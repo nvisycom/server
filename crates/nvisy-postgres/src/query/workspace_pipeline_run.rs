@@ -11,9 +11,36 @@ use crate::model::{
 };
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, Handle, PipelineRunStatus, RunFilter,
-    WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
+
+/// Resolved display names of a run's input and output files.
+///
+/// Each is `None` when the run has no such file yet (no output before redaction)
+/// or the file has been removed (e.g. by retention).
+#[derive(Debug, Default, Clone)]
+pub struct RunFiles {
+    /// Display name of the input document the run analyzes.
+    pub input: Option<String>,
+    /// Display name of the redacted output, once the run has produced one.
+    pub output: Option<String>,
+}
+
+/// One row of a pipeline-run listing: the run plus the context a response needs
+/// to render it without follow-up lookups — the triggering account, the owning
+/// pipeline's slug, and the input file's display name (`None` if the file was
+/// removed).
+#[derive(Debug, Clone)]
+pub struct PipelineRunListRow {
+    /// The run.
+    pub run: WorkspacePipelineRun,
+    /// The account that triggered the run.
+    pub account: AccountRefRow,
+    /// Slug of the run's owning pipeline.
+    pub pipeline_slug: Handle,
+    /// Display name of the run's input document, if still present.
+    pub input_file_name: Option<String>,
+}
 
 /// Repository for workspace pipeline run database operations.
 ///
@@ -45,15 +72,15 @@ pub trait WorkspacePipelineRunRepository {
         idempotency_key: &str,
     ) -> impl Future<Output = PgResult<Option<WorkspacePipelineRun>>> + Send;
 
-    /// Lists a specific pipeline's runs with cursor pagination, each paired with
-    /// the account that triggered it. `filter` narrows by status and/or file
-    /// (its `pipeline_id` is ignored — the listing is already pipeline-scoped).
+    /// Lists a specific pipeline's runs with cursor pagination. `filter` narrows
+    /// by status and/or file (its `pipeline_id` is ignored — the listing is
+    /// already pipeline-scoped).
     fn cursor_list_workspace_pipeline_runs(
         &mut self,
         pipeline_id: Uuid,
         pagination: CursorPagination,
         filter: &RunFilter,
-    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspacePipelineRun>>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<PipelineRunListRow>>> + Send;
 
     /// Lists all runs across a workspace's pipelines with cursor pagination.
     ///
@@ -68,7 +95,7 @@ pub trait WorkspacePipelineRunRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: &RunFilter,
-    ) -> impl Future<Output = PgResult<CursorPage<(WithAccountRef<WorkspacePipelineRun>, Handle)>>> + Send;
+    ) -> impl Future<Output = PgResult<CursorPage<PipelineRunListRow>>> + Send;
 
     /// Atomically claims a run for detection, transitioning it to `Analyzing`.
     ///
@@ -86,6 +113,18 @@ pub trait WorkspacePipelineRunRepository {
         run_id: Uuid,
         stale_before: jiff::Timestamp,
     ) -> impl Future<Output = PgResult<Option<WorkspacePipelineRun>>> + Send;
+
+    /// Resolves the display names of a run's input and output files.
+    ///
+    /// Two indexed lookups by id (the output only when the run has produced one);
+    /// a file removed (e.g. by retention) yields `None` for that name. Used to
+    /// name a single run's files in its response without threading a join
+    /// through the shared run lookup.
+    fn run_file_names(
+        &mut self,
+        workspace_id: Uuid,
+        run: &WorkspacePipelineRun,
+    ) -> impl Future<Output = PgResult<RunFiles>> + Send;
 
     /// Updates a workspace pipeline run with new data.
     fn update_workspace_pipeline_run(
@@ -175,9 +214,9 @@ impl WorkspacePipelineRunRepository for PgConnection {
         pipeline_id: Uuid,
         pagination: CursorPagination,
         filter: &RunFilter,
-    ) -> PgResult<CursorPage<WithAccountRef<WorkspacePipelineRun>>> {
+    ) -> PgResult<CursorPage<PipelineRunListRow>> {
         use schema::workspace_pipeline_runs::dsl;
-        use schema::{accounts, workspace_pipeline_runs};
+        use schema::{accounts, workspace_files, workspace_pipeline_runs, workspace_pipelines};
 
         // Build base query with filters. The listing is already scoped to one
         // pipeline, so `filter.pipeline_id` is not applied here.
@@ -210,9 +249,14 @@ impl WorkspacePipelineRunRepository for PgConnection {
             None
         };
 
-        // Rebuild query for fetching items
+        // Rebuild query for fetching items. Join the owning pipeline (for its
+        // slug) and the input file (to name the run's analyzed document) so a
+        // row is self-contained; a LEFT JOIN on the file tolerates one removed
+        // by retention, yielding a null name.
         let mut query = workspace_pipeline_runs::table
             .inner_join(accounts::table)
+            .inner_join(workspace_pipelines::table)
+            .left_join(workspace_files::table.on(dsl::input_file_id.eq(workspace_files::id)))
             .filter(dsl::pipeline_id.eq(pipeline_id))
             .into_boxed();
 
@@ -230,8 +274,18 @@ impl WorkspacePipelineRunRepository for PgConnection {
         }
 
         let limit = pagination.fetch_limit();
+        let selection = (
+            WorkspacePipelineRun::as_select(),
+            (
+                accounts::username,
+                accounts::display_name,
+                accounts::avatar_url,
+            ),
+            workspace_pipelines::slug,
+            workspace_files::display_name.nullable(),
+        );
 
-        let rows: Vec<(WorkspacePipelineRun, AccountRefRow)> =
+        let rows: Vec<(WorkspacePipelineRun, AccountRefRow, Handle, Option<String>)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -241,14 +295,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
                             .lt(&cursor_time)
                             .or(dsl::started_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
                     )
-                    .select((
-                        WorkspacePipelineRun::as_select(),
-                        (
-                            accounts::username,
-                            accounts::display_name,
-                            accounts::avatar_url,
-                        ),
-                    ))
+                    .select(selection)
                     .order((dsl::started_at.desc(), dsl::id.desc()))
                     .limit(limit)
                     .load(self)
@@ -256,14 +303,7 @@ impl WorkspacePipelineRunRepository for PgConnection {
                     .map_err(PgError::from)?
             } else {
                 query
-                    .select((
-                        WorkspacePipelineRun::as_select(),
-                        (
-                            accounts::username,
-                            accounts::display_name,
-                            accounts::avatar_url,
-                        ),
-                    ))
+                    .select(selection)
                     .order((dsl::started_at.desc(), dsl::id.desc()))
                     .limit(limit)
                     .load(self)
@@ -271,13 +311,20 @@ impl WorkspacePipelineRunRepository for PgConnection {
                     .map_err(PgError::from)?
             };
 
-        let items: Vec<WithAccountRef<WorkspacePipelineRun>> = rows
+        let items = rows
             .into_iter()
-            .map(|(item, account)| WithAccountRef { item, account })
+            .map(
+                |(run, account, pipeline_slug, input_file_name)| PipelineRunListRow {
+                    run,
+                    account,
+                    pipeline_slug,
+                    input_file_name,
+                },
+            )
             .collect();
 
-        Ok(CursorPage::new(items, total, pagination.limit, |wc| {
-            (wc.item.started_at.into(), wc.item.id)
+        Ok(CursorPage::new(items, total, pagination.limit, |row| {
+            (row.run.started_at.into(), row.run.id)
         }))
     }
 
@@ -286,19 +333,23 @@ impl WorkspacePipelineRunRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: &RunFilter,
-    ) -> PgResult<CursorPage<(WithAccountRef<WorkspacePipelineRun>, Handle)>> {
+    ) -> PgResult<CursorPage<PipelineRunListRow>> {
         use schema::accounts::dsl as accounts;
+        use schema::workspace_files::dsl as files;
         use schema::workspace_pipeline_runs::dsl as runs;
         use schema::workspace_pipelines::dsl as pipelines;
 
         // Runs have no workspace column; scope them through the owning pipeline.
-        // The owning pipeline's slug and the triggering account are selected
-        // alongside each run so the cross-pipeline response can name its pipeline
-        // and trigger (the run is addressed by its own id).
+        // The owning pipeline's slug, the triggering account, and the input
+        // file's name are selected alongside each run so the cross-pipeline
+        // response can name its pipeline, trigger, and analyzed document without
+        // a per-row lookup. The input file is LEFT-joined so a file removed by
+        // retention yields a null name rather than dropping the run.
         let scoped = || {
             let mut query = runs::workspace_pipeline_runs
                 .inner_join(pipelines::workspace_pipelines)
                 .inner_join(accounts::accounts)
+                .left_join(files::workspace_files.on(runs::input_file_id.eq(files::id)))
                 .filter(pipelines::workspace_id.eq(workspace_id))
                 .into_boxed();
             if let Some(status) = filter.status {
@@ -340,9 +391,10 @@ impl WorkspacePipelineRunRepository for PgConnection {
                 accounts::display_name,
                 accounts::avatar_url,
             ),
+            files::display_name.nullable(),
         );
 
-        let rows: Vec<(WorkspacePipelineRun, Handle, AccountRefRow)> =
+        let rows: Vec<(WorkspacePipelineRun, Handle, AccountRefRow, Option<String>)> =
             if let Some(cursor) = &pagination.after {
                 let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
 
@@ -368,19 +420,21 @@ impl WorkspacePipelineRunRepository for PgConnection {
                     .map_err(PgError::from)?
             };
 
-        let items: Vec<(WithAccountRef<WorkspacePipelineRun>, Handle)> = rows
+        let items = rows
             .into_iter()
-            .map(|(item, slug, account)| (WithAccountRef { item, account }, slug))
+            .map(
+                |(run, pipeline_slug, account, input_file_name)| PipelineRunListRow {
+                    run,
+                    account,
+                    pipeline_slug,
+                    input_file_name,
+                },
+            )
             .collect();
 
-        Ok(CursorPage::new(
-            items,
-            total,
-            pagination.limit,
-            |(wc, _): &(WithAccountRef<WorkspacePipelineRun>, Handle)| {
-                (wc.item.started_at.into(), wc.item.id)
-            },
-        ))
+        Ok(CursorPage::new(items, total, pagination.limit, |row| {
+            (row.run.started_at.into(), row.run.id)
+        }))
     }
 
     async fn claim_run_for_detection(
@@ -416,6 +470,40 @@ impl WorkspacePipelineRunRepository for PgConnection {
         .map_err(PgError::from)?;
 
         Ok(claimed)
+    }
+
+    async fn run_file_names(
+        &mut self,
+        workspace_id: Uuid,
+        run: &WorkspacePipelineRun,
+    ) -> PgResult<RunFiles> {
+        use schema::workspace_files::{self, dsl};
+
+        // Select the display name only, scoped to the workspace and excluding
+        // soft-deleted files, so a file removed by retention resolves to `None`.
+        async fn name_of(
+            conn: &mut PgConnection,
+            workspace_id: Uuid,
+            file_id: Uuid,
+        ) -> PgResult<Option<String>> {
+            workspace_files::table
+                .filter(dsl::id.eq(file_id))
+                .filter(dsl::workspace_id.eq(workspace_id))
+                .filter(dsl::deleted_at.is_null())
+                .select(dsl::display_name)
+                .first::<String>(conn)
+                .await
+                .optional()
+                .map_err(PgError::from)
+        }
+
+        let input = name_of(self, workspace_id, run.input_file_id).await?;
+        let output = match run.output_file_id {
+            Some(output_file_id) => name_of(self, workspace_id, output_file_id).await?,
+            None => None,
+        };
+
+        Ok(RunFiles { input, output })
     }
 
     async fn update_workspace_pipeline_run(

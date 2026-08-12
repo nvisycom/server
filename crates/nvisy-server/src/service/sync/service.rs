@@ -227,14 +227,17 @@ impl ConnectionSyncService {
         };
 
         let mut removed = 0u64;
-        for (source_key, file_id, storage_path) in imported {
-            if remote_keys.contains(&source_key) {
+        for file in imported {
+            if remote_keys.contains(&file.source_key) {
                 continue;
             }
-            if let Err(err) = self.remove_vanished_file(file_id, &storage_path).await {
+            if let Err(err) = self
+                .remove_vanished_file(file.file_id, &file.storage_path)
+                .await
+            {
                 tracing::warn!(
                     target: TRACING_TARGET,
-                    key = %source_key, error = %err,
+                    key = %file.source_key, error = %err,
                     "Failed to reconcile deleted source object",
                 );
             } else {

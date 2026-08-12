@@ -79,15 +79,15 @@ impl RetentionWorker {
 
             let fetched = due.len() as i64;
             let mut expired = 0i64;
-            for (file_id, storage_path, storage_bucket) in due {
+            for file in due {
                 match self
-                    .expire_file(file_id, &storage_path, &storage_bucket)
+                    .expire_file(file.id, &file.storage_path, &file.storage_bucket)
                     .await
                 {
                     Ok(()) => expired += 1,
                     Err(err) => tracing::error!(
                         target: TRACING_TARGET,
-                        file_id = %file_id,
+                        file_id = %file.id,
                         error = %err,
                         "Failed to expire file",
                     ),
