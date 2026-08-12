@@ -6039,7 +6039,6 @@ dependencies = [
  "nvisy-webhook",
  "serde",
  "tokio",
- "tokio-util",
  "tracing",
  "tracing-subscriber",
 ]
