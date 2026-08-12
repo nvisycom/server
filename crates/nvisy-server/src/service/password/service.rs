@@ -5,8 +5,8 @@
 //! callers reach for a single dependency instead of pairing a validator with a
 //! hasher and remembering to run them in order.
 
-use super::password_hasher::PasswordHasher;
-use super::password_strength::PasswordStrength;
+use super::hasher::PasswordHasher;
+use super::strength::PasswordStrength;
 use crate::handler::Result;
 
 /// Password strength validation and Argon2id hashing.

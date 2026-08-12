@@ -11,14 +11,13 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use nvisy_nats::NatsClient;
 use nvisy_nats::object::{AuditBucket, AuditKey, FileKey, FilesBucket, ObjectBucket};
-use nvisy_postgres::PgClient;
 use nvisy_postgres::query::{WorkspaceFileRepository, WorkspacePipelineRunRepository};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::handler::Result;
+use crate::service::{Infra, Worker};
 
 /// Tracing target for the retention worker.
 const TRACING_TARGET: &str = "nvisy_server::worker::retention";
@@ -31,19 +30,19 @@ const TICK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const SWEEP_BATCH: i64 = 500;
 
 /// Periodically expires stored files per their precomputed `expires_at`.
-pub struct RetentionWorker {
-    postgres: PgClient,
-    nats: NatsClient,
+pub struct FileRetentionWorker {
+    infra: Infra,
 }
 
-impl RetentionWorker {
-    /// Creates a new [`RetentionWorker`].
-    pub fn new(postgres: PgClient, nats: NatsClient) -> Self {
-        Self { postgres, nats }
+impl Worker for FileRetentionWorker {
+    type Output = Result<()>;
+
+    fn name(&self) -> &'static str {
+        "file_retention"
     }
 
     /// Runs the worker until cancelled, logging its lifecycle.
-    pub async fn run(&self, cancel: CancellationToken) -> Result<()> {
+    async fn run(&self, cancel: CancellationToken) -> Result<()> {
         tracing::info!(target: TRACING_TARGET, "Starting retention worker");
 
         let mut ticker = tokio::time::interval(TICK_INTERVAL);
@@ -61,6 +60,13 @@ impl RetentionWorker {
         tracing::info!(target: TRACING_TARGET, "Retention worker stopped");
         Ok(())
     }
+}
+
+impl FileRetentionWorker {
+    /// Creates a new [`FileRetentionWorker`].
+    pub fn new(infra: Infra) -> Self {
+        Self { infra }
+    }
 
     /// Expires all due files, in `SWEEP_BATCH`-sized pages.
     ///
@@ -73,7 +79,7 @@ impl RetentionWorker {
     async fn sweep(&self) -> Result<()> {
         loop {
             let due = {
-                let mut conn = self.postgres.get_connection().await?;
+                let mut conn = self.infra.postgres.get_connection().await?;
                 conn.files_due_for_expiry(SWEEP_BATCH).await?
             };
 
@@ -122,7 +128,7 @@ impl RetentionWorker {
         storage_path: &str,
         storage_bucket: &str,
     ) -> Result<()> {
-        let mut conn = self.postgres.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         conn.clear_run_file_references(file_id).await?;
         conn.delete_workspace_file(file_id).await?;
         drop(conn);
@@ -142,7 +148,8 @@ impl RetentionWorker {
         match bucket {
             b if b == FilesBucket::NAME => {
                 if let Ok(key) = FileKey::from_str(storage_path) {
-                    self.nats
+                    self.infra
+                        .nats
                         .object_store::<FilesBucket>()
                         .await?
                         .delete(&key)
@@ -151,7 +158,8 @@ impl RetentionWorker {
             }
             b if b == AuditBucket::NAME => {
                 if let Ok(key) = AuditKey::from_str(storage_path) {
-                    self.nats
+                    self.infra
+                        .nats
                         .object_store::<AuditBucket>()
                         .await?
                         .delete(&key)

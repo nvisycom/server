@@ -1,14 +1,13 @@
 //! Webhook event emitter for publishing domain events to NATS.
 
-use nvisy_nats::NatsClient;
 use nvisy_nats::stream::{EventPublisher, WebhookStream};
-use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
 use nvisy_postgres::types::WebhookEvent;
 use uuid::Uuid;
 
 use super::WebhookJob;
 use crate::Result;
+use crate::service::Infra;
 
 /// Type alias for webhook publisher.
 type WebhookPublisher = EventPublisher<WebhookJob, WebhookStream>;
@@ -53,8 +52,7 @@ macro_rules! emit_helpers {
 /// configuration at delivery time.
 #[derive(Clone)]
 pub struct WebhookEmitter {
-    pg_client: PgClient,
-    nats_client: NatsClient,
+    infra: Infra,
 }
 
 impl WebhookEmitter {
@@ -84,11 +82,8 @@ impl WebhookEmitter {
     }
 
     /// Create a new webhook emitter.
-    pub fn new(pg_client: PgClient, nats_client: NatsClient) -> Self {
-        Self {
-            pg_client,
-            nats_client,
-        }
+    pub fn new(infra: Infra) -> Self {
+        Self { infra }
     }
 
     /// Emit a webhook event for a workspace.
@@ -122,7 +117,7 @@ impl WebhookEmitter {
         data: Option<serde_json::Value>,
     ) -> Result<usize> {
         // Find all active webhooks subscribed to this event
-        let mut conn = self.pg_client.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         let webhooks = conn.find_webhooks_for_event(workspace_id, event).await?;
 
         if webhooks.is_empty() {
@@ -154,7 +149,7 @@ impl WebhookEmitter {
 
         // Publish every job before surfacing any error, so one failing publish
         // does not silently drop the webhooks that follow it in the batch.
-        let publisher: WebhookPublisher = self.nats_client.event_publisher().await?;
+        let publisher: WebhookPublisher = self.infra.nats.event_publisher().await?;
         let subject = format!("{workspace_id}.{event_subject}");
 
         let mut published = 0usize;

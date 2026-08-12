@@ -45,7 +45,6 @@ nvisy-server = { workspace = true, features = ["cli"] }
 
 # Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
-tokio-util = { workspace = true, features = [] }
 
 # CLI
 clap = { workspace = true, features = ["derive", "env"] }

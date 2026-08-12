@@ -1,10 +1,10 @@
 //! Pipeline-run blob I/O.
 //!
-//! [`BlobService`] reads and writes a run's document, redacted output, and audit
+//! [`RunBlobStore`] reads and writes a run's document, redacted output, and audit
 //! in the platform's internal object store ([`FilesBucket`](nvisy_nats::object::FilesBucket)
 //! and [`AuditBucket`](nvisy_nats::object::AuditBucket)), handling per-workspace
 //! encryption and the file-table bookkeeping each one needs. It is distinct from
-//! [`ObjectService`](crate::service::ObjectService), which bridges external
+//! [`ExternalObjectStore`](crate::service::ExternalObjectStore), which bridges external
 //! tenant object stores.
 
 use std::io::Cursor;
@@ -12,7 +12,6 @@ use std::str::FromStr;
 
 use bytes::Bytes;
 use nvisy_engine::{Audit, Document};
-use nvisy_nats::NatsClient;
 use nvisy_nats::object::{AuditBucket, AuditKey, FileKey, FilesBucket};
 use nvisy_postgres::PgConn;
 use nvisy_postgres::model::{
@@ -25,27 +24,26 @@ use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::CryptoService;
+use crate::service::Infra;
 
 /// Reads and writes a pipeline run's blobs in the internal object store.
 ///
-/// Cloneable and cheap to pass around: it holds a [`NatsClient`] and a
-/// [`CryptoService`] (both `Arc`-backed) and takes the per-request database
-/// connection as a method argument. Not to be confused with
-/// [`ObjectService`](crate::service::ObjectService), which bridges *external*
+/// Cloneable and cheap to pass around: it holds the shared [`Infra`] clients
+/// (all `Arc`-backed) and takes the per-request database connection as a method
+/// argument. Not to be confused with
+/// [`ExternalObjectStore`](crate::service::ExternalObjectStore), which bridges *external*
 /// tenant object stores; this operates on the platform's own NATS buckets
 /// ([`FilesBucket`], [`AuditBucket`]).
 #[derive(Clone)]
 #[must_use = "service does nothing unless you use it"]
-pub struct BlobService {
-    nats: NatsClient,
-    crypto: CryptoService,
+pub struct RunBlobStore {
+    infra: Infra,
 }
 
-impl BlobService {
-    /// Creates a new [`BlobService`] over the internal object store and crypto.
-    pub fn new(nats: NatsClient, crypto: CryptoService) -> Self {
-        Self { nats, crypto }
+impl RunBlobStore {
+    /// Creates a new [`RunBlobStore`] over the internal object store and crypto.
+    pub fn new(infra: Infra) -> Self {
+        Self { infra }
     }
 
     /// Reads a workspace file's bytes from object storage and builds an engine
@@ -55,7 +53,7 @@ impl BlobService {
         file: &WorkspaceFile,
         correlation_id: Uuid,
     ) -> Result<Document> {
-        let store = self.nats.object_store::<FilesBucket>().await?;
+        let store = self.infra.nats.object_store::<FilesBucket>().await?;
         let key = FileKey::from_str(&file.storage_path).map_err(|err| {
             ErrorKind::InternalServerError
                 .with_message("Invalid file storage path")
@@ -74,6 +72,7 @@ impl BlobService {
         })?;
 
         let bytes = self
+            .infra
             .crypto
             .decrypt(file.workspace_id, &ciphertext)
             .map_err(|err| {
@@ -103,6 +102,7 @@ impl BlobService {
         let plaintext_size = bytes.len() as i64;
         let plaintext_hash = Sha256::digest(&bytes).to_vec();
         let ciphertext = self
+            .infra
             .crypto
             .encrypt(source.workspace_id, &bytes)
             .map_err(|err| {
@@ -111,7 +111,7 @@ impl BlobService {
                     .with_context(err.to_string())
             })?;
 
-        let store = self.nats.object_store::<FilesBucket>().await?;
+        let store = self.infra.nats.object_store::<FilesBucket>().await?;
         let key = FileKey::generate(source.workspace_id);
         store.put(&key, Cursor::new(ciphertext)).await?;
 
@@ -162,6 +162,7 @@ impl BlobService {
         let hash = Sha256::digest(&plaintext).to_vec();
         let size = plaintext.len() as i64;
         let ciphertext = self
+            .infra
             .crypto
             .encrypt(workspace_id, &plaintext)
             .map_err(|err| {
@@ -170,7 +171,7 @@ impl BlobService {
                     .with_context(err.to_string())
             })?;
 
-        let store = self.nats.object_store::<AuditBucket>().await?;
+        let store = self.infra.nats.object_store::<AuditBucket>().await?;
         let key = AuditKey::generate(workspace_id);
         store.put(&key, Cursor::new(ciphertext)).await?;
 
@@ -226,7 +227,7 @@ impl BlobService {
                 .with_context(err.to_string())
         })?;
 
-        let store = self.nats.object_store::<AuditBucket>().await?;
+        let store = self.infra.nats.object_store::<AuditBucket>().await?;
         let data = store.get(&key).await?.ok_or_else(|| {
             ErrorKind::InternalServerError.with_message("Analysis is missing from storage")
         })?;
@@ -239,6 +240,7 @@ impl BlobService {
         })?;
 
         let plaintext = self
+            .infra
             .crypto
             .decrypt(workspace_id, &ciphertext)
             .map_err(|err| {

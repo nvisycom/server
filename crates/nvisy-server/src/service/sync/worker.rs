@@ -15,11 +15,9 @@
 use std::time::Duration;
 
 use jiff::{Span, Timestamp};
-use nvisy_nats::NatsClient;
 use nvisy_nats::kv::{LockKey, SchedulerLocksBucket};
 use nvisy_nats::stream::{ConnectionSyncStream, EventPublisher, EventSubscriber};
 use nvisy_object::providers::StorageConfig;
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{
     NewWorkspaceConnectionSync, WorkspaceConnection, WorkspaceConnectionSync,
 };
@@ -34,7 +32,7 @@ use uuid::Uuid;
 
 use super::{ConnectionSyncService, StandardCronSchedule};
 use crate::handler::Result;
-use crate::service::{ConnectionConfig, CryptoService};
+use crate::service::{ConnectionConfig, Infra, Worker};
 
 /// Tracing target for the connection sync worker.
 const TRACING_TARGET: &str = "nvisy_server::worker::connection_sync";
@@ -79,31 +77,20 @@ type JobSubscriber = EventSubscriber<ConnectionSyncJob, ConnectionSyncStream>;
 
 /// Background worker driving scheduled connection syncs.
 pub struct ConnectionSyncWorker {
-    postgres: PgClient,
-    nats: NatsClient,
-    crypto: CryptoService,
+    infra: Infra,
     sync: ConnectionSyncService,
 }
 
-impl ConnectionSyncWorker {
-    /// Creates a new [`ConnectionSyncWorker`].
-    pub fn new(
-        postgres: PgClient,
-        nats: NatsClient,
-        crypto: CryptoService,
-        sync: ConnectionSyncService,
-    ) -> Self {
-        Self {
-            postgres,
-            nats,
-            crypto,
-            sync,
-        }
+impl Worker for ConnectionSyncWorker {
+    type Output = Result<()>;
+
+    fn name(&self) -> &'static str {
+        "connection_sync"
     }
 
     /// Runs the worker until cancelled, logging its lifecycle (start, stop,
     /// failure).
-    pub async fn run(&self, cancel: CancellationToken) -> Result<()> {
+    async fn run(&self, cancel: CancellationToken) -> Result<()> {
         tracing::info!(target: TRACING_TARGET, "Starting connection sync worker");
 
         let result = self.run_inner(cancel).await;
@@ -116,6 +103,13 @@ impl ConnectionSyncWorker {
         }
 
         result
+    }
+}
+
+impl ConnectionSyncWorker {
+    /// Creates a new [`ConnectionSyncWorker`].
+    pub fn new(infra: Infra, sync: ConnectionSyncService) -> Self {
+        Self { infra, sync }
     }
 
     /// Reaps stale runs, then drives the scheduler tick and the job consumer
@@ -135,7 +129,7 @@ impl ConnectionSyncWorker {
     /// Fails any runs left `Running` by a previously crashed process.
     async fn reap_stale_runs(&self) -> Result<()> {
         let cutoff = Timestamp::now() - Span::new().hours(STALE_RUN_AGE_HOURS);
-        let mut conn = self.postgres.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         let reaped = conn.fail_stale_running_syncs(cutoff.into()).await?;
         if reaped > 0 {
             tracing::warn!(target: TRACING_TARGET, reaped, "Reaped stale sync runs");
@@ -172,6 +166,7 @@ impl ConnectionSyncWorker {
         let period = now.as_second() / TICK_INTERVAL.as_secs() as i64;
         let lock_key = LockKey::from(format!("{SCHEDULER_LOCK_KEY}.{period}").as_str());
         let locks = self
+            .infra
             .nats
             .kv_store::<LockKey, u64, SchedulerLocksBucket>()
             .await?;
@@ -182,14 +177,14 @@ impl ConnectionSyncWorker {
         }
 
         let connections = {
-            let mut conn = self.postgres.get_connection().await?;
+            let mut conn = self.infra.postgres.get_connection().await?;
             conn.list_scheduled_connections().await?
         };
 
         // Snapshot each connection's latest run in one query, then release the DB
         // connection before publishing so it is not held across NATS round-trips.
         let due = {
-            let mut conn = self.postgres.get_connection().await?;
+            let mut conn = self.infra.postgres.get_connection().await?;
             let mut due = Vec::new();
             for connection in connections {
                 // Only sync-capable connections are listed, but re-read the
@@ -218,7 +213,7 @@ impl ConnectionSyncWorker {
             due
         };
 
-        let publisher: JobPublisher = self.nats.event_publisher().await?;
+        let publisher: JobPublisher = self.infra.nats.event_publisher().await?;
         for (workspace_id, connection_id) in due {
             let job = ConnectionSyncJob {
                 workspace_id,
@@ -239,7 +234,7 @@ impl ConnectionSyncWorker {
 
     /// Consumer loop: drain the work queue, running each job as a scheduled sync.
     async fn run_consumer(&self, cancel: CancellationToken) -> Result<()> {
-        let subscriber: JobSubscriber = self.nats.event_subscriber().await?;
+        let subscriber: JobSubscriber = self.infra.nats.event_subscriber().await?;
         let mut stream = subscriber.subscribe().await?;
 
         loop {
@@ -360,7 +355,7 @@ impl ConnectionSyncWorker {
         }
 
         let failed = {
-            let mut conn = match self.postgres.get_connection().await {
+            let mut conn = match self.infra.postgres.get_connection().await {
                 Ok(conn) => conn,
                 Err(err) => {
                     tracing::error!(target: TRACING_TARGET, %run_id, error = %err, "Failed to check run outcome for retry");
@@ -382,7 +377,7 @@ impl ConnectionSyncWorker {
 
         let next_attempt = attempt + 1;
         let backoff = RETRY_BACKOFF * attempt as u32;
-        let nats = self.nats.clone();
+        let nats = self.infra.nats.clone();
         let cancel = cancel.clone();
         tokio::spawn(async move {
             // Wait out the backoff, but abandon the retry if the worker is
@@ -417,7 +412,7 @@ impl ConnectionSyncWorker {
         &self,
         job: &ConnectionSyncJob,
     ) -> Result<Option<WorkspaceConnection>> {
-        let mut conn = self.postgres.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         Ok(conn
             .find_connection_in_workspace(job.workspace_id, job.connection_id)
             .await?)
@@ -428,7 +423,7 @@ impl ConnectionSyncWorker {
         &self,
         connection: &WorkspaceConnection,
     ) -> Result<Option<WorkspaceConnectionSync>> {
-        let mut conn = self.postgres.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         Ok(conn
             .find_latest_workspace_connection_sync(connection.id)
             .await?)
@@ -444,6 +439,7 @@ impl ConnectionSyncWorker {
         // Scheduled syncs are object-store imports; a non-storage config here
         // would be a scheduling bug (only sync-capable connections are enqueued).
         let config = match self
+            .infra
             .crypto
             .decrypt_json::<ConnectionConfig>(connection.workspace_id, &connection.encrypted_data)?
         {
@@ -454,7 +450,7 @@ impl ConnectionSyncWorker {
             }
         };
 
-        let mut conn = self.postgres.get_connection().await?;
+        let mut conn = self.infra.postgres.get_connection().await?;
         let deletion_policy = conn
             .find_connection_schedule(connection.id)
             .await?

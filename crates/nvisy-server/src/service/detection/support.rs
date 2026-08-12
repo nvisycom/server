@@ -8,7 +8,7 @@ use nvisy_postgres::query::{
 use nvisy_postgres::types::PipelineRunStatus;
 use uuid::Uuid;
 
-use super::service::DetectionService;
+use super::service::DetectionQueue;
 use crate::handler::Result;
 use crate::service::{CryptoService, WebhookEmitter};
 
@@ -23,7 +23,7 @@ const TRACING_TARGET: &str = "nvisy_server::service::detection";
 /// failed) so a failure takes the same three steps on every path.
 pub(crate) async fn fail_run(
     conn: &mut nvisy_postgres::PgConn,
-    detection: &DetectionService,
+    detection: &DetectionQueue,
     webhook_emitter: &WebhookEmitter,
     workspace_id: Uuid,
     run_id: Uuid,

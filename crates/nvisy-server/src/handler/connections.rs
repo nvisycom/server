@@ -45,7 +45,7 @@ use crate::handler::response::{
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
-    ConnectionConfig, CryptoService, ObjectService, ServiceState, StandardCronSchedule,
+    ConnectionConfig, CryptoService, ExternalObjectStore, ServiceState, StandardCronSchedule,
 };
 
 /// Tracing target for workspace connection operations.
@@ -474,7 +474,7 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
 async fn verify_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
-    State(object): State<ObjectService>,
+    State(object): State<ExternalObjectStore>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionPathParams>,

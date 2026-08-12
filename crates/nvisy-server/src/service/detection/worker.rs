@@ -9,18 +9,17 @@
 use std::time::Duration;
 
 use nvisy_engine::OcrMode;
-use nvisy_nats::NatsClient;
 use nvisy_nats::stream::DetectionStream;
+use nvisy_postgres::PgConn;
 use nvisy_postgres::model::{UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun};
 use nvisy_postgres::query::{
     WorkspaceFileRepository, WorkspacePipelineRunRepository, WorkspaceRepository,
 };
 use nvisy_postgres::types::{OcrPolicy, PipelineRunStatus, WorkspaceSettings};
-use nvisy_postgres::{PgClient, PgConn};
 use tokio_util::sync::CancellationToken;
 
 use super::job::DetectionJob;
-use super::service::DetectionService;
+use super::service::DetectionQueue;
 use super::support::{fail_run, resolve_policies};
 use crate::handler::request::PipelineDefinition;
 use crate::handler::response::{
@@ -28,7 +27,7 @@ use crate::handler::response::{
 };
 use crate::handler::{ErrorKind, Result};
 use crate::service::{
-    BlobService, CryptoService, EngineService, NotificationEmitter, WebhookEmitter,
+    EngineService, Infra, NotificationEmitter, RunBlobStore, WebhookEmitter, Worker,
 };
 
 /// Tracing target for detection worker operations.
@@ -42,42 +41,23 @@ const DETECTION_LEASE: Duration = Duration::from_secs(30 * 60);
 
 /// Background worker that runs pipeline detection off the request thread.
 pub struct DetectionWorker {
-    postgres: PgClient,
-    nats: NatsClient,
-    crypto: CryptoService,
+    infra: Infra,
     engine: EngineService,
-    blob: BlobService,
+    blob: RunBlobStore,
     webhook_emitter: WebhookEmitter,
     notification_emitter: NotificationEmitter,
-    detection: DetectionService,
+    detection: DetectionQueue,
 }
 
-impl DetectionWorker {
-    /// Creates a new [`DetectionWorker`].
-    pub fn new(
-        postgres: PgClient,
-        nats: NatsClient,
-        crypto: CryptoService,
-        engine: EngineService,
-        blob: BlobService,
-        webhook_emitter: WebhookEmitter,
-        notification_emitter: NotificationEmitter,
-        detection: DetectionService,
-    ) -> Self {
-        Self {
-            postgres,
-            nats,
-            crypto,
-            engine,
-            blob,
-            webhook_emitter,
-            notification_emitter,
-            detection,
-        }
+impl Worker for DetectionWorker {
+    type Output = Result<()>;
+
+    fn name(&self) -> &'static str {
+        "detection"
     }
 
     /// Runs the worker until cancelled, logging its lifecycle.
-    pub async fn run(&self, cancel: CancellationToken) -> Result<()> {
+    async fn run(&self, cancel: CancellationToken) -> Result<()> {
         tracing::info!(target: TRACING_TARGET, "Starting detection worker");
 
         let result = self.run_inner(cancel).await;
@@ -91,6 +71,27 @@ impl DetectionWorker {
 
         result
     }
+}
+
+impl DetectionWorker {
+    /// Creates a new [`DetectionWorker`].
+    pub fn new(
+        infra: Infra,
+        engine: EngineService,
+        blob: RunBlobStore,
+        webhook_emitter: WebhookEmitter,
+        notification_emitter: NotificationEmitter,
+        detection: DetectionQueue,
+    ) -> Self {
+        Self {
+            infra,
+            engine,
+            blob,
+            webhook_emitter,
+            notification_emitter,
+            detection,
+        }
+    }
 
     /// Consumes detection jobs until cancelled.
     ///
@@ -102,6 +103,7 @@ impl DetectionWorker {
     /// already being analyzed under a fresh lease is skipped.
     async fn run_inner(&self, cancel: CancellationToken) -> Result<()> {
         let subscriber = self
+            .infra
             .nats
             .event_subscriber::<DetectionJob, DetectionStream>()
             .await?;
@@ -148,7 +150,7 @@ impl DetectionWorker {
     /// already claimed, already settled).
     #[tracing::instrument(skip_all, fields(run_id = %job.run_id, workspace_id = %job.workspace_id))]
     async fn run_job(&self, job: DetectionJob) -> JobOutcome {
-        let mut conn = match self.postgres.get_connection().await {
+        let mut conn = match self.infra.postgres.get_connection().await {
             Ok(conn) => conn,
             Err(err) => {
                 // No connection: the run is still queued. Redeliver so it is not
@@ -274,7 +276,8 @@ impl DetectionWorker {
 
         let document = self.blob.build_document(&file, run.id).await?;
 
-        let policies = resolve_policies(conn, &self.crypto, job.workspace_id, pipeline.id).await?;
+        let policies =
+            resolve_policies(conn, &self.infra.crypto, job.workspace_id, pipeline.id).await?;
         if policies.is_empty() {
             return Err(ErrorKind::BadRequest
                 .with_message("Pipeline has no policies")

@@ -5,7 +5,7 @@
 //! crypto error attached as context.
 
 use super::http_error::{Error as HttpError, ErrorKind};
-use crate::service::crypto::CryptoError;
+use crate::service::CryptoError;
 
 /// Tracing target for crypto error conversions.
 const TRACING_TARGET: &str = "nvisy_server::handler::crypto";

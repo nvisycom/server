@@ -38,7 +38,7 @@ use crate::handler::response::{
 use crate::handler::utility::{SseResponse, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
-    BlobService, CryptoService, DetectionJob, DetectionService, EngineService, NotificationEmitter,
+    CryptoService, DetectionJob, DetectionQueue, EngineService, NotificationEmitter, RunBlobStore,
     RunStatusEvent, ServiceState, WebhookEmitter, fail_run, resolve_policies,
 };
 
@@ -60,7 +60,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::runs";
 )]
 async fn create_pipeline_run(
     State(pg_client): State<PgClient>,
-    State(detection): State<DetectionService>,
+    State(detection): State<DetectionQueue>,
     State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
@@ -436,7 +436,7 @@ fn get_pipeline_run_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn stream_pipeline_run_events(
     State(pg_client): State<PgClient>,
-    State(detection): State<DetectionService>,
+    State(detection): State<DetectionQueue>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelineRunPathParams>,
@@ -569,7 +569,7 @@ fn status_event(event: &RunStatusEvent) -> Event {
 )]
 async fn redact_pipeline_run(
     State(pg_client): State<PgClient>,
-    State(blob): State<BlobService>,
+    State(blob): State<RunBlobStore>,
     State(crypto): State<CryptoService>,
     State(engine): State<EngineService>,
     State(webhook_emitter): State<WebhookEmitter>,
