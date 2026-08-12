@@ -50,6 +50,14 @@ pub struct UnreadStatus {
     pub unread_count: i64,
 }
 
+/// Response type for a mark-all-read action.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkedReadStatus {
+    /// Number of notifications the request marked as read.
+    pub marked_read: i64,
+}
+
 impl Notification {
     pub fn from_model(notification: AccountNotification) -> Self {
         Self {

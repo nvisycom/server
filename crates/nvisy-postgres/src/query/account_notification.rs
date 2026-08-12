@@ -22,12 +22,6 @@ pub trait AccountNotificationRepository {
         new_notification: NewAccountNotification,
     ) -> impl Future<Output = PgResult<AccountNotification>> + Send;
 
-    /// Finds an account notification by its unique identifier.
-    fn find_account_notification_by_id(
-        &mut self,
-        notification_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<AccountNotification>>> + Send;
-
     /// Lists account notifications with offset pagination.
     ///
     /// Excludes expired notifications, ordered by creation date.
@@ -53,6 +47,18 @@ pub trait AccountNotificationRepository {
         &mut self,
         account_id: Uuid,
     ) -> impl Future<Output = PgResult<usize>> + Send;
+
+    /// Marks a single notification as read, scoped to its owning account.
+    ///
+    /// Returns `true` if a matching notification was updated. The `account_id`
+    /// filter is part of the `WHERE` clause, so a notification belonging to
+    /// another account (or a missing id) updates nothing and returns `false` —
+    /// there is no cross-account read or probe.
+    fn mark_account_notification_as_read(
+        &mut self,
+        account_id: Uuid,
+        notification_id: Uuid,
+    ) -> impl Future<Output = PgResult<bool>> + Send;
 
     /// Deletes all expired account notifications system-wide.
     ///
@@ -80,21 +86,6 @@ impl AccountNotificationRepository for PgConnection {
             .returning(AccountNotification::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)
-    }
-
-    async fn find_account_notification_by_id(
-        &mut self,
-        notification_id: Uuid,
-    ) -> PgResult<Option<AccountNotification>> {
-        use schema::account_notifications::{self, dsl};
-
-        account_notifications::table
-            .filter(dsl::id.eq(notification_id))
-            .select(AccountNotification::as_select())
-            .first(self)
-            .await
-            .optional()
             .map_err(PgError::from)
     }
 
@@ -194,6 +185,34 @@ impl AccountNotificationRepository for PgConnection {
         .execute(self)
         .await
         .map_err(PgError::from)
+    }
+
+    async fn mark_account_notification_as_read(
+        &mut self,
+        account_id: Uuid,
+        notification_id: Uuid,
+    ) -> PgResult<bool> {
+        use schema::account_notifications::{self, dsl};
+
+        let update_data = UpdateAccountNotification {
+            is_read: Some(true),
+            read_at: Some(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
+        };
+
+        // Scope by account in the WHERE clause: a notification owned by another
+        // account (or a missing id) matches no row, so this returns `false`
+        // without ever revealing whether the id exists.
+        let updated = diesel::update(
+            account_notifications::table
+                .filter(dsl::id.eq(notification_id))
+                .filter(dsl::account_id.eq(account_id)),
+        )
+        .set(&update_data)
+        .execute(self)
+        .await
+        .map_err(PgError::from)?;
+
+        Ok(updated > 0)
     }
 
     async fn delete_expired_account_notifications(&mut self) -> PgResult<usize> {

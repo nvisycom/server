@@ -91,3 +91,15 @@ pub struct PipelineRunPathParams {
     /// Opaque identifier of the run.
     pub run_id: RunId,
 }
+
+/// Path parameters for notification operations.
+///
+/// The notification id is globally unique; account ownership is enforced in the
+/// query, so a notification of another account resolves to a not-found result.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationPathParams {
+    /// Unique identifier of the notification.
+    pub notification_id: Uuid,
+}
