@@ -3,22 +3,22 @@
 
 -- Create notification event enum
 CREATE TYPE NOTIFICATION_EVENT AS ENUM (
-    -- File events
-    'file:uploaded',          -- File was uploaded
-    'file:downloaded',        -- File was downloaded
-    'file:verified',          -- File verification completed
-
     -- Member events
-    'member:invited',         -- User was invited to a workspace
-    'member:joined',          -- A new member joined a workspace
+    'member:invited',            -- User was invited to a workspace
+    'member:joined',             -- A new member joined a workspace
 
-    -- Connection events
-    'connection:synced',      -- Connection sync completed
-    'connection:desynced',    -- Connection sync failed or disconnected
+    -- Connection sync events
+    'connection:sync.completed', -- A connection sync completed
+    'connection:sync.failed',    -- A connection sync failed
+
+    -- Pipeline run events
+    'pipeline:run.analyzed',     -- A run finished detection, awaiting review
+    'pipeline:run.completed',    -- A run completed (redaction produced)
+    'pipeline:run.failed',       -- A run failed
 
     -- System events
-    'system:announcement',    -- System-wide announcement
-    'system:report'           -- System report generated
+    'system:announcement',       -- System-wide announcement
+    'system:report'              -- System report generated
 );
 
 COMMENT ON TYPE NOTIFICATION_EVENT IS
