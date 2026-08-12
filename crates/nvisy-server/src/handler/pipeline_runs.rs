@@ -17,7 +17,7 @@ use nvisy_postgres::model::{
     NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun,
 };
 use nvisy_postgres::query::{
-    PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineRepository,
+    PipelineReferenceRepository, RunFiles, WorkspaceFileRepository, WorkspacePipelineRepository,
     WorkspacePipelineRunRepository,
 };
 use nvisy_postgres::types::{PipelineRunStatus, WorkspaceSettings};
@@ -93,6 +93,7 @@ async fn create_pipeline_run(
     {
         tracing::debug!(target: TRACING_TARGET, "Replaying run for idempotency key");
         let trigger = resolve_account_ref(&mut conn, existing.account_id).await?;
+        let files = conn.run_file_names(workspace.id, &existing).await?;
         return Ok((
             StatusCode::OK,
             Json(PipelineRun::from_model(
@@ -100,6 +101,7 @@ async fn create_pipeline_run(
                 pipeline.slug.clone(),
                 workspace.slug.clone(),
                 trigger,
+                files,
             )),
         ));
     }
@@ -188,6 +190,12 @@ async fn create_pipeline_run(
 
     let trigger = resolve_account_ref(&mut conn, run.account_id).await?;
 
+    // The run was just created from this file and has no output yet.
+    let files = RunFiles {
+        input: Some(file.display_name),
+        output: None,
+    };
+
     Ok((
         StatusCode::ACCEPTED,
         Json(PipelineRun::from_model(
@@ -195,6 +203,7 @@ async fn create_pipeline_run(
             pipeline.slug,
             workspace.slug,
             trigger,
+            files,
         )),
     ))
 }
@@ -254,12 +263,16 @@ async fn list_pipeline_runs(
         "Pipeline runs listed"
     );
 
-    let response = PipelineRunsPage::from_cursor_page(page, |wc| {
+    let response = PipelineRunsPage::from_cursor_page(page, |row| {
         PipelineRun::from_model(
-            wc.item,
-            pipeline.slug.clone(),
+            row.run,
+            row.pipeline_slug,
             workspace.slug.clone(),
-            wc.account.into(),
+            row.account.into(),
+            RunFiles {
+                input: row.input_file_name,
+                output: None,
+            },
         )
     });
 
@@ -316,17 +329,18 @@ async fn list_workspace_runs(
 
     Ok((
         StatusCode::OK,
-        Json(PipelineRunsPage::from_cursor_page(
-            page,
-            |(wc, pipeline_slug)| {
-                PipelineRun::from_model(
-                    wc.item,
-                    pipeline_slug,
-                    workspace.slug.clone(),
-                    wc.account.into(),
-                )
-            },
-        )),
+        Json(PipelineRunsPage::from_cursor_page(page, |row| {
+            PipelineRun::from_model(
+                row.run,
+                row.pipeline_slug,
+                workspace.slug.clone(),
+                row.account.into(),
+                RunFiles {
+                    input: row.input_file_name,
+                    output: None,
+                },
+            )
+        })),
     ))
 }
 
@@ -370,6 +384,7 @@ async fn get_pipeline_run(
         find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
 
     let trigger = resolve_account_ref(&mut conn, run.account_id).await?;
+    let files = conn.run_file_names(workspace.id, &run).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Pipeline run retrieved");
 
@@ -380,6 +395,7 @@ async fn get_pipeline_run(
             pipeline.slug,
             workspace.slug,
             trigger,
+            files,
         )),
     ))
 }
@@ -650,6 +666,7 @@ async fn redact_pipeline_run(
     );
 
     let trigger = resolve_account_ref(&mut conn, run.account_id).await?;
+    let files = conn.run_file_names(workspace.id, &run).await?;
 
     Ok((
         StatusCode::OK,
@@ -658,6 +675,7 @@ async fn redact_pipeline_run(
             pipeline.slug,
             workspace.slug,
             trigger,
+            files,
         )),
     ))
 }

@@ -2,6 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspacePipelineRun as PipelineRunModel;
+use nvisy_postgres::query::RunFiles;
 use nvisy_postgres::types::{Handle, PipelineRunStatus, PipelineTriggerType, RunId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -24,9 +25,16 @@ pub struct PipelineRun {
     pub workspace_slug: Handle,
     /// Source document this run analyzes / redacts.
     pub input_file_id: Uuid,
+    /// Display name of the source document, for showing the run without a
+    /// separate file lookup. `None` if the file was removed (e.g. by retention).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_file_name: Option<String>,
     /// Redacted document produced by the run, once it completes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_file_id: Option<Uuid>,
+    /// Display name of the redacted output, once the run completes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_file_name: Option<String>,
     /// Account that triggered the run.
     pub triggered_by: AccountRef,
     /// How the run was triggered.
@@ -53,12 +61,14 @@ pub type PipelineRunsPage = Page<PipelineRun>;
 
 impl PipelineRun {
     /// Creates a pipeline run response from the database model, the slugs of its
-    /// owning pipeline and workspace, and the triggering account.
+    /// owning pipeline and workspace, the triggering account, and the resolved
+    /// input/output file display names.
     pub fn from_model(
         run: PipelineRunModel,
         pipeline_slug: Handle,
         workspace_slug: Handle,
         triggered_by: AccountRef,
+        files: RunFiles,
     ) -> Self {
         // Surface a failure reason (written to metadata.error by the worker /
         // enqueue-failure path) as a dedicated field for a failed run.
@@ -73,7 +83,9 @@ impl PipelineRun {
             pipeline_slug,
             workspace_slug,
             input_file_id: run.input_file_id,
+            input_file_name: files.input,
             output_file_id: run.output_file_id,
+            output_file_name: files.output,
             triggered_by,
             trigger_type: run.trigger_type,
             status: run.status,

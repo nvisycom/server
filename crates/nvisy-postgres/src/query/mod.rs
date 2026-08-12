@@ -43,6 +43,6 @@ pub use workspace_file::WorkspaceFileRepository;
 pub use workspace_invite::WorkspaceInviteRepository;
 pub use workspace_member::WorkspaceMemberRepository;
 pub use workspace_pipeline::WorkspacePipelineRepository;
-pub use workspace_pipeline_run::WorkspacePipelineRunRepository;
+pub use workspace_pipeline_run::{PipelineRunListRow, RunFiles, WorkspacePipelineRunRepository};
 pub use workspace_policy::WorkspacePolicyRepository;
 pub use workspace_webhook::WorkspaceWebhookRepository;
