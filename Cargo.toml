@@ -136,6 +136,7 @@ derive_more = { version = "2.0", features = [] }
 derive_builder = { version = "0.20", features = [] }
 anyhow = { version = "1.0", features = [] }
 pin-project-lite = { version = "0.2", features = [] }
+http-body = { version = "1.0", features = [] }
 
 # Primitive datatypes
 uuid = { version = "1.22", features = ["serde", "v4", "v7"] }

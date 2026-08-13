@@ -7,6 +7,7 @@
 use std::time::Instant;
 
 use axum::Router;
+use axum::body::Body;
 use axum::extract::Request;
 use axum::http::header;
 use axum::middleware::{Next, from_fn};
@@ -17,6 +18,7 @@ use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::trace::TraceLayer;
 
 use super::RouteCategory;
+use super::counting_body::CountingBody;
 
 /// Tracing target for request metrics.
 const TRACING_TARGET_METRICS: &str = "nvisy_server::metrics";
@@ -105,25 +107,29 @@ pub async fn track_categorized_metrics(request: Request, next: Next) -> Response
 
     let response = next.run(request).await;
     let duration = start_time.elapsed();
+    let status = response.status();
 
-    let response_size = response
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(0);
+    // The response body streams without a `Content-Length` header, so the size
+    // is not known here. Wrap the body to count bytes as they flow and emit the
+    // "request completed" line when the stream ends (or is dropped) — which for
+    // a streamed response is after this function returns.
+    let category_str = category.as_str();
+    let span = tracing::Span::current();
+    let (parts, body) = response.into_parts();
+    let body = CountingBody::new(body, move |response_size| {
+        let _guard = span.enter();
+        tracing::trace!(
+            target: TRACING_TARGET_METRICS,
+            method = %method,
+            uri = %uri,
+            category = category_str,
+            status = %status,
+            duration_ms = duration.as_millis() as u64,
+            request_size = request_size,
+            response_size = response_size,
+            "request completed"
+        );
+    });
 
-    tracing::trace!(
-        target: TRACING_TARGET_METRICS,
-        method = %method,
-        uri = %uri,
-        category = category.as_str(),
-        status = %response.status(),
-        duration_ms = duration.as_millis() as u64,
-        request_size = request_size,
-        response_size = response_size,
-        "request completed"
-    );
-
-    response
+    Response::from_parts(parts, Body::new(body))
 }
