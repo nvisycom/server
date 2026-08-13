@@ -1,14 +1,12 @@
 //! Filtering options for workspace member queries.
 
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::types::WorkspaceRole;
 
 /// Filter options for workspace members.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MemberFilter {
     /// Filter by workspace role.
     #[serde(skip_serializing_if = "Option::is_none")]

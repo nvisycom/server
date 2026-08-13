@@ -1,7 +1,5 @@
 //! Filtering options for pipeline run queries.
 
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -13,7 +11,7 @@ use crate::types::{PipelineRunStatus, PipelineTriggerType};
 /// The owning pipeline (single-pipeline listing) and workspace scope are applied
 /// by the query itself, not carried here.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RunFilter {
     /// Filter by run status.

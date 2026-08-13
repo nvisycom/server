@@ -5,17 +5,15 @@
 //! enum, one variant per event, each carrying its own params struct. No rendered
 //! text is stored; the client localizes copy from `notifyType` and the params.
 
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::Json;
 use crate::types::NotificationEvent;
 
-/// Params of a `member:invited` notification.
+/// Params of a `member.invited` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MemberInvitedParams {
     /// Slug of the workspace the account was invited to.
@@ -25,9 +23,9 @@ pub struct MemberInvitedParams {
     pub invited_by: Option<String>,
 }
 
-/// Params of a `member:joined` notification.
+/// Params of a `member.joined` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MemberJoinedParams {
     /// Slug of the workspace the member joined.
@@ -36,9 +34,9 @@ pub struct MemberJoinedParams {
     pub member_username: String,
 }
 
-/// Params of a `connection:sync.completed` notification.
+/// Params of a `connection.sync.completed` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSyncCompletedParams {
     /// Id of the connection that synced.
@@ -48,9 +46,9 @@ pub struct ConnectionSyncCompletedParams {
     pub records_synced: Option<i64>,
 }
 
-/// Params of a `connection:sync.failed` notification.
+/// Params of a `connection.sync.failed` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSyncFailedParams {
     /// Id of the connection that failed to sync.
@@ -60,9 +58,9 @@ pub struct ConnectionSyncFailedParams {
     pub error: Option<String>,
 }
 
-/// Params of a `pipeline:run.analyzed` notification.
+/// Params of a `pipeline.run.analyzed` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PipelineRunAnalyzedParams {
     /// Id of the run.
@@ -74,9 +72,9 @@ pub struct PipelineRunAnalyzedParams {
     pub input_file_name: Option<String>,
 }
 
-/// Params of a `pipeline:run.completed` notification.
+/// Params of a `pipeline.run.completed` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PipelineRunCompletedParams {
     /// Id of the run.
@@ -88,9 +86,9 @@ pub struct PipelineRunCompletedParams {
     pub input_file_name: Option<String>,
 }
 
-/// Params of a `pipeline:run.failed` notification.
+/// Params of a `pipeline.run.failed` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PipelineRunFailedParams {
     /// Id of the run.
@@ -105,18 +103,18 @@ pub struct PipelineRunFailedParams {
     pub error: Option<String>,
 }
 
-/// Params of a `system:announcement` notification.
+/// Params of a `system.announcement` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SystemAnnouncementParams {
     /// Announcement message key or body.
     pub message: String,
 }
 
-/// Params of a `system:report` notification.
+/// Params of a `system.report` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SystemReportParams {
     /// Id of the generated report, if any.
@@ -130,43 +128,43 @@ pub struct SystemReportParams {
 /// `notifyType` values match [`NotificationEvent`], so the same key drives the
 /// member's per-event preferences.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "notifyType", rename_all = "camelCase")]
 pub enum NotificationPayload {
     /// The account was invited to a workspace.
-    #[serde(rename = "member:invited")]
+    #[serde(rename = "member.invited")]
     MemberInvited(MemberInvitedParams),
 
     /// A new member joined a workspace.
-    #[serde(rename = "member:joined")]
+    #[serde(rename = "member.joined")]
     MemberJoined(MemberJoinedParams),
 
     /// A connection sync completed.
-    #[serde(rename = "connection:sync.completed")]
+    #[serde(rename = "connection.sync.completed")]
     ConnectionSyncCompleted(ConnectionSyncCompletedParams),
 
     /// A connection sync failed.
-    #[serde(rename = "connection:sync.failed")]
+    #[serde(rename = "connection.sync.failed")]
     ConnectionSyncFailed(ConnectionSyncFailedParams),
 
     /// A pipeline run finished detection and is awaiting review.
-    #[serde(rename = "pipeline:run.analyzed")]
+    #[serde(rename = "pipeline.run.analyzed")]
     PipelineRunAnalyzed(PipelineRunAnalyzedParams),
 
     /// A pipeline run completed (redaction produced).
-    #[serde(rename = "pipeline:run.completed")]
+    #[serde(rename = "pipeline.run.completed")]
     PipelineRunCompleted(PipelineRunCompletedParams),
 
     /// A pipeline run failed.
-    #[serde(rename = "pipeline:run.failed")]
+    #[serde(rename = "pipeline.run.failed")]
     PipelineRunFailed(PipelineRunFailedParams),
 
     /// A system-wide announcement.
-    #[serde(rename = "system:announcement")]
+    #[serde(rename = "system.announcement")]
     SystemAnnouncement(SystemAnnouncementParams),
 
     /// A system report was generated.
-    #[serde(rename = "system:report")]
+    #[serde(rename = "system.report")]
     SystemReport(SystemReportParams),
 }
 

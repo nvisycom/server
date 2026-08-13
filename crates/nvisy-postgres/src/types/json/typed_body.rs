@@ -8,8 +8,6 @@
 //! can never silently disagree with a count over the same rows, and a client can
 //! still fall back to a generic rendering.
 
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -18,7 +16,7 @@ use serde::de::DeserializeOwned;
 /// Untagged, so a [`Known`](JsonBody::Known) value serializes exactly as `P`
 /// does, and an [`Unknown`](JsonBody::Unknown) one as the raw stored object.
 #[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum JsonBody<P> {
     /// A recognized payload.

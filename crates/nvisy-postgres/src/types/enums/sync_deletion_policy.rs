@@ -1,8 +1,6 @@
 //! Deletion policy enumeration for reconciling deleted source objects.
 
 use diesel_derive_enum::DbEnum;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
@@ -12,7 +10,7 @@ use strum::{Display, EnumIter, EnumString};
 /// per connection: the default `Ignore` keeps imports strictly additive so a
 /// transient listing error or a misconfigured root path can never remove files.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::SyncDeletionPolicy"]
 pub enum SyncDeletionPolicy {

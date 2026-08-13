@@ -1,8 +1,6 @@
 //! API token type enumeration for authentication tracking.
 
 use diesel_derive_enum::DbEnum;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
@@ -11,7 +9,7 @@ use strum::{Display, EnumIter, EnumString};
 /// This enumeration corresponds to the `API_TOKEN_TYPE` PostgreSQL enum and is used
 /// to categorize different types of authentication tokens based on the client type.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::ApiTokenType"]
 pub enum ApiTokenType {

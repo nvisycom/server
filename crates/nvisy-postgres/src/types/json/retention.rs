@@ -8,8 +8,6 @@
 //! in the server crate.
 
 use jiff::{Span, Timestamp};
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::RetentionOverride;
@@ -19,7 +17,7 @@ use super::RetentionOverride;
 /// Wire shape is internally tagged on `mode`: `{ "mode": "forever" }`,
 /// `{ "mode": "zeroDays" }`, `{ "mode": "days", "days": 30 }`.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "camelCase")]
 pub enum Retention {
@@ -69,7 +67,7 @@ pub enum RetentionScope {
 /// Retention for every scope. Missing fields default to [`Retention::Forever`],
 /// so an empty settings blob keeps everything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct RetentionSettings {

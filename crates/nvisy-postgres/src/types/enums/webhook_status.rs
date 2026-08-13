@@ -1,8 +1,6 @@
 //! Webhook status enumeration for webhook lifecycle management.
 
 use diesel_derive_enum::DbEnum;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
@@ -12,7 +10,7 @@ use strum::{Display, EnumIter, EnumString};
 /// user controls `Enabled` / `Disabled`; `Suspended` is set by the system when a
 /// webhook fails repeatedly, and the user can re-enable it.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::WebhookStatus"]
 pub enum WebhookStatus {

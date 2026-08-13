@@ -4,15 +4,13 @@
 //! than left as free-form JSON. Read with `Json::or_default` so an absent or
 //! older blob yields an empty value rather than failing the read.
 
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{Retention, RetentionScope};
 
 /// Structured metadata for a pipeline.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", default)]
 pub struct PipelineMetadata {
     /// Per-pipeline retention override; when absent, the workspace baseline
@@ -31,7 +29,7 @@ pub struct PipelineMetadata {
 /// are ingested, not produced by a pipeline, so they have no per-pipeline
 /// override and always follow the workspace baseline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", default)]
 pub struct RetentionOverride {
     /// Overrides redacted-document retention when set.

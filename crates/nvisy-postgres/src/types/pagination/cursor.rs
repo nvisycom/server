@@ -7,8 +7,6 @@ use std::fmt;
 
 use base64::prelude::*;
 use jiff::Timestamp;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -21,7 +19,7 @@ pub const MAX_LIMIT: i64 = 100;
 /// efficient keyset pagination. The ID serves as a tiebreaker for items
 /// with identical timestamps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(into = "String", try_from = "String")]
 pub struct Cursor {
     /// Timestamp of the last seen item.
@@ -84,7 +82,7 @@ impl TryFrom<String> for Cursor {
 /// - Stable results even when items are added/removed
 /// - Efficient "load more" / infinite scroll patterns
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CursorPagination {
     /// Maximum number of records to return.
     pub limit: i64,

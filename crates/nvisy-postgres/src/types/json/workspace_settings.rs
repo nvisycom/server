@@ -5,8 +5,6 @@
 //! column, so adding a setting never touches the schema. Data-retention rules are
 //! one such setting (see [`RetentionSettings`]).
 
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::retention::RetentionSettings;
@@ -25,7 +23,7 @@ const fn default_require_approval() -> bool {
 /// documents with unreliable text layers — scans, watermarks), and `Never`
 /// relies on the text layer only.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OcrPolicy {
@@ -40,7 +38,7 @@ pub enum OcrPolicy {
 
 /// Typed workspace settings, the JSON stored in the `workspaces.settings` column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct WorkspaceSettings {

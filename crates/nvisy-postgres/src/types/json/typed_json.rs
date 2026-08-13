@@ -24,8 +24,6 @@ use diesel::expression::AsExpression;
 use diesel::pg::{Pg, PgValue};
 use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::Jsonb;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -38,7 +36,7 @@ use super::JsonBody;
 /// type is only a phantom marker (`PhantomData<fn() -> T>`), never stored.
 #[derive(AsExpression, FromSqlRow)]
 #[diesel(sql_type = Jsonb)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(transparent))]
 pub struct Json<T> {
     value: serde_json::Value,

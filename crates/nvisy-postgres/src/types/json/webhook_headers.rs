@@ -9,8 +9,6 @@
 
 use std::collections::BTreeMap;
 
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::Json;
@@ -19,7 +17,7 @@ use super::Json;
 ///
 /// Backed by a `BTreeMap` so serialization is deterministic (stable key order).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct WebhookHeaders(BTreeMap<String, String>);
 

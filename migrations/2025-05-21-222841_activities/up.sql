@@ -4,53 +4,53 @@
 -- Enum types for workspace_activities table
 CREATE TYPE ACTIVITY_TYPE AS ENUM (
     -- Workspace activities
-    'workspace:created',
-    'workspace:updated',
-    'workspace:deleted',
+    'workspace.created',
+    'workspace.updated',
+    'workspace.deleted',
 
     -- Member activities
-    'member:added',
-    'member:updated',
-    'member:deleted',
+    'member.added',
+    'member.updated',
+    'member.deleted',
 
     -- Invite activities
-    'invite:created',
-    'invite:accepted',
-    'invite:declined',
-    'invite:canceled',
+    'invite.created',
+    'invite.accepted',
+    'invite.declined',
+    'invite.canceled',
 
     -- Connection activities
-    'connection:created',
-    'connection:updated',
-    'connection:deleted',
-    'connection:sync.completed',
-    'connection:sync.failed',
+    'connection.created',
+    'connection.updated',
+    'connection.deleted',
+    'connection.sync.completed',
+    'connection.sync.failed',
 
     -- Webhook activities
-    'webhook:created',
-    'webhook:updated',
-    'webhook:deleted',
-    'webhook:triggered',
+    'webhook.created',
+    'webhook.updated',
+    'webhook.deleted',
+    'webhook.triggered',
 
     -- File activities
-    'file:created',
-    'file:updated',
-    'file:deleted',
-    'file:verified',
+    'file.created',
+    'file.updated',
+    'file.deleted',
+    'file.verified',
 
     -- Pipeline activities
-    'pipeline:created',
-    'pipeline:updated',
-    'pipeline:deleted',
-    'pipeline:run.started',
-    'pipeline:run.analyzed',
-    'pipeline:run.completed',
-    'pipeline:run.failed',
+    'pipeline.created',
+    'pipeline.updated',
+    'pipeline.deleted',
+    'pipeline.run.started',
+    'pipeline.run.analyzed',
+    'pipeline.run.completed',
+    'pipeline.run.failed',
 
     -- Policy activities
-    'policy:created',
-    'policy:updated',
-    'policy:deleted'
+    'policy.created',
+    'policy.updated',
+    'policy.deleted'
 );
 
 COMMENT ON TYPE ACTIVITY_TYPE IS

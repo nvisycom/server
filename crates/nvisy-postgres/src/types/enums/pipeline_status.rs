@@ -1,8 +1,6 @@
 //! Pipeline status enumeration indicating the lifecycle state of a pipeline.
 
 use diesel_derive_enum::DbEnum;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
@@ -11,7 +9,7 @@ use strum::{Display, EnumIter, EnumString};
 /// This enumeration corresponds to the `PIPELINE_STATUS` PostgreSQL enum and is used
 /// to track whether a pipeline is being configured, enabled and ready to run, or disabled.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::PipelineStatus"]
 pub enum PipelineStatus {
