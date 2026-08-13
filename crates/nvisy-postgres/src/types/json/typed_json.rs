@@ -10,8 +10,9 @@
 //!   as a failure).
 //! - [`or_default`](Json::or_default) — repair to `T::default()` on mismatch
 //!   (config that must stay usable across shape changes).
-//! - [`typed`](Json::typed) — a fail-closed [`JsonBody<T>`] (`Known`/`Unknown`)
-//!   that never drops the row (tagged payloads a list must always surface).
+//! - [`optional`](Json::optional) — `Some(T)` on a match, `None` on a mismatch
+//!   (a response that presents the typed value when it decodes and omits it
+//!   otherwise, without failing the row).
 //!
 //! The value is stored as a [`serde_json::Value`]; `T` is a compile-time marker
 //! that fixes what `encode`/reads accept and yield, without the data layer
@@ -26,8 +27,6 @@ use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::Jsonb;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-
-use super::JsonBody;
 
 /// A `JSONB` column holding a value of type `T`.
 ///
@@ -109,10 +108,13 @@ impl<T: DeserializeOwned> Json<T> {
         serde_json::from_value(self.value.clone())
     }
 
-    /// Decodes the stored value into `T`, or a fail-closed [`JsonBody<T>`] that
-    /// keeps a non-matching blob as [`JsonBody::Unknown`] instead of dropping it.
-    pub fn typed(&self) -> JsonBody<T> {
-        JsonBody::decode(self.value.clone())
+    /// Decodes the stored value into `T`, yielding `None` on a mismatch.
+    ///
+    /// For a response that presents the typed value when the stored blob decodes
+    /// and omits it otherwise — the row is preserved by the surrounding DTO, so a
+    /// list can never silently disagree with a count over the same rows.
+    pub fn optional(&self) -> Option<T> {
+        serde_json::from_value(self.value.clone()).ok()
     }
 }
 

@@ -2,28 +2,26 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::AccountNotification;
-use nvisy_postgres::types::{JsonBody, NotificationPayload};
+use nvisy_postgres::types::NotificationPayload;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::Page;
 
-/// The rendered body of a notification: the typed payload when the stored params
-/// decode into their `notifyType`, or a raw fallback when they do not.
-pub type NotificationBody = JsonBody<NotificationPayload>;
-
 /// Response type for an account notification.
 ///
-/// The [`NotificationBody`] is nested under `payload`, so a notification is
+/// The typed payload is nested under `payload`, so a notification is
 /// `{ id, payload: { notifyType, <params...> }, readAt, ... }`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Notification {
     /// Unique notification identifier.
     pub id: Uuid,
-    /// The notification type and its typed params (or a raw fallback).
-    pub payload: NotificationBody,
+    /// The notification type and its typed params, absent when the stored params
+    /// do not decode into their `notifyType`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<NotificationPayload>,
     /// When the notification was read; absent means unread.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub read_at: Option<Timestamp>,
@@ -57,14 +55,14 @@ impl Notification {
     /// Builds the response from a stored notification, reconstructing the typed
     /// payload from `notify_type` and the stored params.
     ///
-    /// Total by design: a row whose stored params do not match its `notify_type`
-    /// is surfaced as a raw `JsonBody` fallback carrying the params, never
+    /// Total by design: a row whose stored params do not decode into their
+    /// `notify_type` still appears, with `payload` absent rather than the row
     /// dropped. Dropping it would let the list silently disagree with the unread
-    /// count; the row still appears.
+    /// count.
     pub fn from_model(notification: AccountNotification) -> Self {
         Self {
             id: notification.id,
-            payload: notification.params.typed(),
+            payload: notification.params.optional(),
             read_at: notification.read_at.map(Into::into),
             created_at: notification.created_at.into(),
             expires_at: notification.expires_at.map(Into::into),
