@@ -4,15 +4,13 @@
 //! and stores the findings; the run then awaits reviewer verification before
 //! redact consumes the verified findings and produces a redacted file.
 
-use std::convert::Infallible;
-
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use async_stream::stream;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::sse::{Event, KeepAlive, Sse};
-use futures::{Stream, StreamExt};
+use axum::response::sse::Event;
+use futures::StreamExt;
 use nvisy_postgres::model::{
     NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun,
 };
@@ -20,7 +18,7 @@ use nvisy_postgres::query::{
     PipelineReferenceRepository, RunFiles, WorkspaceFileRepository, WorkspacePipelineRepository,
     WorkspacePipelineRunRepository,
 };
-use nvisy_postgres::types::{PipelineRunStatus, WorkspaceSettings};
+use nvisy_postgres::types::{NotificationPayload, PipelineRunCompletedParams, PipelineRunStatus};
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -32,9 +30,7 @@ use crate::handler::request::{
     CreatePipelineRun, CursorPagination, PipelineDefinition, PipelinePathParams,
     PipelineRunPathParams, PipelineRunsQuery, WorkspaceRunsQuery,
 };
-use crate::handler::response::{
-    ErrorResponse, NotificationPayload, PipelineRun, PipelineRunCompletedParams, PipelineRunsPage,
-};
+use crate::handler::response::{ErrorResponse, PipelineRun, PipelineRunsPage};
 use crate::handler::utility::{SseResponse, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
@@ -440,8 +436,7 @@ async fn stream_pipeline_run_events(
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelineRunPathParams>,
-) -> Result<SseResponse<impl Stream<Item = std::result::Result<Event, Infallible>>, RunStatusEvent>>
-{
+) -> Result<SseResponse<RunStatusEvent>> {
     tracing::debug!(target: TRACING_TARGET, "Opening run status stream");
 
     let run_id = path_params.run_id.as_uuid();
@@ -464,7 +459,7 @@ async fn stream_pipeline_run_events(
     let stream = stream! {
         // Emit the current status first: covers the race where detection settled
         // before the subscription was live (no live event would ever arrive).
-        yield Ok(status_event(&RunStatusEvent { run_id, status: current }));
+        yield status_event(&RunStatusEvent { run_id, status: current });
         if !current.is_detecting() {
             return;
         }
@@ -474,7 +469,7 @@ async fn stream_pipeline_run_events(
                 // A live broadcast arrived; forward it and stop once detection settles.
                 Ok(Some(event)) => {
                     let settled = !event.status.is_detecting();
-                    yield Ok(status_event(&event));
+                    yield status_event(&event);
                     if settled {
                         break;
                     }
@@ -483,7 +478,7 @@ async fn stream_pipeline_run_events(
                 // learns the final status.
                 Ok(None) => {
                     if let Some(status) = reread_run_status(&pg_client, workspace.id, run_id).await {
-                        yield Ok(status_event(&RunStatusEvent { run_id, status }));
+                        yield status_event(&RunStatusEvent { run_id, status });
                     }
                     break;
                 }
@@ -492,7 +487,7 @@ async fn stream_pipeline_run_events(
                 // at-most-once) instead of hanging on keep-alive forever.
                 Err(_) => {
                     if let Some(status) = reread_run_status(&pg_client, workspace.id, run_id).await {
-                        yield Ok(status_event(&RunStatusEvent { run_id, status }));
+                        yield status_event(&RunStatusEvent { run_id, status });
                         if !status.is_detecting() {
                             break;
                         }
@@ -502,9 +497,7 @@ async fn stream_pipeline_run_events(
         }
     };
 
-    Ok(SseResponse::new(
-        Sse::new(stream).keep_alive(KeepAlive::default()),
-    ))
+    Ok(SseResponse::new(stream))
 }
 
 /// How long the status stream waits for a live broadcast before re-reading the
@@ -620,7 +613,7 @@ async fn redact_pipeline_run(
     let redacted = engine.anonymize(document, &policies, &mut analyzed).await?;
 
     // Store the redacted bytes as a new workspace file and link it to the run.
-    let workspace_settings = WorkspaceSettings::from_value(&workspace.settings).retention;
+    let workspace_settings = workspace.settings.or_default().retention;
     let output_file = blob
         .store_redacted_file(
             &mut conn,

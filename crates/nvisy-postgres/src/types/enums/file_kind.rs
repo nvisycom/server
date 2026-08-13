@@ -1,8 +1,6 @@
 //! File kind enumeration: a file's role in the system.
 
 use diesel_derive_enum::DbEnum;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
@@ -13,7 +11,7 @@ use strum::{Display, EnumIter, EnumString};
 /// version chain (lineage); import origin (connection and remote key) lives in
 /// the `workspace_file_imports` satellite.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::FileKind"]
 pub enum FileKind {

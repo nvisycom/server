@@ -18,15 +18,15 @@ use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceConnection, WorkspaceFile
 use nvisy_postgres::query::{
     WorkspaceConnectionSyncRepository, WorkspaceFileRepository, WorkspaceRepository,
 };
-use nvisy_postgres::types::{FileKind, SyncDeletionPolicy, WorkspaceSettings};
+use nvisy_postgres::types::{
+    ConnectionSyncCompletedParams, ConnectionSyncFailedParams, FileKind, NotificationPayload,
+    SyncDeletionPolicy,
+};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::SyncConfig;
 use super::bridge::{reader_to_stream, stream_to_reader};
-use crate::handler::response::{
-    ConnectionSyncCompletedParams, ConnectionSyncFailedParams, NotificationPayload,
-};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{
     ExternalObjectStore, HashingReader, Infra, Measurements, NotificationEmitter, WebhookEmitter,
@@ -141,7 +141,9 @@ impl ConnectionSyncService {
             .find_workspace_by_id(connection.workspace_id)
             .await?
             .and_then(|workspace| {
-                WorkspaceSettings::from_value(&workspace.settings)
+                workspace
+                    .settings
+                    .or_default()
                     .retention
                     .original_documents
                     .expires_at(jiff::Timestamp::now())

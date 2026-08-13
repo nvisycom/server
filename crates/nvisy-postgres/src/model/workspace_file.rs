@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_files;
-use crate::types::{FileKind, HasCreatedAt, HasDeletedAt, HasUpdatedAt, RECENTLY_UPLOADED_HOURS};
+use crate::types::{FileKind, HasCreatedAt, HasDeletedAt, HasUpdatedAt};
 
 /// Workspace file model representing a file stored in the system.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -103,43 +103,9 @@ pub struct UpdateWorkspaceFile {
 }
 
 impl WorkspaceFile {
-    /// Returns whether the file was uploaded recently.
-    pub fn is_recently_uploaded(&self) -> bool {
-        self.was_created_within(jiff::Span::new().hours(RECENTLY_UPLOADED_HOURS))
-    }
-
     /// Returns whether the file is deleted.
     pub fn is_deleted(&self) -> bool {
         self.deleted_at.is_some()
-    }
-
-    /// Returns the file size in a human-readable format.
-    pub fn file_size_human(&self) -> String {
-        let bytes = self.file_size_bytes as f64;
-        const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
-
-        if bytes < 1024.0 {
-            return format!("{} B", self.file_size_bytes);
-        }
-
-        let mut size = bytes;
-        let mut unit_index = 0;
-
-        while size >= 1024.0 && unit_index < UNITS.len() - 1 {
-            size /= 1024.0;
-            unit_index += 1;
-        }
-
-        format!("{:.1} {}", size, UNITS[unit_index])
-    }
-
-    /// Returns the file extension with a dot prefix.
-    pub fn file_extension_with_dot(&self) -> String {
-        if self.file_extension.starts_with('.') {
-            self.file_extension.clone()
-        } else {
-            format!(".{}", self.file_extension)
-        }
     }
 
     /// Returns whether the file has custom metadata.
@@ -150,33 +116,6 @@ impl WorkspaceFile {
     /// Returns whether the file is a specific type by extension.
     pub fn is_file_type(&self, extension: &str) -> bool {
         self.file_extension.eq_ignore_ascii_case(extension)
-    }
-
-    /// Returns whether the file is an image.
-    pub fn is_image(&self) -> bool {
-        matches!(
-            self.file_extension.to_lowercase().as_str(),
-            "jpg" | "jpeg" | "png" | "gif" | "svg" | "webp" | "bmp"
-        )
-    }
-
-    /// Returns whether the file is a document.
-    pub fn is_document(&self) -> bool {
-        matches!(
-            self.file_extension.to_lowercase().as_str(),
-            "pdf" | "doc" | "docx" | "txt" | "md" | "rtf"
-        )
-    }
-
-    /// Returns the SHA-256 hash as a hex string.
-    pub fn hash_hex(&self) -> String {
-        use std::fmt::Write;
-
-        let mut hex = String::with_capacity(self.file_hash_sha256.len() * 2);
-        for byte in &self.file_hash_sha256 {
-            let _ = write!(hex, "{byte:02x}");
-        }
-        hex
     }
 
     /// Returns whether this is the original version (version 1).

@@ -5,7 +5,10 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::account_notifications;
-use crate::types::{DEFAULT_RETENTION_DAYS, HasCreatedAt, HasExpiresAt, NotificationEvent};
+use crate::types::{
+    DEFAULT_RETENTION_DAYS, HasCreatedAt, HasExpiresAt, Json, NotificationEvent,
+    NotificationPayload,
+};
 
 /// Account notification model representing a notification sent to a user.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -18,12 +21,10 @@ pub struct AccountNotification {
     pub account_id: Uuid,
     /// Notification type; the client-side localization key.
     pub notify_type: NotificationEvent,
-    /// Whether notification has been read.
-    pub is_read: bool,
-    /// Timestamp when notification was read.
+    /// When the notification was read; `None` means unread.
     pub read_at: Option<Timestamp>,
-    /// Typed params for the notification type (the tagged payload's fields).
-    pub params: serde_json::Value,
+    /// The self-describing tagged payload (its `notifyType` + params).
+    pub params: Json<NotificationPayload>,
     /// Notification creation timestamp.
     pub created_at: Timestamp,
     /// Optional expiration timestamp.
@@ -39,8 +40,8 @@ pub struct NewAccountNotification {
     pub account_id: Uuid,
     /// Notification type; the client-side localization key.
     pub notify_type: NotificationEvent,
-    /// Typed params for the notification type.
-    pub params: Option<serde_json::Value>,
+    /// The self-describing tagged payload (its `notifyType` + params).
+    pub params: Json<NotificationPayload>,
     /// Expiration timestamp.
     pub expires_at: Option<Timestamp>,
 }
@@ -50,16 +51,19 @@ pub struct NewAccountNotification {
 #[diesel(table_name = account_notifications)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateAccountNotification {
-    /// Mark as read/unread.
-    pub is_read: Option<bool>,
-    /// Read timestamp.
+    /// Read timestamp: `Some(Some(ts))` marks read, `Some(None)` marks unread.
     pub read_at: Option<Option<Timestamp>>,
 }
 
 impl AccountNotification {
+    /// Returns whether the notification has been read (`read_at` is set).
+    pub fn is_read(&self) -> bool {
+        self.read_at.is_some()
+    }
+
     /// Returns whether the notification is currently unread.
     pub fn is_unread(&self) -> bool {
-        !self.is_read
+        self.read_at.is_none()
     }
 
     /// Returns whether the notification has expired.
@@ -73,7 +77,7 @@ impl AccountNotification {
 
     /// Returns whether the notification is active (unread and not expired).
     pub fn is_active(&self) -> bool {
-        !self.is_read && !self.is_expired()
+        self.is_unread() && !self.is_expired()
     }
 
     /// Returns the time remaining until expiration.
@@ -118,17 +122,17 @@ impl AccountNotification {
 
     /// Returns whether the notification can be dismissed.
     pub fn can_be_dismissed(&self) -> bool {
-        !self.is_system_notification() || self.is_read
+        !self.is_system_notification() || self.is_read()
     }
 
     /// Returns whether the notification should be shown to the user.
     pub fn should_display(&self) -> bool {
-        !self.is_expired() && (!self.is_read || self.is_system_notification())
+        !self.is_expired() && (self.is_unread() || self.is_system_notification())
     }
 
     /// Returns whether the notification carries typed params.
     pub fn has_params(&self) -> bool {
-        !self.params.as_object().is_none_or(|obj| obj.is_empty())
+        !self.params.is_empty()
     }
 
     /// Returns whether the notification requires action from the user.

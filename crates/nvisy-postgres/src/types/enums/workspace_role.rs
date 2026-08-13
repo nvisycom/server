@@ -3,8 +3,6 @@
 use std::cmp;
 
 use diesel_derive_enum::DbEnum;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
@@ -13,7 +11,7 @@ use strum::{Display, EnumIter, EnumString};
 /// This enumeration corresponds to the `WORKSPACE_ROLE` PostgreSQL enum and provides
 /// hierarchical access control for workspace members with clearly defined capabilities.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::WorkspaceRole"]
 pub enum WorkspaceRole {

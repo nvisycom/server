@@ -18,7 +18,7 @@ use nvisy_postgres::model::{
     NewWorkspaceFile, WorkspaceFile, WorkspacePipeline, WorkspacePipelineRun,
 };
 use nvisy_postgres::query::WorkspaceFileRepository;
-use nvisy_postgres::types::{FileKind, RetentionOverride, RetentionScope, RetentionSettings};
+use nvisy_postgres::types::{FileKind, RetentionScope, RetentionSettings};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
@@ -117,7 +117,7 @@ impl RunBlobStore {
 
         // Retention expiry for the redacted-documents scope (workspace baseline,
         // pipeline override if set).
-        let over = RetentionOverride::from_pipeline_metadata(&pipeline.metadata);
+        let over = pipeline.metadata.or_default().retention;
         let expires_at = workspace_settings
             .resolve(RetentionScope::RedactedDocuments, over.as_ref())
             .expires_at(jiff::Timestamp::now());
@@ -177,7 +177,7 @@ impl RunBlobStore {
 
         // Retention expiry for the audit scope (workspace baseline, pipeline
         // override if set).
-        let over = RetentionOverride::from_pipeline_metadata(&pipeline.metadata);
+        let over = pipeline.metadata.or_default().retention;
         let expires_at = workspace_settings
             .resolve(RetentionScope::AuditLogs, over.as_ref())
             .expires_at(jiff::Timestamp::now());

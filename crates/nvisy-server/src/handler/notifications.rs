@@ -5,8 +5,11 @@
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
+use async_stream::stream;
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::response::sse::Event;
+use futures::StreamExt;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::AccountNotificationRepository;
 
@@ -15,8 +18,9 @@ use crate::handler::request::{CursorPagination, NotificationPathParams};
 use crate::handler::response::{
     ErrorResponse, MarkedReadStatus, Notification, NotificationsPage, UnreadStatus,
 };
+use crate::handler::utility::SseResponse;
 use crate::handler::{Error, Result};
-use crate::service::ServiceState;
+use crate::service::{NotificationEmitter, ServiceState, UnreadCountEvent};
 
 /// Tracing target for notification operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::notifications";
@@ -43,7 +47,7 @@ async fn list_notifications(
         .cursor_list_account_notifications(auth_state.account_id, pagination.into())
         .await?;
 
-    let response = NotificationsPage::filter_from_cursor_page(page, Notification::from_model);
+    let response = NotificationsPage::from_cursor_page(page, Notification::from_model);
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -98,6 +102,117 @@ fn get_unread_status_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
 }
 
+/// How long the unread stream waits for a live broadcast before re-reading the
+/// authoritative count from the database (the fallback for a dropped best-effort
+/// broadcast).
+const UNREAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Streams the authenticated account's unread-notification count as Server-Sent
+/// Events.
+///
+/// Emits one `unread` event with the current count immediately, then forwards
+/// each change as notifications arrive or are marked read. The stream stays open
+/// until the client disconnects.
+///
+/// Live changes arrive over a best-effort core-NATS broadcast; if none arrives
+/// within a short interval the authoritative count is re-read from the database,
+/// so a dropped broadcast self-heals rather than leaving a stale badge.
+///
+/// Authenticated like every other route (Bearer); browsers should consume it via
+/// a `fetch` stream rather than the native `EventSource`, which cannot send an
+/// `Authorization` header.
+#[tracing::instrument(
+    skip_all,
+    fields(account_id = %auth_state.account_id)
+)]
+async fn stream_unread_status(
+    State(pg_client): State<PgClient>,
+    State(notification_emitter): State<NotificationEmitter>,
+    AuthState(auth_state): AuthState,
+) -> Result<SseResponse<UnreadCountEvent>> {
+    tracing::debug!(target: TRACING_TARGET, "Opening unread notifications stream");
+
+    let account_id = auth_state.account_id;
+
+    // Subscribe BEFORE reading the current count: core-NATS broadcasts are not
+    // replayed, so a change published between the read and the subscription going
+    // live would otherwise be missed until the next change.
+    let mut updates = notification_emitter.subscribe_unread(account_id).await?;
+
+    let mut conn = pg_client.get_connection().await?;
+    let current = conn.count_unread_account_notifications(account_id).await?;
+    drop(conn);
+
+    let stream = stream! {
+        // Emit the current count first so a client that connects between changes
+        // still learns the present state.
+        yield unread_event(&UnreadCountEvent { unread_count: current });
+
+        loop {
+            match tokio::time::timeout(UNREAD_POLL_INTERVAL, updates.next()).await {
+                // A live broadcast arrived; forward it.
+                Ok(Some(event)) => {
+                    yield unread_event(&event);
+                }
+                // The subscription ended; re-read once so the client is not left
+                // with a stale count, then stop.
+                Ok(None) => {
+                    if let Some(unread_count) = reread_unread_count(&pg_client, account_id).await {
+                        yield unread_event(&UnreadCountEvent { unread_count });
+                    }
+                    break;
+                }
+                // No broadcast within the interval: re-read the authoritative
+                // count, recovering a dropped best-effort broadcast (core NATS is
+                // at-most-once).
+                Err(_) => {
+                    if let Some(unread_count) = reread_unread_count(&pg_client, account_id).await {
+                        yield unread_event(&UnreadCountEvent { unread_count });
+                    }
+                }
+            }
+        }
+    };
+
+    Ok(SseResponse::new(stream))
+}
+
+/// Re-reads an account's unread count from the database, returning `None` if the
+/// count can no longer be read (a transient error — the next poll retries).
+async fn reread_unread_count(pg_client: &PgClient, account_id: uuid::Uuid) -> Option<i64> {
+    let mut conn = pg_client.get_connection().await.ok()?;
+    match conn.count_unread_account_notifications(account_id).await {
+        Ok(count) => Some(count),
+        Err(err) => {
+            tracing::debug!(target: TRACING_TARGET, error = %err, %account_id, "Failed to re-read unread count");
+            None
+        }
+    }
+}
+
+/// Builds an `unread` SSE event carrying the account's current unread count.
+fn unread_event(event: &UnreadCountEvent) -> Event {
+    Event::default()
+        .event("unread")
+        .json_data(event)
+        .unwrap_or_else(|_| Event::default().event("unread"))
+}
+
+/// OpenAPI documentation for the unread-count SSE stream.
+fn stream_unread_status_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Stream unread notifications count")
+        .description(
+            "Opens a Server-Sent Events stream of the account's unread \
+             notification count. Emits the current count immediately, then each \
+             change as notifications arrive or are marked read, until the client \
+             disconnects. Each event's `data` is an `UnreadCountEvent` (see the \
+             response schema). Authenticate with a Bearer token via a \
+             `fetch`-based client; the native `EventSource` cannot send an \
+             `Authorization` header.",
+        )
+        .response::<401, Json<ErrorResponse>>()
+}
+
 /// Marks all of the authenticated account's unread notifications as read.
 #[tracing::instrument(
     skip_all,
@@ -105,6 +220,7 @@ fn get_unread_status_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn mark_all_notifications_read(
     State(pg_client): State<PgClient>,
+    State(notification_emitter): State<NotificationEmitter>,
     AuthState(auth_state): AuthState,
 ) -> Result<(StatusCode, Json<MarkedReadStatus>)> {
     tracing::debug!(target: TRACING_TARGET, "Marking all notifications as read");
@@ -116,6 +232,13 @@ async fn mark_all_notifications_read(
         .await? as i64;
 
     tracing::debug!(target: TRACING_TARGET, marked_read, "Notifications marked as read");
+
+    // Push the now-zero unread count so a watching badge clears live.
+    if marked_read > 0 {
+        notification_emitter
+            .broadcast_unread(&mut conn, auth_state.account_id)
+            .await;
+    }
 
     Ok((StatusCode::OK, Json(MarkedReadStatus { marked_read })))
 }
@@ -143,6 +266,7 @@ fn mark_all_notifications_read_docs(op: TransformOperation) -> TransformOperatio
 )]
 async fn mark_notification_read(
     State(pg_client): State<PgClient>,
+    State(notification_emitter): State<NotificationEmitter>,
     AuthState(auth_state): AuthState,
     Path(path_params): Path<NotificationPathParams>,
 ) -> Result<StatusCode> {
@@ -157,6 +281,11 @@ async fn mark_notification_read(
     if !marked {
         return Err(Error::not_found("notification"));
     }
+
+    // Push the decremented unread count so a watching badge updates live.
+    notification_emitter
+        .broadcast_unread(&mut conn, auth_state.account_id)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -183,6 +312,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/notifications/unread/",
             get_with(get_unread_status, get_unread_status_docs),
+        )
+        .api_route(
+            "/notifications/unread/events/",
+            get_with(stream_unread_status, stream_unread_status_docs),
         )
         .api_route(
             "/notifications/read/",

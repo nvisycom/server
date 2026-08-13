@@ -7,7 +7,7 @@
 use nvisy_postgres::model::{
     NewWorkspace, UpdateWorkspace as UpdateWorkspaceModel, UpdateWorkspaceMember,
 };
-use nvisy_postgres::types::{Handle, NotificationEvent, WorkspaceSettings};
+use nvisy_postgres::types::{Handle, Json, NotificationEvent, WorkspaceSettings};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -67,15 +67,7 @@ impl CreateWorkspace {
             description: self.description,
             avatar_url: None,
             metadata: None,
-            settings: self
-                .settings
-                .map(|settings| settings.to_value())
-                .transpose()
-                .map_err(|err| {
-                    ErrorKind::BadRequest
-                        .with_message("Invalid workspace settings")
-                        .with_context(err.to_string())
-                })?,
+            settings: self.settings.map(|settings| Json::encode(&settings)),
             created_by: account_id,
         })
     }
@@ -102,20 +94,10 @@ pub struct UpdateWorkspace {
 
 impl UpdateWorkspace {
     pub fn into_model(self) -> Result<UpdateWorkspaceModel> {
-        let settings = self
-            .settings
-            .map(|settings| settings.to_value())
-            .transpose()
-            .map_err(|err| {
-                ErrorKind::BadRequest
-                    .with_message("Invalid workspace settings")
-                    .with_context(err.to_string())
-            })?;
-
         Ok(UpdateWorkspaceModel {
             display_name: self.display_name,
             description: self.description.map(Some),
-            settings,
+            settings: self.settings.map(|settings| Json::encode(&settings)),
             ..Default::default()
         })
     }

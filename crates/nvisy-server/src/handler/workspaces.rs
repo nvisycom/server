@@ -18,7 +18,7 @@ use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Multipart, Permission, Query, ValidateJson, WorkspaceContext,
+    AuthProvider, AuthState, Avatar, Json, Permission, Query, ValidateJson, WorkspaceContext,
 };
 use crate::handler::request::{
     CreateWorkspace, CursorPagination, UpdateNotificationSettings, UpdateWorkspace,
@@ -27,7 +27,7 @@ use crate::handler::response::{
     AccountRef, ActivitiesPage, Activity, ErrorResponse, NotificationSettings, Page, Workspace,
     WorkspacesPage,
 };
-use crate::handler::utility::{read_image_field, resolve_account_ref};
+use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState};
 
@@ -439,7 +439,7 @@ async fn upload_workspace_avatar(
     State(avatar): State<AvatarService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
-    Multipart(multipart): Multipart,
+    Avatar(bytes): Avatar,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Uploading workspace avatar");
 
@@ -448,7 +448,6 @@ async fn upload_workspace_avatar(
         .authorize_workspace(&mut conn, workspace.id, Permission::UpdateWorkspace)
         .await?;
 
-    let bytes = read_image_field(multipart).await?;
     avatar.set_workspace_avatar(workspace.id, bytes).await?;
 
     tracing::info!(target: TRACING_TARGET, "Workspace avatar set");

@@ -1,8 +1,6 @@
 //! Sync mode enumeration indicating the direction a connection syncs.
 
 use diesel_derive_enum::DbEnum;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
@@ -11,7 +9,7 @@ use strum::{Display, EnumIter, EnumString};
 /// Corresponds to the `SYNC_MODE` PostgreSQL enum: `Import` fetches objects from
 /// the connection into the workspace; `Export` pushes workspace files out.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::SyncMode"]
 pub enum SyncMode {

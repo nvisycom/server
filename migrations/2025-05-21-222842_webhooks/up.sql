@@ -14,36 +14,36 @@ COMMENT ON TYPE WEBHOOK_STATUS IS
 -- Webhook event types enum
 CREATE TYPE WEBHOOK_EVENT AS ENUM (
     -- File events
-    'file:created',
-    'file:updated',
-    'file:deleted',
+    'file.created',
+    'file.updated',
+    'file.deleted',
 
     -- Member events
-    'member:added',
-    'member:deleted',
-    'member:updated',
+    'member.added',
+    'member.deleted',
+    'member.updated',
 
     -- Connection events
-    'connection:created',
-    'connection:updated',
-    'connection:deleted',
-    'connection:sync.started',
-    'connection:sync.completed',
-    'connection:sync.failed',
+    'connection.created',
+    'connection.updated',
+    'connection.deleted',
+    'connection.sync.started',
+    'connection.sync.completed',
+    'connection.sync.failed',
 
     -- Pipeline events
-    'pipeline:created',
-    'pipeline:updated',
-    'pipeline:deleted',
-    'pipeline:run.started',
-    'pipeline:run.analyzed',
-    'pipeline:run.completed',
-    'pipeline:run.failed',
+    'pipeline.created',
+    'pipeline.updated',
+    'pipeline.deleted',
+    'pipeline.run.started',
+    'pipeline.run.analyzed',
+    'pipeline.run.completed',
+    'pipeline.run.failed',
 
     -- Policy events
-    'policy:created',
-    'policy:updated',
-    'policy:deleted'
+    'policy.created',
+    'policy.updated',
+    'policy.deleted'
 );
 
 COMMENT ON TYPE WEBHOOK_EVENT IS

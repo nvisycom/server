@@ -196,14 +196,13 @@ impl AccountNotificationRepository for PgConnection {
         use schema::account_notifications::{self, dsl};
 
         let update_data = UpdateAccountNotification {
-            is_read: Some(true),
             read_at: Some(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
         };
 
         diesel::update(
             account_notifications::table
                 .filter(dsl::account_id.eq(account_id))
-                .filter(dsl::is_read.eq(false)),
+                .filter(dsl::read_at.is_null()),
         )
         .set(&update_data)
         .execute(self)
@@ -219,7 +218,6 @@ impl AccountNotificationRepository for PgConnection {
         use schema::account_notifications::{self, dsl};
 
         let update_data = UpdateAccountNotification {
-            is_read: Some(true),
             read_at: Some(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
         };
 
@@ -259,7 +257,7 @@ impl AccountNotificationRepository for PgConnection {
 
         account_notifications::table
             .filter(dsl::account_id.eq(account_id))
-            .filter(dsl::is_read.eq(false))
+            .filter(dsl::read_at.is_null())
             .filter(dsl::expires_at.is_null().or(dsl::expires_at.gt(now)))
             .select(count_star())
             .get_result(self)

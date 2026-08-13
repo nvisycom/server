@@ -3,8 +3,6 @@
 //! Offset pagination is suitable for small datasets or when random page access
 //! is required. For large datasets, prefer cursor-based pagination.
 
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Maximum number of items per page.
@@ -17,7 +15,7 @@ pub const MAX_LIMIT: i64 = 1000;
 ///
 /// [`CursorPagination`]: super::CursorPagination
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct OffsetPagination {
     /// Maximum number of records to return.
     pub limit: i64,

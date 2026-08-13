@@ -3,7 +3,7 @@
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspacePipelineRun as PipelineRunModel;
 use nvisy_postgres::query::RunFiles;
-use nvisy_postgres::types::{Handle, PipelineRunStatus, PipelineTriggerType, RunId};
+use nvisy_postgres::types::{Handle, PipelineRunStatus, PipelineTriggerType, RunId, RunMetadata};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -48,7 +48,7 @@ pub struct PipelineRun {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// Non-encrypted metadata for filtering/display.
-    pub metadata: serde_json::Value,
+    pub metadata: RunMetadata,
     /// When the run started.
     pub started_at: Timestamp,
     /// When the run completed.
@@ -70,13 +70,10 @@ impl PipelineRun {
         triggered_by: AccountRef,
         files: RunFiles,
     ) -> Self {
-        // Surface a failure reason (written to metadata.error by the worker /
+        // Surface the failure reason (written to metadata.error by the worker /
         // enqueue-failure path) as a dedicated field for a failed run.
-        let error = run
-            .metadata
-            .get("error")
-            .and_then(|value| value.as_str())
-            .map(str::to_owned);
+        let metadata = run.metadata.or_default();
+        let error = metadata.error.clone();
 
         Self {
             id: RunId::from_uuid(run.id),
@@ -90,7 +87,7 @@ impl PipelineRun {
             trigger_type: run.trigger_type,
             status: run.status,
             error,
-            metadata: run.metadata,
+            metadata,
             started_at: run.started_at.into(),
             completed_at: run.completed_at.map(Into::into),
         }

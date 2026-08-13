@@ -68,7 +68,7 @@ async fn create_webhook(
     let secret = crypto.generate_secret();
     let encrypted_secret = crypto.encrypt(workspace.id, secret.as_bytes())?;
 
-    let new_webhook = request.into_model(workspace.id, auth_state.account_id, encrypted_secret);
+    let new_webhook = request.into_model(workspace.id, auth_state.account_id, encrypted_secret)?;
     let webhook = conn.create_workspace_webhook(new_webhook).await?;
 
     tracing::info!(
@@ -237,7 +237,7 @@ async fn update_webhook(
         check_webhook_url(url)?;
     }
 
-    let update_data = request.into_model(existing.status);
+    let update_data = request.into_model(existing.status)?;
     conn.update_workspace_webhook(existing.id, update_data)
         .await?;
 
@@ -373,7 +373,7 @@ async fn test_webhook(
     .with_secret(secret);
     let headers = webhook.parsed_headers();
     if !headers.is_empty() {
-        webhook_request = webhook_request.with_headers(headers);
+        webhook_request = webhook_request.with_headers(headers.into_map().into_iter().collect());
     }
 
     let response = webhook_service.deliver(&webhook_request).await?;

@@ -11,10 +11,8 @@ use super::ConstraintCategory;
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspaceActivitiesConstraints {
     // Activity validation constraints
-    #[strum(serialize = "workspace_activities_description_length_max")]
-    DescriptionLengthMax,
-    #[strum(serialize = "workspace_activities_metadata_size")]
-    MetadataSize,
+    #[strum(serialize = "workspace_activities_params_size")]
+    ParamsSize,
 }
 
 impl WorkspaceActivitiesConstraints {
@@ -26,8 +24,7 @@ impl WorkspaceActivitiesConstraints {
     /// Returns the category of this constraint violation.
     pub fn categorize(&self) -> ConstraintCategory {
         match self {
-            WorkspaceActivitiesConstraints::DescriptionLengthMax
-            | WorkspaceActivitiesConstraints::MetadataSize => ConstraintCategory::Validation,
+            WorkspaceActivitiesConstraints::ParamsSize => ConstraintCategory::Validation,
         }
     }
 }

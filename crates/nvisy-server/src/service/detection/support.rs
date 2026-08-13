@@ -5,7 +5,7 @@ use nvisy_postgres::model::UpdateWorkspacePipelineRun;
 use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspacePipelineRunRepository, WorkspacePolicyRepository,
 };
-use nvisy_postgres::types::PipelineRunStatus;
+use nvisy_postgres::types::{Json, PipelineRunStatus, RunMetadata};
 use uuid::Uuid;
 
 use super::service::DetectionQueue;
@@ -30,9 +30,13 @@ pub(crate) async fn fail_run(
     triggered_by: Uuid,
     reason: &str,
 ) {
+    let metadata = RunMetadata {
+        error: Some(reason.to_owned()),
+        ..Default::default()
+    };
     let update = UpdateWorkspacePipelineRun {
         status: Some(PipelineRunStatus::Failed),
-        metadata: Some(serde_json::json!({ "error": reason })),
+        metadata: Some(Json::encode(&metadata)),
         completed_at: Some(Some(jiff::Timestamp::now().into())),
         ..Default::default()
     };

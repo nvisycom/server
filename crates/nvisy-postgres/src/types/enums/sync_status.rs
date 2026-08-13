@@ -1,8 +1,6 @@
 //! Sync status enumeration for connection synchronization operations.
 
 use diesel_derive_enum::DbEnum;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
@@ -11,7 +9,7 @@ use strum::{Display, EnumIter, EnumString};
 /// This enumeration corresponds to the `SYNC_STATUS` PostgreSQL enum and tracks
 /// the state of an individual synchronization run.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::SyncStatus"]
 pub enum SyncStatus {

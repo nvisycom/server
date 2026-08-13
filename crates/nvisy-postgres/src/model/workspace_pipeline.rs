@@ -5,7 +5,9 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_pipelines;
-use crate::types::{Handle, HasCreatedAt, HasDeletedAt, HasUpdatedAt, PipelineStatus};
+use crate::types::{
+    Handle, HasCreatedAt, HasDeletedAt, HasUpdatedAt, Json, PipelineMetadata, PipelineStatus,
+};
 
 /// Workspace pipeline model representing a workflow definition in the system.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -29,7 +31,7 @@ pub struct WorkspacePipeline {
     /// Pipeline definition (steps, input/output schemas, etc.).
     pub definition: serde_json::Value,
     /// Extended metadata.
-    pub metadata: serde_json::Value,
+    pub metadata: Json<PipelineMetadata>,
     /// Cron expression for scheduled runs.
     pub schedule_cron: Option<String>,
     /// Timezone for schedule interpretation.
@@ -64,7 +66,7 @@ pub struct NewWorkspacePipeline {
     /// Pipeline definition.
     pub definition: Option<serde_json::Value>,
     /// Metadata.
-    pub metadata: Option<serde_json::Value>,
+    pub metadata: Option<Json<PipelineMetadata>>,
     /// Cron expression for scheduled runs.
     pub schedule_cron: Option<String>,
     /// Timezone for schedule interpretation.
@@ -87,7 +89,7 @@ pub struct UpdateWorkspacePipeline {
     /// Pipeline definition.
     pub definition: Option<serde_json::Value>,
     /// Metadata.
-    pub metadata: Option<serde_json::Value>,
+    pub metadata: Option<Json<PipelineMetadata>>,
     /// Cron expression for scheduled runs.
     pub schedule_cron: Option<Option<String>>,
     /// Timezone for schedule interpretation.

@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_pipeline_runs;
-use crate::types::{PipelineRunStatus, PipelineTriggerType};
+use crate::types::{Json, PipelineRunStatus, PipelineTriggerType, RunMetadata};
 
 /// A detect/redact run: one analysis of a file through a pipeline.
 ///
@@ -38,7 +38,7 @@ pub struct WorkspacePipelineRun {
     /// Detect idempotency key (dedupes retries).
     pub idempotency_key: Option<String>,
     /// Non-encrypted metadata for filtering/display.
-    pub metadata: serde_json::Value,
+    pub metadata: Json<RunMetadata>,
     /// When a worker last claimed this run for detection. Acts as a lease: a
     /// redelivered job whose claim is still fresh is skipped, while a stale
     /// claim (a worker that died mid-analysis) can be re-claimed. `None` until
@@ -72,7 +72,7 @@ pub struct NewWorkspacePipelineRun {
     /// Detect idempotency key.
     pub idempotency_key: Option<String>,
     /// Non-encrypted metadata for filtering/display.
-    pub metadata: Option<serde_json::Value>,
+    pub metadata: Option<Json<RunMetadata>>,
 }
 
 /// Data for updating a workspace pipeline run.
@@ -87,7 +87,7 @@ pub struct UpdateWorkspacePipelineRun {
     /// Redacted output file produced by redact.
     pub output_file_id: Option<Option<Uuid>>,
     /// Non-encrypted metadata for filtering/display.
-    pub metadata: Option<serde_json::Value>,
+    pub metadata: Option<Json<RunMetadata>>,
     /// When a worker last claimed this run for detection (lease timestamp).
     pub claimed_at: Option<Option<Timestamp>>,
     /// When the run completed.
@@ -133,14 +133,6 @@ impl WorkspacePipelineRun {
     /// Returns whether the run has finished (completed, failed, or cancelled).
     pub fn is_finished(&self) -> bool {
         self.status.is_finished()
-    }
-
-    /// Returns the duration of the run in seconds, if available.
-    pub fn duration_seconds(&self) -> Option<f64> {
-        let completed = self.completed_at?;
-        let started_ts: jiff::Timestamp = self.started_at.into();
-        let completed_ts: jiff::Timestamp = completed.into();
-        Some(completed_ts.duration_since(started_ts).as_secs_f64())
     }
 
     /// Returns whether the run was started directly by a user.

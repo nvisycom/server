@@ -1,8 +1,6 @@
 //! Pipeline trigger type enumeration indicating how a pipeline run was initiated.
 
 use diesel_derive_enum::DbEnum;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
@@ -12,7 +10,7 @@ use strum::{Display, EnumIter, EnumString};
 /// a run is either started directly by a user or automatically by the system
 /// (for example, a file upload that the pipeline auto-redacts).
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::PipelineTriggerType"]
 pub enum PipelineTriggerType {

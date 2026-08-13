@@ -4,20 +4,20 @@
 //! These are pure serializable views of stored JSON — a workspace's
 //! `settings.retention` baseline ([`RetentionSettings`], one [`Retention`] per
 //! [`RetentionScope`]) and a pipeline's per-scope override ([`RetentionOverride`],
-//! stored under [`PIPELINE_RETENTION_KEY`] in its `metadata`). The worker that
-//! enforces them lives in the server crate.
+//! carried by `PipelineMetadata::retention`). The worker that enforces them lives
+//! in the server crate.
 
 use jiff::{Span, Timestamp};
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+use super::RetentionOverride;
 
 /// How long a class of data is retained.
 ///
 /// Wire shape is internally tagged on `mode`: `{ "mode": "forever" }`,
 /// `{ "mode": "zeroDays" }`, `{ "mode": "days", "days": 30 }`.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "camelCase")]
 pub enum Retention {
@@ -67,7 +67,7 @@ pub enum RetentionScope {
 /// Retention for every scope. Missing fields default to [`Retention::Forever`],
 /// so an empty settings blob keeps everything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct RetentionSettings {
@@ -107,60 +107,6 @@ impl RetentionSettings {
         pipeline
             .and_then(|over| over.get(scope))
             .unwrap_or_else(|| self.get(scope))
-    }
-}
-
-/// A pipeline's optional per-scope override of the workspace retention. A `None`
-/// field inherits the workspace value for that scope.
-///
-/// Only scopes a pipeline actually produces are overridable — original documents
-/// are ingested, not produced by a pipeline, so they have no per-pipeline
-/// override and always follow the workspace baseline.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct RetentionOverride {
-    /// Overrides redacted-document retention when set.
-    pub redacted_documents: Option<Retention>,
-    /// Overrides audit-blob retention when set.
-    pub audit_logs: Option<Retention>,
-}
-
-/// JSON key under a pipeline's `metadata` blob that holds its retention override.
-pub const PIPELINE_RETENTION_KEY: &str = "retention";
-
-impl RetentionOverride {
-    /// The override for `scope`, if any. Original documents have no per-pipeline
-    /// override.
-    #[must_use]
-    pub fn get(&self, scope: RetentionScope) -> Option<Retention> {
-        match scope {
-            RetentionScope::OriginalDocuments => None,
-            RetentionScope::RedactedDocuments => self.redacted_documents,
-            RetentionScope::AuditLogs => self.audit_logs,
-        }
-    }
-
-    /// Parses a pipeline's override from its `metadata` blob (under
-    /// [`PIPELINE_RETENTION_KEY`]), returning `None` when absent or malformed so
-    /// the workspace baseline applies.
-    #[must_use]
-    pub fn from_pipeline_metadata(metadata: &serde_json::Value) -> Option<Self> {
-        metadata
-            .get(PIPELINE_RETENTION_KEY)
-            .and_then(|value| serde_json::from_value(value.clone()).ok())
-    }
-
-    /// Builds a pipeline `metadata` object holding this override under
-    /// [`PIPELINE_RETENTION_KEY`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error only if serialization fails, which cannot happen for
-    /// this type.
-    pub fn to_pipeline_metadata(&self) -> serde_json::Result<serde_json::Value> {
-        Ok(serde_json::json!({ PIPELINE_RETENTION_KEY: serde_json::to_value(self)? }))
     }
 }
 

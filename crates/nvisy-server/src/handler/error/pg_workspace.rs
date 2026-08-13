@@ -83,11 +83,8 @@ impl From<WorkspaceInviteConstraints> for Error<'static> {
 impl From<WorkspaceActivitiesConstraints> for Error<'static> {
     fn from(c: WorkspaceActivitiesConstraints) -> Self {
         let error = match c {
-            WorkspaceActivitiesConstraints::DescriptionLengthMax => {
-                ErrorKind::BadRequest.with_message("Activity description is too long")
-            }
-            WorkspaceActivitiesConstraints::MetadataSize => {
-                ErrorKind::BadRequest.with_message("Activity metadata size is invalid")
+            WorkspaceActivitiesConstraints::ParamsSize => {
+                ErrorKind::BadRequest.with_message("Activity params size is invalid")
             }
         };
 

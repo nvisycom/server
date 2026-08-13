@@ -135,36 +135,9 @@ impl WorkspaceInvite {
         }
     }
 
-    /// Returns whether the invitation is expiring soon (within 24 hours).
-    pub fn is_expiring_soon(&self) -> bool {
-        if let Some(remaining) = self.time_until_expiry() {
-            remaining.total(jiff::Unit::Second).ok()
-                <= jiff::Span::new().days(1).total(jiff::Unit::Second).ok()
-        } else {
-            false
-        }
-    }
-
     /// Returns the age of the invitation since creation.
     pub fn age(&self) -> jiff::Span {
         jiff::Timestamp::now() - jiff::Timestamp::from(self.created_at)
-    }
-
-    /// Returns the response time if the invitation was responded to.
-    pub fn response_time(&self) -> Option<jiff::Span> {
-        self.responded_at.map(|responded_at| {
-            jiff::Timestamp::from(responded_at) - jiff::Timestamp::from(self.created_at)
-        })
-    }
-
-    /// Returns whether the invitation is for a specific email.
-    pub fn is_for_specific_email(&self) -> bool {
-        self.invitee_email.is_some()
-    }
-
-    /// Returns whether this is an open invitation (no specific email).
-    pub fn is_open_invitation(&self) -> bool {
-        self.invitee_email.is_none()
     }
 
     /// Returns whether the invitation grants owner privileges.
@@ -189,11 +162,6 @@ impl WorkspaceInvite {
         } else {
             self.invite_token.clone()
         }
-    }
-
-    /// Returns whether the invitation needs immediate attention.
-    pub fn needs_attention(&self) -> bool {
-        self.is_expiring_soon() || self.is_expired()
     }
 }
 

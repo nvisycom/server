@@ -1,8 +1,6 @@
 //! Pipeline run status enumeration indicating the execution state of a pipeline run.
 
 use diesel_derive_enum::DbEnum;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
@@ -15,7 +13,7 @@ use strum::{Display, EnumIter, EnumString};
 /// has begun) and `Analyzing` (a worker is actively analyzing). They settle into
 /// `Analyzed` (detection done, awaiting review), then `Completed` after redaction.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::PipelineRunStatus"]
 pub enum PipelineRunStatus {
