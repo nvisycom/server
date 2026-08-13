@@ -38,7 +38,7 @@ pub use crate::service::external_object_store::ExternalObjectStore;
 pub use crate::service::file_retention::FileRetentionWorker;
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::infra::Infra;
-pub use crate::service::notification::NotificationEmitter;
+pub use crate::service::notification::{NotificationEmitter, UnreadCountEvent};
 pub use crate::service::password::PasswordService;
 pub use crate::service::run_blob_store::RunBlobStore;
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
