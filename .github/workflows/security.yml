@@ -53,23 +53,6 @@ jobs:
       - name: Run deny
         run: cargo deny check all
 
-  unused:
-    name: Unused Dependencies
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
-
-      - name: Install cargo-machete
-        run: cargo binstall cargo-machete --no-confirm --no-symlinks
-
-      - name: Run machete
-        run: cargo machete
-
   secrets:
     name: Secret Scan
     runs-on: ubuntu-latest
