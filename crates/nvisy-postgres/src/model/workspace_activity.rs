@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::schema::workspace_activities;
 use crate::types::{
-    ActivityCategory, ActivityPayload, ActivityType, HasCreatedAt, HasSecurityContext, TypedJson,
+    ActivityCategory, ActivityPayload, ActivityType, HasCreatedAt, HasSecurityContext, Json,
 };
 
 /// Workspace activity log entry representing an action performed in a workspace.
@@ -32,7 +32,7 @@ pub struct WorkspaceActivity {
     /// Type of activity performed.
     pub activity_type: ActivityType,
     /// The self-describing tagged payload (its `activityType` + params).
-    pub params: TypedJson<ActivityPayload>,
+    pub params: Json<ActivityPayload>,
     /// IP address from which the activity originated.
     pub ip_address: Option<IpNet>,
     /// User agent string of the client that performed the activity.
@@ -56,7 +56,7 @@ pub struct NewWorkspaceActivity {
     /// Type of activity being logged.
     pub activity_type: ActivityType,
     /// The self-describing tagged payload (its `activityType` + params).
-    pub params: TypedJson<ActivityPayload>,
+    pub params: Json<ActivityPayload>,
     /// IP address of the client that initiated the activity.
     pub ip_address: Option<IpNet>,
     /// User agent string from the client request.

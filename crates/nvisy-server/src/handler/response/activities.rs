@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceActivity;
-use nvisy_postgres::types::{ActivityPayload, Handle, TypedBody};
+use nvisy_postgres::types::{ActivityPayload, Handle, JsonBody};
 use schemars::JsonSchema;
 use serde::Serialize;
 use uuid::Uuid;
@@ -11,7 +11,7 @@ use super::{AccountRef, Page};
 
 /// The rendered body of an activity: the typed payload when the stored params
 /// decode into their `activityType`, or a raw fallback when they do not.
-pub type ActivityBody = TypedBody<ActivityPayload>;
+pub type ActivityBody = JsonBody<ActivityPayload>;
 
 /// Response type for a workspace activity.
 ///
@@ -45,7 +45,7 @@ impl Activity {
             id: activity.id,
             workspace_slug,
             performed_by,
-            payload: activity.params.decode(),
+            payload: activity.params.typed(),
             created_at: activity.created_at.into(),
         }
     }

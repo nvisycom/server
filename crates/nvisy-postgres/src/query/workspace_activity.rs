@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceActivity, WorkspaceActivity};
 use crate::types::{
-    AccountRefRow, ActivityPayload, ActivityType, CursorPage, CursorPagination, OffsetPagination,
-    TypedJson, WithAccountRef,
+    AccountRefRow, ActivityPayload, ActivityType, CursorPage, CursorPagination, Json,
+    OffsetPagination, WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -23,7 +23,7 @@ pub struct LogEntityActivityParams {
     /// The type of activity being logged.
     pub activity_type: ActivityType,
     /// The self-describing tagged payload (its `activityType` + params).
-    pub params: TypedJson<ActivityPayload>,
+    pub params: Json<ActivityPayload>,
     /// Client IP address.
     pub ip_address: Option<IpNet>,
     /// Client user agent string.

@@ -1,7 +1,7 @@
 //! Notification payloads stored in `account_notifications.params`.
 //!
 //! A notification stores its `notify_type` (indexed column) plus a self-describing
-//! [`TypedJson`] body. [`NotificationPayload`] is that body — a `notifyType`-tagged
+//! [`Json`] body. [`NotificationPayload`] is that body — a `notifyType`-tagged
 //! enum, one variant per event, each carrying its own params struct. No rendered
 //! text is stored; the client localizes copy from `notifyType` and the params.
 
@@ -10,7 +10,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::TypedJson;
+use super::Json;
 use crate::types::NotificationEvent;
 
 /// Params of a `member:invited` notification.
@@ -189,11 +189,11 @@ impl NotificationPayload {
     }
 
     /// Splits the payload into its event (for the indexed `notify_type` column)
-    /// and the self-describing [`TypedJson`] body stored in `params` — the tag
+    /// and the self-describing [`Json`] body stored in `params` — the tag
     /// stays in the body, so a read decodes it back symmetrically.
-    pub fn into_stored(self) -> (NotificationEvent, TypedJson<Self>) {
+    pub fn into_stored(self) -> (NotificationEvent, Json<Self>) {
         let event = self.event();
-        let params = TypedJson::encode(&self);
+        let params = Json::encode(&self);
         (event, params)
     }
 }

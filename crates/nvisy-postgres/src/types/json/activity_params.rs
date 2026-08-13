@@ -1,7 +1,7 @@
 //! Activity payloads stored in `workspace_activities.params`.
 //!
 //! An activity stores its `activity_type` (indexed column) plus a self-describing
-//! [`TypedJson`](super::TypedJson) body. [`ActivityPayload`] is that body — an
+//! [`Json`](super::Json) body. [`ActivityPayload`] is that body — an
 //! `activityType`-tagged enum, one variant per event, each carrying its own
 //! params. No rendered text is stored; the client localizes copy from
 //! `activityType` and the params.

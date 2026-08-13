@@ -3,15 +3,14 @@
 //! This module provides models for managing webhooks connected to workspaces.
 //! Webhooks enable workspaces to send event notifications to external services.
 
-use std::collections::HashMap;
-
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_webhooks;
 use crate::types::{
-    HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, WebhookEvent, WebhookStatus,
+    HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, Json, WebhookEvent, WebhookHeaders,
+    WebhookStatus,
 };
 
 /// Workspace webhook model representing a webhook configuration for a workspace.
@@ -36,7 +35,7 @@ pub struct WorkspaceWebhook {
     /// Array of event types this webhook subscribes to.
     pub events: Vec<Option<WebhookEvent>>,
     /// Custom headers to include in webhook requests.
-    pub headers: serde_json::Value,
+    pub headers: Json<WebhookHeaders>,
     /// HMAC-SHA256 signing secret, encrypted under the workspace key.
     pub encrypted_secret: Vec<u8>,
     /// Current status of the webhook.
@@ -73,7 +72,7 @@ pub struct NewWorkspaceWebhook {
     /// Array of event types this webhook subscribes to.
     pub events: Vec<Option<WebhookEvent>>,
     /// Custom headers to include in webhook requests.
-    pub headers: Option<serde_json::Value>,
+    pub headers: Option<Json<WebhookHeaders>>,
     /// HMAC-SHA256 signing secret, encrypted under the workspace key.
     pub encrypted_secret: Vec<u8>,
     /// Initial status of the webhook.
@@ -96,7 +95,7 @@ pub struct UpdateWorkspaceWebhook {
     /// Updated event subscriptions.
     pub events: Option<Vec<Option<WebhookEvent>>>,
     /// Updated custom headers.
-    pub headers: Option<serde_json::Value>,
+    pub headers: Option<Json<WebhookHeaders>>,
     /// Updated status.
     pub status: Option<WebhookStatus>,
     /// Soft deletion timestamp.
@@ -119,29 +118,19 @@ impl WorkspaceWebhook {
         self.status.is_suspended()
     }
 
-    /// Returns whether the webhook has custom headers.
-    pub fn has_custom_headers(&self) -> bool {
-        !self.headers.as_object().is_none_or(|obj| obj.is_empty())
-    }
-
     /// Returns the list of subscribed events.
     pub fn subscribed_events(&self) -> Vec<WebhookEvent> {
         self.events.iter().filter_map(|e| *e).collect()
     }
 
-    /// Returns the custom headers as a `HashMap<String, String>`.
-    pub fn parsed_headers(&self) -> HashMap<String, String> {
-        serde_json::from_value(self.headers.clone()).unwrap_or_default()
+    /// Returns the custom headers, or an empty set for an absent/older blob.
+    pub fn parsed_headers(&self) -> WebhookHeaders {
+        self.headers.or_default()
     }
 
     /// Returns whether the webhook subscribes to a specific event type.
     pub fn subscribes_to(&self, event: WebhookEvent) -> bool {
         self.events.contains(&Some(event))
-    }
-
-    /// Returns whether the webhook has been triggered at least once.
-    pub fn has_been_triggered(&self) -> bool {
-        self.last_success_at.is_some() || self.last_failure_at.is_some()
     }
 }
 
@@ -166,27 +155,5 @@ impl HasDeletedAt for WorkspaceWebhook {
 impl HasOwnership for WorkspaceWebhook {
     fn created_by(&self) -> Uuid {
         self.created_by
-    }
-}
-
-impl NewWorkspaceWebhook {
-    /// Converts a `HashMap<String, String>` to `Option<serde_json::Value>`.
-    ///
-    /// Returns `None` if the map is empty.
-    pub fn serialize_headers(headers: HashMap<String, String>) -> Option<serde_json::Value> {
-        if headers.is_empty() {
-            None
-        } else {
-            Some(serde_json::to_value(&headers).unwrap_or_default())
-        }
-    }
-
-    /// Converts an `Option<HashMap<String, String>>` to `Option<serde_json::Value>`.
-    ///
-    /// Returns `None` if the input is `None` or the map is empty.
-    pub fn serialize_headers_opt(
-        headers: Option<HashMap<String, String>>,
-    ) -> Option<serde_json::Value> {
-        headers.and_then(Self::serialize_headers)
     }
 }

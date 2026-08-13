@@ -12,7 +12,7 @@ use nvisy_postgres::model::WorkspacePipeline;
 use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineRepository,
 };
-use nvisy_postgres::types::{FileKind, Handle, RetentionScope, WithAccountRef, WorkspaceSettings};
+use nvisy_postgres::types::{FileKind, Handle, RetentionScope, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, PgError, PgResult};
 use uuid::Uuid;
 
@@ -265,7 +265,7 @@ async fn update_pipeline(
     // the files this pipeline already produced, so the change applies to stored
     // data too. Resolved against the workspace baseline (override wins per scope).
     let backfill = retention_override.map(|over| {
-        let workspace_retention = WorkspaceSettings::from_value(&workspace.settings).retention;
+        let workspace_retention = workspace.settings.or_default().retention;
         let now = jiff::Timestamp::now();
         [
             (

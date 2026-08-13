@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::AccountNotification;
-use nvisy_postgres::types::{NotificationPayload, TypedBody};
+use nvisy_postgres::types::{JsonBody, NotificationPayload};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -11,7 +11,7 @@ use super::Page;
 
 /// The rendered body of a notification: the typed payload when the stored params
 /// decode into their `notifyType`, or a raw fallback when they do not.
-pub type NotificationBody = TypedBody<NotificationPayload>;
+pub type NotificationBody = JsonBody<NotificationPayload>;
 
 /// Response type for an account notification.
 ///
@@ -58,13 +58,13 @@ impl Notification {
     /// payload from `notify_type` and the stored params.
     ///
     /// Total by design: a row whose stored params do not match its `notify_type`
-    /// is surfaced as a raw `TypedBody` fallback carrying the params, never
+    /// is surfaced as a raw `JsonBody` fallback carrying the params, never
     /// dropped. Dropping it would let the list silently disagree with the unread
     /// count; the row still appears.
     pub fn from_model(notification: AccountNotification) -> Self {
         Self {
             id: notification.id,
-            payload: notification.params.decode(),
+            payload: notification.params.typed(),
             read_at: notification.read_at.map(Into::into),
             created_at: notification.created_at.into(),
             expires_at: notification.expires_at.map(Into::into),

@@ -141,11 +141,6 @@ impl Account {
         self.avatar_url.is_some()
     }
 
-    /// Returns whether the account requires email verification.
-    pub fn needs_verification(&self) -> bool {
-        !self.is_verified
-    }
-
     /// Returns whether the account is eligible for suspension.
     ///
     /// Only active, non-admin accounts can be suspended. Admin accounts have

@@ -432,7 +432,12 @@ impl WebhookDeliveryWorker {
             .with_timeout(DEFAULT_DELIVERY_TIMEOUT)
             .with_secret(secret);
 
-        if let Some(headers) = parse_headers(&webhook.headers) {
+        let headers: HashMap<String, String> = webhook
+            .parsed_headers()
+            .iter()
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .collect();
+        if !headers.is_empty() {
             request = request.with_headers(headers);
         }
 
@@ -459,16 +464,4 @@ impl WebhookDeliveryWorker {
 /// `429 Too Many Requests` — which ask the sender to try again later.
 fn is_permanent_failure(status_code: u16) -> bool {
     (400..500).contains(&status_code) && !matches!(status_code, 408 | 425 | 429)
-}
-
-/// Extracts a webhook's custom headers from its stored JSON, keeping only
-/// string values. Returns `None` when there are no usable headers.
-fn parse_headers(headers: &serde_json::Value) -> Option<HashMap<String, String>> {
-    let map: HashMap<String, String> = headers
-        .as_object()?
-        .iter()
-        .filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_string())))
-        .collect();
-
-    (!map.is_empty()).then_some(map)
 }

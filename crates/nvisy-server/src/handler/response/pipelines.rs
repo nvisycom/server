@@ -50,7 +50,7 @@ impl Pipeline {
         created_by: AccountRef,
         policy_slugs: Vec<Handle>,
     ) -> serde_json::Result<Self> {
-        let retention = RetentionOverride::from_pipeline_metadata(&pipeline.metadata);
+        let retention = pipeline.metadata.or_default().retention;
         let definition = PipelineDefinition::from_parts(pipeline.definition, policy_slugs)?;
         Ok(Self {
             slug: pipeline.slug,

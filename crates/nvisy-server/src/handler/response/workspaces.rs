@@ -38,7 +38,7 @@ pub struct Workspace {
 impl Workspace {
     /// Creates a new instance of [`Workspace`] as an owner.
     pub fn from_model(workspace: model::Workspace, created_by: AccountRef) -> Self {
-        let settings = WorkspaceSettings::from_value(&workspace.settings);
+        let settings = workspace.settings.or_default();
         Self {
             slug: workspace.slug,
             display_name: workspace.display_name,
@@ -58,7 +58,7 @@ impl Workspace {
         member: model::WorkspaceMember,
         created_by: AccountRef,
     ) -> Self {
-        let settings = WorkspaceSettings::from_value(&workspace.settings);
+        let settings = workspace.settings.or_default();
         Self {
             slug: workspace.slug,
             display_name: workspace.display_name,

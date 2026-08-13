@@ -269,7 +269,7 @@ impl DetectionWorker {
             })?;
 
         // Parse the workspace settings once; both OCR mode and retention read it.
-        let settings = WorkspaceSettings::from_value(&workspace.settings);
+        let settings = workspace.settings.or_default();
         let params =
             self.engine
                 .analyzer_params(&definition, job.scope.clone(), ocr_mode_of(&settings));

@@ -5,7 +5,10 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspaces;
-use crate::types::{Handle, HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt};
+use crate::types::{
+    Handle, HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, Json, WorkspaceMetadata,
+    WorkspaceSettings,
+};
 
 /// Main workspace model representing a workspace workspace.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -23,9 +26,9 @@ pub struct Workspace {
     /// URL to workspace avatar/logo image.
     pub avatar_url: Option<String>,
     /// Additional workspace metadata.
-    pub metadata: serde_json::Value,
+    pub metadata: Json<WorkspaceMetadata>,
     /// Workspace-specific settings.
-    pub settings: serde_json::Value,
+    pub settings: Json<WorkspaceSettings>,
     /// Account that created the workspace.
     pub created_by: Uuid,
     /// Timestamp when the workspace was created.
@@ -50,9 +53,9 @@ pub struct NewWorkspace {
     /// Optional avatar URL.
     pub avatar_url: Option<String>,
     /// Metadata.
-    pub metadata: Option<serde_json::Value>,
+    pub metadata: Option<Json<WorkspaceMetadata>>,
     /// Settings.
-    pub settings: Option<serde_json::Value>,
+    pub settings: Option<Json<WorkspaceSettings>>,
     /// Created by.
     pub created_by: Uuid,
 }
@@ -69,9 +72,9 @@ pub struct UpdateWorkspace {
     /// Avatar URL.
     pub avatar_url: Option<Option<String>>,
     /// Metadata.
-    pub metadata: Option<serde_json::Value>,
+    pub metadata: Option<Json<WorkspaceMetadata>>,
     /// Settings.
-    pub settings: Option<serde_json::Value>,
+    pub settings: Option<Json<WorkspaceSettings>>,
 }
 
 impl Workspace {
@@ -96,12 +99,12 @@ impl Workspace {
 
     /// Returns whether the workspace has custom metadata.
     pub fn has_metadata(&self) -> bool {
-        !self.metadata.as_object().is_none_or(|obj| obj.is_empty())
+        !self.metadata.is_empty()
     }
 
     /// Returns whether the workspace has custom settings.
     pub fn has_settings(&self) -> bool {
-        !self.settings.as_object().is_none_or(|obj| obj.is_empty())
+        !self.settings.is_empty()
     }
 
     /// Returns whether the workspace allows file uploads.

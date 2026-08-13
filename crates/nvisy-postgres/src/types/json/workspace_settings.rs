@@ -62,41 +62,28 @@ impl Default for WorkspaceSettings {
     }
 }
 
-impl WorkspaceSettings {
-    /// Parses typed settings from the stored JSONB, treating an absent or
-    /// malformed blob as the default so a bad blob never fails a read.
-    #[must_use]
-    pub fn from_value(value: &serde_json::Value) -> Self {
-        serde_json::from_value(value.clone()).unwrap_or_default()
-    }
-
-    /// Serializes to a JSON value for the `settings` column.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error only if serialization fails, which cannot happen for
-    /// this type.
-    pub fn to_value(&self) -> serde_json::Result<serde_json::Value> {
-        serde_json::to_value(self)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::types::Json;
+
+    /// Wraps a raw JSON value as a settings column for `or_default` testing.
+    fn column(value: serde_json::Value) -> Json<WorkspaceSettings> {
+        Json::from_raw(value)
+    }
 
     #[test]
     fn empty_settings_blob_is_default() {
-        let settings = WorkspaceSettings::from_value(&json!({}));
+        let settings = column(json!({})).or_default();
         assert!(settings.require_approval);
         assert!(settings.retention.is_noop());
     }
 
     #[test]
     fn malformed_settings_blob_falls_back_to_default() {
-        let settings = WorkspaceSettings::from_value(&json!({ "retention": "nonsense" }));
+        let settings = column(json!({ "retention": "nonsense" })).or_default();
         assert!(settings.require_approval);
         assert!(settings.retention.is_noop());
     }
@@ -107,21 +94,16 @@ mod tests {
             require_approval: false,
             ..Default::default()
         };
-        let value = settings.to_value().expect("serialize");
-        assert_eq!(WorkspaceSettings::from_value(&value), settings);
+        assert_eq!(Json::encode(&settings).or_default(), settings);
     }
 
     #[test]
     fn ocr_policy_defaults_to_auto_and_round_trips() {
-        assert_eq!(
-            WorkspaceSettings::from_value(&json!({})).ocr,
-            OcrPolicy::Auto
-        );
+        assert_eq!(column(json!({})).or_default().ocr, OcrPolicy::Auto);
         let settings = WorkspaceSettings {
             ocr: OcrPolicy::Force,
             ..Default::default()
         };
-        let value = settings.to_value().expect("serialize");
-        assert_eq!(WorkspaceSettings::from_value(&value), settings);
+        assert_eq!(Json::encode(&settings).or_default(), settings);
     }
 }

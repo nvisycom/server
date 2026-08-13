@@ -1,6 +1,6 @@
 //! Workspace webhook response types.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
@@ -28,7 +28,7 @@ pub struct Webhook {
     /// List of event types this webhook receives.
     pub events: Vec<WebhookEvent>,
     /// Custom headers included in webhook requests.
-    pub headers: HashMap<String, String>,
+    pub headers: BTreeMap<String, String>,
     /// Current status of the webhook.
     pub status: WebhookStatus,
     /// Timestamp of the most recent successful delivery.
@@ -54,7 +54,7 @@ impl Webhook {
         created_by: AccountRef,
     ) -> Self {
         let events = webhook.subscribed_events();
-        let headers = webhook.parsed_headers();
+        let headers = webhook.parsed_headers().into_map();
 
         Self {
             id: WebhookId::from_uuid(webhook.id),

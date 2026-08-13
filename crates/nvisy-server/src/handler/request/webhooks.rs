@@ -8,11 +8,13 @@ use std::collections::HashMap;
 use nvisy_postgres::model::{
     NewWorkspaceWebhook, UpdateWorkspaceWebhook as UpdateWorkspaceWebhookModel,
 };
-use nvisy_postgres::types::{WebhookEvent, WebhookStatus};
+use nvisy_postgres::types::{Json, WebhookEvent, WebhookHeaders, WebhookStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
+
+use crate::handler::{ErrorKind, Result};
 
 /// Request payload for creating a new workspace webhook.
 #[must_use]
@@ -49,9 +51,9 @@ impl CreateWebhook {
         workspace_id: Uuid,
         account_id: Uuid,
         encrypted_secret: Vec<u8>,
-    ) -> NewWorkspaceWebhook {
+    ) -> Result<NewWorkspaceWebhook> {
         let events = self.events.into_iter().map(Some).collect();
-        let headers = NewWorkspaceWebhook::serialize_headers_opt(self.headers);
+        let headers = validate_headers(self.headers)?;
         // Suspended is a system-only state; coerce a user-supplied Suspended to
         // Disabled (the user off-switch).
         let status = self.status.map(|s| match s {
@@ -59,7 +61,7 @@ impl CreateWebhook {
             other => other,
         });
 
-        NewWorkspaceWebhook {
+        Ok(NewWorkspaceWebhook {
             workspace_id,
             display_name: self.display_name,
             description: self.description,
@@ -69,8 +71,24 @@ impl CreateWebhook {
             encrypted_secret,
             status,
             created_by: account_id,
-        }
+        })
     }
+}
+
+/// Validates optional raw headers into a stored column, rejecting malformed names
+/// or values with a `400`.
+fn validate_headers(
+    headers: Option<HashMap<String, String>>,
+) -> Result<Option<Json<WebhookHeaders>>> {
+    let Some(headers) = headers else {
+        return Ok(None);
+    };
+    let headers = WebhookHeaders::try_new(headers).map_err(|err| {
+        ErrorKind::BadRequest
+            .with_message("Invalid webhook header")
+            .with_context(err.to_string())
+    })?;
+    Ok(headers.into_column())
 }
 
 /// Request payload for updating an existing workspace webhook.
@@ -102,9 +120,9 @@ impl UpdateWebhook {
     /// While `current_status` is `Suspended` (system-set), the status field is
     /// ignored. A user-supplied `Suspended` is coerced to `Disabled`.
     #[inline]
-    pub fn into_model(self, current_status: WebhookStatus) -> UpdateWorkspaceWebhookModel {
+    pub fn into_model(self, current_status: WebhookStatus) -> Result<UpdateWorkspaceWebhookModel> {
         let events = self.events.map(|e| e.into_iter().map(Some).collect());
-        let headers = NewWorkspaceWebhook::serialize_headers_opt(self.headers);
+        let headers = validate_headers(self.headers)?;
         // A system-suspended webhook ignores user status changes; coerce a
         // user-supplied Suspended to Disabled.
         let status = if current_status.is_suspended() {
@@ -116,7 +134,7 @@ impl UpdateWebhook {
             })
         };
 
-        UpdateWorkspaceWebhookModel {
+        Ok(UpdateWorkspaceWebhookModel {
             display_name: self.display_name,
             description: self.description,
             url: self.url,
@@ -124,7 +142,7 @@ impl UpdateWebhook {
             headers,
             status,
             ..Default::default()
-        }
+        })
     }
 }
 

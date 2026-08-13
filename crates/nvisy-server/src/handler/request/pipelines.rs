@@ -6,7 +6,7 @@
 
 use nvisy_engine::plan::ScopeParams;
 use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
-use nvisy_postgres::types::{Handle, PipelineStatus, RetentionOverride};
+use nvisy_postgres::types::{Handle, Json, PipelineMetadata, PipelineStatus, RetentionOverride};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -129,10 +129,12 @@ impl CreatePipeline {
         account_id: Uuid,
     ) -> serde_json::Result<(NewWorkspacePipeline, PipelineReferences)> {
         let (definition, references) = split_definition(self.definition)?;
-        let metadata = self
-            .retention
-            .map(|retention| retention.to_pipeline_metadata())
-            .transpose()?;
+        let metadata = self.retention.map(|retention| {
+            Json::encode(&PipelineMetadata {
+                retention: Some(retention),
+                ..Default::default()
+            })
+        });
         let model = NewWorkspacePipeline {
             workspace_id,
             account_id,
@@ -209,10 +211,12 @@ impl UpdatePipeline {
             }
             None => (None, None),
         };
-        let metadata = self
-            .retention
-            .map(|retention| retention.to_pipeline_metadata())
-            .transpose()?;
+        let metadata = self.retention.map(|retention| {
+            Json::encode(&PipelineMetadata {
+                retention: Some(retention),
+                ..Default::default()
+            })
+        });
         let model = UpdatePipelineModel {
             display_name: self.display_name,
             description: self.description.map(Some),

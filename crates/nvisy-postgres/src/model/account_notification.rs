@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use crate::schema::account_notifications;
 use crate::types::{
-    DEFAULT_RETENTION_DAYS, HasCreatedAt, HasExpiresAt, NotificationEvent, NotificationPayload,
-    TypedJson,
+    DEFAULT_RETENTION_DAYS, HasCreatedAt, HasExpiresAt, Json, NotificationEvent,
+    NotificationPayload,
 };
 
 /// Account notification model representing a notification sent to a user.
@@ -24,7 +24,7 @@ pub struct AccountNotification {
     /// When the notification was read; `None` means unread.
     pub read_at: Option<Timestamp>,
     /// The self-describing tagged payload (its `notifyType` + params).
-    pub params: TypedJson<NotificationPayload>,
+    pub params: Json<NotificationPayload>,
     /// Notification creation timestamp.
     pub created_at: Timestamp,
     /// Optional expiration timestamp.
@@ -41,7 +41,7 @@ pub struct NewAccountNotification {
     /// Notification type; the client-side localization key.
     pub notify_type: NotificationEvent,
     /// The self-describing tagged payload (its `notifyType` + params).
-    pub params: TypedJson<NotificationPayload>,
+    pub params: Json<NotificationPayload>,
     /// Expiration timestamp.
     pub expires_at: Option<Timestamp>,
 }

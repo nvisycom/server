@@ -20,9 +20,7 @@ use nvisy_postgres::query::{
     PipelineReferenceRepository, RunFiles, WorkspaceFileRepository, WorkspacePipelineRepository,
     WorkspacePipelineRunRepository,
 };
-use nvisy_postgres::types::{
-    NotificationPayload, PipelineRunCompletedParams, PipelineRunStatus, WorkspaceSettings,
-};
+use nvisy_postgres::types::{NotificationPayload, PipelineRunCompletedParams, PipelineRunStatus};
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -620,7 +618,7 @@ async fn redact_pipeline_run(
     let redacted = engine.anonymize(document, &policies, &mut analyzed).await?;
 
     // Store the redacted bytes as a new workspace file and link it to the run.
-    let workspace_settings = WorkspaceSettings::from_value(&workspace.settings).retention;
+    let workspace_settings = workspace.settings.or_default().retention;
     let output_file = blob
         .store_redacted_file(
             &mut conn,

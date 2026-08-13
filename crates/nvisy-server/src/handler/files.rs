@@ -18,7 +18,7 @@ use nvisy_nats::NatsClient;
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
 use nvisy_postgres::query::WorkspaceFileRepository;
-use nvisy_postgres::types::{FileKind, WithAccountRef, WorkspaceSettings};
+use nvisy_postgres::types::{FileKind, WithAccountRef};
 use nvisy_postgres::{PgClient, PgConn};
 use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
@@ -219,7 +219,9 @@ async fn upload_file(
 
     // Precompute the retention expiry for uploaded originals from workspace
     // settings, so every file in this batch carries the same expiry.
-    let expires_at = WorkspaceSettings::from_value(&workspace.settings)
+    let expires_at = workspace
+        .settings
+        .or_default()
         .retention
         .original_documents
         .expires_at(jiff::Timestamp::now());

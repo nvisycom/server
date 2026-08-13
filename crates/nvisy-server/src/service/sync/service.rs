@@ -20,7 +20,7 @@ use nvisy_postgres::query::{
 };
 use nvisy_postgres::types::{
     ConnectionSyncCompletedParams, ConnectionSyncFailedParams, FileKind, NotificationPayload,
-    SyncDeletionPolicy, WorkspaceSettings,
+    SyncDeletionPolicy,
 };
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -141,7 +141,9 @@ impl ConnectionSyncService {
             .find_workspace_by_id(connection.workspace_id)
             .await?
             .and_then(|workspace| {
-                WorkspaceSettings::from_value(&workspace.settings)
+                workspace
+                    .settings
+                    .or_default()
                     .retention
                     .original_documents
                     .expires_at(jiff::Timestamp::now())
