@@ -15,8 +15,8 @@ use uuid::Uuid;
 
 use super::request::{AccountPathParams, UpdateAccount};
 use super::response::{Account, ErrorResponse, PublicAccount};
-use crate::extract::{AuthState, Json, Multipart, Path, ValidateJson};
-use crate::handler::utility::{build_password_user_inputs, read_image_field};
+use crate::extract::{AuthState, Avatar, Json, Path, ValidateJson};
+use crate::handler::utility::build_password_user_inputs;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, PasswordService, ServiceState};
 
@@ -232,7 +232,7 @@ async fn upload_account_avatar(
     State(avatar): State<AvatarService>,
     AuthState(auth_claims): AuthState,
     Path(path_params): Path<AccountPathParams>,
-    Multipart(multipart): Multipart,
+    Avatar(bytes): Avatar,
 ) -> Result<(StatusCode, Json<Account>)> {
     tracing::debug!(target: TRACING_TARGET, "Uploading account avatar");
 
@@ -240,7 +240,6 @@ async fn upload_account_avatar(
     let account = find_account(&mut conn, auth_claims.account_id).await?;
     authorize_self(&account, &path_params.username)?;
 
-    let bytes = read_image_field(multipart).await?;
     let updated = avatar.set_account_avatar(account.id, bytes).await?;
 
     tracing::info!(target: TRACING_TARGET, "Account avatar set");

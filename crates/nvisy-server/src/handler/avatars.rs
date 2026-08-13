@@ -11,14 +11,12 @@ use aide::axum::ApiRouter;
 use aide::axum::routing::get_with;
 use aide::transform::TransformOperation;
 use axum::extract::State;
-use axum::response::Response;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::extract::{Json, Path};
+use crate::extract::{Avatar, Json, Path};
 use crate::handler::response::ErrorResponse;
-use crate::handler::utility::avatar_response;
 use crate::handler::{Error, Result};
 use crate::service::{AvatarService, ServiceState};
 
@@ -45,7 +43,7 @@ struct AvatarPathParams {
 async fn get_account_avatar(
     State(avatar): State<AvatarService>,
     Path(params): Path<AvatarPathParams>,
-) -> Result<Response> {
+) -> Result<Avatar> {
     tracing::debug!(target: TRACING_TARGET, "Serving account avatar");
 
     let bytes = avatar
@@ -53,7 +51,7 @@ async fn get_account_avatar(
         .await?
         .ok_or_else(|| Error::not_found("avatar"))?;
 
-    Ok(avatar_response(bytes))
+    Ok(Avatar(bytes))
 }
 
 /// Serves a workspace's avatar image. Public; 404 when the version is unknown.
@@ -61,7 +59,7 @@ async fn get_account_avatar(
 async fn get_workspace_avatar(
     State(avatar): State<AvatarService>,
     Path(params): Path<AvatarPathParams>,
-) -> Result<Response> {
+) -> Result<Avatar> {
     tracing::debug!(target: TRACING_TARGET, "Serving workspace avatar");
 
     let bytes = avatar
@@ -69,13 +67,12 @@ async fn get_workspace_avatar(
         .await?
         .ok_or_else(|| Error::not_found("avatar"))?;
 
-    Ok(avatar_response(bytes))
+    Ok(Avatar(bytes))
 }
 
 fn get_avatar_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get avatar")
         .description("Returns the owner's avatar image (WebP), publicly. 404 when unset.")
-        .response::<200, ()>()
         .response::<404, Json<ErrorResponse>>()
 }
 

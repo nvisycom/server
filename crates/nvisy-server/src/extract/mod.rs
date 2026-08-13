@@ -6,6 +6,7 @@
 //! standard Axum counterparts while providing additional features.
 
 mod auth;
+mod avatar;
 mod connection_info;
 mod idempotency_key;
 mod pg_connection;
@@ -17,6 +18,7 @@ mod workspace_context;
 pub use crate::extract::auth::{
     AuthClaims, AuthHeader, AuthProvider, AuthResult, AuthState, Permission,
 };
+pub use crate::extract::avatar::Avatar;
 pub use crate::extract::connection_info::{AppConnectInfo, ClientIp};
 pub use crate::extract::idempotency_key::IdempotencyKey;
 pub use crate::extract::pg_connection::PgPool;
