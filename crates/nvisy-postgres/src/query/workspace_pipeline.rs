@@ -8,6 +8,7 @@ use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
+use crate::query::search::ilike_contains;
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, OffsetPagination, PipelineStatus, WithAccountRef,
 };
@@ -99,7 +100,8 @@ pub trait WorkspacePipelineRepository {
         status: PipelineStatus,
     ) -> impl Future<Output = PgResult<i64>> + Send;
 
-    /// Searches pipelines by name using trigram similarity.
+    /// Searches pipelines by name: a case-insensitive substring match or a
+    /// trigram-similarity match.
     fn search_pipelines_by_name(
         &mut self,
         workspace_id: Uuid,
@@ -234,9 +236,14 @@ impl WorkspacePipelineRepository for PgConnection {
             base_query = base_query.filter(dsl::status.eq(status));
         }
 
-        // Apply search filter
+        // Hybrid name search: ILIKE substring (works for short queries) OR
+        // trigram similarity (typo tolerance); both served by the trgm index.
         if let Some(term) = search_term {
-            base_query = base_query.filter(dsl::display_name.trgm_similar_to(term));
+            base_query = base_query.filter(
+                dsl::display_name
+                    .ilike(ilike_contains(term))
+                    .or(dsl::display_name.trgm_similar_to(term)),
+            );
         }
 
         let total = if pagination.include_count {
@@ -262,8 +269,13 @@ impl WorkspacePipelineRepository for PgConnection {
             query = query.filter(dsl::status.eq(status));
         }
 
+        // Hybrid name search: ILIKE substring OR trigram similarity (see above).
         if let Some(term) = search_term {
-            query = query.filter(dsl::display_name.trgm_similar_to(term));
+            query = query.filter(
+                dsl::display_name
+                    .ilike(ilike_contains(term))
+                    .or(dsl::display_name.trgm_similar_to(term)),
+            );
         }
 
         let limit = pagination.fetch_limit();
@@ -417,7 +429,11 @@ impl WorkspacePipelineRepository for PgConnection {
 
         let pipelines = workspace_pipelines::table
             .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::display_name.trgm_similar_to(search_term))
+            .filter(
+                dsl::display_name
+                    .ilike(ilike_contains(search_term))
+                    .or(dsl::display_name.trgm_similar_to(search_term)),
+            )
             .filter(dsl::deleted_at.is_null())
             .order(dsl::display_name.asc())
             .limit(limit)

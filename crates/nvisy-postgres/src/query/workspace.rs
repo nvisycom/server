@@ -9,6 +9,7 @@ use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspace, UpdateWorkspace, Workspace};
+use crate::query::search::ilike_contains;
 use crate::types::{AccountRefRow, OffsetPagination, WithAccountRef};
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -183,7 +184,11 @@ impl WorkspaceRepository for PgConnection {
 
         let workspace_list = workspaces
             .filter(deleted_at.is_null())
-            .filter(display_name.trgm_similar_to(search_query))
+            .filter(
+                display_name
+                    .ilike(ilike_contains(search_query))
+                    .or(display_name.trgm_similar_to(search_query)),
+            )
             .select(Workspace::as_select())
             .order(updated_at.desc())
             .limit(pagination.limit)

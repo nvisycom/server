@@ -17,6 +17,7 @@ mod account;
 mod account_api_token;
 mod account_notification;
 mod pipeline_reference;
+mod search;
 mod workspace;
 mod workspace_activity;
 mod workspace_connection;
