@@ -155,3 +155,24 @@ jobs:
         run: cargo doc --no-deps --all-features --workspace
         env:
           RUSTDOCFLAGS: "-D warnings"
+
+  machete:
+    name: Machete
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install cargo-machete
+        run: cargo binstall cargo-machete --no-confirm --no-symlinks
+
+      - name: Run machete
+        run: cargo machete

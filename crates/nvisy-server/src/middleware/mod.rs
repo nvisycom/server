@@ -48,6 +48,7 @@
 mod authentication;
 mod authorization;
 mod constants;
+mod counting_body;
 mod observability;
 mod recovery;
 mod route_category;

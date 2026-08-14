@@ -89,6 +89,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 toml = { workspace = true, features = ["parse"] }
 bytes = { workspace = true, features = [] }
+http-body = { workspace = true, features = [] }
 validator = { workspace = true, features = [] }
 
 # Text processing
