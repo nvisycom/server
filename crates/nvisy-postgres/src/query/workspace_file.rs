@@ -9,6 +9,7 @@ use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceFile, NewWorkspaceFileImport, UpdateWorkspaceFile, WorkspaceFile};
+use crate::query::search::ilike_contains;
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, FileFilter, FileKind, FileSortBy, FileSortField,
     OffsetPagination, PipelineRunStatus, SortOrder, WithAccountRef,
@@ -604,6 +605,16 @@ impl WorkspaceFileRepository for PgConnection {
             .filter(dsl::file_kind.eq_any(FileKind::DOCUMENTS))
             .into_boxed();
 
+        // Hybrid name search: ILIKE substring (works for short queries) OR
+        // trigram similarity (typo tolerance); both served by the trgm index.
+        if let Some(term) = filter.search_term() {
+            query = query.filter(
+                dsl::display_name
+                    .ilike(ilike_contains(term))
+                    .or(dsl::display_name.trgm_similar_to(term)),
+            );
+        }
+
         // Apply the extension constraint. A present-but-empty set matches
         // nothing (an active facet with no members), so apply whenever `Some`.
         if let Some(extensions) = filter.extensions() {
@@ -651,9 +662,14 @@ impl WorkspaceFileRepository for PgConnection {
             .filter(dsl::file_kind.eq_any(FileKind::DOCUMENTS))
             .into_boxed();
 
-        // Apply trigram search filter (pg_trgm)
+        // Hybrid name search: ILIKE substring (works for short queries) OR
+        // trigram similarity (typo tolerance); both served by the trgm index.
         if let Some(ref term) = search_term {
-            base_query = base_query.filter(dsl::display_name.trgm_similar_to(term));
+            base_query = base_query.filter(
+                dsl::display_name
+                    .ilike(ilike_contains(term))
+                    .or(dsl::display_name.trgm_similar_to(term)),
+            );
         }
 
         // Apply the extension constraint. A present-but-empty set matches
@@ -685,9 +701,13 @@ impl WorkspaceFileRepository for PgConnection {
             .filter(dsl::file_kind.eq_any(FileKind::DOCUMENTS))
             .into_boxed();
 
-        // Apply trigram search filter (pg_trgm)
+        // Hybrid name search: ILIKE substring OR trigram similarity (see above).
         if let Some(ref term) = search_term {
-            query = query.filter(dsl::display_name.trgm_similar_to(term));
+            query = query.filter(
+                dsl::display_name
+                    .ilike(ilike_contains(term))
+                    .or(dsl::display_name.trgm_similar_to(term)),
+            );
         }
 
         // Apply the extension constraint. A present-but-empty set matches
