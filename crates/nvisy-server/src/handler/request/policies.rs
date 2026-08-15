@@ -1,10 +1,12 @@
 //! Policy request types.
 
-use elide_pipeline::policy::PolicyDefinition;
+use elide_pipeline::policy::redaction::ModalityRedactions;
+use elide_pipeline::policy::{LabelGroup, Labels, PolicyDefinition, PolicyRule, TemplateOrigin};
 use elide_pipeline::template::PolicyTemplate;
 use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use validator::Validate;
 
 /// Path parameters for policy operations.
@@ -21,10 +23,60 @@ pub struct PolicyPathParams {
     pub policy_slug: String,
 }
 
+/// A client-authored policy body: the parts of a policy definition a caller may
+/// set, without the fields the server owns.
+///
+/// The engine's `PolicyDefinition` also carries an `id` and a `template` origin.
+/// Both are server-owned — the `id` is minted at creation and the `template`
+/// records which built-in a policy was seeded from (provenance). Neither is
+/// representable here, so a client cannot mint ids or forge provenance; the
+/// server stamps them in [`into_definition`](PolicyDraft::into_definition).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PolicyDraft {
+    /// Human-readable name. Display-only.
+    pub name: String,
+    /// Optional description for reviewers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Vocabulary the policy operates over: builtins picked by name plus
+    /// caller-authored custom label schemas.
+    #[serde(default, skip_serializing_if = "Labels::is_empty")]
+    pub labels: Labels,
+    /// Named clusters of labels this policy's rules may reference by name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<LabelGroup>,
+    /// Ordered rules. First match wins within this policy.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<PolicyRule>,
+    /// Per-policy catch-all, fired when no rule matched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<ModalityRedactions>,
+}
+
+impl PolicyDraft {
+    /// Builds a full engine [`PolicyDefinition`] from this draft, stamping the
+    /// server-owned fields: a fresh `id`, and the given `template` origin
+    /// (`None` for a hand-authored body, the built-in's origin when seeded from
+    /// a template).
+    pub fn into_definition(self, template: Option<TemplateOrigin>) -> PolicyDefinition {
+        PolicyDefinition {
+            id: Uuid::now_v7(),
+            name: self.name.into(),
+            description: self.description.map(Into::into),
+            template,
+            labels: self.labels,
+            groups: self.groups,
+            rules: self.rules,
+            fallback: self.fallback,
+        }
+    }
+}
+
 /// Where a new policy's body comes from: exactly one source, enforced by the
 /// type so neither-nor-both is unrepresentable.
 ///
-/// Tagged by `source`: `{ "source": "template", "template": "hipaa_safe_harbor" }`
+/// Tagged by `source`: `{ "source": "template", "template": { ... } }`
 /// or `{ "source": "inline", "definition": { ... } }`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "source", rename_all = "camelCase")]
@@ -32,28 +84,36 @@ pub enum PolicyBody {
     /// Seed the body from a built-in policy template.
     ///
     /// The template's body is copied into a normal, independently-editable
-    /// policy at creation time.
+    /// policy at creation time, tagged with the template's origin.
     Template {
         /// The built-in policy template to seed from.
         template: PolicyTemplate,
     },
     /// An inline structured policy body consumed by the engine.
     Inline {
-        /// The structured policy body.
+        /// The client-authored policy body.
         ///
         /// Boxed to keep the enum small: an inline body is much larger than a
         /// template id, and most requests use a template.
-        definition: Box<PolicyDefinition>,
+        definition: Box<PolicyDraft>,
     },
 }
 
 impl PolicyBody {
-    /// Resolves the body source into a concrete policy definition: the inline
-    /// body as-is, or the template's body materialized from the runtime.
+    /// Resolves the body source into a concrete policy definition with a fresh
+    /// `id`, so two policies seeded from the same template stay independent.
+    ///
+    /// An inline body is hand-authored, so it carries no template origin; a
+    /// template body keeps the template's own origin (stamped by `build`).
     pub fn into_definition(self) -> PolicyDefinition {
         match self {
-            PolicyBody::Inline { definition } => *definition,
-            PolicyBody::Template { template } => template.build().policy,
+            PolicyBody::Inline { definition } => definition.into_definition(None),
+            PolicyBody::Template { template } => PolicyDefinition {
+                // `build()` bakes a stable constant id; re-mint so each created
+                // policy is distinct.
+                id: Uuid::now_v7(),
+                ..template.build().policy
+            },
         }
     }
 }
@@ -81,7 +141,9 @@ pub struct CreatePolicy {
 
 /// Request payload for updating an existing workspace policy.
 ///
-/// Replacing the `definition` replaces the whole policy body.
+/// Replacing the `definition` replaces the whole policy body. The policy's
+/// template origin is server-owned and preserved across updates — it is not
+/// settable here.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePolicy {
@@ -92,5 +154,5 @@ pub struct UpdatePolicy {
     #[validate(length(max = 4096))]
     pub description: Option<Option<String>>,
     /// New policy body (replaces the stored definition).
-    pub definition: Option<PolicyDefinition>,
+    pub definition: Option<PolicyDraft>,
 }
