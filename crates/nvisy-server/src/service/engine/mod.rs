@@ -10,8 +10,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use derive_more::Deref;
-use nvisy_engine::plan::{AnalyzerParams, AnyAnnotations, ScopeParams};
-use nvisy_engine::{Engine, OcrMode};
+use elide_pipeline::plan::{AnalyzerParams, AnyAnnotations, ScopeParams};
+use elide_pipeline::{Engine, RasterMode};
 
 use crate::Result;
 use crate::handler::request::PipelineDefinition;
@@ -78,15 +78,15 @@ impl EngineService {
     ///
     /// Recognition is entirely engine-owned (the built-in pattern set plus the
     /// deployment's NER/LLM lineups always run). Scope is the request's own,
-    /// falling back to the pipeline default. `ocr_mode` is the workspace's OCR
-    /// policy (forced vs. auto). Deduplication and calibration are engine-owned
-    /// defaults; the label catalog is derived from the run's policies at detect
-    /// time.
+    /// falling back to the pipeline default. `raster_mode` is the workspace's
+    /// page-rasterisation policy (always render vs. auto). Deduplication and
+    /// calibration are engine-owned defaults; the label catalog is derived from
+    /// the run's policies at detect time.
     pub fn analyzer_params(
         &self,
         definition: &PipelineDefinition,
         request_scope: Option<ScopeParams>,
-        ocr_mode: OcrMode,
+        raster_mode: RasterMode,
     ) -> AnalyzerParams {
         let scope = request_scope
             .or_else(|| definition.default_scope.clone())
@@ -94,7 +94,7 @@ impl EngineService {
 
         AnalyzerParams {
             scope,
-            ocr_mode,
+            raster_mode,
             annotations: AnyAnnotations::default(),
         }
     }

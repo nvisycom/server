@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use derive_more::{AsRef, Into};
-use nvisy_engine::FormatRegistry;
+use elide_pipeline::FormatRegistry;
 use nvisy_postgres::model::UpdateWorkspaceFile as UpdateFileModel;
 use nvisy_postgres::types::FileFilter;
 use schemars::{JsonSchema, Schema, SchemaGenerator};

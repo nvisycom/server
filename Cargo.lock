@@ -1058,6 +1058,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "block-padding"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "710f1dd022ef4e93f8a438b4ba958de7f64308434fa6a87104481645cc30068b"
+dependencies = [
+ "hybrid-array",
+]
+
+[[package]]
 name = "brotli"
 version = "8.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1163,6 +1172,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dec551ab6e7578819132c713a93c022a05d60159dc86e7a7050223577484c55a"
 dependencies = [
  "rustversion",
+]
+
+[[package]]
+name = "cbc"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce2dc9ee5f88d11e0beb842c88b33c8a5cf0d1329c4b19494af42b07dbfe8896"
+dependencies = [
+ "cipher",
 ]
 
 [[package]]
@@ -2850,6 +2868,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
+name = "ecb"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fbfbf3db731928d6912bc3beda911d55b834cee3df6131ba79b337a1298a3fa9"
+dependencies = [
+ "cipher",
+]
+
+[[package]]
 name = "ed25519"
 version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2898,7 +2925,7 @@ checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
 [[package]]
 name = "elide"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "async-trait",
  "elide-codec",
@@ -2919,7 +2946,7 @@ dependencies = [
 [[package]]
 name = "elide-bento"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/bento?branch=main#70e1cba24bc39d01b1e35ecac4d58d05a376bd53"
+source = "git+https://github.com/nvisycom/elide-bento?branch=main#543c2e554de73f0c5820a0d7b7cdac83e596671a"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -2936,13 +2963,15 @@ dependencies = [
 [[package]]
 name = "elide-codec"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "async-trait",
  "bytes",
  "csv",
  "ego-tree",
  "elide-core",
+ "elide-docx",
+ "elide-pdf",
  "hex",
  "hound",
  "image",
@@ -2953,13 +2982,12 @@ dependencies = [
  "sha2 0.11.0",
  "symphonia",
  "tracing",
- "zip",
 ]
 
 [[package]]
 name = "elide-context"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "async-trait",
  "elide-core",
@@ -2970,7 +2998,7 @@ dependencies = [
 [[package]]
 name = "elide-core"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "async-trait",
  "blake3",
@@ -2990,7 +3018,7 @@ dependencies = [
 [[package]]
 name = "elide-detection"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "elide-core",
  "futures",
@@ -3000,9 +3028,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "elide-docx"
+version = "0.1.0"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
+dependencies = [
+ "bytes",
+ "hipstr",
+ "quick-xml",
+ "thiserror",
+ "zip",
+]
+
+[[package]]
 name = "elide-engine"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "bytes",
  "elide-codec",
@@ -3017,7 +3057,7 @@ dependencies = [
 [[package]]
 name = "elide-fake"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "async-trait",
  "elide-core",
@@ -3026,9 +3066,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "elide-governance"
+version = "0.1.0"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#1786c1aa8320af68a1e367a89f0b6e6678acd510"
+dependencies = [
+ "elide-core",
+ "elide-operator",
+ "hipstr",
+ "schemars 1.2.2",
+ "semver",
+ "serde",
+ "strum 0.28.0",
+ "uuid",
+]
+
+[[package]]
 name = "elide-lingua"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "async-trait",
  "elide-core",
@@ -3039,7 +3094,7 @@ dependencies = [
 [[package]]
 name = "elide-llm"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "async-trait",
  "derive_builder",
@@ -3061,7 +3116,7 @@ dependencies = [
 [[package]]
 name = "elide-ner"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "async-trait",
  "derive_builder",
@@ -3075,7 +3130,7 @@ dependencies = [
 [[package]]
 name = "elide-ocr"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "async-trait",
  "elide-core",
@@ -3085,7 +3140,7 @@ dependencies = [
 [[package]]
 name = "elide-operator"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -3107,7 +3162,7 @@ dependencies = [
 [[package]]
 name = "elide-pattern"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "aho-corasick",
  "async-trait",
@@ -3125,9 +3180,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "elide-pdf"
+version = "0.1.0"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
+dependencies = [
+ "bytes",
+ "hipstr",
+ "image",
+ "lopdf",
+ "thiserror",
+]
+
+[[package]]
+name = "elide-pipeline"
+version = "0.1.0"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#1786c1aa8320af68a1e367a89f0b6e6678acd510"
+dependencies = [
+ "bytes",
+ "csv",
+ "elide",
+ "elide-bento",
+ "elide-core",
+ "elide-governance",
+ "elide-template",
+ "elide-wire",
+ "hipstr",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "elide-redaction"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "async-trait",
  "elide-core",
@@ -3141,10 +3228,40 @@ dependencies = [
 [[package]]
 name = "elide-stt"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#3facedc82c16584f00a69ce64d45126c3bcc0380"
+source = "git+https://github.com/nvisycom/elide?branch=main#df3d7081263e7fe54a5deda037c1f0f8d8d418f3"
 dependencies = [
  "async-trait",
  "elide-core",
+ "uuid",
+]
+
+[[package]]
+name = "elide-template"
+version = "0.1.0"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#1786c1aa8320af68a1e367a89f0b6e6678acd510"
+dependencies = [
+ "elide-core",
+ "elide-governance",
+ "elide-operator",
+ "hipstr",
+ "jiff",
+ "schemars 1.2.2",
+ "semver",
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "elide-wire"
+version = "0.1.0"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#1786c1aa8320af68a1e367a89f0b6e6678acd510"
+dependencies = [
+ "bytes",
+ "elide-core",
+ "hipstr",
+ "jiff",
+ "schemars 1.2.2",
+ "serde",
  "uuid",
 ]
 
@@ -3724,7 +3841,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee8cfcc411d9adbbaba82fb72661cc1bcca13e8bba98b364e62b2dba8f960159"
 dependencies = [
  "color_quant",
- "weezl",
+ "weezl 0.1.12",
 ]
 
 [[package]]
@@ -4380,6 +4497,7 @@ version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4250ce6452e92010fdf7268ccc5d14faa80bb12fc741938534c58f16804e03c7"
 dependencies = [
+ "block-padding",
  "hybrid-array",
 ]
 
@@ -5476,6 +5594,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "lopdf"
+version = "0.44.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e2ec995d822e05cabc3f06d196ee43650af3fe4fe38012cacb35e0c3d113b68"
+dependencies = [
+ "aes",
+ "bitflags 2.13.1",
+ "cbc",
+ "ecb",
+ "encoding_rs",
+ "flate2",
+ "getrandom 0.4.3",
+ "image",
+ "indexmap 2.14.0",
+ "itoa",
+ "log",
+ "md-5 0.11.0",
+ "nom 8.0.0",
+ "rand 0.10.2",
+ "rangemap",
+ "sha2 0.11.0",
+ "stringprep",
+ "thiserror",
+ "weezl 0.2.1",
+]
+
+[[package]]
 name = "lru-cache"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6055,25 +6200,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nvisy-engine"
-version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#3e805a7779fb803f9baecc6535668d224f98077f"
-dependencies = [
- "bytes",
- "csv",
- "elide",
- "elide-bento",
- "elide-core",
- "hipstr",
- "nvisy-schema",
- "nvisy-template",
- "schemars 1.2.2",
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
 name = "nvisy-inference"
 version = "0.1.0"
 dependencies = [
@@ -6125,20 +6251,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nvisy-policy"
-version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#3e805a7779fb803f9baecc6535668d224f98077f"
-dependencies = [
- "elide-core",
- "elide-operator",
- "hipstr",
- "schemars 1.2.2",
- "serde",
- "strum 0.28.0",
- "uuid",
-]
-
-[[package]]
 name = "nvisy-postgres"
 version = "0.1.0"
 dependencies = [
@@ -6171,21 +6283,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nvisy-schema"
-version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#3e805a7779fb803f9baecc6535668d224f98077f"
-dependencies = [
- "bytes",
- "elide-core",
- "hipstr",
- "jiff",
- "nvisy-policy",
- "schemars 1.2.2",
- "serde",
- "uuid",
-]
-
-[[package]]
 name = "nvisy-server"
 version = "0.1.0"
 dependencies = [
@@ -6206,6 +6303,7 @@ dependencies = [
  "croner",
  "derive_more",
  "dotenvy",
+ "elide-pipeline",
  "futures",
  "hex",
  "hkdf",
@@ -6216,7 +6314,6 @@ dependencies = [
  "jsonwebtoken",
  "mime_guess",
  "nvisy-core",
- "nvisy-engine",
  "nvisy-inference",
  "nvisy-nats",
  "nvisy-object",
@@ -6243,21 +6340,6 @@ dependencies = [
  "woothee",
  "zip",
  "zxcvbn",
-]
-
-[[package]]
-name = "nvisy-template"
-version = "0.1.0"
-source = "git+https://github.com/nvisycom/runtime?branch=main#3e805a7779fb803f9baecc6535668d224f98077f"
-dependencies = [
- "elide-core",
- "hipstr",
- "jiff",
- "nvisy-policy",
- "schemars 1.2.2",
- "semver",
- "serde",
- "uuid",
 ]
 
 [[package]]
@@ -8377,6 +8459,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8993,7 +9081,7 @@ dependencies = [
  "flate2",
  "half",
  "quick-error",
- "weezl",
+ "weezl 0.1.12",
  "zune-jpeg",
 ]
 
@@ -9727,6 +9815,7 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 
@@ -9998,6 +10087,12 @@ name = "weezl"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
+
+[[package]]
+name = "weezl"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4ca08e5ef825b65b056d9efbd95c8750683f0a6d0466d02e96dc2e4e360f3d2"
 
 [[package]]
 name = "whoami"

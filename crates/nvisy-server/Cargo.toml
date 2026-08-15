@@ -31,8 +31,16 @@ default = []
 cli = ["dep:clap", "dep:humantime"]
 
 [dependencies]
+# Elide crates. The workspace dep disables default features, so re-enable every
+# modality (all-modalities: tabular/image/audio/document) plus JSON/CSV audit
+# export. elide-pipeline re-exports every engine type this crate uses.
+elide-pipeline = { workspace = true, features = [
+    "all-modalities",
+    "audit-json",
+    "audit-csv",
+] }
+
 # Internal crates
-nvisy-engine = { workspace = true, features = ["audit-json", "audit-csv"] }
 nvisy-core = { workspace = true, features = ["schema"] }
 nvisy-nats = { workspace = true, features = [] }
 nvisy-inference = { workspace = true, features = ["schema"] }

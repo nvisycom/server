@@ -1,7 +1,7 @@
 //! Policy response types.
 
+use elide_pipeline::policy::PolicyDefinition;
 use jiff::Timestamp;
-use nvisy_engine::policy::PolicyDefinition;
 use nvisy_postgres::model::WorkspacePolicy;
 use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;

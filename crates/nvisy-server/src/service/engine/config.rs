@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use nvisy_engine::provider::{
+use elide_pipeline::provider::{
     LlmConfig, LlmRecognizerConfig, NerConfig, NerRecognizerConfig, OcrConfig, OcrEnricherConfig,
     SttConfig, SttEnricherConfig,
 };

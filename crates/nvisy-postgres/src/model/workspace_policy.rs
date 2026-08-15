@@ -10,7 +10,7 @@ use crate::types::{Handle, HasCreatedAt, HasDeletedAt, HasUpdatedAt};
 
 /// Workspace policy representing a structured redaction governance policy.
 ///
-/// The `definition` holds a `nvisy_schema` Policy (rules, labels, fallback,
+/// The `definition` holds an `elide-governance` Policy (rules, labels, fallback,
 /// retention) that the redaction engine consumes.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_policies)]

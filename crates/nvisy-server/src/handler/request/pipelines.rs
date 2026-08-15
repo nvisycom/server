@@ -4,7 +4,7 @@
 //! creation, updates, and filtering. All request types support JSON serialization
 //! and validation.
 
-use nvisy_engine::plan::ScopeParams;
+use elide_pipeline::plan::ScopeParams;
 use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
 use nvisy_postgres::types::{Handle, Json, PipelineMetadata, PipelineStatus, RetentionOverride};
 use schemars::JsonSchema;

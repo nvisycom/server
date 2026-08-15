@@ -1,6 +1,6 @@
 //! Deployment catalog response types.
 
-use nvisy_engine::RegisteredRecognizer;
+use elide_pipeline::RegisteredRecognizer;
 use schemars::JsonSchema;
 use serde::Serialize;
 
