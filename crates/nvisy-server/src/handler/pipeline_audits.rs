@@ -14,7 +14,7 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use nvisy_engine::Audit;
+use elide_pipeline::Audit;
 use nvisy_postgres::PgClient;
 use zip::write::SimpleFileOptions;
 

@@ -1,6 +1,6 @@
 //! Detection job and run-status event types.
 
-use nvisy_engine::plan::ScopeParams;
+use elide_pipeline::plan::ScopeParams;
 use nvisy_postgres::types::PipelineRunStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

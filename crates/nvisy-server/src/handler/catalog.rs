@@ -5,12 +5,12 @@
 //! target) and the recognizers the engine has registered. Both are
 //! deployment-owned reference data, not persisted rows: labels come from the
 //! runtime's built-in [`LabelCatalog`], recognizers from the configured
-//! [`Engine`](nvisy_engine::Engine) lineup.
+//! [`Engine`](elide_pipeline::Engine) lineup.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
-use nvisy_engine::entity::LabelCatalog;
+use elide_pipeline::entity::LabelCatalog;
 
 use crate::extract::{AuthState, Json};
 use crate::handler::response::{ErrorResponse, RecognizerCatalog};
@@ -69,7 +69,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
 #[cfg(test)]
 mod tests {
-    use nvisy_engine::entity::LabelCatalog;
+    use elide_pipeline::entity::LabelCatalog;
 
     #[test]
     fn builtin_labels_are_non_empty() {

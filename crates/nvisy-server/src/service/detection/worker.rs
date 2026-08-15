@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use nvisy_engine::OcrMode;
+use elide_pipeline::RasterMode;
 use nvisy_nats::stream::DetectionStream;
 use nvisy_postgres::PgConn;
 use nvisy_postgres::model::{UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun};
@@ -272,7 +272,7 @@ impl DetectionWorker {
         let settings = workspace.settings.or_default();
         let params =
             self.engine
-                .analyzer_params(&definition, job.scope.clone(), ocr_mode_of(&settings));
+                .analyzer_params(&definition, job.scope.clone(), raster_mode_of(&settings));
 
         let document = self.blob.build_document(&file, run.id).await?;
 
@@ -340,11 +340,12 @@ enum JobOutcome {
     Retry,
 }
 
-/// Maps a workspace's OCR policy to the engine's per-run OCR mode.
-fn ocr_mode_of(settings: &WorkspaceSettings) -> OcrMode {
+/// Maps a workspace's OCR policy to the engine's per-run page-rasterisation
+/// mode.
+fn raster_mode_of(settings: &WorkspaceSettings) -> RasterMode {
     match settings.ocr {
-        OcrPolicy::Auto => OcrMode::Auto,
-        OcrPolicy::Force => OcrMode::force(),
-        OcrPolicy::Never => OcrMode::Never,
+        OcrPolicy::Auto => RasterMode::Auto,
+        OcrPolicy::Force => RasterMode::always(),
+        OcrPolicy::Never => RasterMode::Never,
     }
 }

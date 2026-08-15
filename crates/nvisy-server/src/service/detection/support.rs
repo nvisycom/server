@@ -1,6 +1,6 @@
 //! Shared detection helpers used by both the create-run handler and the worker.
 
-use nvisy_engine::policy::PolicyDefinition;
+use elide_pipeline::policy::PolicyDefinition;
 use nvisy_postgres::model::UpdateWorkspacePipelineRun;
 use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspacePipelineRunRepository, WorkspacePolicyRepository,

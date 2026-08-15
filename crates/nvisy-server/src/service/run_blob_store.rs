@@ -11,7 +11,7 @@ use std::io::Cursor;
 use std::str::FromStr;
 
 use bytes::Bytes;
-use nvisy_engine::{Audit, Document};
+use elide_pipeline::{Audit, Document};
 use nvisy_nats::object::{AuditBucket, AuditKey, FileKey, FilesBucket};
 use nvisy_postgres::PgConn;
 use nvisy_postgres::model::{

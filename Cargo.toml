@@ -31,8 +31,10 @@ documentation = "https://docs.rs/nvisy-server"
 #
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
+# Elide crates
+elide-pipeline = { git = "https://github.com/nvisycom/elide-runtime", branch = "main", default-features = false }
+
 # Internal crates
-nvisy-engine = { git = "https://github.com/nvisycom/runtime", branch = "main" }
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-inference = { path = "./crates/nvisy-inference", version = "0.1.0" }

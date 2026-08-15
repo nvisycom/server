@@ -10,6 +10,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
+use elide_pipeline::policy::PolicyDefinition;
 use nvisy_postgres::model::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 use nvisy_postgres::query::WorkspacePolicyRepository;
 use nvisy_postgres::types::WithAccountRef;
@@ -56,10 +57,9 @@ async fn create_policy(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManagePolicies)
         .await?;
 
-    // Resolve the body (inline or a built-in template) and give it a fresh id so
-    // policies from one template stay independent.
-    let mut definition = request.body.into_definition();
-    definition.id = Uuid::now_v7();
+    // Resolve the body (inline or a built-in template). `into_definition` mints a
+    // fresh id and stamps the template origin (server-owned).
+    let definition = request.body.into_definition();
 
     let display_name = request
         .display_name
@@ -249,8 +249,17 @@ async fn update_policy(
         .await?
         .item;
 
-    let definition = match &request.definition {
-        Some(definition) => Some(crypto.encrypt_json(workspace.id, definition)?),
+    // A replaced body keeps the policy's server-owned template origin: the caller
+    // authored new rules, but where the policy came from is provenance the client
+    // cannot set or clear. Carry the stored origin forward onto the new draft.
+    let definition = match request.definition {
+        Some(draft) => {
+            let template = crypto
+                .decrypt_json::<PolicyDefinition>(workspace.id, &existing.definition)?
+                .template;
+            let definition = draft.into_definition(template);
+            Some(crypto.encrypt_json(workspace.id, &definition)?)
+        }
         None => None,
     };
 
