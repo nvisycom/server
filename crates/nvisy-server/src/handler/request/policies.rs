@@ -1,7 +1,8 @@
 //! Policy request types.
 
+use elide_pipeline::entity::Label;
 use elide_pipeline::policy::redaction::ModalityRedactions;
-use elide_pipeline::policy::{LabelGroup, Labels, PolicyDefinition, PolicyRule, TemplateOrigin};
+use elide_pipeline::policy::{LabelScope, PolicyDefinition, PolicyRule, TemplateOrigin};
 use elide_pipeline::template::PolicyTemplate;
 use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
@@ -39,13 +40,12 @@ pub struct PolicyDraft {
     /// Optional description for reviewers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Vocabulary the policy operates over: builtins picked by name plus
-    /// caller-authored custom label schemas.
-    #[serde(default, skip_serializing_if = "Labels::is_empty")]
-    pub labels: Labels,
-    /// Named clusters of labels this policy's rules may reference by name.
+    /// What this policy detects: named, attributed label sets.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub groups: Vec<LabelGroup>,
+    pub scopes: Vec<LabelScope>,
+    /// Caller-authored custom label schemas this policy introduces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom: Vec<Label>,
     /// Ordered rules. First match wins within this policy.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<PolicyRule>,
@@ -65,8 +65,8 @@ impl PolicyDraft {
             name: self.name.into(),
             description: self.description.map(Into::into),
             template,
-            labels: self.labels,
-            groups: self.groups,
+            scopes: self.scopes,
+            custom: self.custom,
             rules: self.rules,
             fallback: self.fallback,
         }
