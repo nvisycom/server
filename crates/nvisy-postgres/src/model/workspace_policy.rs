@@ -10,8 +10,8 @@ use crate::types::{Handle, HasCreatedAt, HasDeletedAt, HasUpdatedAt};
 
 /// Workspace policy representing a structured redaction governance policy.
 ///
-/// The `definition` holds an `elide-governance` Policy (rules, labels, fallback,
-/// retention) that the redaction engine consumes.
+/// The `definition` holds an `elide-governance` `PolicyDefinition` (rules,
+/// labels, fallback, retention) that the redaction engine consumes.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
