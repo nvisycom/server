@@ -6,6 +6,7 @@
 //! once, so the binary only has to enumerate which workers to run.
 
 use std::future::Future;
+use std::time::Duration;
 
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -49,8 +50,15 @@ pub struct WorkerSet {
 impl WorkerSet {
     /// Creates an empty set with a fresh cancellation token.
     pub fn new() -> Self {
+        Self::with_token(CancellationToken::new())
+    }
+
+    /// Creates an empty set driven by an existing cancellation token, so workers
+    /// stop when that shared token is cancelled (e.g. the app-wide shutdown
+    /// signal).
+    pub fn with_token(cancel: CancellationToken) -> Self {
         Self {
-            cancel: CancellationToken::new(),
+            cancel,
             handles: Vec::new(),
         }
     }
@@ -70,14 +78,29 @@ impl WorkerSet {
     pub async fn shutdown(self) {
         self.cancel.cancel();
         for (name, handle) in self.handles {
-            if let Err(err) = handle.await {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    worker = name,
-                    error = %err,
-                    "Worker task panicked",
-                );
+            join_worker(name, handle).await;
+        }
+    }
+
+    /// Like [`shutdown`](Self::shutdown), but bounds the join by `timeout`: a
+    /// worker that does not observe its cancellation token within the deadline is
+    /// abandoned (its task detached) rather than blocking process exit.
+    ///
+    /// Cancellation is signalled once up front, so all workers wind down in
+    /// parallel and the whole join shares the single `timeout` budget.
+    pub async fn shutdown_with_timeout(self, timeout: Duration) {
+        self.cancel.cancel();
+        let join_all = async {
+            for (name, handle) in self.handles {
+                join_worker(name, handle).await;
             }
+        };
+        if tokio::time::timeout(timeout, join_all).await.is_err() {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                timeout_secs = timeout.as_secs(),
+                "Workers did not stop within the shutdown timeout; abandoning remaining tasks",
+            );
         }
     }
 }
@@ -85,5 +108,17 @@ impl WorkerSet {
 impl Default for WorkerSet {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Awaits one worker handle, logging (never propagating) a task that panicked.
+async fn join_worker(name: &'static str, handle: JoinHandle<()>) {
+    if let Err(err) = handle.await {
+        tracing::error!(
+            target: TRACING_TARGET,
+            worker = name,
+            error = %err,
+            "Worker task panicked",
+        );
     }
 }

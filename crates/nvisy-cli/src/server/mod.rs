@@ -25,6 +25,7 @@ use http_server::serve_http;
 #[cfg(feature = "tls")]
 use https_server::serve_https;
 use shutdown::shutdown_signal;
+use tokio_util::sync::CancellationToken;
 
 use crate::config::ServerConfig;
 
@@ -44,14 +45,18 @@ use crate::config::ServerConfig;
 /// - TLS certificates cannot be loaded (HTTPS mode)
 /// - Cannot bind to the specified address/port
 /// - Server encounters a fatal error during operation
-pub async fn serve(app: Router, config: ServerConfig) -> io::Result<()> {
+pub async fn serve(
+    app: Router,
+    config: ServerConfig,
+    shutdown: CancellationToken,
+) -> io::Result<()> {
     #[cfg(feature = "tls")]
     {
-        serve_https(app, config).await
+        serve_https(app, config, shutdown).await
     }
 
     #[cfg(not(feature = "tls"))]
     {
-        serve_http(app, config).await
+        serve_http(app, config, shutdown).await
     }
 }

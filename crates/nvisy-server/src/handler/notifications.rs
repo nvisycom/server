@@ -3,6 +3,8 @@
 //! This module provides handlers for listing notifications, checking unread
 //! status, and marking notifications as read for the authenticated account.
 
+use std::time::Duration;
+
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use async_stream::stream;
@@ -12,6 +14,8 @@ use axum::response::sse::Event;
 use futures::StreamExt;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::AccountNotificationRepository;
+use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use crate::extract::{AuthState, Json, Path, Query};
 use crate::handler::request::{CursorPagination, NotificationPathParams};
@@ -105,14 +109,14 @@ fn get_unread_status_docs(op: TransformOperation) -> TransformOperation {
 /// How long the unread stream waits for a live broadcast before re-reading the
 /// authoritative count from the database (the fallback for a dropped best-effort
 /// broadcast).
-const UNREAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+const UNREAD_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Streams the authenticated account's unread-notification count as Server-Sent
 /// Events.
 ///
 /// Emits one `unread` event with the current count immediately, then forwards
 /// each change as notifications arrive or are marked read. The stream stays open
-/// until the client disconnects.
+/// until the client disconnects or the server begins shutting down.
 ///
 /// Live changes arrive over a best-effort core-NATS broadcast; if none arrives
 /// within a short interval the authoritative count is re-read from the database,
@@ -128,6 +132,7 @@ const UNREAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs
 async fn stream_unread_status(
     State(pg_client): State<PgClient>,
     State(notification_emitter): State<NotificationEmitter>,
+    State(shutdown): State<CancellationToken>,
     AuthState(auth_state): AuthState,
 ) -> Result<SseResponse<UnreadCountEvent>> {
     tracing::debug!(target: TRACING_TARGET, "Opening unread notifications stream");
@@ -149,25 +154,32 @@ async fn stream_unread_status(
         yield unread_event(&UnreadCountEvent { unread_count: current });
 
         loop {
-            match tokio::time::timeout(UNREAD_POLL_INTERVAL, updates.next()).await {
-                // A live broadcast arrived; forward it.
-                Ok(Some(event)) => {
-                    yield unread_event(&event);
-                }
-                // The subscription ended; re-read once so the client is not left
-                // with a stale count, then stop.
-                Ok(None) => {
-                    if let Some(unread_count) = reread_unread_count(&pg_client, account_id).await {
-                        yield unread_event(&UnreadCountEvent { unread_count });
-                    }
-                    break;
-                }
-                // No broadcast within the interval: re-read the authoritative
-                // count, recovering a dropped best-effort broadcast (core NATS is
-                // at-most-once).
-                Err(_) => {
-                    if let Some(unread_count) = reread_unread_count(&pg_client, account_id).await {
-                        yield unread_event(&UnreadCountEvent { unread_count });
+            tokio::select! {
+                // Server shutting down: this stream is open-ended and would
+                // otherwise block graceful shutdown, so end it promptly.
+                () = shutdown.cancelled() => break,
+                result = tokio::time::timeout(UNREAD_POLL_INTERVAL, updates.next()) => {
+                    match result {
+                        // A live broadcast arrived; forward it.
+                        Ok(Some(event)) => {
+                            yield unread_event(&event);
+                        }
+                        // The subscription ended; re-read once so the client is
+                        // not left with a stale count, then stop.
+                        Ok(None) => {
+                            if let Some(unread_count) = reread_unread_count(&pg_client, account_id).await {
+                                yield unread_event(&UnreadCountEvent { unread_count });
+                            }
+                            break;
+                        }
+                        // No broadcast within the interval: re-read the
+                        // authoritative count, recovering a dropped best-effort
+                        // broadcast (core NATS is at-most-once).
+                        Err(_) => {
+                            if let Some(unread_count) = reread_unread_count(&pg_client, account_id).await {
+                                yield unread_event(&UnreadCountEvent { unread_count });
+                            }
+                        }
                     }
                 }
             }
@@ -179,7 +191,7 @@ async fn stream_unread_status(
 
 /// Re-reads an account's unread count from the database, returning `None` if the
 /// count can no longer be read (a transient error — the next poll retries).
-async fn reread_unread_count(pg_client: &PgClient, account_id: uuid::Uuid) -> Option<i64> {
+async fn reread_unread_count(pg_client: &PgClient, account_id: Uuid) -> Option<i64> {
     let mut conn = pg_client.get_connection().await.ok()?;
     match conn.count_unread_account_notifications(account_id).await {
         Ok(count) => Some(count),

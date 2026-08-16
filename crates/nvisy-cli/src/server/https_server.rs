@@ -6,6 +6,7 @@ use std::path::Path;
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use nvisy_server::extract::AppConnectInfo;
+use tokio_util::sync::CancellationToken;
 
 use super::TRACING_TARGET_STARTUP;
 use crate::config::ServerConfig;
@@ -13,7 +14,15 @@ use crate::server::lifecycle::serve_with_shutdown;
 use crate::server::shutdown_signal;
 
 /// Starts an HTTPS server with enhanced lifecycle management.
-pub async fn serve_https(app: Router, server_config: ServerConfig) -> io::Result<()> {
+///
+/// On a shutdown signal the `shutdown` token is cancelled (so long-lived SSE
+/// handlers end promptly), then `axum-server` drains connections bounded by
+/// `shutdown_timeout`.
+pub async fn serve_https(
+    app: Router,
+    server_config: ServerConfig,
+    shutdown: CancellationToken,
+) -> io::Result<()> {
     let server_addr = server_config.socket_addr();
     let shutdown_timeout = server_config.shutdown_timeout();
     let cert_path = &server_config.tls_cert_path;
@@ -51,6 +60,9 @@ pub async fn serve_https(app: Router, server_config: ServerConfig) -> io::Result
 
         tokio::spawn(async move {
             shutdown_signal(shutdown_timeout).await;
+            // Cancel the shared token first so open-ended handlers (SSE) stop
+            // yielding, then bound the drain via axum-server's own timeout.
+            shutdown.cancel();
             shutdown_handle.graceful_shutdown(Some(shutdown_timeout));
         });
 
