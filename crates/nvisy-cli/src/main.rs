@@ -47,12 +47,15 @@ async fn run() -> anyhow::Result<()> {
     // Build router
     let router = create_router(state.clone(), &cli.middleware);
 
-    // Spawn every background worker under one shared cancellation token.
+    // Spawn every background worker under the app-wide shutdown token.
     let workers = state.spawn_workers();
+    let shutdown = state.shutdown.clone();
+    let shutdown_timeout = cli.server.shutdown_timeout();
 
-    // Run the HTTP server, then stop and join the workers.
-    let server_result = server::serve(router, cli.server).await;
-    workers.shutdown().await;
+    // Run the HTTP server (it cancels the shared token on signal), then stop and
+    // join the workers under the same timeout so a stuck worker cannot hang exit.
+    let server_result = server::serve(router, cli.server, shutdown).await;
+    workers.shutdown_with_timeout(shutdown_timeout).await;
 
     server_result?;
     Ok(())

@@ -24,6 +24,7 @@ use nvisy_core::health::HealthCheck;
 use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use nvisy_webhook::WebhookService;
+use tokio_util::sync::CancellationToken;
 
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::connection_config::ConnectionConfig;
@@ -71,6 +72,10 @@ use crate::{Error, Result};
 pub struct ServiceState {
     // Shared infrastructure (Postgres, NATS, crypto):
     pub infra: Infra,
+
+    // App-wide shutdown signal: cancelled once on Ctrl+C/SIGTERM so long-lived
+    // handlers (SSE streams) and background workers can wind down promptly.
+    pub shutdown: CancellationToken,
 
     // External services:
     pub webhook: WebhookService,
@@ -129,6 +134,7 @@ impl ServiceState {
 
         let service_state = Self {
             infra,
+            shutdown: CancellationToken::new(),
             webhook: webhook_service,
             engine,
             connection_sync,
@@ -141,17 +147,20 @@ impl ServiceState {
         Ok(service_state)
     }
 
-    /// Spawns every background worker under one shared cancellation token.
+    /// Spawns every background worker under the app-wide [`shutdown`] token, so
+    /// cancelling it (on Ctrl+C/SIGTERM) stops the workers alongside the
+    /// long-lived handlers.
     ///
     /// The stateless collaborators the detection worker needs are composed
     /// through the same [`FromRef`] wiring handlers use. Call
     /// [`WorkerSet::shutdown`] to stop and join them.
     ///
+    /// [`shutdown`]: Self::shutdown
     /// [`FromRef`]: axum::extract::FromRef
     pub fn spawn_workers(&self) -> WorkerSet {
         use axum::extract::FromRef;
 
-        let mut workers = WorkerSet::new();
+        let mut workers = WorkerSet::with_token(self.shutdown.clone());
         workers.spawn(WebhookDeliveryWorker::new(
             self.infra.clone(),
             self.webhook.clone(),
@@ -245,6 +254,7 @@ impl_di_infra!(
 // Stored fields (external services + stateful singletons + security):
 impl_di_field!(
     infra: Infra,
+    shutdown: CancellationToken,
     webhook: WebhookService,
     engine: EngineService,
     connection_sync: ConnectionSyncService,
