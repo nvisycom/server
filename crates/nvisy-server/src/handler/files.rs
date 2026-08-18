@@ -121,6 +121,8 @@ struct FileUploadContext {
     account_id: Uuid,
     file_store: ObjectStore<FilesBucket>,
     crypto: CryptoService,
+    /// Engine handle, used to reject upload of a format no codec can decode.
+    engine: EngineService,
     /// Retention expiry for uploaded originals (`None` = keep indefinitely).
     expires_at: Option<jiff::Timestamp>,
 }
@@ -141,6 +143,17 @@ async fn process_single_file(
         .and_then(|ext| ext.to_str())
         .unwrap_or("bin")
         .to_lowercase();
+
+    // Reject a format no codec can decode before streaming it to storage: an
+    // unprocessable file would only fail later at detection, after wasting an
+    // encrypted upload.
+    if !ctx.engine.supports_extension(&file_extension) {
+        return Err(ErrorKind::BadRequest
+            .with_message(format!("Unsupported file format: .{file_extension}"))
+            .with_context(
+                "The redaction engine has no codec for this file type; upload a supported format.",
+            ));
+    }
 
     // Generate file key with unique object ID for NATS storage
     let file_key = FileKey::generate(ctx.workspace_id);
@@ -200,6 +213,7 @@ async fn upload_file(
     State(nats_client): State<NatsClient>,
     State(webhook_emitter): State<WebhookEmitter>,
     State(crypto): State<CryptoService>,
+    State(engine): State<EngineService>,
     WorkspaceContext(workspace): WorkspaceContext,
     AuthState(auth_claims): AuthState,
     Multipart(mut multipart): Multipart,
@@ -231,6 +245,7 @@ async fn upload_file(
         account_id: auth_claims.account_id,
         file_store,
         crypto,
+        engine,
         expires_at,
     };
 

@@ -127,7 +127,21 @@ async fn update_own_account(
 
     // Validate and hash password if provided
     let password_hash = match request.password.as_ref() {
-        Some(new_password) => {
+        Some(change) => {
+            // Re-authenticate the change: it must prove knowledge of the current
+            // password, so a hijacked session or CSRF cannot silently reset it
+            // (and lock out the real owner).
+            if password
+                .verify(&change.current_password, &current_account.password_hash)
+                .is_err()
+            {
+                tracing::warn!(target: TRACING_TARGET, "Password change failed: current password incorrect");
+                return Err(ErrorKind::Unauthorized
+                    .with_message("Current password is incorrect")
+                    .with_resource("account"));
+            }
+
+            let new_password = &change.new_password;
             let username = request
                 .username
                 .as_ref()
