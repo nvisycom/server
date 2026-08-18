@@ -169,6 +169,20 @@ impl EngineService {
 
         Ok(out)
     }
+
+    /// Whether the engine has a codec registered for `extension`.
+    ///
+    /// The check is what decides if an uploaded file can be processed at all, so
+    /// callers can reject an unsupported format at upload time rather than
+    /// failing later when detection tries (and fails) to decode it. Matching is
+    /// case-insensitive.
+    #[must_use]
+    pub fn supports_extension(&self, extension: &str) -> bool {
+        self.engine
+            .formats()
+            .by_extension(&extension.trim().to_ascii_lowercase())
+            .is_some()
+    }
 }
 
 /// Pushes `ext` (lowercased) into `out` if not already present.
