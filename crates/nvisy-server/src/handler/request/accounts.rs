@@ -6,6 +6,23 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::{Validate, ValidationError};
 
+/// A re-authenticated password change: the new password plus the current one
+/// that authorizes it.
+///
+/// Coupling the two in one struct makes the invariant explicit — a password
+/// change always carries the current password, so a hijacked session or CSRF
+/// cannot silently reset it (and lock out the real owner).
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PasswordChange {
+    /// The account's current password, verified before the change is applied.
+    pub current_password: String,
+    /// The new password (will be hashed before storage).
+    #[validate(length(min = 8, max = 128))]
+    pub new_password: String,
+}
+
 /// Request payload to update an account.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
@@ -21,9 +38,9 @@ pub struct UpdateAccount {
     #[validate(email)]
     #[validate(length(min = 5, max = 254))]
     pub email_address: Option<String>,
-    /// New password (will be hashed before storage).
-    #[validate(length(min = 8, max = 128))]
-    pub password: Option<String>,
+    /// A re-authenticated password change, when changing the password.
+    #[validate(nested)]
+    pub password: Option<PasswordChange>,
 }
 
 impl UpdateAccount {
