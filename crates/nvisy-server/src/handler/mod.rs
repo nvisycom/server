@@ -7,6 +7,7 @@ mod accounts;
 mod authentication;
 mod avatars;
 mod catalog;
+mod chat;
 mod connection_syncs;
 mod connections;
 mod error;
@@ -80,6 +81,7 @@ fn private_routes(
         .merge(workspaces::routes())
         .merge(members::routes())
         .merge(connections::routes())
+        .merge(chat::routes())
         .merge(connection_syncs::routes())
         .merge(files::routes())
         .merge(pipelines::routes())

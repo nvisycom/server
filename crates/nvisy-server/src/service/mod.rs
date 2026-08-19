@@ -1,6 +1,7 @@
 //! Application state and dependency injection.
 
 mod avatar;
+mod chat;
 mod connection_config;
 mod crypto;
 mod detection;
@@ -27,6 +28,7 @@ use nvisy_webhook::WebhookService;
 use tokio_util::sync::CancellationToken;
 
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
+pub use crate::service::chat::ChatService;
 pub use crate::service::connection_config::ConnectionConfig;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, Measurements};
@@ -267,6 +269,7 @@ impl_di_field!(
 // Stateless services, composed from `Infra` on extraction:
 impl_di_compose!(
     AvatarService => AvatarService::new,
+    ChatService => ChatService::new,
     RunBlobStore => RunBlobStore::new,
     DetectionQueue => DetectionQueue::new,
     WebhookEmitter => WebhookEmitter::new,
