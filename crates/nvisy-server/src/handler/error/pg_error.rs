@@ -20,6 +20,8 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::Account(c) => c.into(),
             ConstraintViolation::AccountNotification(c) => c.into(),
             ConstraintViolation::AccountApiToken(c) => c.into(),
+            ConstraintViolation::ChatSession(c) => c.into(),
+            ConstraintViolation::ChatMessage(c) => c.into(),
             ConstraintViolation::Workspace(c) => c.into(),
             ConstraintViolation::WorkspaceMember(c) => c.into(),
             ConstraintViolation::WorkspaceInvite(c) => c.into(),

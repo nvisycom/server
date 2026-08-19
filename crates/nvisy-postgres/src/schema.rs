@@ -10,6 +10,10 @@ pub mod sql_types {
     pub struct ApiTokenType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "chat_role"))]
+    pub struct ChatRole;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "file_kind"))]
     pub struct FileKind;
 
@@ -32,6 +36,10 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "pipeline_trigger_type"))]
     pub struct PipelineTriggerType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "provider_type"))]
+    pub struct ProviderType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "sync_deletion_policy"))]
@@ -120,6 +128,35 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+    use super::sql_types::ChatRole;
+
+    chat_messages (id) {
+        id -> Uuid,
+        session_id -> Uuid,
+        parent_id -> Nullable<Uuid>,
+        role -> ChatRole,
+        content -> Bytea,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
+    chat_sessions (id) {
+        id -> Uuid,
+        workspace_id -> Uuid,
+        account_id -> Uuid,
+        title -> Text,
+        current_message_id -> Nullable<Uuid>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
     use super::sql_types::ActivityType;
 
     workspace_activities (id) {
@@ -169,6 +206,7 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+    use super::sql_types::ProviderType;
 
     workspace_connections (id) {
         id -> Uuid,
@@ -176,6 +214,7 @@ diesel::table! {
         account_id -> Uuid,
         display_name -> Text,
         provider -> Text,
+        provider_type -> ProviderType,
         encrypted_data -> Bytea,
         is_active -> Bool,
         metadata -> Jsonb,
@@ -379,6 +418,8 @@ diesel::table! {
 
 diesel::joinable!(account_api_tokens -> accounts (account_id));
 diesel::joinable!(account_notifications -> accounts (account_id));
+diesel::joinable!(chat_sessions -> accounts (account_id));
+diesel::joinable!(chat_sessions -> workspaces (workspace_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
 diesel::joinable!(workspace_connection_schedule -> workspace_connections (connection_id));
@@ -407,6 +448,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     account_api_tokens,
     account_notifications,
     accounts,
+    chat_messages,
+    chat_sessions,
     workspace_activities,
     workspace_connection_schedule,
     workspace_connection_syncs,

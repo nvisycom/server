@@ -17,15 +17,6 @@ impl From<WorkspaceFileConstraints> for Error<'static> {
             WorkspaceFileConstraints::FileSizeMin => {
                 ErrorKind::BadRequest.with_message("File size must be greater than or equal to 0")
             }
-            WorkspaceFileConstraints::StoragePathNotEmpty => {
-                ErrorKind::InternalServerError.into_error()
-            }
-            WorkspaceFileConstraints::StorageBucketNotEmpty => {
-                ErrorKind::InternalServerError.into_error()
-            }
-            WorkspaceFileConstraints::FileHashSha256Length => {
-                ErrorKind::InternalServerError.into_error()
-            }
             WorkspaceFileConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("File metadata size is invalid")
             }
@@ -37,12 +28,6 @@ impl From<WorkspaceFileConstraints> for Error<'static> {
             }
             WorkspaceFileConstraints::WorkspaceIdIdUnique => {
                 ErrorKind::Conflict.with_message("A file with this identifier already exists")
-            }
-            WorkspaceFileConstraints::UpdatedAfterCreated
-            | WorkspaceFileConstraints::DeletedAfterCreated
-            | WorkspaceFileConstraints::DeletedAfterUpdated
-            | WorkspaceFileConstraints::ExpiresAfterCreated => {
-                ErrorKind::InternalServerError.into_error()
             }
         };
 

@@ -2,6 +2,7 @@
 
 mod accounts;
 mod authentications;
+mod chat;
 mod connection_syncs;
 mod connections;
 mod files;
@@ -19,6 +20,7 @@ mod workspaces;
 
 pub use accounts::*;
 pub use authentications::*;
+pub use chat::*;
 pub use connection_syncs::*;
 pub use connections::*;
 pub use files::*;

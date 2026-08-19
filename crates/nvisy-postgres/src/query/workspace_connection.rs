@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection};
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, OffsetPagination, SyncMode, WithAccountRef,
+    AccountRefRow, CursorPage, CursorPagination, OffsetPagination, ProviderType, SyncMode,
+    WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -54,6 +55,19 @@ pub trait WorkspaceConnectionRepository {
         workspace_id: Uuid,
         provider: &str,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceConnection>>> + Send;
+
+    /// Finds the workspace's most recently updated live, enabled connection of a
+    /// given capability (e.g. its language model), if any. Resolves a capability
+    /// connection without decrypting every connection's config.
+    ///
+    /// Disabled (`is_active = false`) connections are excluded: a disabled
+    /// connection is not usable, and a newer disabled one must not shadow an
+    /// active one.
+    fn find_connection_by_type(
+        &mut self,
+        workspace_id: Uuid,
+        provider_type: ProviderType,
+    ) -> impl Future<Output = PgResult<Option<WorkspaceConnection>>> + Send;
 
     /// Lists all active, import-mode connections that have a sync schedule,
     /// across every workspace. Used by the scheduled-sync worker.
@@ -209,6 +223,26 @@ impl WorkspaceConnectionRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(connections)
+    }
+
+    async fn find_connection_by_type(
+        &mut self,
+        workspace_id: Uuid,
+        provider_type: ProviderType,
+    ) -> PgResult<Option<WorkspaceConnection>> {
+        use schema::workspace_connections::{self, dsl};
+
+        workspace_connections::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::provider_type.eq(provider_type))
+            .filter(dsl::deleted_at.is_null())
+            .filter(dsl::is_active.eq(true))
+            .order(dsl::updated_at.desc())
+            .select(WorkspaceConnection::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(PgError::from)
     }
 
     async fn list_scheduled_connections(&mut self) -> PgResult<Vec<WorkspaceConnection>> {

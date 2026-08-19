@@ -47,6 +47,18 @@ CREATE TYPE SYNC_DELETION_POLICY AS ENUM (
 COMMENT ON TYPE SYNC_DELETION_POLICY IS
     'How an import reconciles files whose source object has been deleted.';
 
+-- The capability category of a connection's provider. Stable, closed set: the
+-- concrete provider (`provider` column) stays open and extensible, but its
+-- capability is one of these types. Lets a connection be found by what it can do
+-- (e.g. the workspace's language model) without decrypting its config.
+CREATE TYPE PROVIDER_TYPE AS ENUM (
+    'object_store',     -- External object storage (s3, azure, gcs)
+    'language_model'    -- LLM inference (openai, ollama, anthropic)
+);
+
+COMMENT ON TYPE PROVIDER_TYPE IS
+    'Capability category of a connection provider (object store, language model, ...).';
+
 -- Workspace connections table (generic encrypted provider credentials)
 CREATE TABLE workspace_connections (
     -- Primary identifier
@@ -61,7 +73,11 @@ CREATE TABLE workspace_connections (
 
     -- Core attributes
     display_name    TEXT            NOT NULL,
+    -- The concrete provider (open, extensible: 's3', 'anthropic', ...) and its
+    -- capability category (a stable, closed enum). The category lets a
+    -- connection be found by what it can do without decrypting its config.
     provider        TEXT            NOT NULL,
+    provider_type   PROVIDER_TYPE   NOT NULL,
 
     CONSTRAINT workspace_connections_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 255),
     CONSTRAINT workspace_connections_provider_length CHECK (length(trim(provider)) BETWEEN 1 AND 64),
@@ -102,6 +118,12 @@ CREATE INDEX workspace_connections_provider_idx
     ON workspace_connections (provider, workspace_id)
     WHERE deleted_at IS NULL;
 
+-- Find a workspace's connection of a given capability (e.g. its language model),
+-- most recently updated first.
+CREATE INDEX workspace_connections_provider_type_idx
+    ON workspace_connections (workspace_id, provider_type, updated_at DESC)
+    WHERE deleted_at IS NULL;
+
 CREATE UNIQUE INDEX workspace_connections_display_name_unique_idx
     ON workspace_connections (workspace_id, lower(trim(display_name)))
     WHERE deleted_at IS NULL;
@@ -119,6 +141,7 @@ COMMENT ON COLUMN workspace_connections.workspace_id IS 'Parent workspace refere
 COMMENT ON COLUMN workspace_connections.account_id IS 'Creator account reference';
 COMMENT ON COLUMN workspace_connections.display_name IS 'Human-readable connection display name (1-255 chars)';
 COMMENT ON COLUMN workspace_connections.provider IS 'Provider identifier (e.g. s3, azure, gcs, openai, ollama, anthropic)';
+COMMENT ON COLUMN workspace_connections.provider_type IS 'Capability category of the provider (object_store, language_model)';
 COMMENT ON COLUMN workspace_connections.encrypted_data IS 'XChaCha20-Poly1305 encrypted JSON: provider config + credentials';
 COMMENT ON COLUMN workspace_connections.is_active IS 'Whether the connection is enabled';
 COMMENT ON COLUMN workspace_connections.metadata IS 'Non-encrypted metadata for filtering/display';

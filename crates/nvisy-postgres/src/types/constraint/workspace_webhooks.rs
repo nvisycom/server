@@ -1,20 +1,12 @@
 //! Workspace webhooks table constraint violations.
 
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString};
-
-use super::ConstraintCategory;
+use strum::EnumString;
 
 /// Workspace webhooks table constraint violations.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
-#[serde(into = "String", try_from = "String")]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, EnumString)]
 pub enum WorkspaceWebhookConstraints {
-    // Webhook unique constraints
     #[strum(serialize = "workspace_webhooks_workspace_id_id_key")]
     WorkspaceIdIdUnique,
-
-    // Webhook validation constraints
     #[strum(serialize = "workspace_webhooks_display_name_length")]
     DisplayNameLength,
     #[strum(serialize = "workspace_webhooks_description_length")]
@@ -27,50 +19,4 @@ pub enum WorkspaceWebhookConstraints {
     EventsNotEmpty,
     #[strum(serialize = "workspace_webhooks_headers_size")]
     HeadersSize,
-
-    // Webhook chronological constraints
-    #[strum(serialize = "workspace_webhooks_updated_after_created")]
-    UpdatedAfterCreated,
-    #[strum(serialize = "workspace_webhooks_deleted_after_created")]
-    DeletedAfterCreated,
-}
-
-impl WorkspaceWebhookConstraints {
-    /// Creates a new [`WorkspaceWebhookConstraints`] from the constraint name.
-    pub fn new(constraint: &str) -> Option<Self> {
-        constraint.parse().ok()
-    }
-
-    /// Returns the category of this constraint violation.
-    pub fn categorize(&self) -> ConstraintCategory {
-        match self {
-            WorkspaceWebhookConstraints::WorkspaceIdIdUnique => ConstraintCategory::Uniqueness,
-
-            WorkspaceWebhookConstraints::DisplayNameLength
-            | WorkspaceWebhookConstraints::DescriptionLength
-            | WorkspaceWebhookConstraints::UrlLength
-            | WorkspaceWebhookConstraints::UrlFormat
-            | WorkspaceWebhookConstraints::EventsNotEmpty
-            | WorkspaceWebhookConstraints::HeadersSize => ConstraintCategory::Validation,
-
-            WorkspaceWebhookConstraints::UpdatedAfterCreated
-            | WorkspaceWebhookConstraints::DeletedAfterCreated => ConstraintCategory::Chronological,
-        }
-    }
-}
-
-impl From<WorkspaceWebhookConstraints> for String {
-    #[inline]
-    fn from(val: WorkspaceWebhookConstraints) -> Self {
-        val.to_string()
-    }
-}
-
-impl TryFrom<String> for WorkspaceWebhookConstraints {
-    type Error = strum::ParseError;
-
-    #[inline]
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        value.parse()
-    }
 }

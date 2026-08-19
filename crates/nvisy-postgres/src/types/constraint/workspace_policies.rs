@@ -1,16 +1,10 @@
 //! Workspace policies table constraint violations.
 
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString};
-
-use super::ConstraintCategory;
+use strum::EnumString;
 
 /// Workspace policies table constraint violations.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
-#[serde(into = "String", try_from = "String")]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, EnumString)]
 pub enum WorkspacePolicyConstraints {
-    // Validation constraints
     #[strum(serialize = "workspace_policies_slug_length")]
     SlugLength,
     #[strum(serialize = "workspace_policies_slug_format")]
@@ -23,60 +17,10 @@ pub enum WorkspacePolicyConstraints {
     DefinitionSize,
     #[strum(serialize = "workspace_policies_metadata_size")]
     MetadataSize,
-
-    // Uniqueness constraints
     #[strum(serialize = "workspace_policies_workspace_id_id_key")]
     WorkspaceIdIdUnique,
     #[strum(serialize = "workspace_policies_slug_unique_idx")]
     SlugUnique,
     #[strum(serialize = "workspace_policies_display_name_unique_idx")]
     NameUnique,
-
-    // Chronological constraints
-    #[strum(serialize = "workspace_policies_updated_after_created")]
-    UpdatedAfterCreated,
-    #[strum(serialize = "workspace_policies_deleted_after_created")]
-    DeletedAfterCreated,
-}
-
-impl WorkspacePolicyConstraints {
-    /// Creates a new [`WorkspacePolicyConstraints`] from the constraint name.
-    pub fn new(constraint: &str) -> Option<Self> {
-        constraint.parse().ok()
-    }
-
-    /// Returns the category of this constraint violation.
-    pub fn categorize(&self) -> ConstraintCategory {
-        match self {
-            WorkspacePolicyConstraints::SlugLength
-            | WorkspacePolicyConstraints::SlugFormat
-            | WorkspacePolicyConstraints::NameLength
-            | WorkspacePolicyConstraints::DescriptionLength
-            | WorkspacePolicyConstraints::DefinitionSize
-            | WorkspacePolicyConstraints::MetadataSize => ConstraintCategory::Validation,
-
-            WorkspacePolicyConstraints::WorkspaceIdIdUnique
-            | WorkspacePolicyConstraints::SlugUnique
-            | WorkspacePolicyConstraints::NameUnique => ConstraintCategory::Uniqueness,
-
-            WorkspacePolicyConstraints::UpdatedAfterCreated
-            | WorkspacePolicyConstraints::DeletedAfterCreated => ConstraintCategory::Chronological,
-        }
-    }
-}
-
-impl From<WorkspacePolicyConstraints> for String {
-    #[inline]
-    fn from(val: WorkspacePolicyConstraints) -> Self {
-        val.to_string()
-    }
-}
-
-impl TryFrom<String> for WorkspacePolicyConstraints {
-    type Error = strum::ParseError;
-
-    #[inline]
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        value.parse()
-    }
 }

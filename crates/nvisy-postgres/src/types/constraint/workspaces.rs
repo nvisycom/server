@@ -1,16 +1,10 @@
 //! Workspaces table constraint violations.
 
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString};
-
-use super::ConstraintCategory;
+use strum::EnumString;
 
 /// Workspace table constraint violations.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
-#[serde(into = "String", try_from = "String")]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, EnumString)]
 pub enum WorkspaceConstraints {
-    // Workspace validation constraints
     #[strum(serialize = "workspaces_display_name_length")]
     DisplayNameLength,
     #[strum(serialize = "workspaces_slug_length")]
@@ -23,61 +17,8 @@ pub enum WorkspaceConstraints {
     MetadataSize,
     #[strum(serialize = "workspaces_settings_size")]
     SettingsSize,
-
-    // Workspace uniqueness constraints
     #[strum(serialize = "workspaces_slug_unique_idx")]
     SlugUnique,
     #[strum(serialize = "workspaces_display_name_owner_unique_idx")]
     NameUnique,
-
-    // Workspace chronological constraints
-    #[strum(serialize = "workspaces_updated_after_created")]
-    UpdatedAfterCreated,
-    #[strum(serialize = "workspaces_deleted_after_created")]
-    DeletedAfterCreated,
-    #[strum(serialize = "workspaces_deleted_after_updated")]
-    DeletedAfterUpdated,
-}
-
-impl WorkspaceConstraints {
-    /// Creates a new [`WorkspaceConstraints`] from the constraint name.
-    pub fn new(constraint: &str) -> Option<Self> {
-        constraint.parse().ok()
-    }
-
-    /// Returns the category of this constraint violation.
-    pub fn categorize(&self) -> ConstraintCategory {
-        match self {
-            WorkspaceConstraints::DisplayNameLength
-            | WorkspaceConstraints::SlugLength
-            | WorkspaceConstraints::SlugFormat
-            | WorkspaceConstraints::DescriptionLengthMax
-            | WorkspaceConstraints::MetadataSize
-            | WorkspaceConstraints::SettingsSize => ConstraintCategory::Validation,
-
-            WorkspaceConstraints::SlugUnique | WorkspaceConstraints::NameUnique => {
-                ConstraintCategory::Uniqueness
-            }
-
-            WorkspaceConstraints::UpdatedAfterCreated
-            | WorkspaceConstraints::DeletedAfterCreated
-            | WorkspaceConstraints::DeletedAfterUpdated => ConstraintCategory::Chronological,
-        }
-    }
-}
-
-impl From<WorkspaceConstraints> for String {
-    #[inline]
-    fn from(val: WorkspaceConstraints) -> Self {
-        val.to_string()
-    }
-}
-
-impl TryFrom<String> for WorkspaceConstraints {
-    type Error = strum::ParseError;
-
-    #[inline]
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        value.parse()
-    }
 }

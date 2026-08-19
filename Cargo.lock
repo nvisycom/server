@@ -6128,6 +6128,7 @@ dependencies = [
 name = "nvisy-inference"
 version = "0.1.0"
 dependencies = [
+ "async-stream",
  "derive_more",
  "futures",
  "rig",

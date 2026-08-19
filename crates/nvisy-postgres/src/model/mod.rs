@@ -6,6 +6,8 @@
 mod account;
 mod account_api_token;
 mod account_notification;
+mod chat_message;
+mod chat_session;
 mod pipeline_reference;
 mod workspace;
 mod workspace_activity;
@@ -27,6 +29,9 @@ pub use account_api_token::{AccountApiToken, NewAccountApiToken, UpdateAccountAp
 pub use account_notification::{
     AccountNotification, NewAccountNotification, UpdateAccountNotification,
 };
+// Chat models
+pub use chat_message::{ChatMessage, NewChatMessage};
+pub use chat_session::{ChatSession, NewChatSession, UpdateChatSession};
 pub use pipeline_reference::PipelinePolicy;
 // Workspace models
 pub use workspace::{NewWorkspace, UpdateWorkspace, Workspace};

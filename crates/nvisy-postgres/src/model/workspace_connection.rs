@@ -6,7 +6,7 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::schema::workspace_connections;
-use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt};
+use crate::types::{HasCreatedAt, HasDeletedAt, HasUpdatedAt, ProviderType};
 
 /// Workspace connection model: a generic encrypted provider connection.
 ///
@@ -28,6 +28,8 @@ pub struct WorkspaceConnection {
     pub display_name: String,
     /// Provider identifier (`s3`, `azure`, `gcs`, `openai`, `ollama`, ...).
     pub provider: String,
+    /// Capability category of the provider (object store, language model, ...).
+    pub provider_type: ProviderType,
     /// Encrypted connection config (XChaCha20-Poly1305 encrypted JSON):
     /// provider tag, credentials, and any provider-specific settings.
     pub encrypted_data: Vec<u8>,
@@ -56,6 +58,8 @@ pub struct NewWorkspaceConnection {
     pub display_name: String,
     /// Provider identifier, for indexing and filtering.
     pub provider: String,
+    /// Capability category of the provider.
+    pub provider_type: ProviderType,
     /// Encrypted connection config.
     pub encrypted_data: Vec<u8>,
     /// Whether the connection is enabled.

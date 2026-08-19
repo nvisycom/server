@@ -1,16 +1,10 @@
 //! Accounts table constraint violations.
 
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString};
-
-use super::ConstraintCategory;
+use strum::EnumString;
 
 /// Account table constraint violations.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
-#[serde(into = "String", try_from = "String")]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, EnumString)]
 pub enum AccountConstraints {
-    // Account validation constraints
     #[strum(serialize = "accounts_username_length")]
     UsernameLength,
     #[strum(serialize = "accounts_username_format")]
@@ -33,69 +27,8 @@ pub enum AccountConstraints {
     LocaleFormat,
     #[strum(serialize = "accounts_suspended_not_admin")]
     SuspendedNotAdmin,
-
-    // Account uniqueness constraints
     #[strum(serialize = "accounts_username_unique_idx")]
     UsernameUnique,
     #[strum(serialize = "accounts_email_address_unique_idx")]
     EmailUnique,
-
-    // Account chronological constraints
-    #[strum(serialize = "accounts_updated_after_created")]
-    UpdatedAfterCreated,
-    #[strum(serialize = "accounts_deleted_after_created")]
-    DeletedAfterCreated,
-    #[strum(serialize = "accounts_deleted_after_updated")]
-    DeletedAfterUpdated,
-    #[strum(serialize = "accounts_password_changed_after_created")]
-    PasswordChangedAfterCreated,
-}
-
-impl AccountConstraints {
-    /// Creates a new [`AccountConstraints`] from the constraint name.
-    pub fn new(constraint: &str) -> Option<Self> {
-        constraint.parse().ok()
-    }
-
-    /// Returns the category of this constraint violation.
-    pub fn categorize(&self) -> ConstraintCategory {
-        match self {
-            AccountConstraints::UsernameLength
-            | AccountConstraints::UsernameFormat
-            | AccountConstraints::DisplayNameLength
-            | AccountConstraints::DisplayNameNotEmpty
-            | AccountConstraints::EmailFormat
-            | AccountConstraints::EmailLengthMax
-            | AccountConstraints::PasswordHashNotEmpty
-            | AccountConstraints::PasswordHashLengthMin
-            | AccountConstraints::TimezoneFormat
-            | AccountConstraints::LocaleFormat
-            | AccountConstraints::SuspendedNotAdmin => ConstraintCategory::Validation,
-
-            AccountConstraints::UsernameUnique | AccountConstraints::EmailUnique => {
-                ConstraintCategory::Uniqueness
-            }
-
-            AccountConstraints::UpdatedAfterCreated
-            | AccountConstraints::DeletedAfterCreated
-            | AccountConstraints::DeletedAfterUpdated
-            | AccountConstraints::PasswordChangedAfterCreated => ConstraintCategory::Chronological,
-        }
-    }
-}
-
-impl From<AccountConstraints> for String {
-    #[inline]
-    fn from(val: AccountConstraints) -> Self {
-        val.to_string()
-    }
-}
-
-impl TryFrom<String> for AccountConstraints {
-    type Error = strum::ParseError;
-
-    #[inline]
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        value.parse()
-    }
 }
