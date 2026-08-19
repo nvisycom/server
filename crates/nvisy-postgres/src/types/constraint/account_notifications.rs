@@ -8,15 +8,8 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum AccountNotificationConstraints {
-    // Notification validation constraints
     #[strum(serialize = "account_notifications_params_size")]
     ParamsSize,
-
-    // Notification chronological constraints
-    #[strum(serialize = "account_notifications_expires_after_created")]
-    ExpiresAfterCreated,
-    #[strum(serialize = "account_notifications_read_after_created")]
-    ReadAfterCreated,
 }
 
 impl AccountNotificationConstraints {

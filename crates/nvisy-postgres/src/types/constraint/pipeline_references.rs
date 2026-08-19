@@ -11,11 +11,8 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspacePipelineReferenceConstraints {
-    // Foreign-key constraints (referenced row must exist in the workspace)
     #[strum(serialize = "workspace_pipeline_policies_policy_fkey")]
     PolicyReference,
-    #[strum(serialize = "workspace_pipeline_policies_pipeline_fkey")]
-    PolicyPipelineReference,
 }
 
 impl WorkspacePipelineReferenceConstraints {

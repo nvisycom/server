@@ -8,7 +8,6 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspaceConstraints {
-    // Workspace validation constraints
     #[strum(serialize = "workspaces_display_name_length")]
     DisplayNameLength,
     #[strum(serialize = "workspaces_slug_length")]
@@ -21,20 +20,10 @@ pub enum WorkspaceConstraints {
     MetadataSize,
     #[strum(serialize = "workspaces_settings_size")]
     SettingsSize,
-
-    // Workspace uniqueness constraints
     #[strum(serialize = "workspaces_slug_unique_idx")]
     SlugUnique,
     #[strum(serialize = "workspaces_display_name_owner_unique_idx")]
     NameUnique,
-
-    // Workspace chronological constraints
-    #[strum(serialize = "workspaces_updated_after_created")]
-    UpdatedAfterCreated,
-    #[strum(serialize = "workspaces_deleted_after_created")]
-    DeletedAfterCreated,
-    #[strum(serialize = "workspaces_deleted_after_updated")]
-    DeletedAfterUpdated,
 }
 
 impl WorkspaceConstraints {

@@ -32,11 +32,6 @@ impl From<WorkspaceConstraints> for Error<'static> {
             WorkspaceConstraints::SettingsSize => {
                 ErrorKind::BadRequest.with_message("Workspace settings size is invalid")
             }
-            WorkspaceConstraints::UpdatedAfterCreated
-            | WorkspaceConstraints::DeletedAfterCreated
-            | WorkspaceConstraints::DeletedAfterUpdated => {
-                ErrorKind::InternalServerError.into_error()
-            }
         };
 
         error.with_resource("workspace")
@@ -48,9 +43,6 @@ impl From<WorkspaceMemberConstraints> for Error<'static> {
         let error = match c {
             WorkspaceMemberConstraints::MembershipUnique => ErrorKind::Conflict
                 .with_message("This account is already a member of the workspace"),
-            WorkspaceMemberConstraints::UpdatedAfterCreated => {
-                ErrorKind::InternalServerError.into_error()
-            }
         };
 
         error.with_resource("workspace_member")
@@ -65,14 +57,6 @@ impl From<WorkspaceInviteConstraints> for Error<'static> {
             }
             WorkspaceInviteConstraints::WorkspaceIdIdUnique => {
                 ErrorKind::Conflict.with_message("An invite with this identifier already exists")
-            }
-            WorkspaceInviteConstraints::InviteTokenNotEmpty => {
-                ErrorKind::InternalServerError.into_error()
-            }
-            WorkspaceInviteConstraints::ExpiresAfterCreated
-            | WorkspaceInviteConstraints::UpdatedAfterCreated
-            | WorkspaceInviteConstraints::RespondedAfterCreated => {
-                ErrorKind::InternalServerError.into_error()
             }
         };
 
@@ -114,10 +98,6 @@ impl From<WorkspaceWebhookConstraints> for Error<'static> {
             }
             WorkspaceWebhookConstraints::WorkspaceIdIdUnique => {
                 ErrorKind::Conflict.with_message("A webhook with this identifier already exists")
-            }
-            WorkspaceWebhookConstraints::UpdatedAfterCreated
-            | WorkspaceWebhookConstraints::DeletedAfterCreated => {
-                ErrorKind::InternalServerError.into_error()
             }
         };
 

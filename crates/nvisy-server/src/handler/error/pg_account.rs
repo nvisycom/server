@@ -42,12 +42,6 @@ impl From<AccountConstraints> for Error<'static> {
             AccountConstraints::LocaleFormat => {
                 ErrorKind::BadRequest.with_message("Invalid locale format")
             }
-            AccountConstraints::UpdatedAfterCreated
-            | AccountConstraints::DeletedAfterCreated
-            | AccountConstraints::DeletedAfterUpdated
-            | AccountConstraints::PasswordChangedAfterCreated => {
-                ErrorKind::InternalServerError.into_error()
-            }
             AccountConstraints::SuspendedNotAdmin => {
                 ErrorKind::BadRequest.with_message("Admin accounts cannot be suspended")
             }
@@ -66,11 +60,6 @@ impl From<AccountApiTokenConstraints> for Error<'static> {
             AccountApiTokenConstraints::NameLength => {
                 ErrorKind::BadRequest.with_message("Token name is too long")
             }
-            AccountApiTokenConstraints::ExpiredAfterIssued
-            | AccountApiTokenConstraints::DeletedAfterIssued
-            | AccountApiTokenConstraints::LastUsedAfterIssued => {
-                ErrorKind::InternalServerError.into_error()
-            }
         };
 
         error.with_resource("account_api_token")
@@ -82,11 +71,6 @@ impl From<AccountNotificationConstraints> for Error<'static> {
         let error = match constraint {
             AccountNotificationConstraints::ParamsSize => ErrorKind::BadRequest
                 .with_message("Notification params must be between 2 and 4096 bytes"),
-            // Server-controlled timestamps; a violation is a server invariant break.
-            AccountNotificationConstraints::ExpiresAfterCreated
-            | AccountNotificationConstraints::ReadAfterCreated => {
-                ErrorKind::InternalServerError.into_error()
-            }
         };
 
         error.with_resource("notification")

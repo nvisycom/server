@@ -8,39 +8,22 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspaceConnectionConstraints {
-    // Name validation constraints
     #[strum(serialize = "workspace_connections_display_name_length")]
     NameLength,
-
-    // Provider validation constraints
     #[strum(serialize = "workspace_connections_provider_length")]
     ProviderLength,
-
-    // Data validation constraints
     #[strum(serialize = "workspace_connections_data_size")]
     DataSize,
-
-    // Metadata validation constraints
     #[strum(serialize = "workspace_connections_metadata_size")]
     MetadataSize,
-
-    // Schedule validation constraints
     #[strum(serialize = "workspace_connection_schedule_cron_length")]
     ScheduleCronLength,
     #[strum(serialize = "workspace_connection_schedule_import_only")]
     ScheduleImportOnly,
-
-    // Uniqueness constraints
     #[strum(serialize = "workspace_connections_workspace_id_id_key")]
     WorkspaceIdIdUnique,
     #[strum(serialize = "workspace_connections_display_name_unique_idx")]
     NameUnique,
-
-    // Chronological constraints
-    #[strum(serialize = "workspace_connections_updated_after_created")]
-    UpdatedAfterCreated,
-    #[strum(serialize = "workspace_connections_deleted_after_created")]
-    DeletedAfterCreated,
 }
 
 impl WorkspaceConnectionConstraints {

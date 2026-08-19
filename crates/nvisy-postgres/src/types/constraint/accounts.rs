@@ -8,7 +8,6 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum AccountConstraints {
-    // Account validation constraints
     #[strum(serialize = "accounts_username_length")]
     UsernameLength,
     #[strum(serialize = "accounts_username_format")]
@@ -31,22 +30,10 @@ pub enum AccountConstraints {
     LocaleFormat,
     #[strum(serialize = "accounts_suspended_not_admin")]
     SuspendedNotAdmin,
-
-    // Account uniqueness constraints
     #[strum(serialize = "accounts_username_unique_idx")]
     UsernameUnique,
     #[strum(serialize = "accounts_email_address_unique_idx")]
     EmailUnique,
-
-    // Account chronological constraints
-    #[strum(serialize = "accounts_updated_after_created")]
-    UpdatedAfterCreated,
-    #[strum(serialize = "accounts_deleted_after_created")]
-    DeletedAfterCreated,
-    #[strum(serialize = "accounts_deleted_after_updated")]
-    DeletedAfterUpdated,
-    #[strum(serialize = "accounts_password_changed_after_created")]
-    PasswordChangedAfterCreated,
 }
 
 impl AccountConstraints {

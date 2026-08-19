@@ -37,10 +37,6 @@ impl From<WorkspacePipelineConstraints> for Error<'static> {
                 }
                 WorkspacePipelineConstraints::WorkspaceIdIdUnique => ErrorKind::Conflict
                     .with_message("A pipeline with this identifier already exists"),
-                WorkspacePipelineConstraints::UpdatedAfterCreated
-                | WorkspacePipelineConstraints::DeletedAfterCreated => {
-                    ErrorKind::InternalServerError.into_error()
-                }
             };
 
         error.with_resource("pipeline")
@@ -57,9 +53,6 @@ impl From<WorkspacePipelineRunConstraints> for Error<'static> {
                     .with_message("Idempotency key must be 1 to 255 characters"),
                 WorkspacePipelineRunConstraints::IdempotencyUnique => ErrorKind::Conflict
                     .with_message("A run with this idempotency key already exists"),
-                WorkspacePipelineRunConstraints::CompletedAfterStarted => {
-                    ErrorKind::InternalServerError.into_error()
-                }
             };
 
         error.with_resource("pipeline_run")
@@ -68,20 +61,12 @@ impl From<WorkspacePipelineRunConstraints> for Error<'static> {
 
 impl From<WorkspacePipelineReferenceConstraints> for Error<'static> {
     fn from(c: WorkspacePipelineReferenceConstraints) -> Self {
-        let (resource, error) = match c {
-            WorkspacePipelineReferenceConstraints::PolicyReference => (
-                "policy",
-                ErrorKind::BadRequest
-                    .with_message("Referenced policy does not exist in this workspace"),
-            ),
-            // The pipeline side of the FK only fails if the pipeline row vanished
-            // mid-transaction, which is a server-side fault rather than bad input.
-            WorkspacePipelineReferenceConstraints::PolicyPipelineReference => {
-                ("pipeline", ErrorKind::InternalServerError.into_error())
-            }
+        let error = match c {
+            WorkspacePipelineReferenceConstraints::PolicyReference => ErrorKind::BadRequest
+                .with_message("Referenced policy does not exist in this workspace"),
         };
 
-        error.with_resource(resource)
+        error.with_resource("policy")
     }
 }
 
@@ -109,10 +94,6 @@ impl From<WorkspaceConnectionConstraints> for Error<'static> {
                 WorkspaceConnectionConstraints::NameUnique => {
                     ErrorKind::Conflict.with_message("A connection with this name already exists")
                 }
-                WorkspaceConnectionConstraints::UpdatedAfterCreated
-                | WorkspaceConnectionConstraints::DeletedAfterCreated => {
-                    ErrorKind::InternalServerError.into_error()
-                }
             };
 
         error.with_resource("workspace_connection")
@@ -129,11 +110,6 @@ impl From<WorkspaceConnectionSyncConstraints> for Error<'static> {
             }
             WorkspaceConnectionSyncConstraints::OneActivePerConnection => {
                 ErrorKind::Conflict.with_message("A sync is already in progress")
-            }
-            WorkspaceConnectionSyncConstraints::RecordsSyncedNonNegative
-            | WorkspaceConnectionSyncConstraints::AttemptPositive
-            | WorkspaceConnectionSyncConstraints::CompletedAfterStarted => {
-                ErrorKind::InternalServerError.into_error()
             }
         };
 
@@ -167,10 +143,6 @@ impl From<WorkspacePolicyConstraints> for Error<'static> {
             }
             WorkspacePolicyConstraints::WorkspaceIdIdUnique => {
                 ErrorKind::Conflict.with_message("A policy with this identifier already exists")
-            }
-            WorkspacePolicyConstraints::UpdatedAfterCreated
-            | WorkspacePolicyConstraints::DeletedAfterCreated => {
-                ErrorKind::InternalServerError.into_error()
             }
         };
 

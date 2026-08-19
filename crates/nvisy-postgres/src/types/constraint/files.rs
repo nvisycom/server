@@ -8,47 +8,22 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspaceFileConstraints {
-    // File identity validation constraints
     #[strum(serialize = "workspace_files_display_name_length")]
     DisplayNameLength,
     #[strum(serialize = "workspace_files_original_filename_length")]
     OriginalFilenameLength,
     #[strum(serialize = "workspace_files_file_extension_format")]
     FileExtensionFormat,
-
-    // File storage constraints
     #[strum(serialize = "workspace_files_file_size_min")]
     FileSizeMin,
-    #[strum(serialize = "workspace_files_storage_path_not_empty")]
-    StoragePathNotEmpty,
-    #[strum(serialize = "workspace_files_storage_bucket_not_empty")]
-    StorageBucketNotEmpty,
-    #[strum(serialize = "workspace_files_file_hash_sha256_length")]
-    FileHashSha256Length,
-
-    // File metadata constraints
     #[strum(serialize = "workspace_files_metadata_size")]
     MetadataSize,
-
-    // File version constraints
     #[strum(serialize = "workspace_files_version_number_min")]
     VersionNumberMin,
-
-    // Uniqueness constraints
     #[strum(serialize = "workspace_files_workspace_id_id_key")]
     WorkspaceIdIdUnique,
     #[strum(serialize = "workspace_files_source_object_unique_idx")]
     SourceObjectUnique,
-
-    // File chronological constraints
-    #[strum(serialize = "workspace_files_updated_after_created")]
-    UpdatedAfterCreated,
-    #[strum(serialize = "workspace_files_deleted_after_created")]
-    DeletedAfterCreated,
-    #[strum(serialize = "workspace_files_deleted_after_updated")]
-    DeletedAfterUpdated,
-    #[strum(serialize = "workspace_files_expires_after_created")]
-    ExpiresAfterCreated,
 }
 
 impl WorkspaceFileConstraints {

@@ -8,19 +8,10 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum AccountApiTokenConstraints {
-    // Token validation constraints
     #[strum(serialize = "account_api_tokens_display_name_not_empty")]
     NameNotEmpty,
     #[strum(serialize = "account_api_tokens_display_name_length")]
     NameLength,
-
-    // Token chronological constraints
-    #[strum(serialize = "account_api_tokens_expired_after_issued")]
-    ExpiredAfterIssued,
-    #[strum(serialize = "account_api_tokens_deleted_after_issued")]
-    DeletedAfterIssued,
-    #[strum(serialize = "account_api_tokens_last_used_after_issued")]
-    LastUsedAfterIssued,
 }
 
 impl AccountApiTokenConstraints {

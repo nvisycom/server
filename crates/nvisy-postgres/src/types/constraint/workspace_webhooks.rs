@@ -8,11 +8,8 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspaceWebhookConstraints {
-    // Webhook unique constraints
     #[strum(serialize = "workspace_webhooks_workspace_id_id_key")]
     WorkspaceIdIdUnique,
-
-    // Webhook validation constraints
     #[strum(serialize = "workspace_webhooks_display_name_length")]
     DisplayNameLength,
     #[strum(serialize = "workspace_webhooks_description_length")]
@@ -25,12 +22,6 @@ pub enum WorkspaceWebhookConstraints {
     EventsNotEmpty,
     #[strum(serialize = "workspace_webhooks_headers_size")]
     HeadersSize,
-
-    // Webhook chronological constraints
-    #[strum(serialize = "workspace_webhooks_updated_after_created")]
-    UpdatedAfterCreated,
-    #[strum(serialize = "workspace_webhooks_deleted_after_created")]
-    DeletedAfterCreated,
 }
 
 impl WorkspaceWebhookConstraints {

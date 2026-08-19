@@ -8,21 +8,10 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspaceConnectionSyncConstraints {
-    // Size / validation constraints
-    #[strum(serialize = "workspace_connection_syncs_records_synced_non_negative")]
-    RecordsSyncedNonNegative,
-    #[strum(serialize = "workspace_connection_syncs_attempt_positive")]
-    AttemptPositive,
     #[strum(serialize = "workspace_connection_syncs_error_message_length")]
     ErrorMessageLength,
     #[strum(serialize = "workspace_connection_syncs_metadata_size")]
     MetadataSize,
-
-    // Chronological constraints
-    #[strum(serialize = "workspace_connection_syncs_completed_after_started")]
-    CompletedAfterStarted,
-
-    // Uniqueness constraints
     #[strum(serialize = "workspace_connection_syncs_one_active_idx")]
     OneActivePerConnection,
 }

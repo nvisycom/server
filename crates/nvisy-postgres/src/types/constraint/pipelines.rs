@@ -8,47 +8,28 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspacePipelineConstraints {
-    // Pipeline slug validation constraints
     #[strum(serialize = "workspace_pipelines_slug_length")]
     SlugLength,
     #[strum(serialize = "workspace_pipelines_slug_format")]
     SlugFormat,
-
-    // Pipeline name validation constraints
     #[strum(serialize = "workspace_pipelines_display_name_length")]
     NameLength,
-
-    // Pipeline description validation constraints
     #[strum(serialize = "workspace_pipelines_description_length")]
     DescriptionLength,
-
-    // Pipeline definition constraints
     #[strum(serialize = "workspace_pipelines_definition_size")]
     DefinitionSize,
-
-    // Pipeline metadata constraints
     #[strum(serialize = "workspace_pipelines_metadata_size")]
     MetadataSize,
-
-    // Pipeline schedule validation constraints
     #[strum(serialize = "workspace_pipelines_schedule_cron_length")]
     ScheduleCronLength,
     #[strum(serialize = "workspace_pipelines_schedule_requires_cron")]
     ScheduleRequiresCron,
     #[strum(serialize = "workspace_pipelines_schedule_tz_length")]
     ScheduleTzLength,
-
-    // Uniqueness constraints
     #[strum(serialize = "workspace_pipelines_workspace_id_id_key")]
     WorkspaceIdIdUnique,
     #[strum(serialize = "workspace_pipelines_slug_unique_idx")]
     SlugUnique,
-
-    // Pipeline chronological constraints
-    #[strum(serialize = "workspace_pipelines_updated_after_created")]
-    UpdatedAfterCreated,
-    #[strum(serialize = "workspace_pipelines_deleted_after_created")]
-    DeletedAfterCreated,
 }
 
 impl WorkspacePipelineConstraints {

@@ -8,19 +8,12 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspacePipelineRunConstraints {
-    // Size / validation constraints
     #[strum(serialize = "workspace_pipeline_runs_metadata_size")]
     MetadataSize,
     #[strum(serialize = "workspace_pipeline_runs_idempotency_key_length")]
     IdempotencyKeyLength,
-
-    // Uniqueness constraints
     #[strum(serialize = "workspace_pipeline_runs_idempotency_idx")]
     IdempotencyUnique,
-
-    // Chronological constraints
-    #[strum(serialize = "workspace_pipeline_runs_completed_after_started")]
-    CompletedAfterStarted,
 }
 
 impl WorkspacePipelineRunConstraints {

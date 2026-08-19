@@ -8,7 +8,6 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum WorkspaceActivitiesConstraints {
-    // Activity validation constraints
     #[strum(serialize = "workspace_activities_params_size")]
     ParamsSize,
 }

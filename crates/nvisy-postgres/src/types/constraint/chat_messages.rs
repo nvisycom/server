@@ -8,7 +8,6 @@ use strum::{Display, EnumIter, EnumString};
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
 #[serde(into = "String", try_from = "String")]
 pub enum ChatMessageConstraints {
-    // Validation constraints
     #[strum(serialize = "chat_messages_content_size")]
     ContentSize,
 
