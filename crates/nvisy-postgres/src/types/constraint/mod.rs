@@ -154,40 +154,6 @@ impl ConstraintViolation {
         }
     }
 
-    /// Returns the table name associated with this constraint.
-    ///
-    /// This is useful for categorizing errors by the table they affect.
-    pub fn table_name(&self) -> &'static str {
-        match self {
-            // Account-related tables
-            ConstraintViolation::Account(_) => "accounts",
-            ConstraintViolation::AccountNotification(_) => "account_notifications",
-            ConstraintViolation::AccountApiToken(_) => "account_api_tokens",
-
-            // Chat-related tables
-            ConstraintViolation::ChatSession(_) => "chat_sessions",
-            ConstraintViolation::ChatMessage(_) => "chat_messages",
-
-            // Workspace-related tables
-            ConstraintViolation::Workspace(_) => "workspaces",
-            ConstraintViolation::WorkspaceMember(_) => "workspace_members",
-            ConstraintViolation::WorkspaceInvite(_) => "workspace_invites",
-            ConstraintViolation::WorkspaceActivityLog(_) => "workspace_activities",
-            ConstraintViolation::WorkspaceWebhook(_) => "workspace_webhooks",
-
-            // File-related tables
-            ConstraintViolation::WorkspaceFile(_) => "workspace_files",
-
-            // Pipeline-related tables
-            ConstraintViolation::WorkspacePipeline(_) => "workspace_pipelines",
-            ConstraintViolation::WorkspacePipelineRun(_) => "workspace_pipeline_runs",
-            ConstraintViolation::WorkspacePipelineReference(_) => "pipeline_references",
-            ConstraintViolation::WorkspaceConnection(_) => "workspace_connections",
-            ConstraintViolation::WorkspaceConnectionSync(_) => "workspace_connection_syncs",
-            ConstraintViolation::WorkspacePolicy(_) => "workspace_policies",
-        }
-    }
-
     /// Returns the underlying constraint name as used in the database.
     #[inline]
     pub fn constraint_name(&self) -> String {
@@ -272,23 +238,6 @@ mod tests {
             ))
         );
         assert_eq!(ConstraintViolation::new("unknown_constraint"), None);
-    }
-
-    #[test]
-    fn test_table_name_extraction() {
-        let violation = ConstraintViolation::Account(AccountConstraints::EmailFormat);
-        assert_eq!(violation.table_name(), "accounts");
-
-        let violation = ConstraintViolation::Workspace(WorkspaceConstraints::DisplayNameLength);
-        assert_eq!(violation.table_name(), "workspaces");
-
-        let violation =
-            ConstraintViolation::WorkspaceFile(WorkspaceFileConstraints::StoragePathNotEmpty);
-        assert_eq!(violation.table_name(), "workspace_files");
-
-        let violation =
-            ConstraintViolation::WorkspacePolicy(WorkspacePolicyConstraints::NameLength);
-        assert_eq!(violation.table_name(), "workspace_policies");
     }
 
     #[test]
