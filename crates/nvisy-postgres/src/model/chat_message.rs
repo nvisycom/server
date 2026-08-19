@@ -16,6 +16,8 @@ pub struct ChatMessage {
     pub id: Uuid,
     /// Session this message belongs to.
     pub session_id: Uuid,
+    /// Parent in the conversation tree; `None` is a root.
+    pub parent_id: Option<Uuid>,
     /// Author of the message.
     pub role: ChatRole,
     /// Message text, XChaCha20-Poly1305 encrypted with the workspace key.
@@ -24,13 +26,15 @@ pub struct ChatMessage {
     pub created_at: Timestamp,
 }
 
-/// Data for creating a new chat message.
+/// Data for appending a new chat message.
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = chat_messages)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewChatMessage {
     /// Session this message belongs to.
     pub session_id: Uuid,
+    /// Parent in the conversation tree; `None` is a root.
+    pub parent_id: Option<Uuid>,
     /// Author of the message.
     pub role: ChatRole,
     /// Message text, XChaCha20-Poly1305 encrypted with the workspace key.

@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::response::sse::Event;
 use futures::StreamExt;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::NewChatSession;
+use nvisy_postgres::model::{NewChatSession, UpdateChatSession};
 use nvisy_postgres::query::{ChatMessageRepository, ChatSessionRepository};
 use nvisy_postgres::types::ChatRole;
 use tokio_util::sync::CancellationToken;
@@ -27,13 +27,16 @@ use crate::handler::request::{
 use crate::handler::response::{ChatMessage, ChatSession, ChatSessionsPage, ErrorResponse};
 use crate::handler::utility::SseResponse;
 use crate::handler::{Error, Result};
-use crate::service::{ChatService, ServiceState};
+use crate::service::{ChatService, ServiceState, TurnLocation};
 
 /// Tracing target for chat operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::chat";
 
 /// How long a session title seeded from the first message may be.
 const TITLE_MAX: usize = 80;
+
+/// The default session title, until seeded from the first message.
+const DEFAULT_TITLE: &str = "New chat";
 
 /// Creates a new chat session in the workspace.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id, workspace_id = %workspace.id))]
@@ -52,7 +55,7 @@ async fn create_session(
         .create_chat_session(NewChatSession {
             workspace_id: workspace.id,
             account_id: auth_state.account_id,
-            title: request.title.unwrap_or_else(|| "New chat".to_owned()),
+            title: request.title.unwrap_or_else(|| DEFAULT_TITLE.to_owned()),
         })
         .await?;
 
@@ -202,45 +205,55 @@ async fn send_message(
         .await?
         .ok_or_else(|| Error::not_found("chat session"))?;
 
-    // Load prior history, then persist the user's turn. The history passed to the
-    // model excludes the new prompt (it is the `stream_turn` prompt argument).
-    let history = conn.list_chat_messages(session_id).await?;
-    let seed_title = history.is_empty();
-    chat.append_message(
-        &mut conn,
+    // The turn extends the branch the client is on: an explicit parent, else the
+    // session's current leaf.
+    let user_turn = TurnLocation {
         workspace_id,
         session_id,
-        ChatRole::User,
-        &request.content,
+        parent_id: request.parent_id.or(session.current_message_id),
+    };
+
+    // Open the model turn BEFORE persisting anything: resolving the workspace's
+    // language-model connection can fail (409 when none is configured), and a
+    // failed send must not leave an orphan user turn in the history.
+    let mut tokens = chat
+        .stream_turn(&mut conn, user_turn, &request.content)
+        .await?;
+
+    // The turn resolved: persist the user message under the branch, and advance
+    // the session to it (seeding the title on the first message).
+    let user_message = chat
+        .append_message(&mut conn, user_turn, ChatRole::User, &request.content)
+        .await?;
+    let title = (session.title == DEFAULT_TITLE).then(|| seeded_title(&request.content));
+    conn.update_chat_session(
+        session_id,
+        UpdateChatSession {
+            title,
+            current_message_id: Some(Some(user_message.id)),
+            updated_at: None,
+        },
     )
     .await?;
 
-    // Seed the session title from the first message when it still has the default.
-    if seed_title {
-        let title = seeded_title(&request.content);
-        conn.update_chat_session(
-            session_id,
-            nvisy_postgres::model::UpdateChatSession {
-                title: Some(title),
-                updated_at: None,
-            },
-        )
-        .await?;
-    }
-    let _ = session;
+    // The assistant reply replies to the user message just stored.
+    let reply_turn = TurnLocation {
+        parent_id: Some(user_message.id),
+        ..user_turn
+    };
 
-    let mut tokens = chat
-        .stream_turn(&mut conn, workspace_id, &history, &request.content)
-        .await?;
     drop(conn);
 
     let stream = stream! {
         let mut reply = String::new();
-        loop {
+        // Only a normal end-of-stream (`None`) is a complete reply. A shutdown or
+        // a generation error stops mid-reply; persisting that would store a
+        // partial turn as if the assistant had finished, corrupting later history.
+        let completed = loop {
             tokio::select! {
                 // Server shutting down: end the open stream promptly so it does
                 // not block graceful shutdown.
-                () = shutdown.cancelled() => break,
+                () = shutdown.cancelled() => break false,
                 next = tokens.next() => match next {
                     Some(Ok(delta)) => {
                         reply.push_str(&delta);
@@ -250,17 +263,19 @@ async fn send_message(
                     Some(Err(err)) => {
                         tracing::warn!(target: TRACING_TARGET, error = %err, "Chat generation failed");
                         yield error_event(&err.to_string());
-                        break;
+                        break false;
                     }
-                    // Generation finished.
-                    None => break,
+                    // Generation finished normally.
+                    None => break true,
                 },
             }
-        }
+        };
 
-        // Persist the assembled reply (best-effort: the user already saw it).
-        if !reply.is_empty()
-            && let Err(err) = chat.persist_reply(&pg_client, workspace_id, session_id, &reply).await
+        // Persist the assembled reply only on normal completion (best-effort: the
+        // user already saw it), under the user message it answered.
+        if completed
+            && !reply.is_empty()
+            && let Err(err) = chat.persist_reply(reply_turn, &reply).await
         {
             tracing::error!(target: TRACING_TARGET, error = %err, "Failed to persist assistant reply");
         }

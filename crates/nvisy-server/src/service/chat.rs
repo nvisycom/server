@@ -6,14 +6,29 @@
 //! session's history.
 
 use nvisy_inference::{ChatTurn, InferenceClient, TokenStream};
-use nvisy_postgres::model::{ChatMessage, NewChatMessage};
-use nvisy_postgres::query::{ChatMessageRepository, WorkspaceConnectionRepository};
+use nvisy_postgres::PgConn;
+use nvisy_postgres::model::{ChatMessage, NewChatMessage, UpdateChatSession};
+use nvisy_postgres::query::{
+    ChatMessageRepository, ChatSessionRepository, WorkspaceConnectionRepository,
+};
 use nvisy_postgres::types::{ChatRole, ProviderType};
-use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::handler::{ErrorKind, Result};
 use crate::service::{ConnectionConfig, Infra};
+
+/// Where in a conversation a turn happens: the workspace and session it belongs
+/// to, and the message it extends (its parent in the tree; `None` starts a new
+/// root).
+#[derive(Debug, Clone, Copy)]
+pub struct TurnLocation {
+    /// Workspace owning the session (and its encryption key + model connection).
+    pub workspace_id: Uuid,
+    /// Session the turn belongs to.
+    pub session_id: Uuid,
+    /// The message this turn replies to; `None` is a root.
+    pub parent_id: Option<Uuid>,
+}
 
 /// The assistant's system preamble. Kept deliberately narrow: this is a plain
 /// chat assistant with no access to document contents (a hard constraint on a
@@ -77,62 +92,65 @@ impl ChatService {
         })
     }
 
-    /// Streams the assistant's reply to `prompt`, given the session's prior
-    /// messages as context.
+    /// Streams the assistant's reply to `prompt`, using the conversation path
+    /// ending at `parent_id` as context.
     ///
-    /// Returns a [`TokenStream`] of text deltas; the caller persists the user
-    /// prompt and the assembled reply around it. `history` is the session's
-    /// stored messages in chronological order (with encrypted content).
+    /// Loads the session's messages, walks the path (root → `parent_id`),
+    /// decrypts it, and streams the model's reply. Resolving the model connection
+    /// happens first, so a missing connection fails before the caller persists
+    /// anything. Returns a [`TokenStream`] of text deltas.
     pub async fn stream_turn(
         &self,
         conn: &mut PgConn,
-        workspace_id: Uuid,
-        history: &[ChatMessage],
+        at: TurnLocation,
         prompt: &str,
     ) -> Result<TokenStream> {
-        let client = self.resolve_client(conn, workspace_id).await?;
-        let history = self.to_history(workspace_id, history)?;
+        let client = self.resolve_client(conn, at.workspace_id).await?;
+        let messages = conn.list_chat_messages(at.session_id).await?;
+        let path = ChatMessage::path_to(&messages, at.parent_id);
+        let history = self.to_history(at.workspace_id, &path)?;
         Ok(client.stream_chat(prompt, history))
     }
 
-    /// Appends a message to a session, encrypting its content under the
-    /// workspace key. Returns the stored row.
+    /// Appends a message at `at` in the session's tree, encrypting its content
+    /// under the workspace key. Returns the stored row.
     pub async fn append_message(
         &self,
         conn: &mut PgConn,
-        workspace_id: Uuid,
-        session_id: Uuid,
+        at: TurnLocation,
         role: ChatRole,
         text: &str,
     ) -> Result<ChatMessage> {
-        let content = self.infra.crypto.encrypt(workspace_id, text.as_bytes())?;
+        let content = self
+            .infra
+            .crypto
+            .encrypt(at.workspace_id, text.as_bytes())?;
         Ok(conn
             .append_chat_message(NewChatMessage {
-                session_id,
+                session_id: at.session_id,
+                parent_id: at.parent_id,
                 role,
                 content,
             })
             .await?)
     }
 
-    /// Persists the assistant's assembled reply on its own pooled connection.
+    /// Persists the assistant's assembled reply at `at`, and advances the
+    /// session's active leaf to it.
     ///
-    /// Called after the stream completes (the request connection is already
-    /// released), so it acquires a fresh connection.
-    pub async fn persist_reply(
-        &self,
-        pg_client: &PgClient,
-        workspace_id: Uuid,
-        session_id: Uuid,
-        reply: &str,
-    ) -> Result<()> {
-        let mut conn = pg_client.get_connection().await?;
-        self.append_message(
-            &mut conn,
-            workspace_id,
-            session_id,
-            ChatRole::Assistant,
-            reply,
+    /// Acquires its own connection: it runs after the stream completes, when the
+    /// request connection has already been released back to the pool.
+    pub async fn persist_reply(&self, at: TurnLocation, reply: &str) -> Result<()> {
+        let mut conn = self.infra.postgres.get_connection().await?;
+        let message = self
+            .append_message(&mut conn, at, ChatRole::Assistant, reply)
+            .await?;
+        conn.update_chat_session(
+            at.session_id,
+            UpdateChatSession {
+                current_message_id: Some(Some(message.id)),
+                ..Default::default()
+            },
         )
         .await?;
         Ok(())
@@ -148,12 +166,12 @@ impl ChatService {
         })
     }
 
-    /// Builds the chat history from stored messages (decrypting each), preceded
-    /// by the assistant preamble as a system instruction.
-    fn to_history(&self, workspace_id: Uuid, messages: &[ChatMessage]) -> Result<Vec<ChatTurn>> {
-        let mut history = Vec::with_capacity(messages.len() + 1);
+    /// Builds the chat history from a decrypted path, preceded by the assistant
+    /// preamble as a system instruction.
+    fn to_history(&self, workspace_id: Uuid, path: &[&ChatMessage]) -> Result<Vec<ChatTurn>> {
+        let mut history = Vec::with_capacity(path.len() + 1);
         history.push(ChatTurn::system(PREAMBLE));
-        for message in messages {
+        for message in path {
             let content = self.decrypt_content(workspace_id, message)?;
             history.push(match message.role {
                 ChatRole::System => ChatTurn::system(content),

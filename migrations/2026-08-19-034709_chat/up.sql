@@ -24,6 +24,11 @@ CREATE TABLE chat_sessions (
     title           TEXT            NOT NULL DEFAULT 'New chat',
     CONSTRAINT chat_sessions_title_length CHECK (length(trim(title)) BETWEEN 1 AND 255),
 
+    -- The active leaf of the message tree: the message this conversation
+    -- currently ends at. A client resumes from here, and a new turn without an
+    -- explicit parent extends this. The FK is added after chat_messages exists.
+    current_message_id UUID          DEFAULT NULL,
+
     -- Lifecycle timestamps
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp,
@@ -40,6 +45,7 @@ COMMENT ON COLUMN chat_sessions.id IS 'Unique session identifier';
 COMMENT ON COLUMN chat_sessions.workspace_id IS 'Workspace this session belongs to';
 COMMENT ON COLUMN chat_sessions.account_id IS 'Account that opened the session';
 COMMENT ON COLUMN chat_sessions.title IS 'Human-readable title (seeded from the first message)';
+COMMENT ON COLUMN chat_sessions.current_message_id IS 'Active leaf of the message tree (resume point)';
 COMMENT ON COLUMN chat_sessions.created_at IS 'Session creation timestamp';
 COMMENT ON COLUMN chat_sessions.updated_at IS 'Timestamp of the most recent message';
 COMMENT ON COLUMN chat_sessions.deleted_at IS 'Soft-deletion timestamp; NULL means live';
@@ -52,6 +58,11 @@ CREATE TABLE chat_messages (
     -- References
     session_id      UUID            NOT NULL REFERENCES chat_sessions (id) ON DELETE CASCADE,
 
+    -- The message this one replies to (its parent in the conversation tree).
+    -- NULL is a root. A regenerated reply is a sibling: another child of the same
+    -- parent. The active conversation is the path from a leaf back to the root.
+    parent_id       UUID            DEFAULT NULL REFERENCES chat_messages (id) ON DELETE CASCADE,
+
     -- Message details. The content is stored XChaCha20-Poly1305 encrypted with
     -- the workspace-derived key (a user may paste sensitive text into the
     -- assistant), so it is opaque bytes rather than searchable text.
@@ -63,13 +74,25 @@ CREATE TABLE chat_messages (
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT current_timestamp
 );
 
--- Ordered history of a session (oldest first when read).
-CREATE INDEX chat_messages_session_created_idx
-    ON chat_messages (session_id, created_at);
+-- All of a session's messages (the whole tree; the path is walked in-app).
+CREATE INDEX chat_messages_session_idx
+    ON chat_messages (session_id);
 
-COMMENT ON TABLE chat_messages IS 'Ordered messages of a chat session.';
+-- Walk a node's children (sibling branches), and enforce the parent FK lookup.
+CREATE INDEX chat_messages_parent_idx
+    ON chat_messages (parent_id)
+    WHERE parent_id IS NOT NULL;
+
+-- The active-leaf pointer references a message; add the FK now that both tables
+-- exist. A deleted leaf clears the pointer rather than cascading the session.
+ALTER TABLE chat_sessions
+    ADD CONSTRAINT chat_sessions_current_message_id_fkey
+    FOREIGN KEY (current_message_id) REFERENCES chat_messages (id) ON DELETE SET NULL;
+
+COMMENT ON TABLE chat_messages IS 'Messages of a chat session, as a conversation tree.';
 COMMENT ON COLUMN chat_messages.id IS 'Unique message identifier';
 COMMENT ON COLUMN chat_messages.session_id IS 'Session this message belongs to';
-COMMENT ON COLUMN chat_messages.role IS 'Author of the message (user or assistant)';
+COMMENT ON COLUMN chat_messages.parent_id IS 'Parent in the conversation tree; NULL is a root';
+COMMENT ON COLUMN chat_messages.role IS 'Author of the message (system, user, or assistant)';
 COMMENT ON COLUMN chat_messages.content IS 'XChaCha20-Poly1305 encrypted message text';
 COMMENT ON COLUMN chat_messages.created_at IS 'Message creation timestamp';

@@ -30,4 +30,9 @@ pub struct SendChatMessage {
     /// The user's message.
     #[validate(length(min = 1, max = 65536))]
     pub content: String,
+    /// The message this turn replies to (the branch being extended). Omit to
+    /// continue from the session's current leaf; use an earlier message's id to
+    /// branch (e.g. edit-and-resend).
+    #[serde(default)]
+    pub parent_id: Option<Uuid>,
 }

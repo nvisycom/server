@@ -19,6 +19,9 @@ pub struct ChatSession {
     pub id: Uuid,
     /// Human-readable title.
     pub title: String,
+    /// Active leaf of the message tree (the conversation's resume point).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_message_id: Option<Uuid>,
     /// When the session was created.
     pub created_at: Timestamp,
     /// When the session was last active.
@@ -31,6 +34,7 @@ impl ChatSession {
         Self {
             id: session.id,
             title: session.title,
+            current_message_id: session.current_message_id,
             created_at: session.created_at.into(),
             updated_at: session.updated_at.into(),
         }
@@ -46,6 +50,9 @@ pub type ChatSessionsPage = Page<ChatSession>;
 pub struct ChatMessage {
     /// Unique message identifier.
     pub id: Uuid,
+    /// Parent in the conversation tree; absent for a root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<Uuid>,
     /// Author of the message.
     pub role: ChatRole,
     /// Message text.
@@ -65,6 +72,7 @@ impl ChatMessage {
         let content = chat.decrypt_content(workspace_id, &message)?;
         Ok(Self {
             id: message.id,
+            parent_id: message.parent_id,
             role: message.role,
             content,
             created_at: message.created_at.into(),

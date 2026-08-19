@@ -56,9 +56,13 @@ pub trait WorkspaceConnectionRepository {
         provider: &str,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceConnection>>> + Send;
 
-    /// Finds the workspace's most recently updated live connection of a given
-    /// capability (e.g. its language model), if any. Resolves a capability
+    /// Finds the workspace's most recently updated live, enabled connection of a
+    /// given capability (e.g. its language model), if any. Resolves a capability
     /// connection without decrypting every connection's config.
+    ///
+    /// Disabled (`is_active = false`) connections are excluded: a disabled
+    /// connection is not usable, and a newer disabled one must not shadow an
+    /// active one.
     fn find_connection_by_type(
         &mut self,
         workspace_id: Uuid,
@@ -232,6 +236,7 @@ impl WorkspaceConnectionRepository for PgConnection {
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::provider_type.eq(provider_type))
             .filter(dsl::deleted_at.is_null())
+            .filter(dsl::is_active.eq(true))
             .order(dsl::updated_at.desc())
             .select(WorkspaceConnection::as_select())
             .first(self)

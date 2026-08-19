@@ -133,6 +133,7 @@ diesel::table! {
     chat_messages (id) {
         id -> Uuid,
         session_id -> Uuid,
+        parent_id -> Nullable<Uuid>,
         role -> ChatRole,
         content -> Bytea,
         created_at -> Timestamptz,
@@ -147,6 +148,7 @@ diesel::table! {
         workspace_id -> Uuid,
         account_id -> Uuid,
         title -> Text,
+        current_message_id -> Nullable<Uuid>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,
@@ -416,7 +418,6 @@ diesel::table! {
 
 diesel::joinable!(account_api_tokens -> accounts (account_id));
 diesel::joinable!(account_notifications -> accounts (account_id));
-diesel::joinable!(chat_messages -> chat_sessions (session_id));
 diesel::joinable!(chat_sessions -> accounts (account_id));
 diesel::joinable!(chat_sessions -> workspaces (workspace_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));

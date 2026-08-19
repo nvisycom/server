@@ -19,6 +19,8 @@ pub struct ChatSession {
     pub account_id: Uuid,
     /// Human-readable title, seeded from the first message.
     pub title: String,
+    /// Active leaf of the message tree (the conversation's resume point).
+    pub current_message_id: Option<Uuid>,
     /// Session creation timestamp.
     pub created_at: Timestamp,
     /// Timestamp of the most recent message.
@@ -47,6 +49,8 @@ pub struct NewChatSession {
 pub struct UpdateChatSession {
     /// New title.
     pub title: Option<String>,
+    /// New active leaf of the message tree.
+    pub current_message_id: Option<Option<Uuid>>,
     /// New most-recent-activity timestamp.
     pub updated_at: Option<Timestamp>,
 }
