@@ -88,9 +88,10 @@ async fn create_connection(
         validate_sync_input(sync)?;
     }
 
-    // The provider column is derived from the typed config so the two can never
-    // disagree; the full config is encrypted at rest.
+    // The provider and its capability type are derived from the typed config so
+    // they can never disagree with it; the full config is encrypted at rest.
     let provider = request.config.provider_id().to_owned();
+    let provider_type = request.config.provider_type();
     let encrypted_data = crypto.encrypt_json(workspace.id, &request.config)?;
 
     let new_connection = NewWorkspaceConnection {
@@ -98,6 +99,7 @@ async fn create_connection(
         account_id: auth_state.account_id,
         display_name: request.display_name,
         provider,
+        provider_type,
         encrypted_data,
         is_active: request.is_active,
         metadata: None,

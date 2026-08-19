@@ -8,6 +8,7 @@
 
 use nvisy_inference::providers::LlmConfig;
 use nvisy_object::providers::StorageConfig;
+use nvisy_postgres::types::ProviderType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +33,16 @@ impl ConnectionConfig {
         match self {
             Self::ObjectStore(config) => config.provider_id(),
             Self::Inference(config) => config.provider_id(),
+        }
+    }
+
+    /// The capability category of this config, stored on the connection so it can
+    /// be found by what it does without decrypting the config.
+    #[must_use]
+    pub fn provider_type(&self) -> ProviderType {
+        match self {
+            Self::ObjectStore(_) => ProviderType::ObjectStore,
+            Self::Inference(_) => ProviderType::LanguageModel,
         }
     }
 

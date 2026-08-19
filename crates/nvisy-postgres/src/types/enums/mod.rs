@@ -8,6 +8,12 @@
 pub mod api_token_type;
 pub mod notification_event;
 
+// Chat-related enumerations
+pub mod chat_role;
+
+// Connection-related enumerations
+pub mod provider_type;
+
 // Workspace-related enumerations
 pub mod activity_type;
 pub mod invite_status;
@@ -29,12 +35,14 @@ pub mod pipeline_trigger_type;
 
 pub use activity_type::{ActivityCategory, ActivityType};
 pub use api_token_type::ApiTokenType;
+pub use chat_role::ChatRole;
 pub use file_kind::FileKind;
 pub use invite_status::InviteStatus;
 pub use notification_event::NotificationEvent;
 pub use pipeline_run_status::PipelineRunStatus;
 pub use pipeline_status::PipelineStatus;
 pub use pipeline_trigger_type::PipelineTriggerType;
+pub use provider_type::ProviderType;
 pub use sync_deletion_policy::SyncDeletionPolicy;
 pub use sync_mode::SyncMode;
 pub use sync_status::SyncStatus;

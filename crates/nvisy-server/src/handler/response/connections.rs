@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::{WorkspaceConnection, WorkspaceConnectionSchedule};
-use nvisy_postgres::types::{ConnectionId, Handle, SyncDeletionPolicy, SyncMode};
+use nvisy_postgres::types::{ConnectionId, Handle, ProviderType, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +41,8 @@ pub struct Connection {
     pub display_name: String,
     /// Provider identifier (`s3`, `azure`, `gcs`, `openai`, `ollama`, ...).
     pub provider: String,
+    /// Capability category of the provider (object store, language model, ...).
+    pub provider_type: ProviderType,
     /// Whether the connection is enabled.
     pub is_active: bool,
     /// Sync configuration; present only for sync-capable connections.
@@ -105,6 +107,7 @@ impl Connection {
             created_by,
             display_name: connection.display_name,
             provider: connection.provider,
+            provider_type: connection.provider_type,
             is_active: connection.is_active,
             sync,
             created_at: connection.created_at.into(),
