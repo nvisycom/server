@@ -1,12 +1,9 @@
 //! Accounts table constraint violations.
 
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString};
+use strum::EnumString;
 
 /// Account table constraint violations.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
-#[serde(into = "String", try_from = "String")]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, EnumString)]
 pub enum AccountConstraints {
     #[strum(serialize = "accounts_username_length")]
     UsernameLength,
@@ -34,27 +31,4 @@ pub enum AccountConstraints {
     UsernameUnique,
     #[strum(serialize = "accounts_email_address_unique_idx")]
     EmailUnique,
-}
-
-impl AccountConstraints {
-    /// Creates a new [`AccountConstraints`] from the constraint name.
-    pub fn new(constraint: &str) -> Option<Self> {
-        constraint.parse().ok()
-    }
-}
-
-impl From<AccountConstraints> for String {
-    #[inline]
-    fn from(val: AccountConstraints) -> Self {
-        val.to_string()
-    }
-}
-
-impl TryFrom<String> for AccountConstraints {
-    type Error = strum::ParseError;
-
-    #[inline]
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        value.parse()
-    }
 }

@@ -1,12 +1,9 @@
 //! Workspace webhooks table constraint violations.
 
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString};
+use strum::EnumString;
 
 /// Workspace webhooks table constraint violations.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
-#[serde(into = "String", try_from = "String")]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, EnumString)]
 pub enum WorkspaceWebhookConstraints {
     #[strum(serialize = "workspace_webhooks_workspace_id_id_key")]
     WorkspaceIdIdUnique,
@@ -22,27 +19,4 @@ pub enum WorkspaceWebhookConstraints {
     EventsNotEmpty,
     #[strum(serialize = "workspace_webhooks_headers_size")]
     HeadersSize,
-}
-
-impl WorkspaceWebhookConstraints {
-    /// Creates a new [`WorkspaceWebhookConstraints`] from the constraint name.
-    pub fn new(constraint: &str) -> Option<Self> {
-        constraint.parse().ok()
-    }
-}
-
-impl From<WorkspaceWebhookConstraints> for String {
-    #[inline]
-    fn from(val: WorkspaceWebhookConstraints) -> Self {
-        val.to_string()
-    }
-}
-
-impl TryFrom<String> for WorkspaceWebhookConstraints {
-    type Error = strum::ParseError;
-
-    #[inline]
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        value.parse()
-    }
 }

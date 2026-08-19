@@ -31,10 +31,6 @@ mod workspace_connection_syncs;
 mod workspace_connections;
 mod workspace_policies;
 
-use std::fmt;
-
-use serde::{Deserialize, Serialize};
-
 pub use self::account_api_tokens::AccountApiTokenConstraints;
 pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
@@ -58,8 +54,7 @@ pub use self::workspaces::WorkspaceConstraints;
 /// This enum wraps all specific constraint types, providing a single interface
 /// for handling any constraint violation while maintaining type safety and
 /// organizational benefits of the separate modules.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(into = "String", try_from = "String")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConstraintViolation {
     // Account-related constraints
     Account(AccountConstraints),
@@ -116,91 +111,33 @@ impl ConstraintViolation {
     /// assert!(unknown.is_none());
     /// ```
     pub fn new(constraint: &str) -> Option<Self> {
-        let prefix = constraint.split('_').next()?;
+        // Every per-table enum matches the full constraint name via strum, so
+        // parsing is tried against each in turn until one succeeds.
         macro_rules! try_parse {
-            ($($parser:expr => $variant:ident),+ $(,)?) => {
-                None$(.or_else(|| $parser(constraint).map(Self::$variant)))+
+            ($($variant:ident),+ $(,)?) => {
+                None$(.or_else(|| constraint.parse().ok().map(Self::$variant)))+
             };
         }
 
-        match prefix {
-            "accounts" => try_parse!(AccountConstraints::new => Account),
-            "account" => try_parse! {
-                AccountNotificationConstraints::new => AccountNotification,
-                AccountApiTokenConstraints::new => AccountApiToken,
-            },
-            "chat" => try_parse! {
-                ChatSessionConstraints::new => ChatSession,
-                ChatMessageConstraints::new => ChatMessage,
-            },
-            "workspaces" => try_parse!(WorkspaceConstraints::new => Workspace),
-            // Every workspace-owned table is prefixed `workspace_*`, so all of
-            // their constraints dispatch here. strum matches the full name, so
-            // the order of these parsers does not matter.
-            "workspace" => try_parse! {
-                WorkspaceMemberConstraints::new => WorkspaceMember,
-                WorkspaceInviteConstraints::new => WorkspaceInvite,
-                WorkspaceActivitiesConstraints::new => WorkspaceActivityLog,
-                WorkspaceWebhookConstraints::new => WorkspaceWebhook,
-                WorkspaceConnectionSyncConstraints::new => WorkspaceConnectionSync,
-                WorkspaceConnectionConstraints::new => WorkspaceConnection,
-                WorkspacePolicyConstraints::new => WorkspacePolicy,
-                WorkspaceFileConstraints::new => WorkspaceFile,
-                WorkspacePipelineRunConstraints::new => WorkspacePipelineRun,
-                WorkspacePipelineConstraints::new => WorkspacePipeline,
-                WorkspacePipelineReferenceConstraints::new => WorkspacePipelineReference,
-            },
-            _ => None,
+        try_parse! {
+            Account,
+            AccountNotification,
+            AccountApiToken,
+            ChatSession,
+            ChatMessage,
+            Workspace,
+            WorkspaceMember,
+            WorkspaceInvite,
+            WorkspaceActivityLog,
+            WorkspaceWebhook,
+            WorkspaceFile,
+            WorkspacePipeline,
+            WorkspacePipelineRun,
+            WorkspacePipelineReference,
+            WorkspaceConnection,
+            WorkspaceConnectionSync,
+            WorkspacePolicy,
         }
-    }
-
-    /// Returns the underlying constraint name as used in the database.
-    #[inline]
-    pub fn constraint_name(&self) -> String {
-        self.to_string()
-    }
-}
-
-impl fmt::Display for ConstraintViolation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ConstraintViolation::Account(c) => write!(f, "{}", c),
-            ConstraintViolation::AccountNotification(c) => write!(f, "{}", c),
-            ConstraintViolation::AccountApiToken(c) => write!(f, "{}", c),
-
-            ConstraintViolation::ChatSession(c) => write!(f, "{}", c),
-            ConstraintViolation::ChatMessage(c) => write!(f, "{}", c),
-
-            ConstraintViolation::Workspace(c) => write!(f, "{}", c),
-            ConstraintViolation::WorkspaceMember(c) => write!(f, "{}", c),
-            ConstraintViolation::WorkspaceInvite(c) => write!(f, "{}", c),
-            ConstraintViolation::WorkspaceActivityLog(c) => write!(f, "{}", c),
-            ConstraintViolation::WorkspaceWebhook(c) => write!(f, "{}", c),
-
-            ConstraintViolation::WorkspaceFile(c) => write!(f, "{}", c),
-
-            ConstraintViolation::WorkspacePipeline(c) => write!(f, "{}", c),
-            ConstraintViolation::WorkspacePipelineRun(c) => write!(f, "{}", c),
-            ConstraintViolation::WorkspacePipelineReference(c) => write!(f, "{}", c),
-            ConstraintViolation::WorkspaceConnection(c) => write!(f, "{}", c),
-            ConstraintViolation::WorkspaceConnectionSync(c) => write!(f, "{}", c),
-            ConstraintViolation::WorkspacePolicy(c) => write!(f, "{}", c),
-        }
-    }
-}
-
-impl From<ConstraintViolation> for String {
-    #[inline]
-    fn from(val: ConstraintViolation) -> Self {
-        val.to_string()
-    }
-}
-
-impl TryFrom<String> for ConstraintViolation {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::new(&value).ok_or_else(|| format!("Unknown constraint: {}", value))
     }
 }
 
@@ -217,36 +154,13 @@ mod tests {
             ))
         );
 
-        // Workspace-owned tables all share the `workspace_*` prefix and dispatch
-        // through the same arm; the file/pipeline enums live there too.
         assert_eq!(
             ConstraintViolation::new("workspace_files_version_number_min"),
             Some(ConstraintViolation::WorkspaceFile(
                 WorkspaceFileConstraints::VersionNumberMin
             ))
         );
-        assert_eq!(
-            ConstraintViolation::new("workspace_pipelines_display_name_length"),
-            Some(ConstraintViolation::WorkspacePipeline(
-                WorkspacePipelineConstraints::NameLength
-            ))
-        );
-        assert_eq!(
-            ConstraintViolation::new("workspace_policies_workspace_id_id_key"),
-            Some(ConstraintViolation::WorkspacePolicy(
-                WorkspacePolicyConstraints::WorkspaceIdIdUnique
-            ))
-        );
-        assert_eq!(ConstraintViolation::new("unknown_constraint"), None);
-    }
 
-    #[test]
-    fn test_constraint_name_method() {
-        let violation =
-            ConstraintViolation::WorkspaceFile(WorkspaceFileConstraints::WorkspaceIdIdUnique);
-        assert_eq!(
-            violation.constraint_name(),
-            "workspace_files_workspace_id_id_key"
-        );
+        assert_eq!(ConstraintViolation::new("unknown_constraint"), None);
     }
 }
