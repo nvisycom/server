@@ -3,8 +3,6 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-use super::ConstraintCategory;
-
 /// Workspace connections table constraint violations.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
@@ -49,26 +47,6 @@ impl WorkspaceConnectionConstraints {
     /// Creates a new [`WorkspaceConnectionConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
-    }
-
-    /// Returns the category of this constraint violation.
-    pub fn categorize(&self) -> ConstraintCategory {
-        match self {
-            WorkspaceConnectionConstraints::NameLength
-            | WorkspaceConnectionConstraints::ProviderLength
-            | WorkspaceConnectionConstraints::DataSize
-            | WorkspaceConnectionConstraints::MetadataSize
-            | WorkspaceConnectionConstraints::ScheduleCronLength
-            | WorkspaceConnectionConstraints::ScheduleImportOnly => ConstraintCategory::Validation,
-
-            WorkspaceConnectionConstraints::WorkspaceIdIdUnique
-            | WorkspaceConnectionConstraints::NameUnique => ConstraintCategory::Uniqueness,
-
-            WorkspaceConnectionConstraints::UpdatedAfterCreated
-            | WorkspaceConnectionConstraints::DeletedAfterCreated => {
-                ConstraintCategory::Chronological
-            }
-        }
     }
 }
 

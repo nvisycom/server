@@ -3,8 +3,6 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-use super::ConstraintCategory;
-
 /// Account notifications table constraint violations.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
@@ -25,16 +23,6 @@ impl AccountNotificationConstraints {
     /// Creates a new [`AccountNotificationConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
-    }
-
-    /// Returns the category of this constraint violation.
-    pub fn categorize(&self) -> ConstraintCategory {
-        match self {
-            AccountNotificationConstraints::ParamsSize => ConstraintCategory::Validation,
-
-            AccountNotificationConstraints::ExpiresAfterCreated
-            | AccountNotificationConstraints::ReadAfterCreated => ConstraintCategory::Chronological,
-        }
     }
 }
 

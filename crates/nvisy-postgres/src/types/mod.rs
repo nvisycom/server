@@ -14,7 +14,7 @@ mod utilities;
 pub use constants::{DEFAULT_RETENTION_DAYS, RECENTLY_SENT_HOURS};
 pub use constraint::{
     AccountApiTokenConstraints, AccountConstraints, AccountNotificationConstraints,
-    ChatMessageConstraints, ChatSessionConstraints, ConstraintCategory, ConstraintViolation,
+    ChatMessageConstraints, ChatSessionConstraints, ConstraintViolation,
     WorkspaceActivitiesConstraints, WorkspaceConnectionConstraints,
     WorkspaceConnectionSyncConstraints, WorkspaceConstraints, WorkspaceFileConstraints,
     WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspacePipelineConstraints,

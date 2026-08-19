@@ -3,8 +3,6 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-use super::ConstraintCategory;
-
 /// Files table constraint violations.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
@@ -57,29 +55,6 @@ impl WorkspaceFileConstraints {
     /// Creates a new [`WorkspaceFileConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
-    }
-
-    /// Returns the category of this constraint violation.
-    pub fn categorize(&self) -> ConstraintCategory {
-        match self {
-            WorkspaceFileConstraints::DisplayNameLength
-            | WorkspaceFileConstraints::OriginalFilenameLength
-            | WorkspaceFileConstraints::FileExtensionFormat
-            | WorkspaceFileConstraints::FileSizeMin
-            | WorkspaceFileConstraints::StoragePathNotEmpty
-            | WorkspaceFileConstraints::StorageBucketNotEmpty
-            | WorkspaceFileConstraints::FileHashSha256Length
-            | WorkspaceFileConstraints::MetadataSize
-            | WorkspaceFileConstraints::VersionNumberMin => ConstraintCategory::Validation,
-
-            WorkspaceFileConstraints::WorkspaceIdIdUnique
-            | WorkspaceFileConstraints::SourceObjectUnique => ConstraintCategory::Uniqueness,
-
-            WorkspaceFileConstraints::UpdatedAfterCreated
-            | WorkspaceFileConstraints::DeletedAfterCreated
-            | WorkspaceFileConstraints::DeletedAfterUpdated
-            | WorkspaceFileConstraints::ExpiresAfterCreated => ConstraintCategory::Chronological,
-        }
     }
 }
 

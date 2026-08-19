@@ -3,8 +3,6 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-use super::ConstraintCategory;
-
 /// Pipelines table constraint violations.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
@@ -57,29 +55,6 @@ impl WorkspacePipelineConstraints {
     /// Creates a new [`WorkspacePipelineConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
-    }
-
-    /// Returns the category of this constraint violation.
-    pub fn categorize(&self) -> ConstraintCategory {
-        match self {
-            WorkspacePipelineConstraints::SlugLength
-            | WorkspacePipelineConstraints::SlugFormat
-            | WorkspacePipelineConstraints::NameLength
-            | WorkspacePipelineConstraints::DescriptionLength
-            | WorkspacePipelineConstraints::DefinitionSize
-            | WorkspacePipelineConstraints::MetadataSize
-            | WorkspacePipelineConstraints::ScheduleCronLength
-            | WorkspacePipelineConstraints::ScheduleRequiresCron
-            | WorkspacePipelineConstraints::ScheduleTzLength => ConstraintCategory::Validation,
-
-            WorkspacePipelineConstraints::WorkspaceIdIdUnique
-            | WorkspacePipelineConstraints::SlugUnique => ConstraintCategory::Uniqueness,
-
-            WorkspacePipelineConstraints::UpdatedAfterCreated
-            | WorkspacePipelineConstraints::DeletedAfterCreated => {
-                ConstraintCategory::Chronological
-            }
-        }
     }
 }
 

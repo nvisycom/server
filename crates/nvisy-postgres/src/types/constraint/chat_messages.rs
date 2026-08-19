@@ -3,8 +3,6 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-use super::ConstraintCategory;
-
 /// Chat messages table constraint violations.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
@@ -25,15 +23,6 @@ impl ChatMessageConstraints {
     /// Creates a new [`ChatMessageConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
-    }
-
-    /// Returns the category of this constraint violation.
-    pub fn categorize(&self) -> ConstraintCategory {
-        match self {
-            ChatMessageConstraints::ContentSize => ConstraintCategory::Validation,
-            ChatMessageConstraints::IdSession => ConstraintCategory::Uniqueness,
-            ChatMessageConstraints::Parent => ConstraintCategory::BusinessLogic,
-        }
     }
 }
 

@@ -3,8 +3,6 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-use super::ConstraintCategory;
-
 /// Workspace table constraint violations.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
@@ -43,26 +41,6 @@ impl WorkspaceConstraints {
     /// Creates a new [`WorkspaceConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
-    }
-
-    /// Returns the category of this constraint violation.
-    pub fn categorize(&self) -> ConstraintCategory {
-        match self {
-            WorkspaceConstraints::DisplayNameLength
-            | WorkspaceConstraints::SlugLength
-            | WorkspaceConstraints::SlugFormat
-            | WorkspaceConstraints::DescriptionLengthMax
-            | WorkspaceConstraints::MetadataSize
-            | WorkspaceConstraints::SettingsSize => ConstraintCategory::Validation,
-
-            WorkspaceConstraints::SlugUnique | WorkspaceConstraints::NameUnique => {
-                ConstraintCategory::Uniqueness
-            }
-
-            WorkspaceConstraints::UpdatedAfterCreated
-            | WorkspaceConstraints::DeletedAfterCreated
-            | WorkspaceConstraints::DeletedAfterUpdated => ConstraintCategory::Chronological,
-        }
     }
 }
 

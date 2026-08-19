@@ -3,8 +3,6 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-use super::ConstraintCategory;
-
 /// Foreign-key violations on the pipeline → policy join table.
 ///
 /// These fire when a pipeline references a policy id that does not exist in its
@@ -24,11 +22,6 @@ impl WorkspacePipelineReferenceConstraints {
     /// Creates a new [`WorkspacePipelineReferenceConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
-    }
-
-    /// Returns the category of this constraint violation.
-    pub fn categorize(&self) -> ConstraintCategory {
-        ConstraintCategory::BusinessLogic
     }
 }
 

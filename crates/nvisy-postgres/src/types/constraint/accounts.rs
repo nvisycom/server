@@ -3,8 +3,6 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-use super::ConstraintCategory;
-
 /// Account table constraint violations.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
@@ -55,32 +53,6 @@ impl AccountConstraints {
     /// Creates a new [`AccountConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
-    }
-
-    /// Returns the category of this constraint violation.
-    pub fn categorize(&self) -> ConstraintCategory {
-        match self {
-            AccountConstraints::UsernameLength
-            | AccountConstraints::UsernameFormat
-            | AccountConstraints::DisplayNameLength
-            | AccountConstraints::DisplayNameNotEmpty
-            | AccountConstraints::EmailFormat
-            | AccountConstraints::EmailLengthMax
-            | AccountConstraints::PasswordHashNotEmpty
-            | AccountConstraints::PasswordHashLengthMin
-            | AccountConstraints::TimezoneFormat
-            | AccountConstraints::LocaleFormat
-            | AccountConstraints::SuspendedNotAdmin => ConstraintCategory::Validation,
-
-            AccountConstraints::UsernameUnique | AccountConstraints::EmailUnique => {
-                ConstraintCategory::Uniqueness
-            }
-
-            AccountConstraints::UpdatedAfterCreated
-            | AccountConstraints::DeletedAfterCreated
-            | AccountConstraints::DeletedAfterUpdated
-            | AccountConstraints::PasswordChangedAfterCreated => ConstraintCategory::Chronological,
-        }
     }
 }
 

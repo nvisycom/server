@@ -81,9 +81,7 @@ impl From<PgError> for Error<'static> {
                     tracing::error!(
                         target: TRACING_TARGET,
                         constraint = constraint_name,
-                        category = ?constraint.constraint_category(),
                         table = constraint.table_name(),
-                        area = constraint.functional_area(),
                         error = %query_error,
                         "query error (constraint violation)"
                     );

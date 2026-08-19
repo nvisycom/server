@@ -89,22 +89,6 @@ pub enum ConstraintViolation {
     WorkspacePolicy(WorkspacePolicyConstraints),
 }
 
-/// Categories of database constraint violations.
-///
-/// This enum helps classify constraint violations by their purpose and type,
-/// making it easier to handle different categories of errors appropriately.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ConstraintCategory {
-    /// Data validation constraints (format, length, range checks).
-    Validation,
-    /// Chronological integrity constraints (timestamp relationships).
-    Chronological,
-    /// Business logic constraints (domain-specific rules).
-    BusinessLogic,
-    /// Uniqueness constraints (primary keys, unique indexes).
-    Uniqueness,
-}
-
 impl ConstraintViolation {
     /// Creates a new [`ConstraintViolation`] from the constraint name.
     ///
@@ -201,64 +185,6 @@ impl ConstraintViolation {
             ConstraintViolation::WorkspaceConnection(_) => "workspace_connections",
             ConstraintViolation::WorkspaceConnectionSync(_) => "workspace_connection_syncs",
             ConstraintViolation::WorkspacePolicy(_) => "workspace_policies",
-        }
-    }
-
-    /// Returns the functional area this constraint belongs to.
-    ///
-    /// This groups constraints by their business domain for higher-level categorization.
-    pub fn functional_area(&self) -> &'static str {
-        match self {
-            ConstraintViolation::Account(_)
-            | ConstraintViolation::AccountNotification(_)
-            | ConstraintViolation::AccountApiToken(_) => "accounts",
-
-            ConstraintViolation::ChatSession(_) | ConstraintViolation::ChatMessage(_) => "chat",
-
-            ConstraintViolation::Workspace(_)
-            | ConstraintViolation::WorkspaceMember(_)
-            | ConstraintViolation::WorkspaceInvite(_)
-            | ConstraintViolation::WorkspaceActivityLog(_)
-            | ConstraintViolation::WorkspaceWebhook(_) => "workspaces",
-
-            ConstraintViolation::WorkspaceFile(_) => "files",
-
-            ConstraintViolation::WorkspacePipeline(_)
-            | ConstraintViolation::WorkspacePipelineRun(_)
-            | ConstraintViolation::WorkspacePipelineReference(_) => "pipelines",
-
-            ConstraintViolation::WorkspaceConnection(_)
-            | ConstraintViolation::WorkspaceConnectionSync(_) => "connections",
-            ConstraintViolation::WorkspacePolicy(_) => "policies",
-        }
-    }
-
-    /// Returns the category of this constraint violation.
-    ///
-    /// This helps categorize errors by their type for better error handling and reporting.
-    pub fn constraint_category(&self) -> ConstraintCategory {
-        match self {
-            ConstraintViolation::Account(c) => c.categorize(),
-            ConstraintViolation::AccountNotification(c) => c.categorize(),
-            ConstraintViolation::AccountApiToken(c) => c.categorize(),
-
-            ConstraintViolation::ChatSession(c) => c.categorize(),
-            ConstraintViolation::ChatMessage(c) => c.categorize(),
-
-            ConstraintViolation::Workspace(c) => c.categorize(),
-            ConstraintViolation::WorkspaceMember(c) => c.categorize(),
-            ConstraintViolation::WorkspaceInvite(c) => c.categorize(),
-            ConstraintViolation::WorkspaceActivityLog(c) => c.categorize(),
-            ConstraintViolation::WorkspaceWebhook(c) => c.categorize(),
-
-            ConstraintViolation::WorkspaceFile(c) => c.categorize(),
-
-            ConstraintViolation::WorkspacePipeline(c) => c.categorize(),
-            ConstraintViolation::WorkspacePipelineRun(c) => c.categorize(),
-            ConstraintViolation::WorkspacePipelineReference(c) => c.categorize(),
-            ConstraintViolation::WorkspaceConnection(c) => c.categorize(),
-            ConstraintViolation::WorkspaceConnectionSync(c) => c.categorize(),
-            ConstraintViolation::WorkspacePolicy(c) => c.categorize(),
         }
     }
 
@@ -363,43 +289,6 @@ mod tests {
         let violation =
             ConstraintViolation::WorkspacePolicy(WorkspacePolicyConstraints::NameLength);
         assert_eq!(violation.table_name(), "workspace_policies");
-    }
-
-    #[test]
-    fn test_functional_area_extraction() {
-        let violation = ConstraintViolation::Account(AccountConstraints::EmailFormat);
-        assert_eq!(violation.functional_area(), "accounts");
-
-        let violation =
-            ConstraintViolation::WorkspaceFile(WorkspaceFileConstraints::VersionNumberMin);
-        assert_eq!(violation.functional_area(), "files");
-
-        let violation =
-            ConstraintViolation::WorkspacePolicy(WorkspacePolicyConstraints::NameLength);
-        assert_eq!(violation.functional_area(), "policies");
-    }
-
-    #[test]
-    fn test_constraint_categorization() {
-        let violation = ConstraintViolation::Account(AccountConstraints::DisplayNameLength);
-        assert_eq!(
-            violation.constraint_category(),
-            ConstraintCategory::Validation
-        );
-
-        let violation = ConstraintViolation::Account(AccountConstraints::UpdatedAfterCreated);
-        assert_eq!(
-            violation.constraint_category(),
-            ConstraintCategory::Chronological
-        );
-
-        let violation = ConstraintViolation::WorkspaceConnection(
-            WorkspaceConnectionConstraints::WorkspaceIdIdUnique,
-        );
-        assert_eq!(
-            violation.constraint_category(),
-            ConstraintCategory::Uniqueness
-        );
     }
 
     #[test]

@@ -3,8 +3,6 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-use super::ConstraintCategory;
-
 /// Chat sessions table constraint violations.
 ///
 /// Enumerates the constraints a client request can trip that map to a specific
@@ -23,13 +21,6 @@ impl ChatSessionConstraints {
     /// Creates a new [`ChatSessionConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
-    }
-
-    /// Returns the category of this constraint violation.
-    pub fn categorize(&self) -> ConstraintCategory {
-        match self {
-            ChatSessionConstraints::TitleLength => ConstraintCategory::Validation,
-        }
     }
 }
 

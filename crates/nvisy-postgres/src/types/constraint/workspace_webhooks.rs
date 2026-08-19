@@ -3,8 +3,6 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-use super::ConstraintCategory;
-
 /// Workspace webhooks table constraint violations.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[derive(Serialize, Deserialize, Display, EnumIter, EnumString)]
@@ -39,23 +37,6 @@ impl WorkspaceWebhookConstraints {
     /// Creates a new [`WorkspaceWebhookConstraints`] from the constraint name.
     pub fn new(constraint: &str) -> Option<Self> {
         constraint.parse().ok()
-    }
-
-    /// Returns the category of this constraint violation.
-    pub fn categorize(&self) -> ConstraintCategory {
-        match self {
-            WorkspaceWebhookConstraints::WorkspaceIdIdUnique => ConstraintCategory::Uniqueness,
-
-            WorkspaceWebhookConstraints::DisplayNameLength
-            | WorkspaceWebhookConstraints::DescriptionLength
-            | WorkspaceWebhookConstraints::UrlLength
-            | WorkspaceWebhookConstraints::UrlFormat
-            | WorkspaceWebhookConstraints::EventsNotEmpty
-            | WorkspaceWebhookConstraints::HeadersSize => ConstraintCategory::Validation,
-
-            WorkspaceWebhookConstraints::UpdatedAfterCreated
-            | WorkspaceWebhookConstraints::DeletedAfterCreated => ConstraintCategory::Chronological,
-        }
     }
 }
 
