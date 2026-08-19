@@ -7,9 +7,9 @@
 
 use nvisy_inference::{ChatTurn, InferenceClient, TokenStream};
 use nvisy_postgres::PgConn;
-use nvisy_postgres::model::{ChatMessage, NewChatMessage, UpdateChatSession};
+use nvisy_postgres::model::{ChatMessage, NewChatMessage};
 use nvisy_postgres::query::{
-    ChatMessageRepository, ChatSessionRepository, WorkspaceConnectionRepository,
+    AppendSessionUpdate, ChatMessageRepository, WorkspaceConnectionRepository,
 };
 use nvisy_postgres::types::{ChatRole, ProviderType};
 use uuid::Uuid;
@@ -112,43 +112,49 @@ impl ChatService {
         Ok(client.stream_chat(prompt, history))
     }
 
-    /// Appends a message at `at` in the session's tree, encrypting its content
-    /// under the workspace key. Returns the stored row.
+    /// Appends a message at `at` in the session's tree — encrypting its content
+    /// under the workspace key — and applies `session_update` (advance the active
+    /// leaf, set the title) in the same transaction, so a message and the session
+    /// state it implies never diverge. Returns the stored row.
     pub async fn append_message(
         &self,
         conn: &mut PgConn,
         at: TurnLocation,
         role: ChatRole,
         text: &str,
+        session_update: AppendSessionUpdate,
     ) -> Result<ChatMessage> {
         let content = self
             .infra
             .crypto
             .encrypt(at.workspace_id, text.as_bytes())?;
         Ok(conn
-            .append_chat_message(NewChatMessage {
-                session_id: at.session_id,
-                parent_id: at.parent_id,
-                role,
-                content,
-            })
+            .append_chat_message(
+                NewChatMessage {
+                    session_id: at.session_id,
+                    parent_id: at.parent_id,
+                    role,
+                    content,
+                },
+                session_update,
+            )
             .await?)
     }
 
-    /// Persists the assistant's assembled reply at `at`, and advances the
-    /// session's active leaf to it.
+    /// Persists the assistant's assembled reply at `at`, advancing the session's
+    /// active leaf to it in the same transaction.
     ///
     /// Acquires its own connection: it runs after the stream completes, when the
     /// request connection has already been released back to the pool.
     pub async fn persist_reply(&self, at: TurnLocation, reply: &str) -> Result<()> {
         let mut conn = self.infra.postgres.get_connection().await?;
-        let message = self
-            .append_message(&mut conn, at, ChatRole::Assistant, reply)
-            .await?;
-        conn.update_chat_session(
-            at.session_id,
-            UpdateChatSession {
-                current_message_id: Some(Some(message.id)),
+        self.append_message(
+            &mut conn,
+            at,
+            ChatRole::Assistant,
+            reply,
+            AppendSessionUpdate {
+                advance_leaf: true,
                 ..Default::default()
             },
         )

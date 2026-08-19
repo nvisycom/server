@@ -14,11 +14,12 @@ mod utilities;
 pub use constants::{DEFAULT_RETENTION_DAYS, RECENTLY_SENT_HOURS};
 pub use constraint::{
     AccountApiTokenConstraints, AccountConstraints, AccountNotificationConstraints,
-    ConstraintCategory, ConstraintViolation, WorkspaceActivitiesConstraints,
-    WorkspaceConnectionConstraints, WorkspaceConnectionSyncConstraints, WorkspaceConstraints,
-    WorkspaceFileConstraints, WorkspaceInviteConstraints, WorkspaceMemberConstraints,
-    WorkspacePipelineConstraints, WorkspacePipelineReferenceConstraints,
-    WorkspacePipelineRunConstraints, WorkspacePolicyConstraints, WorkspaceWebhookConstraints,
+    ChatMessageConstraints, ChatSessionConstraints, ConstraintCategory, ConstraintViolation,
+    WorkspaceActivitiesConstraints, WorkspaceConnectionConstraints,
+    WorkspaceConnectionSyncConstraints, WorkspaceConstraints, WorkspaceFileConstraints,
+    WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspacePipelineConstraints,
+    WorkspacePipelineReferenceConstraints, WorkspacePipelineRunConstraints,
+    WorkspacePolicyConstraints, WorkspaceWebhookConstraints,
 };
 pub use enums::{
     ActivityCategory, ActivityType, ApiTokenType, ChatRole, FileKind, InviteStatus,

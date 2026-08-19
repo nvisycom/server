@@ -8,6 +8,10 @@ mod account_api_tokens;
 mod account_notifications;
 mod accounts;
 
+// Chat constraint modules
+mod chat_messages;
+mod chat_sessions;
+
 // Workspace-related constraint modules
 mod workspace_activities;
 mod workspace_invites;
@@ -34,6 +38,8 @@ use serde::{Deserialize, Serialize};
 pub use self::account_api_tokens::AccountApiTokenConstraints;
 pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
+pub use self::chat_messages::ChatMessageConstraints;
+pub use self::chat_sessions::ChatSessionConstraints;
 pub use self::files::WorkspaceFileConstraints;
 pub use self::pipeline_references::WorkspacePipelineReferenceConstraints;
 pub use self::pipeline_runs::WorkspacePipelineRunConstraints;
@@ -59,6 +65,10 @@ pub enum ConstraintViolation {
     Account(AccountConstraints),
     AccountNotification(AccountNotificationConstraints),
     AccountApiToken(AccountApiTokenConstraints),
+
+    // Chat-related constraints
+    ChatSession(ChatSessionConstraints),
+    ChatMessage(ChatMessageConstraints),
 
     // Workspace-related constraints
     Workspace(WorkspaceConstraints),
@@ -135,6 +145,10 @@ impl ConstraintViolation {
                 AccountNotificationConstraints::new => AccountNotification,
                 AccountApiTokenConstraints::new => AccountApiToken,
             },
+            "chat" => try_parse! {
+                ChatSessionConstraints::new => ChatSession,
+                ChatMessageConstraints::new => ChatMessage,
+            },
             "workspaces" => try_parse!(WorkspaceConstraints::new => Workspace),
             // Every workspace-owned table is prefixed `workspace_*`, so all of
             // their constraints dispatch here. strum matches the full name, so
@@ -166,6 +180,10 @@ impl ConstraintViolation {
             ConstraintViolation::AccountNotification(_) => "account_notifications",
             ConstraintViolation::AccountApiToken(_) => "account_api_tokens",
 
+            // Chat-related tables
+            ConstraintViolation::ChatSession(_) => "chat_sessions",
+            ConstraintViolation::ChatMessage(_) => "chat_messages",
+
             // Workspace-related tables
             ConstraintViolation::Workspace(_) => "workspaces",
             ConstraintViolation::WorkspaceMember(_) => "workspace_members",
@@ -195,6 +213,8 @@ impl ConstraintViolation {
             | ConstraintViolation::AccountNotification(_)
             | ConstraintViolation::AccountApiToken(_) => "accounts",
 
+            ConstraintViolation::ChatSession(_) | ConstraintViolation::ChatMessage(_) => "chat",
+
             ConstraintViolation::Workspace(_)
             | ConstraintViolation::WorkspaceMember(_)
             | ConstraintViolation::WorkspaceInvite(_)
@@ -221,6 +241,9 @@ impl ConstraintViolation {
             ConstraintViolation::Account(c) => c.categorize(),
             ConstraintViolation::AccountNotification(c) => c.categorize(),
             ConstraintViolation::AccountApiToken(c) => c.categorize(),
+
+            ConstraintViolation::ChatSession(c) => c.categorize(),
+            ConstraintViolation::ChatMessage(c) => c.categorize(),
 
             ConstraintViolation::Workspace(c) => c.categorize(),
             ConstraintViolation::WorkspaceMember(c) => c.categorize(),
@@ -252,6 +275,9 @@ impl fmt::Display for ConstraintViolation {
             ConstraintViolation::Account(c) => write!(f, "{}", c),
             ConstraintViolation::AccountNotification(c) => write!(f, "{}", c),
             ConstraintViolation::AccountApiToken(c) => write!(f, "{}", c),
+
+            ConstraintViolation::ChatSession(c) => write!(f, "{}", c),
+            ConstraintViolation::ChatMessage(c) => write!(f, "{}", c),
 
             ConstraintViolation::Workspace(c) => write!(f, "{}", c),
             ConstraintViolation::WorkspaceMember(c) => write!(f, "{}", c),

@@ -36,7 +36,7 @@ mod workspace_webhook;
 pub use account::AccountRepository;
 pub use account_api_token::AccountApiTokenRepository;
 pub use account_notification::AccountNotificationRepository;
-pub use chat_message::ChatMessageRepository;
+pub use chat_message::{AppendSessionUpdate, ChatMessageRepository};
 pub use chat_session::ChatSessionRepository;
 pub use pipeline_reference::PipelineReferenceRepository;
 pub use workspace::WorkspaceRepository;

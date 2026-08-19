@@ -82,10 +82,11 @@ impl From<AccountNotificationConstraints> for Error<'static> {
         let error = match constraint {
             AccountNotificationConstraints::ParamsSize => ErrorKind::BadRequest
                 .with_message("Notification params must be between 2 and 4096 bytes"),
-            AccountNotificationConstraints::ExpiresAfterCreated => ErrorKind::BadRequest
-                .with_message("Notification expiration time must be after creation time"),
-            AccountNotificationConstraints::ReadAfterCreated => ErrorKind::BadRequest
-                .with_message("Notification read time must be after creation time"),
+            // Server-controlled timestamps; a violation is a server invariant break.
+            AccountNotificationConstraints::ExpiresAfterCreated
+            | AccountNotificationConstraints::ReadAfterCreated => {
+                ErrorKind::InternalServerError.into_error()
+            }
         };
 
         error.with_resource("notification")

@@ -13,8 +13,8 @@ use axum::http::StatusCode;
 use axum::response::sse::Event;
 use futures::StreamExt;
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::{NewChatSession, UpdateChatSession};
-use nvisy_postgres::query::{ChatMessageRepository, ChatSessionRepository};
+use nvisy_postgres::model::NewChatSession;
+use nvisy_postgres::query::{AppendSessionUpdate, ChatMessageRepository, ChatSessionRepository};
 use nvisy_postgres::types::ChatRole;
 use tokio_util::sync::CancellationToken;
 
@@ -37,6 +37,11 @@ const TITLE_MAX: usize = 80;
 
 /// The default session title, until seeded from the first message.
 const DEFAULT_TITLE: &str = "New chat";
+
+/// Maximum assistant-reply length, in bytes of plaintext. Kept below the
+/// encrypted-content column limit (131072 bytes) with headroom for the
+/// encryption framing (nonce, tag, chunking), so an accepted reply always fits.
+const MAX_REPLY_BYTES: usize = 96 * 1024;
 
 /// Creates a new chat session in the workspace.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id, workspace_id = %workspace.id))]
@@ -205,6 +210,18 @@ async fn send_message(
         .await?
         .ok_or_else(|| Error::not_found("chat session"))?;
 
+    // An explicit parent must belong to this session. The composite FK enforces
+    // this at write time, but reject it here — before inference — for a clean 404
+    // rather than a failed insert after the model has run.
+    if let Some(parent_id) = request.parent_id
+        && conn
+            .find_chat_message_in_session(session_id, parent_id)
+            .await?
+            .is_none()
+    {
+        return Err(Error::not_found("chat message"));
+    }
+
     // The turn extends the branch the client is on: an explicit parent, else the
     // session's current leaf.
     let user_turn = TurnLocation {
@@ -220,21 +237,21 @@ async fn send_message(
         .stream_turn(&mut conn, user_turn, &request.content)
         .await?;
 
-    // The turn resolved: persist the user message under the branch, and advance
-    // the session to it (seeding the title on the first message).
+    // The turn resolved: persist the user message under the branch, advancing the
+    // active leaf to it and seeding the title on the first message — all in one
+    // transaction so the session state can't diverge from its messages.
     let user_message = chat
-        .append_message(&mut conn, user_turn, ChatRole::User, &request.content)
+        .append_message(
+            &mut conn,
+            user_turn,
+            ChatRole::User,
+            &request.content,
+            AppendSessionUpdate {
+                advance_leaf: true,
+                title: (session.title == DEFAULT_TITLE).then(|| seeded_title(&request.content)),
+            },
+        )
         .await?;
-    let title = (session.title == DEFAULT_TITLE).then(|| seeded_title(&request.content));
-    conn.update_chat_session(
-        session_id,
-        UpdateChatSession {
-            title,
-            current_message_id: Some(Some(user_message.id)),
-            updated_at: None,
-        },
-    )
-    .await?;
 
     // The assistant reply replies to the user message just stored.
     let reply_turn = TurnLocation {
@@ -246,9 +263,10 @@ async fn send_message(
 
     let stream = stream! {
         let mut reply = String::new();
-        // Only a normal end-of-stream (`None`) is a complete reply. A shutdown or
-        // a generation error stops mid-reply; persisting that would store a
-        // partial turn as if the assistant had finished, corrupting later history.
+        // Only a normal end-of-stream (`None`) is a complete reply. A shutdown, a
+        // generation error, or exceeding the reply limit stops mid-reply;
+        // persisting that would store a partial turn as if the assistant had
+        // finished, corrupting later history.
         let completed = loop {
             tokio::select! {
                 // Server shutting down: end the open stream promptly so it does
@@ -256,6 +274,14 @@ async fn send_message(
                 () = shutdown.cancelled() => break false,
                 next = tokens.next() => match next {
                     Some(Ok(delta)) => {
+                        // Cap the reply so it always fits the encrypted-content
+                        // column: a longer reply would fail to persist after the
+                        // user already saw it, silently dropping it from history.
+                        if reply.len() + delta.len() > MAX_REPLY_BYTES {
+                            tracing::warn!(target: TRACING_TARGET, "Chat reply exceeded the size limit; stopping");
+                            yield error_event("The response exceeded the maximum length and was stopped.");
+                            break false;
+                        }
                         reply.push_str(&delta);
                         yield token_event(&ChatToken { delta });
                     }

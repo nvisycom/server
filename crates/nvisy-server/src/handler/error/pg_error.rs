@@ -20,6 +20,8 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::Account(c) => c.into(),
             ConstraintViolation::AccountNotification(c) => c.into(),
             ConstraintViolation::AccountApiToken(c) => c.into(),
+            ConstraintViolation::ChatSession(c) => c.into(),
+            ConstraintViolation::ChatMessage(c) => c.into(),
             ConstraintViolation::Workspace(c) => c.into(),
             ConstraintViolation::WorkspaceMember(c) => c.into(),
             ConstraintViolation::WorkspaceInvite(c) => c.into(),
@@ -79,6 +81,9 @@ impl From<PgError> for Error<'static> {
                     tracing::error!(
                         target: TRACING_TARGET,
                         constraint = constraint_name,
+                        category = ?constraint.constraint_category(),
+                        table = constraint.table_name(),
+                        area = constraint.functional_area(),
                         error = %query_error,
                         "query error (constraint violation)"
                     );
