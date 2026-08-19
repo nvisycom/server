@@ -78,26 +78,3 @@ COMMENT ON COLUMN account_notifications.read_at IS 'When the notification was re
 COMMENT ON COLUMN account_notifications.params IS 'Typed params for the event type (JSON, 2B-4KB)';
 COMMENT ON COLUMN account_notifications.created_at IS 'Notification creation timestamp';
 COMMENT ON COLUMN account_notifications.expires_at IS 'Optional expiration timestamp; NULL means it does not expire';
-
--- Cleanup function: deletes notifications past their expiry, returning the count.
-CREATE OR REPLACE FUNCTION cleanup_expired_notifications()
-RETURNS INTEGER
-LANGUAGE plpgsql AS $$
-DECLARE
-    deleted_count INTEGER := 0;
-BEGIN
-    WITH deleted AS (
-        DELETE FROM account_notifications
-        WHERE expires_at IS NOT NULL
-          AND expires_at < CURRENT_TIMESTAMP
-        RETURNING id
-    )
-    SELECT COUNT(*)
-    INTO deleted_count
-    FROM deleted;
-
-    RETURN deleted_count;
-END;
-$$;
-
-COMMENT ON FUNCTION cleanup_expired_notifications() IS 'Deletes expired notifications. Returns count of deleted notifications.';

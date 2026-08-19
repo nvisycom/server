@@ -138,30 +138,3 @@ COMMENT ON COLUMN workspace_files.created_at IS 'Upload timestamp';
 COMMENT ON COLUMN workspace_files.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN workspace_files.deleted_at IS 'Soft deletion timestamp';
 COMMENT ON COLUMN workspace_files.expires_at IS 'Data-retention expiry (NULL = keep indefinitely)';
-
--- Groups live files by hash and size to surface duplicates, optionally within one workspace.
-CREATE OR REPLACE FUNCTION find_duplicate_workspace_files(_workspace_id UUID DEFAULT NULL)
-RETURNS TABLE (
-    file_hash TEXT,
-    file_size BIGINT,
-    duplicate_count BIGINT,
-    file_ids UUID[]
-)
-LANGUAGE plpgsql AS $$
-BEGIN
-    RETURN QUERY
-    SELECT
-        ENCODE(f.file_hash_sha256, 'hex'),
-        f.file_size_bytes,
-        COUNT(*),
-        ARRAY_AGG(f.id)
-    FROM workspace_files f
-    WHERE (_workspace_id IS NULL OR f.workspace_id = _workspace_id)
-        AND f.deleted_at IS NULL
-    GROUP BY f.file_hash_sha256, f.file_size_bytes
-    HAVING COUNT(*) > 1
-    ORDER BY COUNT(*) DESC;
-END;
-$$;
-
-COMMENT ON FUNCTION find_duplicate_workspace_files(UUID) IS 'Finds duplicate workspace files by hash and size. Optionally scoped to a specific workspace.';
