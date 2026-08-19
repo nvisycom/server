@@ -2,54 +2,29 @@
 //!
 //! [`InferenceClient`] is a thin, cloneable wrapper around any provider's rig
 //! [`Agent`] that provides convenience methods for the most common operations —
-//! one-shot [`prompt`](InferenceClient::prompt) and multi-turn
-//! [`chat`](InferenceClient::chat). Every public method is instrumented with
-//! [`tracing`] for observability. It plays the same role for inference that
-//! `ObjectStoreClient` plays for object storage: one runtime handle callers use
-//! regardless of which provider backs it.
+//! one-shot [`prompt`](InferenceClient::prompt), multi-turn
+//! [`chat`](InferenceClient::chat), and streaming
+//! [`stream_chat`](InferenceClient::stream_chat). Every public method is
+//! instrumented with [`tracing`] for observability. It plays the same role for
+//! inference that `ObjectStoreClient` plays for object storage: one runtime
+//! handle callers use regardless of which provider backs it.
+
+mod erased_agent;
+mod token_stream;
+mod turn;
 
 use std::sync::Arc;
 
-use futures::future::BoxFuture;
+use async_stream::stream;
+use futures::StreamExt;
 use rig::agent::Agent;
 use rig::client::verify::{VerifyClient, VerifyError};
-/// A single conversation message, re-exported so callers can build the
-/// [`chat`](InferenceClient::chat) history without depending on `rig` directly.
-pub use rig::completion::Message;
-use rig::completion::{Chat, CompletionModel, Prompt, PromptError};
+use rig::completion::{CompletionModel, GetTokenUsage, Message};
 
+use self::erased_agent::ErasedAgent;
+pub use self::token_stream::TokenStream;
+pub use self::turn::{ChatTurn, Role};
 use crate::error::Error;
-
-/// Object-safe view of a rig [`Agent`], erasing the provider's concrete
-/// completion-model type so a single handle can hold any backend.
-trait ErasedAgent: Send + Sync {
-    /// Send a single prompt with no prior context.
-    fn prompt(&self, prompt: String) -> BoxFuture<'_, Result<String, PromptError>>;
-
-    /// Run one chat turn against `history`, appending the committed messages.
-    fn chat<'a>(
-        &'a self,
-        prompt: String,
-        history: &'a mut Vec<Message>,
-    ) -> BoxFuture<'a, Result<String, PromptError>>;
-}
-
-impl<M> ErasedAgent for Agent<M>
-where
-    M: CompletionModel + 'static,
-{
-    fn prompt(&self, prompt: String) -> BoxFuture<'_, Result<String, PromptError>> {
-        Box::pin(async move { Prompt::prompt(self, prompt).await })
-    }
-
-    fn chat<'a>(
-        &'a self,
-        prompt: String,
-        history: &'a mut Vec<Message>,
-    ) -> BoxFuture<'a, Result<String, PromptError>> {
-        Box::pin(async move { Chat::chat(self, prompt, history).await })
-    }
-}
 
 /// Cloneable handle to any inference backend (OpenAI, Anthropic, Ollama, ...).
 ///
@@ -63,6 +38,7 @@ impl InferenceClient {
     pub(crate) fn new<M>(agent: Agent<M>) -> Self
     where
         M: CompletionModel + 'static,
+        M::StreamingResponse: GetTokenUsage,
     {
         Self(Arc::new(agent))
     }
@@ -79,16 +55,46 @@ impl InferenceClient {
 
     /// Run one chat turn against `history`, returning the model's text response.
     ///
-    /// `history` is caller-owned and updated in place: the prompt and the
-    /// messages the model commits this turn are appended to it, so passing the
-    /// same `Vec` across calls continues the conversation.
+    /// `history` is the prior conversation as [`ChatTurn`]s.
     #[tracing::instrument(name = "inference.chat", skip_all, fields(history_len = history.len()))]
-    pub async fn chat(&self, prompt: &str, history: &mut Vec<Message>) -> Result<String, Error> {
+    pub async fn chat(&self, prompt: &str, history: Vec<ChatTurn>) -> Result<String, Error> {
+        let mut history = to_messages(history);
         self.0
-            .chat(prompt.to_owned(), history)
+            .chat(prompt.to_owned(), &mut history)
             .await
             .map_err(|err| Error::Prompt(err.to_string()))
     }
+
+    /// Stream one chat turn against `history`, yielding the model's response as
+    /// text deltas.
+    ///
+    /// Returns immediately with a [`TokenStream`]; the request opens lazily when
+    /// the stream is first polled. Each item is a token chunk as it arrives, and
+    /// a failure mid-generation ends the stream with an `Err`. `history` is the
+    /// prior conversation as [`ChatTurn`]s; persist the user prompt and the
+    /// assembled reply on the caller side.
+    #[tracing::instrument(name = "inference.stream_chat", skip_all, fields(history_len = history.len()))]
+    pub fn stream_chat(&self, prompt: &str, history: Vec<ChatTurn>) -> TokenStream {
+        // Own the agent handle in the generator so the result is `'static` and
+        // can outlive this `InferenceClient` (moved into a response body). The
+        // provider stream borrows the owned `Arc`, which the coroutine keeps
+        // alive for the whole stream.
+        let agent = Arc::clone(&self.0);
+        let prompt = prompt.to_owned();
+        let history = to_messages(history);
+        let inner = stream! {
+            let mut deltas = agent.stream_chat(prompt, history).await;
+            while let Some(delta) = deltas.next().await {
+                yield delta;
+            }
+        };
+        TokenStream::new(inner.boxed())
+    }
+}
+
+/// Converts a provider-agnostic history into rig messages.
+fn to_messages(history: Vec<ChatTurn>) -> Vec<Message> {
+    history.into_iter().map(Message::from).collect()
 }
 
 /// Verifies a built provider client's credentials against the provider.

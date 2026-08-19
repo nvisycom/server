@@ -26,6 +26,7 @@ schema = ["dep:schemars"]
 [dependencies]
 # Async runtime
 futures = { workspace = true, features = [] }
+async-stream = { workspace = true, features = [] }
 
 # LLM framework: provider clients + the classic Agent runtime
 rig = { workspace = true, features = [] }
