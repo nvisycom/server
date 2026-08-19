@@ -1,17 +1,18 @@
--- Webhooks: per-workspace outbound webhook subscriptions and delivery
--- status. Workspace-scoped but a standalone integration feature.
+-- Webhooks: per-workspace outbound webhook subscriptions with an HMAC-signed
+-- delivery secret and failure tracking. A workspace-scoped but standalone
+-- integration feature that fans workspace events out to external endpoints.
 
--- Webhook status enum
+-- Operational status of a webhook: whether it currently delivers events.
 CREATE TYPE WEBHOOK_STATUS AS ENUM (
-    'enabled',      -- Webhook is enabled and will receive events
-    'disabled',     -- Webhook was disabled by the user
-    'suspended'     -- Webhook was suspended by the system (too many failures)
+    'enabled',      -- Enabled and will receive events
+    'disabled',     -- Disabled by the user
+    'suspended'     -- Suspended by the system (too many failures)
 );
 
 COMMENT ON TYPE WEBHOOK_STATUS IS
     'Defines the operational status of workspace webhooks.';
 
--- Webhook event types enum
+-- Event types a webhook can subscribe to, grouped by resource.
 CREATE TYPE WEBHOOK_EVENT AS ENUM (
     -- File events
     'file.created',
@@ -49,7 +50,7 @@ CREATE TYPE WEBHOOK_EVENT AS ENUM (
 COMMENT ON TYPE WEBHOOK_EVENT IS
     'Defines the types of events that can trigger webhook delivery.';
 
--- Workspace webhooks table definition
+-- Workspace webhooks table: one outbound subscription within a workspace.
 CREATE TABLE workspace_webhooks (
     -- Primary identifier
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -107,35 +108,34 @@ CREATE TABLE workspace_webhooks (
     CONSTRAINT workspace_webhooks_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
 );
 
--- Triggers for workspace_webhooks table
+-- Maintains updated_at on every row modification.
 SELECT setup_updated_at('workspace_webhooks');
 
--- Indexes for workspace_webhooks table
+-- Live webhooks per workspace, filtered by status (the subscription list).
 CREATE INDEX workspace_webhooks_workspace_status_idx
     ON workspace_webhooks (workspace_id, status)
     WHERE deleted_at IS NULL;
 
+-- Match enabled webhooks by subscribed event type when fanning out a delivery.
 CREATE INDEX workspace_webhooks_events_idx
     ON workspace_webhooks USING gin (events)
     WHERE deleted_at IS NULL AND status = 'enabled';
 
--- Comments for workspace_webhooks table
 COMMENT ON TABLE workspace_webhooks IS
     'Webhook configurations for workspaces to receive event notifications.';
-
 COMMENT ON COLUMN workspace_webhooks.id IS 'Unique webhook identifier';
-COMMENT ON COLUMN workspace_webhooks.workspace_id IS 'Reference to the workspace';
+COMMENT ON COLUMN workspace_webhooks.workspace_id IS 'Workspace this webhook belongs to';
 COMMENT ON COLUMN workspace_webhooks.display_name IS 'Human-readable webhook name (1-128 chars)';
 COMMENT ON COLUMN workspace_webhooks.description IS 'Webhook description (up to 500 chars)';
 COMMENT ON COLUMN workspace_webhooks.url IS 'Webhook endpoint URL (must be HTTP/HTTPS)';
 COMMENT ON COLUMN workspace_webhooks.events IS 'Array of event types this webhook subscribes to';
 COMMENT ON COLUMN workspace_webhooks.headers IS 'Custom headers to include in webhook requests';
+COMMENT ON COLUMN workspace_webhooks.encrypted_secret IS 'XChaCha20-Poly1305 encrypted HMAC signing secret';
 COMMENT ON COLUMN workspace_webhooks.status IS 'Current webhook status (enabled, disabled, suspended)';
 COMMENT ON COLUMN workspace_webhooks.last_success_at IS 'Timestamp of last successful delivery';
 COMMENT ON COLUMN workspace_webhooks.last_failure_at IS 'Timestamp of last failed delivery';
 COMMENT ON COLUMN workspace_webhooks.consecutive_failures IS 'Consecutive failed deliveries; reset on success, drives auto-disable';
 COMMENT ON COLUMN workspace_webhooks.created_by IS 'Account that created the webhook';
-COMMENT ON COLUMN workspace_webhooks.created_at IS 'Timestamp when webhook was created';
+COMMENT ON COLUMN workspace_webhooks.created_at IS 'Webhook creation timestamp';
 COMMENT ON COLUMN workspace_webhooks.updated_at IS 'Timestamp when webhook was last modified';
-COMMENT ON COLUMN workspace_webhooks.deleted_at IS 'Soft deletion timestamp';
-
+COMMENT ON COLUMN workspace_webhooks.deleted_at IS 'Soft-deletion timestamp; NULL means live';

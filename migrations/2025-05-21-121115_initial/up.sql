@@ -1,12 +1,11 @@
--- This migration provides core utility functions for database management and common operations
--- Foundation functions required by all subsequent migrations
+-- Initial: shared extensions and utility functions every later migration builds
+-- on — timestamp triggers, soft-delete/restore helpers, token generation, and
+-- email validation.
 
--- Enable pgcrypto extension for cryptographic functions
--- Required for secure token generation (gen_random_bytes)
+-- pgcrypto: cryptographic primitives (gen_random_bytes for secure tokens).
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- Enable pg_trgm extension for trigram-based text search
--- Required for fuzzy filename matching
+-- pg_trgm: trigram text search (fuzzy name/email matching).
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- Timestamp management function for soft-deletable tables.
@@ -19,13 +18,11 @@ CREATE OR REPLACE FUNCTION trigger_updated_at()
 RETURNS TRIGGER
 LANGUAGE plpgsql AS $$
 BEGIN
-    -- Handle soft deletes: sync updated_at with deleted_at to satisfy constraints
     IF (NEW.deleted_at IS DISTINCT FROM OLD.deleted_at AND NEW.deleted_at IS NOT NULL) THEN
         NEW.updated_at := NEW.deleted_at;
         RETURN NEW;
     END IF;
 
-    -- Only update if the row has actually changed (excluding updated_at itself)
     IF (NEW IS DISTINCT FROM OLD AND NEW.updated_at IS NOT DISTINCT FROM OLD.updated_at) THEN
         NEW.updated_at := CURRENT_TIMESTAMP;
     END IF;
@@ -64,7 +61,6 @@ CREATE OR REPLACE FUNCTION setup_updated_at(_tbl REGCLASS)
 RETURNS VOID
 LANGUAGE plpgsql AS $$
 BEGIN
-    -- Create or replace the trigger
     EXECUTE FORMAT(
         'CREATE OR REPLACE TRIGGER trigger_%I_updated_at
          BEFORE UPDATE ON %s
@@ -72,7 +68,6 @@ BEGIN
         _tbl, _tbl
     );
 
-    -- Log successful setup
     RAISE NOTICE 'Updated_at trigger configured for table: %', _tbl;
 EXCEPTION
     WHEN OTHERS THEN
@@ -117,7 +112,6 @@ LANGUAGE plpgsql AS $$
 DECLARE
     _rows_affected INTEGER;
 BEGIN
-    -- Perform soft delete by setting deleted_at timestamp
     EXECUTE FORMAT(
         'UPDATE %s SET deleted_at = CURRENT_TIMESTAMP
          WHERE %I = $1 AND deleted_at IS NULL',
@@ -126,7 +120,6 @@ BEGIN
 
     GET DIAGNOSTICS _rows_affected = ROW_COUNT;
 
-    -- Return true if a row was affected
     RETURN _rows_affected > 0;
 EXCEPTION
     WHEN OTHERS THEN
@@ -149,7 +142,6 @@ LANGUAGE plpgsql AS $$
 DECLARE
     _rows_affected INTEGER;
 BEGIN
-    -- Restore record by clearing deleted_at timestamp
     EXECUTE FORMAT(
         'UPDATE %s SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
          WHERE %I = $1 AND deleted_at IS NOT NULL',
@@ -158,7 +150,6 @@ BEGIN
 
     GET DIAGNOSTICS _rows_affected = ROW_COUNT;
 
-    -- Return true if a row was restored
     RETURN _rows_affected > 0;
 EXCEPTION
     WHEN OTHERS THEN
@@ -180,7 +171,6 @@ LANGUAGE plpgsql AS $$
 DECLARE
     _rows_affected INTEGER;
 BEGIN
-    -- Soft delete expired records
     EXECUTE FORMAT(
         'UPDATE %s SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
          WHERE %I < CURRENT_TIMESTAMP AND deleted_at IS NULL',
@@ -189,7 +179,6 @@ BEGIN
 
     GET DIAGNOSTICS _rows_affected = ROW_COUNT;
 
-    -- Log cleanup activity
     IF _rows_affected > 0 THEN
         RAISE NOTICE 'Cleaned up % expired records from table %', _rows_affected, _tbl;
     END IF;
@@ -209,8 +198,6 @@ CREATE OR REPLACE FUNCTION generate_secure_token(_length INTEGER DEFAULT 32)
 RETURNS TEXT
 LANGUAGE plpgsql AS $$
 BEGIN
-    -- Generate a cryptographically secure random token using URL-safe base64
-    -- Replace + with -, / with _, and remove padding =
     RETURN TRANSLATE(
         REPLACE(ENCODE(gen_random_bytes(_length), 'base64'), '=', ''),
         '+/',
@@ -230,7 +217,6 @@ CREATE OR REPLACE FUNCTION is_valid_email(_email TEXT)
 RETURNS BOOLEAN
 LANGUAGE plpgsql IMMUTABLE AS $$
 BEGIN
-    -- Basic email validation using regex
     RETURN _email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
         AND LENGTH(_email) <= 254
         AND _email NOT LIKE '%@%@%';
