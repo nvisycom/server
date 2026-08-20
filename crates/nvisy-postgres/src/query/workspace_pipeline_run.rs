@@ -7,7 +7,8 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{
-    NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun,
+    NewWorkspacePipelineRun, NewWorkspacePipelineRunUsage, UpdateWorkspacePipelineRun,
+    WorkspacePipeline, WorkspacePipelineRun,
 };
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, Handle, PipelineRunStatus, RunFilter,
@@ -132,6 +133,13 @@ pub trait WorkspacePipelineRunRepository {
         run_id: Uuid,
         updates: UpdateWorkspacePipelineRun,
     ) -> impl Future<Output = PgResult<WorkspacePipelineRun>> + Send;
+
+    /// Records a run's per-model inference usage. A no-op for an empty slice
+    /// (a deterministic run spends no tokens). Inserted once, at analyze time.
+    fn record_run_usage(
+        &mut self,
+        usage: &[NewWorkspacePipelineRunUsage],
+    ) -> impl Future<Output = PgResult<()>> + Send;
 }
 
 impl WorkspacePipelineRunRepository for PgConnection {
@@ -511,5 +519,21 @@ impl WorkspacePipelineRunRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(run)
+    }
+
+    async fn record_run_usage(&mut self, usage: &[NewWorkspacePipelineRunUsage]) -> PgResult<()> {
+        use schema::workspace_pipeline_run_usage;
+
+        if usage.is_empty() {
+            return Ok(());
+        }
+
+        diesel::insert_into(workspace_pipeline_run_usage::table)
+            .values(usage)
+            .execute(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(())
     }
 }

@@ -1,6 +1,7 @@
 //! Request types for HTTP handlers.
 
 mod accounts;
+mod analytics;
 mod authentications;
 mod chat;
 mod connection_syncs;
@@ -19,6 +20,7 @@ mod webhooks;
 mod workspaces;
 
 pub use accounts::*;
+pub use analytics::*;
 pub use authentications::*;
 pub use chat::*;
 pub use connection_syncs::*;

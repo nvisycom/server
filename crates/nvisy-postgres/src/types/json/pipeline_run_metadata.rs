@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Structured metadata for a pipeline run.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", default)]
 pub struct RunMetadata {
@@ -17,4 +17,11 @@ pub struct RunMetadata {
     /// Failure reason recorded when the run failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The engine's full per-recognizer usage report (durations, per-model token
+    /// counts), stored opaquely for drill-down. The denormalized token totals on
+    /// the run row (`input_tokens`/`output_tokens`) drive aggregation; this keeps
+    /// the detail. Absent when the run produced no usage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<serde_json::Value>"))]
+    pub usage: Option<serde_json::Value>,
 }

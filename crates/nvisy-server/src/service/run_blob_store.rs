@@ -242,14 +242,21 @@ impl RunBlobStore {
     /// workspace key before it leaves the process. Modeling it as a file lets
     /// data-retention expire it with the same `expires_at` sweep as documents;
     /// its bytes live in the audit bucket, not the files bucket.
-    pub async fn store_analyzed_document(
+    /// Encrypts the analysis, writes it to the audit bucket, and builds the
+    /// `workspace_files` row that will point at it — but does not insert the row.
+    ///
+    /// The object write is not transactional, so it is kept out of the caller's
+    /// database transaction: the bytes are written first, then the returned row is
+    /// inserted (with the run's other writes) atomically. A rollback therefore
+    /// leaves at worst an orphan object in the bucket, never a file row that points
+    /// at bytes that were never written; the orphan is reclaimed by retention.
+    pub async fn stage_analyzed_document(
         &self,
-        conn: &mut PgConn,
         pipeline: &WorkspacePipeline,
         workspace_settings: &RetentionSettings,
         account_id: Uuid,
         analyzed: &Audit,
-    ) -> Result<Uuid> {
+    ) -> Result<NewWorkspaceFile> {
         let workspace_id = pipeline.workspace_id;
         let plaintext = serde_json::to_vec(analyzed).map_err(analysis_serde_error)?;
         let hash = Sha256::digest(&plaintext).to_vec();
@@ -275,7 +282,7 @@ impl RunBlobStore {
             .resolve(RetentionScope::AuditLogs, over.as_ref())
             .expires_at(jiff::Timestamp::now());
 
-        let new_file = NewWorkspaceFile {
+        Ok(NewWorkspaceFile {
             workspace_id,
             account_id,
             display_name: Some("analysis.audit".to_owned()),
@@ -288,9 +295,7 @@ impl RunBlobStore {
             storage_bucket: store.bucket().to_owned(),
             expires_at: expires_at.map(Into::into),
             ..Default::default()
-        };
-        let file = conn.create_workspace_file(new_file).await?;
-        Ok(file.id)
+        })
     }
 
     /// Fetches and decrypts a run's stored [`Audit`].

@@ -10,20 +10,20 @@ use std::time::Duration;
 
 use elide_pipeline::RasterMode;
 use nvisy_nats::stream::DetectionStream;
-use nvisy_postgres::PgConn;
 use nvisy_postgres::model::{UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun};
 use nvisy_postgres::query::{
     WorkspaceFileRepository, WorkspacePipelineRunRepository, WorkspaceRepository,
 };
 use nvisy_postgres::types::{
-    NotificationPayload, OcrPolicy, PipelineRunAnalyzedParams, PipelineRunFailedParams,
-    PipelineRunStatus, WorkspaceSettings,
+    Json, NotificationPayload, OcrPolicy, PipelineRunAnalyzedParams, PipelineRunFailedParams,
+    PipelineRunStatus, RunMetadata, WorkspaceSettings,
 };
+use nvisy_postgres::{AsyncConnection, PgConn, PgError};
 use tokio_util::sync::CancellationToken;
 
 use super::job::DetectionJob;
 use super::service::DetectionQueue;
-use super::support::{fail_run, resolve_policies};
+use super::support::{extract_run_usage, fail_run, resolve_policies};
 use crate::handler::request::PipelineDefinition;
 use crate::handler::{ErrorKind, Result};
 use crate::service::{
@@ -286,25 +286,45 @@ impl DetectionWorker {
 
         let analyzed = self.engine.analyze(document, &policies, &params).await?;
 
-        let audit_file_id = self
+        // Write the (non-transactional) audit object first, then commit its file
+        // row together with the run's usage and status in one transaction below.
+        let audit_file = self
             .blob
-            .store_analyzed_document(
-                conn,
-                pipeline,
-                &settings.retention,
-                run.account_id,
-                &analyzed,
-            )
+            .stage_analyzed_document(pipeline, &settings.retention, run.account_id, &analyzed)
             .await?;
 
-        conn.update_workspace_pipeline_run(
-            run.id,
-            UpdateWorkspacePipelineRun {
-                status: Some(PipelineRunStatus::Analyzed),
-                audit_file_id: Some(Some(audit_file_id)),
+        // Record inference usage: per-model token rows into the usage table (the
+        // usage aggregation surface) and the full per-recognizer report into
+        // metadata for drill-down. Absent for a purely deterministic run.
+        let usage = extract_run_usage(run.id, &analyzed);
+        let metadata = usage.as_ref().map(|u| {
+            Json::encode(&RunMetadata {
+                usage: Some(u.report.clone()),
                 ..Default::default()
-            },
-        )
+            })
+        });
+
+        // Persist the audit file row, per-model usage, and the run's transition to
+        // `Analyzed` atomically: a partial failure would otherwise strand usage
+        // rows or an audit pointer on a run still marked `Analyzing`.
+        let run_id = run.id;
+        conn.transaction(async |conn| {
+            let audit_file_id = conn.create_workspace_file(audit_file).await?.id;
+            if let Some(usage) = &usage {
+                conn.record_run_usage(&usage.per_model).await?;
+            }
+            conn.update_workspace_pipeline_run(
+                run_id,
+                UpdateWorkspacePipelineRun {
+                    status: Some(PipelineRunStatus::Analyzed),
+                    audit_file_id: Some(Some(audit_file_id)),
+                    metadata,
+                    ..Default::default()
+                },
+            )
+            .await?;
+            Ok::<_, PgError>(())
+        })
         .await?;
 
         tracing::info!(target: TRACING_TARGET, run_id = %run.id, "Run analyzed");
