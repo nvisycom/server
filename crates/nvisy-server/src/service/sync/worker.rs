@@ -12,6 +12,7 @@
 //! - **Reaper**: on startup, runs left `Running` by a previous crashed process
 //!   are failed so they do not appear stuck forever.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use jiff::{Span, Timestamp};
@@ -22,7 +23,7 @@ use nvisy_postgres::model::{
     NewWorkspaceConnectionSync, WorkspaceConnection, WorkspaceConnectionSync,
 };
 use nvisy_postgres::query::{
-    WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
+    ScheduledConnection, WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
     WorkspaceConnectionSyncRepository,
 };
 use nvisy_postgres::types::{SyncDeletionPolicy, SyncStatus, SyncTriggerType};
@@ -176,37 +177,36 @@ impl ConnectionSyncWorker {
             return Ok(());
         }
 
-        let connections = {
-            let mut conn = self.infra.postgres.get_connection().await?;
-            conn.list_scheduled_connections().await?
-        };
-
-        // Snapshot each connection's latest run in one query, then release the DB
-        // connection before publishing so it is not held across NATS round-trips.
+        // Snapshot the scheduled connections (each with its cron) and every
+        // candidate's latest sync in two queries, then release the DB connection
+        // before publishing so it is not held across NATS round-trips.
         let due = {
             let mut conn = self.infra.postgres.get_connection().await?;
+            let connections = conn.list_scheduled_connections().await?;
+            let ids: Vec<Uuid> = connections.iter().map(|c| c.connection.id).collect();
+            let latest: HashMap<Uuid, WorkspaceConnectionSync> = conn
+                .find_latest_workspace_connection_syncs(&ids)
+                .await?
+                .into_iter()
+                .map(|sync| (sync.connection_id, sync))
+                .collect();
+
             let mut due = Vec::new();
-            for connection in connections {
-                // Only sync-capable connections are listed, but re-read the
-                // schedule to get the cron; skip any without one.
-                let Some(schedule) = conn.find_connection_schedule(connection.id).await? else {
-                    continue;
-                };
-                let Some(cron) = &schedule.schedule_cron else {
-                    continue;
-                };
-                let latest = conn
-                    .find_latest_workspace_connection_sync(connection.id)
-                    .await?;
+            for ScheduledConnection {
+                connection,
+                schedule_cron,
+            } in connections
+            {
+                let latest = latest.get(&connection.id);
                 // A run already in progress means this connection is busy; skip it.
-                if latest.as_ref().is_some_and(|run| run.is_in_progress()) {
+                if latest.is_some_and(|run| run.is_in_progress()) {
                     continue;
                 }
                 // Due-ness is measured from the last attempt (success or failure),
                 // not the last success, so a persistently failing connection is not
                 // re-enqueued every tick; retries are owned by maybe_retry.
                 let last_attempt = latest.map(|run| run.started_at.into());
-                if StandardCronSchedule.is_due(cron, last_attempt, now) {
+                if StandardCronSchedule.is_due(&schedule_cron, last_attempt, now) {
                     due.push((connection.workspace_id, connection.id));
                 }
             }

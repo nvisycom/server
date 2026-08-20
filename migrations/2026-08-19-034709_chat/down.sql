@@ -1,5 +1,9 @@
--- Revert the chat feature: drop messages, sessions, then the role enum.
+-- Revert the chat feature.
+-- Objects are dropped in reverse order of creation.
 
-DROP TABLE IF EXISTS chat_messages;
-DROP TABLE IF EXISTS chat_sessions;
+-- chat_messages and chat_sessions reference each other; dropping both in one
+-- statement resolves the cross constraint without CASCADE (which could silently
+-- remove unexpected external dependents).
+DROP TABLE IF EXISTS chat_messages, chat_sessions;
+
 DROP TYPE IF EXISTS CHAT_ROLE;

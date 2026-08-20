@@ -1,17 +1,18 @@
--- Pipelines: redaction pipeline definitions, their runs, and artifacts.
--- Policy references live in a join table declared alongside policies.
+-- Pipelines: redaction pipeline definitions, their runs, and produced files.
+-- A pipeline is a workspace-scoped detection/redaction config; a run is one
+-- pass of a file through that config. Policy references live in a join table
+-- declared alongside policies, not embedded here.
 
--- Pipeline status enum
+-- Lifecycle status of a pipeline definition.
 CREATE TYPE PIPELINE_STATUS AS ENUM (
     'draft',        -- Pipeline is being configured
     'enabled',      -- Pipeline is ready to run
-    'disabled'      -- Pipeline is disabled
+    'disabled'      -- Pipeline is turned off
 );
 
-COMMENT ON TYPE PIPELINE_STATUS IS
-    'Lifecycle status for pipeline definitions.';
+COMMENT ON TYPE PIPELINE_STATUS IS 'Lifecycle status of a pipeline definition: draft, enabled, or disabled.';
 
--- Pipeline run status enum
+-- Execution status of a pipeline run.
 CREATE TYPE PIPELINE_RUN_STATUS AS ENUM (
     'queued',       -- Enqueued for detection; no worker has picked it up yet
     'analyzing',    -- A worker is actively analyzing the document
@@ -21,19 +22,17 @@ CREATE TYPE PIPELINE_RUN_STATUS AS ENUM (
     'cancelled'     -- Run was cancelled by user
 );
 
-COMMENT ON TYPE PIPELINE_RUN_STATUS IS
-    'Execution status for pipeline runs.';
+COMMENT ON TYPE PIPELINE_RUN_STATUS IS 'Execution status of a pipeline run.';
 
--- Pipeline trigger type enum
+-- How a pipeline run was initiated.
 CREATE TYPE PIPELINE_TRIGGER_TYPE AS ENUM (
     'user',         -- Started directly by a user
     'system'        -- Started automatically (e.g. a file upload auto-redacted)
 );
 
-COMMENT ON TYPE PIPELINE_TRIGGER_TYPE IS
-    'How a pipeline run was initiated.';
+COMMENT ON TYPE PIPELINE_TRIGGER_TYPE IS 'How a pipeline run was initiated: by a user or by the system.';
 
--- Workspace pipeline definitions table
+-- Pipeline definitions table: a workspace's detection/redaction configs.
 CREATE TABLE workspace_pipelines (
     -- Primary identifier
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -54,87 +53,73 @@ CREATE TABLE workspace_pipelines (
 
     -- Core attributes
     display_name    TEXT             NOT NULL,
-    description     TEXT             DEFAULT NULL,
-    status          PIPELINE_STATUS  NOT NULL DEFAULT 'draft',
-
     CONSTRAINT workspace_pipelines_display_name_length CHECK (length(trim(display_name)) BETWEEN 2 AND 128),
+    description     TEXT             DEFAULT NULL,
     CONSTRAINT workspace_pipelines_description_length CHECK (description IS NULL OR length(description) <= 500),
+    status          PIPELINE_STATUS  NOT NULL DEFAULT 'draft',
 
     -- Engine detection + redaction config (nvisy_schema plan as JSON):
     -- recognizers, enrichers, deduplication, label catalog, default scope.
     -- Policy references are relational (workspace_pipeline_policies, declared
     -- alongside policies), not embedded here.
     definition      JSONB            NOT NULL,
-
     CONSTRAINT workspace_pipelines_definition_size CHECK (length(definition::TEXT) BETWEEN 2 AND 1048576),
 
-    -- Configuration
+    -- Free-form metadata for filtering and display.
     metadata        JSONB            NOT NULL DEFAULT '{}',
-
     CONSTRAINT workspace_pipelines_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
-
-    -- Scheduling (optional)
-    schedule_cron   TEXT             DEFAULT NULL,
-    schedule_tz     TEXT             DEFAULT 'UTC',
-    next_run_at     TIMESTAMPTZ      DEFAULT NULL,
-
-    CONSTRAINT workspace_pipelines_schedule_cron_length CHECK (schedule_cron IS NULL OR length(schedule_cron) BETWEEN 9 AND 100),
-    CONSTRAINT workspace_pipelines_schedule_tz_length CHECK (length(schedule_tz) BETWEEN 1 AND 64),
-    CONSTRAINT workspace_pipelines_schedule_requires_cron CHECK (next_run_at IS NULL OR schedule_cron IS NOT NULL),
 
     -- Lifecycle timestamps
     created_at      TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     updated_at      TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     deleted_at      TIMESTAMPTZ      DEFAULT NULL,
-
     CONSTRAINT workspace_pipelines_updated_after_created CHECK (updated_at >= created_at),
     CONSTRAINT workspace_pipelines_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
 );
 
--- Triggers
+-- Maintain updated_at on every row modification.
 SELECT setup_updated_at('workspace_pipelines');
 
--- Indexes
+-- One live pipeline per slug within a workspace (slug frees up after deletion).
 CREATE UNIQUE INDEX workspace_pipelines_slug_unique_idx
     ON workspace_pipelines (workspace_id, slug)
     WHERE deleted_at IS NULL;
 
+-- Live pipelines of a workspace, newest first (the pipeline list).
 CREATE INDEX workspace_pipelines_workspace_idx
     ON workspace_pipelines (workspace_id, created_at DESC)
     WHERE deleted_at IS NULL;
 
+-- Live pipelines created by an account, newest first.
 CREATE INDEX workspace_pipelines_account_idx
     ON workspace_pipelines (account_id, created_at DESC)
     WHERE deleted_at IS NULL;
 
+-- Filter live pipelines by lifecycle status within a workspace.
 CREATE INDEX workspace_pipelines_status_idx
     ON workspace_pipelines (status, workspace_id)
     WHERE deleted_at IS NULL;
 
+-- Trigram search over live pipeline display names.
 CREATE INDEX workspace_pipelines_display_name_trgm_idx
     ON workspace_pipelines USING gin (display_name gin_trgm_ops)
     WHERE deleted_at IS NULL;
 
--- Comments
-COMMENT ON TABLE workspace_pipelines IS
-    'Redaction pipeline definitions with step configurations.';
-
+COMMENT ON TABLE workspace_pipelines IS 'Workspace-scoped redaction pipeline definitions.';
 COMMENT ON COLUMN workspace_pipelines.id IS 'Unique pipeline identifier';
-COMMENT ON COLUMN workspace_pipelines.workspace_id IS 'Parent workspace reference';
-COMMENT ON COLUMN workspace_pipelines.account_id IS 'Creator account reference';
+COMMENT ON COLUMN workspace_pipelines.workspace_id IS 'Workspace this pipeline belongs to';
+COMMENT ON COLUMN workspace_pipelines.account_id IS 'Account that created the pipeline';
+COMMENT ON COLUMN workspace_pipelines.slug IS 'URL identity, unique among live pipelines in the workspace';
 COMMENT ON COLUMN workspace_pipelines.display_name IS 'Pipeline display name (2-128 chars)';
 COMMENT ON COLUMN workspace_pipelines.description IS 'Pipeline description (up to 500 chars)';
 COMMENT ON COLUMN workspace_pipelines.status IS 'Pipeline lifecycle status';
-COMMENT ON COLUMN workspace_pipelines.definition IS 'Pipeline definition JSON (steps, input/output schemas, etc.)';
-COMMENT ON COLUMN workspace_pipelines.metadata IS 'Extended metadata';
-COMMENT ON COLUMN workspace_pipelines.schedule_cron IS 'Cron expression for scheduled runs (e.g., "0 0 * * *")';
-COMMENT ON COLUMN workspace_pipelines.schedule_tz IS 'Timezone for schedule interpretation (default: UTC)';
-COMMENT ON COLUMN workspace_pipelines.next_run_at IS 'Next scheduled run time (computed from cron)';
-COMMENT ON COLUMN workspace_pipelines.created_at IS 'Creation timestamp';
+COMMENT ON COLUMN workspace_pipelines.definition IS 'Detection/redaction config (nvisy_schema plan as JSON)';
+COMMENT ON COLUMN workspace_pipelines.metadata IS 'Free-form metadata for filtering/display';
+COMMENT ON COLUMN workspace_pipelines.created_at IS 'Pipeline creation timestamp';
 COMMENT ON COLUMN workspace_pipelines.updated_at IS 'Last modification timestamp';
-COMMENT ON COLUMN workspace_pipelines.deleted_at IS 'Soft deletion timestamp';
+COMMENT ON COLUMN workspace_pipelines.deleted_at IS 'Soft-deletion timestamp; NULL means live';
 
--- Pipeline runs table (execution instances)
+-- Pipeline runs table: one pass of a file through a pipeline.
 CREATE TABLE workspace_pipeline_runs (
     -- Primary identifier
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -150,9 +135,15 @@ CREATE TABLE workspace_pipeline_runs (
     --   audit:  the engine's analysis (Audit), a `file_kind = audit` file held
     --           between detect and redact; redact reads it as the source of truth.
     --   output: the redacted document produced by redact.
-    -- Produced files use ON DELETE SET NULL so deleting them (e.g. via retention)
-    -- leaves the run history intact; the input cascades since a run is meaningless
-    -- without its source document.
+    -- A run is append-only audit history: its file references survive the files
+    -- themselves. Files are only ever soft-deleted (their objects purged), so
+    -- these ON DELETE actions fire only on a hard delete. The app never hard-
+    -- deletes an individual file; the one hard delete is a whole-workspace
+    -- teardown, which cascades files and runs away together. The input therefore
+    -- cascades — a workspace deletion that removes the source document should
+    -- remove its runs too. Produced files use ON DELETE SET NULL so that, in that
+    -- same teardown, they clear rather than cascade (redundant here, but the
+    -- correct action for a produced artifact).
     input_file_id   UUID                    NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
     audit_file_id   UUID                    DEFAULT NULL REFERENCES workspace_files (id) ON DELETE SET NULL,
     output_file_id  UUID                    DEFAULT NULL REFERENCES workspace_files (id) ON DELETE SET NULL,
@@ -164,12 +155,10 @@ CREATE TABLE workspace_pipeline_runs (
     -- Idempotency key from the initiating detect request; a repeat replays the
     -- existing run instead of analyzing twice.
     idempotency_key TEXT                    DEFAULT NULL,
-
     CONSTRAINT workspace_pipeline_runs_idempotency_key_length CHECK (idempotency_key IS NULL OR length(idempotency_key) BETWEEN 1 AND 255),
 
-    -- Metadata (non-encrypted, for filtering/display)
+    -- Non-encrypted metadata for filtering and display.
     metadata        JSONB                   NOT NULL DEFAULT '{}',
-
     CONSTRAINT workspace_pipeline_runs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
 
     -- Detection lease: when a worker last claimed this run. A redelivered job
@@ -180,21 +169,23 @@ CREATE TABLE workspace_pipeline_runs (
     -- Timing
     started_at      TIMESTAMPTZ             NOT NULL DEFAULT current_timestamp,
     completed_at    TIMESTAMPTZ             DEFAULT NULL,
-
     CONSTRAINT workspace_pipeline_runs_completed_after_started CHECK (completed_at IS NULL OR completed_at >= started_at)
 );
 
--- Indexes
+-- A pipeline's runs, newest first (the run list).
 CREATE INDEX workspace_pipeline_runs_pipeline_idx
     ON workspace_pipeline_runs (pipeline_id, started_at DESC);
 
+-- Runs triggered by an account, newest first.
 CREATE INDEX workspace_pipeline_runs_account_idx
     ON workspace_pipeline_runs (account_id, started_at DESC);
 
+-- In-flight runs by status (queue and review backlog).
 CREATE INDEX workspace_pipeline_runs_status_idx
     ON workspace_pipeline_runs (status, started_at DESC)
     WHERE status IN ('queued', 'analyzing', 'analyzed');
 
+-- Runs analyzing a given input file, newest first.
 CREATE INDEX workspace_pipeline_runs_input_file_idx
     ON workspace_pipeline_runs (input_file_id, started_at DESC);
 
@@ -203,60 +194,24 @@ CREATE UNIQUE INDEX workspace_pipeline_runs_idempotency_idx
     ON workspace_pipeline_runs (pipeline_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
 
--- Comments
-COMMENT ON TABLE workspace_pipeline_runs IS
-    'Detect/redact runs: one analysis of a file through a pipeline, awaiting review then redaction.';
+-- A run is append-only history: its file references (input/audit/output) are
+-- kept even after those files are deleted, so the record of what a run analyzed
+-- and produced survives. The `ON DELETE SET NULL` FKs would fire only on a hard
+-- file delete, which never happens (files are soft-deleted); a reference to a
+-- soft-deleted file resolves to "gone" at read time, distinct from a NULL that
+-- means the run never had one.
 
+COMMENT ON TABLE workspace_pipeline_runs IS 'Detect/redact runs: one pass of a file through a pipeline.';
 COMMENT ON COLUMN workspace_pipeline_runs.id IS 'Unique run identifier';
 COMMENT ON COLUMN workspace_pipeline_runs.pipeline_id IS 'Pipeline whose config drove the run';
-COMMENT ON COLUMN workspace_pipeline_runs.account_id IS 'Account that triggered the run (optional)';
+COMMENT ON COLUMN workspace_pipeline_runs.account_id IS 'Account that triggered the run';
 COMMENT ON COLUMN workspace_pipeline_runs.input_file_id IS 'Source document the run analyzes / redacts';
-COMMENT ON COLUMN workspace_pipeline_runs.audit_file_id IS 'Audit file (file_kind=audit) holding the encrypted analysis between detect and redact';
-COMMENT ON COLUMN workspace_pipeline_runs.output_file_id IS 'Redacted document produced by redact (file_kind=redacted); null until completed';
+COMMENT ON COLUMN workspace_pipeline_runs.audit_file_id IS 'Audit file (file_kind=audit) holding the analysis between detect and redact';
+COMMENT ON COLUMN workspace_pipeline_runs.output_file_id IS 'Redacted document produced by redact; NULL until completed';
 COMMENT ON COLUMN workspace_pipeline_runs.trigger_type IS 'How the run was initiated';
 COMMENT ON COLUMN workspace_pipeline_runs.status IS 'Current run status';
 COMMENT ON COLUMN workspace_pipeline_runs.idempotency_key IS 'Detect idempotency key (dedupes retries)';
 COMMENT ON COLUMN workspace_pipeline_runs.metadata IS 'Non-encrypted metadata for filtering/display';
 COMMENT ON COLUMN workspace_pipeline_runs.claimed_at IS 'Detection lease: when a worker last claimed this run';
 COMMENT ON COLUMN workspace_pipeline_runs.started_at IS 'When the run started';
-COMMENT ON COLUMN workspace_pipeline_runs.completed_at IS 'When the run completed';
-
--- View for active pipeline runs
-CREATE VIEW active_workspace_pipeline_runs AS
-SELECT
-    pr.id,
-    pr.pipeline_id,
-    p.display_name AS pipeline_name,
-    p.workspace_id,
-    pr.account_id,
-    pr.trigger_type,
-    pr.status,
-    pr.started_at,
-    EXTRACT(EPOCH FROM (COALESCE(pr.completed_at, current_timestamp) - pr.started_at)) AS duration_seconds
-FROM workspace_pipeline_runs pr
-    JOIN workspace_pipelines p ON pr.pipeline_id = p.id
-WHERE pr.status IN ('queued', 'analyzing', 'analyzed')
-ORDER BY pr.started_at DESC NULLS LAST;
-
-COMMENT ON VIEW active_workspace_pipeline_runs IS
-    'Currently active pipeline runs with progress information.';
-
--- View for workspace pipeline run history
-CREATE VIEW workspace_pipeline_run_history AS
-SELECT
-    pr.id,
-    pr.pipeline_id,
-    p.display_name AS pipeline_name,
-    p.workspace_id,
-    pr.trigger_type,
-    pr.status,
-    pr.started_at,
-    pr.completed_at,
-    EXTRACT(EPOCH FROM (pr.completed_at - pr.started_at)) AS duration_seconds
-FROM workspace_pipeline_runs pr
-    JOIN workspace_pipelines p ON pr.pipeline_id = p.id
-WHERE pr.status IN ('completed', 'failed', 'cancelled')
-ORDER BY pr.completed_at DESC;
-
-COMMENT ON VIEW workspace_pipeline_run_history IS
-    'Completed pipeline runs for history and analytics.';
+COMMENT ON COLUMN workspace_pipeline_runs.completed_at IS 'When the run completed; NULL while in flight';

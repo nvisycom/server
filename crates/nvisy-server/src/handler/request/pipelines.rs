@@ -144,9 +144,6 @@ impl CreatePipeline {
             status: self.status,
             definition: Some(definition),
             metadata,
-            schedule_cron: None,
-            schedule_tz: None,
-            next_run_at: None,
         };
         Ok((model, references))
     }

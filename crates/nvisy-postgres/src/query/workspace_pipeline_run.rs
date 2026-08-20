@@ -132,16 +132,6 @@ pub trait WorkspacePipelineRunRepository {
         run_id: Uuid,
         updates: UpdateWorkspacePipelineRun,
     ) -> impl Future<Output = PgResult<WorkspacePipelineRun>> + Send;
-
-    /// Clears any run references to `file_id`, nulling `audit_file_id` and
-    /// `output_file_id` wherever they point at it. Used when a file is
-    /// soft-deleted (e.g. by retention): the `ON DELETE SET NULL` FKs fire only
-    /// on a hard delete, so runs would otherwise keep pointing at a tombstoned
-    /// file. Returns the number of runs updated.
-    fn clear_run_file_references(
-        &mut self,
-        file_id: Uuid,
-    ) -> impl Future<Output = PgResult<usize>> + Send;
 }
 
 impl WorkspacePipelineRunRepository for PgConnection {
@@ -521,25 +511,5 @@ impl WorkspacePipelineRunRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(run)
-    }
-
-    async fn clear_run_file_references(&mut self, file_id: Uuid) -> PgResult<usize> {
-        use schema::workspace_pipeline_runs::{self, dsl};
-
-        let audit_cleared =
-            diesel::update(workspace_pipeline_runs::table.filter(dsl::audit_file_id.eq(file_id)))
-                .set(dsl::audit_file_id.eq(None::<Uuid>))
-                .execute(self)
-                .await
-                .map_err(PgError::from)?;
-
-        let output_cleared =
-            diesel::update(workspace_pipeline_runs::table.filter(dsl::output_file_id.eq(file_id)))
-                .set(dsl::output_file_id.eq(None::<Uuid>))
-                .execute(self)
-                .await
-                .map_err(PgError::from)?;
-
-        Ok(audit_cleared + output_cleared)
     }
 }

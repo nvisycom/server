@@ -1,18 +1,9 @@
--- Drop all objects created in the workspaces migration
--- Drop in reverse order of creation to avoid dependency issues
+-- Revert the workspaces tables.
+-- Objects are dropped in reverse order of creation.
 
--- Drop functions
-DROP FUNCTION IF EXISTS cleanup_expired_invites();
-
--- Drop views
-DROP VIEW IF EXISTS pending_workspace_invites;
-DROP VIEW IF EXISTS workspace_member_summary;
-
--- Drop tables (indexes and triggers dropped automatically with tables)
 DROP TABLE IF EXISTS workspace_invites;
 DROP TABLE IF EXISTS workspace_members;
 DROP TABLE IF EXISTS workspaces;
 
--- Drop enum types
 DROP TYPE IF EXISTS INVITE_STATUS;
 DROP TYPE IF EXISTS WORKSPACE_ROLE;

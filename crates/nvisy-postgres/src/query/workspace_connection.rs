@@ -13,6 +13,17 @@ use crate::types::{
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
+/// A sync-scheduled connection paired with its cron expression, as returned by
+/// [`WorkspaceConnectionRepository::list_scheduled_connections`]. The cron is
+/// non-optional: the query only lists connections whose schedule has one.
+#[derive(Debug, Clone, Queryable)]
+pub struct ScheduledConnection {
+    /// The connection due for scheduling.
+    pub connection: WorkspaceConnection,
+    /// The connection's cron expression.
+    pub schedule_cron: String,
+}
+
 /// Repository for workspace connection database operations.
 ///
 /// Handles connection lifecycle management including creation, updates,
@@ -70,10 +81,12 @@ pub trait WorkspaceConnectionRepository {
     ) -> impl Future<Output = PgResult<Option<WorkspaceConnection>>> + Send;
 
     /// Lists all active, import-mode connections that have a sync schedule,
-    /// across every workspace. Used by the scheduled-sync worker.
+    /// across every workspace, each paired with its cron. Used by the
+    /// scheduled-sync worker; returning the cron avoids re-reading each
+    /// schedule row.
     fn list_scheduled_connections(
         &mut self,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceConnection>>> + Send;
+    ) -> impl Future<Output = PgResult<Vec<ScheduledConnection>>> + Send;
 
     /// Lists all connections in a workspace with offset pagination.
     fn offset_list_workspace_connections(
@@ -245,20 +258,25 @@ impl WorkspaceConnectionRepository for PgConnection {
             .map_err(PgError::from)
     }
 
-    async fn list_scheduled_connections(&mut self) -> PgResult<Vec<WorkspaceConnection>> {
+    async fn list_scheduled_connections(&mut self) -> PgResult<Vec<ScheduledConnection>> {
         use schema::workspace_connection_schedule as sched;
         use schema::workspace_connections::{self, dsl};
 
         // Sync config lives in the schedule satellite; join it to find active,
-        // import-mode connections with a cron schedule.
+        // import-mode connections with a cron schedule. The `schedule_cron IS NOT
+        // NULL` filter makes the column non-null for this query, so the worker
+        // gets the cron without re-reading the schedule row.
         let connections = workspace_connections::table
             .inner_join(sched::table.on(sched::connection_id.eq(dsl::id)))
             .filter(sched::schedule_cron.is_not_null())
             .filter(sched::sync_mode.eq(SyncMode::Import))
             .filter(dsl::is_active.eq(true))
             .filter(dsl::deleted_at.is_null())
-            .select(WorkspaceConnection::as_select())
-            .load(self)
+            .select((
+                WorkspaceConnection::as_select(),
+                sched::schedule_cron.assume_not_null(),
+            ))
+            .load::<ScheduledConnection>(self)
             .await
             .map_err(PgError::from)?;
 

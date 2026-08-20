@@ -48,6 +48,9 @@ pub struct WorkspaceFile {
     pub deleted_at: Option<Timestamp>,
     /// Data-retention expiry (`None` = keep indefinitely).
     pub expires_at: Option<Timestamp>,
+    /// When the backing object was reclaimed from the store. `None` on a
+    /// soft-deleted row means the purge is still pending (the reaper's to-do).
+    pub purged_at: Option<Timestamp>,
 }
 
 /// Data for creating a new workspace file.

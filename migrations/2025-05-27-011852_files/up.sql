@@ -1,19 +1,19 @@
--- This migration creates tables for files
+-- Files: workspace-scoped documents with version chains and content
+-- deduplication. Each file records its storage location, a SHA256 content hash,
+-- and a data-retention window; versions link to their predecessor via parent_id.
 
--- Create file kind enum: the file's role, which drives data-retention scope and
--- whether it is a user-facing document.
+-- Role of a file: drives data-retention scope and whether it is user-facing.
 CREATE TYPE FILE_KIND AS ENUM (
     'original',     -- Source document (uploaded or imported)
     'redacted',     -- Redacted output produced by a pipeline
     'audit'         -- Engine analysis blob (not shown in file lists)
 );
 
-COMMENT ON TYPE FILE_KIND IS
-    'The role of a file: original document, redacted output, or audit blob.';
+COMMENT ON TYPE FILE_KIND IS 'The role of a file: original document, redacted output, or audit blob.';
 
--- Create workspace files table
+-- Workspace files table: one stored document, with version tracking and dedup.
 CREATE TABLE workspace_files (
-    -- Primary identifiers
+    -- Primary identifier
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References
@@ -24,9 +24,9 @@ CREATE TABLE workspace_files (
     -- Composite key target for workspace-scoped access and foreign keys.
     CONSTRAINT workspace_files_workspace_id_id_key UNIQUE (workspace_id, id),
 
-    -- Version tracking (parent_id links to previous version, version_number tracks sequence)
+    -- Version tracking: parent_id links to the previous version, version_number
+    -- tracks the sequence and is set automatically from the parent on insert.
     version_number          INTEGER          NOT NULL DEFAULT 1,
-
     CONSTRAINT workspace_files_version_number_min CHECK (version_number >= 1),
 
     -- File metadata
@@ -34,7 +34,6 @@ CREATE TABLE workspace_files (
     original_filename       TEXT             NOT NULL DEFAULT 'Untitled',
     file_extension          TEXT             NOT NULL DEFAULT 'txt',
     file_kind               FILE_KIND        NOT NULL DEFAULT 'original',
-
     CONSTRAINT workspace_files_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 255),
     CONSTRAINT workspace_files_original_filename_length CHECK (length(original_filename) BETWEEN 1 AND 255),
     CONSTRAINT workspace_files_file_extension_format CHECK (file_extension ~ '^[a-zA-Z0-9]{1,20}$'),
@@ -44,7 +43,6 @@ CREATE TABLE workspace_files (
     file_hash_sha256        BYTEA            NOT NULL,
     storage_path            TEXT             NOT NULL,
     storage_bucket          TEXT             NOT NULL,
-
     CONSTRAINT workspace_files_file_size_min CHECK (file_size_bytes >= 0),
     CONSTRAINT workspace_files_file_hash_sha256_length CHECK (octet_length(file_hash_sha256) = 32),
     CONSTRAINT workspace_files_storage_path_not_empty CHECK (trim(storage_path) <> ''),
@@ -52,7 +50,6 @@ CREATE TABLE workspace_files (
 
     -- Configuration
     metadata                JSONB            NOT NULL DEFAULT '{}',
-
     CONSTRAINT workspace_files_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
 
     -- Lifecycle timestamps
@@ -60,33 +57,44 @@ CREATE TABLE workspace_files (
     updated_at              TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     deleted_at              TIMESTAMPTZ      DEFAULT NULL,
     expires_at              TIMESTAMPTZ      DEFAULT NULL,
-
     CONSTRAINT workspace_files_updated_after_created CHECK (updated_at >= created_at),
     CONSTRAINT workspace_files_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
     CONSTRAINT workspace_files_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at),
-    CONSTRAINT workspace_files_expires_after_created CHECK (expires_at IS NULL OR expires_at >= created_at)
+    CONSTRAINT workspace_files_expires_after_created CHECK (expires_at IS NULL OR expires_at >= created_at),
+
+    -- When the backing object was reclaimed from the store. A soft-deleted row
+    -- keeps its object until the reaper purges it and stamps this; a NULL here on
+    -- a deleted row is the reaper's to-do list (retried until the object is gone).
+    purged_at               TIMESTAMPTZ      DEFAULT NULL,
+    -- An object is only purged once its row is soft-deleted, so purged_at implies
+    -- deleted_at and never precedes it.
+    CONSTRAINT workspace_files_purged_after_deleted CHECK (purged_at IS NULL OR (deleted_at IS NOT NULL AND purged_at >= deleted_at))
 );
 
--- Set up automatic updated_at trigger
+-- Keep updated_at current on every row modification.
 SELECT setup_updated_at('workspace_files');
 
--- Create indexes for workspace files
+-- Most recent live files per workspace (the file list).
 CREATE INDEX workspace_files_workspace_idx
     ON workspace_files (workspace_id, created_at DESC)
     WHERE deleted_at IS NULL;
 
+-- Most recent live files per account.
 CREATE INDEX workspace_files_account_idx
     ON workspace_files (account_id, created_at DESC)
     WHERE deleted_at IS NULL;
 
+-- Deduplication lookup by content hash and size.
 CREATE INDEX workspace_files_hash_dedup_idx
     ON workspace_files (file_hash_sha256, file_size_bytes)
     WHERE deleted_at IS NULL;
 
+-- Fuzzy display-name search over live files.
 CREATE INDEX workspace_files_display_name_trgm_idx
     ON workspace_files USING gin (display_name gin_trgm_ops)
     WHERE deleted_at IS NULL;
 
+-- Walk a file's version chain, newest version first.
 CREATE INDEX workspace_files_version_chain_idx
     ON workspace_files (parent_id, version_number DESC)
     WHERE parent_id IS NOT NULL AND deleted_at IS NULL;
@@ -96,35 +104,36 @@ CREATE INDEX workspace_files_expiry_idx
     ON workspace_files (expires_at)
     WHERE expires_at IS NOT NULL AND deleted_at IS NULL;
 
--- Trigger function to auto-set version_number based on parent
+-- Reconcile sweep: soft-deleted files whose backing object was not yet reclaimed
+-- (a best-effort purge that failed, or a delete path that bypassed the reaper).
+CREATE INDEX workspace_files_purge_pending_idx
+    ON workspace_files (deleted_at)
+    WHERE deleted_at IS NOT NULL AND purged_at IS NULL;
+
+-- Sets version_number on insert: one past the parent's version, or 1 with no parent.
 CREATE OR REPLACE FUNCTION set_workspace_file_version_number()
 RETURNS TRIGGER AS $$
 BEGIN
-    -- If parent_id is set, calculate version as parent's version + 1
     IF NEW.parent_id IS NOT NULL THEN
         SELECT version_number + 1 INTO NEW.version_number
         FROM workspace_files
         WHERE id = NEW.parent_id;
     ELSE
-        -- No parent means version 1
         NEW.version_number := 1;
     END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
+-- Derives version_number from the parent before each row is inserted.
 CREATE TRIGGER workspace_files_set_version_trigger
     BEFORE INSERT ON workspace_files
     FOR EACH ROW
     EXECUTE FUNCTION set_workspace_file_version_number();
 
-COMMENT ON FUNCTION set_workspace_file_version_number() IS
-    'Automatically sets version_number based on parent file version.';
+COMMENT ON FUNCTION set_workspace_file_version_number() IS 'Automatically sets version_number based on parent file version.';
 
--- Add table and column comments
-COMMENT ON TABLE workspace_files IS
-    'Files stored in the system with version tracking and deduplication.';
-
+COMMENT ON TABLE workspace_files IS 'Files stored in the system with version tracking and deduplication.';
 COMMENT ON COLUMN workspace_files.id IS 'Unique file identifier';
 COMMENT ON COLUMN workspace_files.workspace_id IS 'Parent workspace reference';
 COMMENT ON COLUMN workspace_files.account_id IS 'Uploading/creating account reference';
@@ -141,33 +150,6 @@ COMMENT ON COLUMN workspace_files.storage_bucket IS 'Storage bucket/container';
 COMMENT ON COLUMN workspace_files.metadata IS 'Extended metadata (JSON)';
 COMMENT ON COLUMN workspace_files.created_at IS 'Upload timestamp';
 COMMENT ON COLUMN workspace_files.updated_at IS 'Last modification timestamp';
-COMMENT ON COLUMN workspace_files.deleted_at IS 'Soft deletion timestamp';
+COMMENT ON COLUMN workspace_files.deleted_at IS 'Soft-deletion timestamp; NULL means live';
 COMMENT ON COLUMN workspace_files.expires_at IS 'Data-retention expiry (NULL = keep indefinitely)';
-
--- Create duplicate detection function
-CREATE OR REPLACE FUNCTION find_duplicate_workspace_files(_workspace_id UUID DEFAULT NULL)
-RETURNS TABLE (
-    file_hash TEXT,
-    file_size BIGINT,
-    duplicate_count BIGINT,
-    file_ids UUID[]
-)
-LANGUAGE plpgsql AS $$
-BEGIN
-    RETURN QUERY
-    SELECT
-        ENCODE(f.file_hash_sha256, 'hex'),
-        f.file_size_bytes,
-        COUNT(*),
-        ARRAY_AGG(f.id)
-    FROM workspace_files f
-    WHERE (_workspace_id IS NULL OR f.workspace_id = _workspace_id)
-        AND f.deleted_at IS NULL
-    GROUP BY f.file_hash_sha256, f.file_size_bytes
-    HAVING COUNT(*) > 1
-    ORDER BY COUNT(*) DESC;
-END;
-$$;
-
-COMMENT ON FUNCTION find_duplicate_workspace_files(UUID) IS
-    'Finds duplicate workspace files by hash and size. Optionally scoped to a specific workspace.';
+COMMENT ON COLUMN workspace_files.purged_at IS 'When the backing object was reclaimed; NULL on a deleted row means purge still pending';

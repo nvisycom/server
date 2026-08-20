@@ -257,6 +257,7 @@ diesel::table! {
         updated_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,
         expires_at -> Nullable<Timestamptz>,
+        purged_at -> Nullable<Timestamptz>,
     }
 }
 
@@ -346,9 +347,6 @@ diesel::table! {
         status -> PipelineStatus,
         definition -> Jsonb,
         metadata -> Jsonb,
-        schedule_cron -> Nullable<Text>,
-        schedule_tz -> Nullable<Text>,
-        next_run_at -> Nullable<Timestamptz>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,

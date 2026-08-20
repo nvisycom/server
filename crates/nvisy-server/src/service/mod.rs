@@ -7,7 +7,7 @@ mod crypto;
 mod detection;
 mod engine;
 mod external_object_store;
-mod file_retention;
+mod file_reaper;
 mod health;
 mod infra;
 mod notification;
@@ -38,12 +38,12 @@ pub use crate::service::detection::{
 pub(crate) use crate::service::detection::{fail_run, resolve_policies};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::external_object_store::ExternalObjectStore;
-pub use crate::service::file_retention::FileRetentionWorker;
+pub use crate::service::file_reaper::FileReaper;
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::infra::Infra;
 pub use crate::service::notification::{NotificationEmitter, UnreadCountEvent};
 pub use crate::service::password::PasswordService;
-pub use crate::service::run_blob_store::RunBlobStore;
+pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
 pub use crate::service::sync::{
     ConnectionSyncJob, ConnectionSyncService, ConnectionSyncWorker, DEFAULT_IMPORT_CONCURRENCY,
@@ -171,7 +171,7 @@ impl ServiceState {
             self.infra.clone(),
             self.connection_sync.clone(),
         ));
-        workers.spawn(FileRetentionWorker::new(self.infra.clone()));
+        workers.spawn(FileReaper::new(self.infra.clone()));
         workers.spawn(DetectionWorker::new(
             self.infra.clone(),
             self.engine.clone(),

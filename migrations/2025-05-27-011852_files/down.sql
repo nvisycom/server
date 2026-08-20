@@ -1,15 +1,8 @@
--- Drop all objects created in the files migration
--- Drop in reverse order of creation to avoid dependency issues
+-- Revert the files table.
+-- Objects are dropped in reverse order of creation.
 
--- Drop trigger before the function it depends on
-DROP TRIGGER IF EXISTS workspace_files_set_version_trigger ON workspace_files;
-
--- Drop workspace files table
 DROP TABLE IF EXISTS workspace_files;
 
--- Drop functions (after triggers that depend on them)
-DROP FUNCTION IF EXISTS find_duplicate_workspace_files(UUID);
-DROP FUNCTION IF EXISTS set_workspace_file_version_number();
+DROP FUNCTION IF EXISTS set_workspace_file_version_number;
 
--- Drop enum types
 DROP TYPE IF EXISTS FILE_KIND;
