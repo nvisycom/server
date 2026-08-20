@@ -41,7 +41,7 @@ pub use chat_session::ChatSessionRepository;
 pub use pipeline_reference::PipelineReferenceRepository;
 pub use workspace::WorkspaceRepository;
 pub use workspace_activity::WorkspaceActivityRepository;
-pub use workspace_connection::WorkspaceConnectionRepository;
+pub use workspace_connection::{ScheduledConnection, WorkspaceConnectionRepository};
 pub use workspace_connection_schedule::WorkspaceConnectionScheduleRepository;
 pub use workspace_connection_sync::WorkspaceConnectionSyncRepository;
 pub use workspace_file::{ExpiredFileRef, ImportedFileRef, WorkspaceFileRepository};

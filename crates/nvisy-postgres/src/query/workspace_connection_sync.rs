@@ -84,6 +84,14 @@ pub trait WorkspaceConnectionSyncRepository {
         connection_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionSync>>> + Send;
 
+    /// Gets the most recent sync for each of `connection_ids` in one query.
+    /// Connections with no sync yet are simply absent from the result. Used by
+    /// the scheduled-sync worker to snapshot every candidate's state at once.
+    fn find_latest_workspace_connection_syncs(
+        &mut self,
+        connection_ids: &[Uuid],
+    ) -> impl Future<Output = PgResult<Vec<WorkspaceConnectionSync>>> + Send;
+
     /// Updates a workspace connection sync with new data.
     fn update_workspace_connection_sync(
         &mut self,
@@ -410,6 +418,26 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
             .map_err(PgError::from)?;
 
         Ok(sync)
+    }
+
+    async fn find_latest_workspace_connection_syncs(
+        &mut self,
+        connection_ids: &[Uuid],
+    ) -> PgResult<Vec<WorkspaceConnectionSync>> {
+        use schema::workspace_connection_syncs::{self, dsl};
+
+        // One latest row per connection: DISTINCT ON keeps the first row for each
+        // connection_id under the matching ORDER BY (newest started_at first).
+        let syncs = workspace_connection_syncs::table
+            .filter(dsl::connection_id.eq_any(connection_ids))
+            .distinct_on(dsl::connection_id)
+            .order((dsl::connection_id, dsl::started_at.desc()))
+            .select(WorkspaceConnectionSync::as_select())
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(syncs)
     }
 
     async fn update_workspace_connection_sync(
