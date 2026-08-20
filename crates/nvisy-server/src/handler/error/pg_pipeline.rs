@@ -20,13 +20,6 @@ impl From<WorkspacePipelineConstraints> for Error<'static> {
                     .with_message("Pipeline definition size exceeds maximum limit"),
                 WorkspacePipelineConstraints::MetadataSize => ErrorKind::BadRequest
                     .with_message("Pipeline metadata size exceeds maximum limit"),
-                WorkspacePipelineConstraints::ScheduleCronLength => {
-                    ErrorKind::BadRequest.with_message("Pipeline schedule cron length is invalid")
-                }
-                WorkspacePipelineConstraints::ScheduleRequiresCron => ErrorKind::BadRequest
-                    .with_message("A scheduled pipeline requires a cron expression"),
-                WorkspacePipelineConstraints::ScheduleTzLength => ErrorKind::BadRequest
-                    .with_message("Pipeline schedule timezone length is invalid"),
                 WorkspacePipelineConstraints::SlugLength => ErrorKind::BadRequest
                     .with_message("Pipeline slug must be between 3 and 32 characters long"),
                 WorkspacePipelineConstraints::SlugFormat => ErrorKind::BadRequest.with_message(

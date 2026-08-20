@@ -69,15 +69,6 @@ CREATE TABLE workspace_pipelines (
     metadata        JSONB            NOT NULL DEFAULT '{}',
     CONSTRAINT workspace_pipelines_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
 
-    -- Scheduling (optional): a cron expression, its timezone, and the next
-    -- computed fire time. next_run_at is only meaningful when a cron is set.
-    schedule_cron   TEXT             DEFAULT NULL,
-    CONSTRAINT workspace_pipelines_schedule_cron_length CHECK (schedule_cron IS NULL OR length(schedule_cron) BETWEEN 9 AND 100),
-    schedule_tz     TEXT             DEFAULT 'UTC',
-    CONSTRAINT workspace_pipelines_schedule_tz_length CHECK (length(schedule_tz) BETWEEN 1 AND 64),
-    next_run_at     TIMESTAMPTZ      DEFAULT NULL,
-    CONSTRAINT workspace_pipelines_schedule_requires_cron CHECK (next_run_at IS NULL OR schedule_cron IS NOT NULL),
-
     -- Lifecycle timestamps
     created_at      TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     updated_at      TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
@@ -124,9 +115,6 @@ COMMENT ON COLUMN workspace_pipelines.description IS 'Pipeline description (up t
 COMMENT ON COLUMN workspace_pipelines.status IS 'Pipeline lifecycle status';
 COMMENT ON COLUMN workspace_pipelines.definition IS 'Detection/redaction config (nvisy_schema plan as JSON)';
 COMMENT ON COLUMN workspace_pipelines.metadata IS 'Free-form metadata for filtering/display';
-COMMENT ON COLUMN workspace_pipelines.schedule_cron IS 'Cron expression for scheduled runs (e.g. "0 0 * * *")';
-COMMENT ON COLUMN workspace_pipelines.schedule_tz IS 'Timezone for schedule interpretation (default UTC)';
-COMMENT ON COLUMN workspace_pipelines.next_run_at IS 'Next scheduled run time (computed from cron)';
 COMMENT ON COLUMN workspace_pipelines.created_at IS 'Pipeline creation timestamp';
 COMMENT ON COLUMN workspace_pipelines.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN workspace_pipelines.deleted_at IS 'Soft-deletion timestamp; NULL means live';

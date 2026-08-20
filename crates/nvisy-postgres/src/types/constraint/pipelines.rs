@@ -17,12 +17,6 @@ pub enum WorkspacePipelineConstraints {
     DefinitionSize,
     #[strum(serialize = "workspace_pipelines_metadata_size")]
     MetadataSize,
-    #[strum(serialize = "workspace_pipelines_schedule_cron_length")]
-    ScheduleCronLength,
-    #[strum(serialize = "workspace_pipelines_schedule_requires_cron")]
-    ScheduleRequiresCron,
-    #[strum(serialize = "workspace_pipelines_schedule_tz_length")]
-    ScheduleTzLength,
     #[strum(serialize = "workspace_pipelines_workspace_id_id_key")]
     WorkspaceIdIdUnique,
     #[strum(serialize = "workspace_pipelines_slug_unique_idx")]

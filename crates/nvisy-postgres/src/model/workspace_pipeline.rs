@@ -28,16 +28,10 @@ pub struct WorkspacePipeline {
     pub description: Option<String>,
     /// Pipeline lifecycle status.
     pub status: PipelineStatus,
-    /// Pipeline definition (steps, input/output schemas, etc.).
+    /// Detection/redaction config (nvisy_schema plan as JSON).
     pub definition: serde_json::Value,
     /// Extended metadata.
     pub metadata: Json<PipelineMetadata>,
-    /// Cron expression for scheduled runs.
-    pub schedule_cron: Option<String>,
-    /// Timezone for schedule interpretation.
-    pub schedule_tz: Option<String>,
-    /// Next scheduled run time (computed from cron).
-    pub next_run_at: Option<Timestamp>,
     /// Timestamp when the pipeline was created.
     pub created_at: Timestamp,
     /// Timestamp when the pipeline was last updated.
@@ -67,12 +61,6 @@ pub struct NewWorkspacePipeline {
     pub definition: Option<serde_json::Value>,
     /// Metadata.
     pub metadata: Option<Json<PipelineMetadata>>,
-    /// Cron expression for scheduled runs.
-    pub schedule_cron: Option<String>,
-    /// Timezone for schedule interpretation.
-    pub schedule_tz: Option<String>,
-    /// Next scheduled run time.
-    pub next_run_at: Option<Timestamp>,
 }
 
 /// Data for updating a workspace pipeline.
@@ -90,12 +78,6 @@ pub struct UpdateWorkspacePipeline {
     pub definition: Option<serde_json::Value>,
     /// Metadata.
     pub metadata: Option<Json<PipelineMetadata>>,
-    /// Cron expression for scheduled runs.
-    pub schedule_cron: Option<Option<String>>,
-    /// Timezone for schedule interpretation.
-    pub schedule_tz: Option<Option<String>>,
-    /// Next scheduled run time.
-    pub next_run_at: Option<Option<Timestamp>>,
     /// Soft delete timestamp.
     pub deleted_at: Option<Option<Timestamp>>,
 }
@@ -124,11 +106,6 @@ impl WorkspacePipeline {
     /// Returns whether the pipeline has a description.
     pub fn has_description(&self) -> bool {
         self.description.as_ref().is_some_and(|d| !d.is_empty())
-    }
-
-    /// Returns whether the pipeline has a schedule configured.
-    pub fn is_scheduled(&self) -> bool {
-        self.schedule_cron.is_some()
     }
 }
 
