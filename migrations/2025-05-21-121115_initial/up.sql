@@ -11,8 +11,11 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 -- Timestamp management function for soft-deletable tables.
 --
 -- Bumps `updated_at` on change, and on a soft delete syncs `updated_at` with
--- `deleted_at` to satisfy the deleted-after-updated constraint. Requires the
--- table to have a `deleted_at` column; use `trigger_updated_at_no_soft_delete` (via
+-- `deleted_at` to satisfy the deleted-after-updated constraint. Once a row is
+-- soft-deleted, `updated_at` stays frozen at `deleted_at`: a tombstone's
+-- post-deletion system stamps (e.g. a reaper marking its object purged) must not
+-- push `updated_at` past `deleted_at`. Requires the table to have a `deleted_at`
+-- column; use `trigger_updated_at_no_soft_delete` (via
 -- `setup_updated_at_no_soft_delete`) for tables without one.
 CREATE OR REPLACE FUNCTION trigger_updated_at()
 RETURNS TRIGGER
@@ -20,6 +23,14 @@ LANGUAGE plpgsql AS $$
 BEGIN
     IF (NEW.deleted_at IS DISTINCT FROM OLD.deleted_at AND NEW.deleted_at IS NOT NULL) THEN
         NEW.updated_at := NEW.deleted_at;
+        RETURN NEW;
+    END IF;
+
+    -- Already a tombstone (and staying one): keep updated_at pinned to the
+    -- deletion time so later mutations of a deleted row don't violate the
+    -- deleted-after-updated constraint.
+    IF (OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NOT NULL) THEN
+        NEW.updated_at := OLD.updated_at;
         RETURN NEW;
     END IF;
 

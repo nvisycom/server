@@ -257,6 +257,7 @@ diesel::table! {
         updated_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,
         expires_at -> Nullable<Timestamptz>,
+        purged_at -> Nullable<Timestamptz>,
     }
 }
 

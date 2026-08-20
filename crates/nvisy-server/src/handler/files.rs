@@ -32,7 +32,9 @@ use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
-use crate::service::{CryptoService, EngineService, HashingReader, ServiceState, WebhookEmitter};
+use crate::service::{
+    CryptoService, EngineService, HashingReader, RunBlobStore, ServiceState, WebhookEmitter,
+};
 
 /// Tracing target for workspace file operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspace_files";
@@ -583,6 +585,7 @@ fn download_file_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_file(
     State(pg_client): State<PgClient>,
+    State(blob): State<RunBlobStore>,
     State(webhook_emitter): State<WebhookEmitter>,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<WorkspaceFilePathParams>,
@@ -599,14 +602,11 @@ async fn delete_file(
     // Confirm the file exists in this workspace before deleting.
     let file = find_file(&mut conn, workspace.id, path_params.file_id).await?;
 
-    conn.delete_workspace_file(path_params.file_id)
-        .await
-        .map_err(|err| {
-            tracing::error!(target: TRACING_TARGET, error = %err, "Failed to soft delete file");
-            ErrorKind::InternalServerError
-                .with_message("Failed to delete file")
-                .with_context(format!("Database error: {}", err))
-        })?;
+    // Soft-delete the row and purge its object, reclaiming storage the same way
+    // retention expiry does. Runs keep their reference to the file as history; a
+    // reader resolves it to "gone".
+    blob.purge_file(&mut conn, file.id, &file.storage_path, &file.storage_bucket)
+        .await?;
 
     // Emit webhook event (fire-and-forget)
     let data = serde_json::json!({

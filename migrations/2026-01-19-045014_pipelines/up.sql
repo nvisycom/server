@@ -147,9 +147,15 @@ CREATE TABLE workspace_pipeline_runs (
     --   audit:  the engine's analysis (Audit), a `file_kind = audit` file held
     --           between detect and redact; redact reads it as the source of truth.
     --   output: the redacted document produced by redact.
-    -- Produced files use ON DELETE SET NULL so deleting them (e.g. via retention)
-    -- leaves the run history intact; the input cascades since a run is meaningless
-    -- without its source document.
+    -- A run is append-only audit history: its file references survive the files
+    -- themselves. Files are only ever soft-deleted (their objects purged), so
+    -- these ON DELETE actions fire only on a hard delete. The app never hard-
+    -- deletes an individual file; the one hard delete is a whole-workspace
+    -- teardown, which cascades files and runs away together. The input therefore
+    -- cascades — a workspace deletion that removes the source document should
+    -- remove its runs too. Produced files use ON DELETE SET NULL so that, in that
+    -- same teardown, they clear rather than cascade (redundant here, but the
+    -- correct action for a produced artifact).
     input_file_id   UUID                    NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
     audit_file_id   UUID                    DEFAULT NULL REFERENCES workspace_files (id) ON DELETE SET NULL,
     output_file_id  UUID                    DEFAULT NULL REFERENCES workspace_files (id) ON DELETE SET NULL,
@@ -199,6 +205,13 @@ CREATE INDEX workspace_pipeline_runs_input_file_idx
 CREATE UNIQUE INDEX workspace_pipeline_runs_idempotency_idx
     ON workspace_pipeline_runs (pipeline_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
+
+-- A run is append-only history: its file references (input/audit/output) are
+-- kept even after those files are deleted, so the record of what a run analyzed
+-- and produced survives. The `ON DELETE SET NULL` FKs would fire only on a hard
+-- file delete, which never happens (files are soft-deleted); a reference to a
+-- soft-deleted file resolves to "gone" at read time, distinct from a NULL that
+-- means the run never had one.
 
 COMMENT ON TABLE workspace_pipeline_runs IS 'Detect/redact runs: one pass of a file through a pipeline.';
 COMMENT ON COLUMN workspace_pipeline_runs.id IS 'Unique run identifier';

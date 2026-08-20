@@ -103,12 +103,26 @@ pub trait WorkspaceFileRepository {
     ) -> impl Future<Output = PgResult<Vec<ImportedFileRef>>> + Send;
 
     /// Returns up to `limit` live files whose retention window has elapsed
-    /// (`expires_at < now`). The data-retention worker sweeps these, purges their
-    /// objects, and soft-deletes the rows.
+    /// (`expires_at < now`). The file reaper sweeps these, purges their objects,
+    /// and soft-deletes the rows.
     fn files_due_for_expiry(
         &mut self,
         limit: i64,
     ) -> impl Future<Output = PgResult<Vec<ExpiredFileRef>>> + Send;
+
+    /// Returns up to `limit` soft-deleted files whose backing object has not yet
+    /// been reclaimed (`deleted_at IS NOT NULL AND purged_at IS NULL`). The reaper
+    /// sweeps these to purge objects that a best-effort delete missed, or that a
+    /// delete path left behind — retried until `purged_at` is stamped.
+    fn files_pending_purge(
+        &mut self,
+        limit: i64,
+    ) -> impl Future<Output = PgResult<Vec<ExpiredFileRef>>> + Send;
+
+    /// Stamps `purged_at = now()` once a file's backing object is removed, taking
+    /// the row out of the reaper's pending-purge set. Idempotent: only sets it
+    /// when currently NULL.
+    fn mark_file_purged(&mut self, file_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
 
     /// Recomputes `expires_at` for live files of `kind` in `workspace_id`,
     /// returning the number updated. Used to backfill when retention settings
@@ -391,6 +405,39 @@ impl WorkspaceFileRepository for PgConnection {
         Ok(files)
     }
 
+    async fn files_pending_purge(&mut self, limit: i64) -> PgResult<Vec<ExpiredFileRef>> {
+        use schema::workspace_files;
+
+        let files = workspace_files::table
+            .filter(workspace_files::deleted_at.is_not_null())
+            .filter(workspace_files::purged_at.is_null())
+            .select((
+                workspace_files::id,
+                workspace_files::storage_path,
+                workspace_files::storage_bucket,
+            ))
+            .limit(limit)
+            .load::<ExpiredFileRef>(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(files)
+    }
+
+    async fn mark_file_purged(&mut self, file_id: Uuid) -> PgResult<()> {
+        use schema::workspace_files::{self, dsl};
+
+        diesel::update(workspace_files::table)
+            .filter(dsl::id.eq(file_id))
+            .filter(dsl::purged_at.is_null())
+            .set(dsl::purged_at.eq(diesel::dsl::now))
+            .execute(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(())
+    }
+
     async fn backfill_files_expiry(
         &mut self,
         workspace_id: Uuid,
@@ -535,12 +582,20 @@ impl WorkspaceFileRepository for PgConnection {
         // The origin's `(connection_id, source_key)` uniqueness would otherwise
         // block ever re-importing that source object, since the soft delete keeps
         // the file row and its `ON DELETE CASCADE` never fires.
+        //
+        // Guarded on `deleted_at IS NULL` so it is idempotent: the reaper's
+        // reconcile sweep re-invokes this for an already-deleted row, and must not
+        // move `deleted_at` forward.
         self.transaction(async |conn| {
-            diesel::update(workspace_files::table.filter(workspace_files::id.eq(file_id)))
-                .set(workspace_files::deleted_at.eq(diesel::dsl::now))
-                .execute(conn)
-                .await
-                .map_err(PgError::from)?;
+            diesel::update(
+                workspace_files::table
+                    .filter(workspace_files::id.eq(file_id))
+                    .filter(workspace_files::deleted_at.is_null()),
+            )
+            .set(workspace_files::deleted_at.eq(diesel::dsl::now))
+            .execute(conn)
+            .await
+            .map_err(PgError::from)?;
 
             diesel::delete(
                 workspace_file_imports::table.filter(workspace_file_imports::file_id.eq(file_id)),

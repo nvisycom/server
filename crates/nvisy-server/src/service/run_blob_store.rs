@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 use bytes::Bytes;
 use elide_pipeline::{Audit, Document};
-use nvisy_nats::object::{AuditBucket, AuditKey, FileKey, FilesBucket};
+use nvisy_nats::object::{AuditBucket, AuditKey, FileKey, FilesBucket, ObjectBucket};
 use nvisy_postgres::PgConn;
 use nvisy_postgres::model::{
     NewWorkspaceFile, WorkspaceFile, WorkspacePipeline, WorkspacePipelineRun,
@@ -25,6 +25,9 @@ use uuid::Uuid;
 
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::Infra;
+
+/// Tracing target for blob-store operations.
+const TRACING_TARGET: &str = "nvisy_server::service::run_blob_store";
 
 /// Reads and writes a pipeline run's blobs in the internal object store.
 ///
@@ -44,6 +47,75 @@ impl RunBlobStore {
     /// Creates a new [`RunBlobStore`] over the internal object store and crypto.
     pub fn new(infra: Infra) -> Self {
         Self { infra }
+    }
+
+    /// Tears a stored file down completely: soft-deletes the row (stopping reads)
+    /// and purges its backing object from the bucket the row names.
+    ///
+    /// Runs keep their references to a deleted file as append-only history; a
+    /// reader resolving one to a soft-deleted row gets "gone", which readers
+    /// distinguish from a NULL reference. Object removal is best-effort: a
+    /// tombstoned row with an orphaned object is logged and left for the reaper's
+    /// reconcile sweep to retry, so the caller still observes the row as deleted.
+    ///
+    /// Shared by the file reaper (expiring/reconciling files) and the manual
+    /// file-delete handler, so both paths reclaim storage identically.
+    pub async fn purge_file(
+        &self,
+        conn: &mut PgConn,
+        file_id: Uuid,
+        storage_path: &str,
+        storage_bucket: &str,
+    ) -> Result<()> {
+        conn.delete_workspace_file(file_id).await?;
+
+        // Object removal is best-effort: on failure the row stays soft-deleted
+        // with `purged_at` NULL, so the reaper's reconcile sweep retries it. Only
+        // stamp `purged_at` once the object is actually gone.
+        match self.delete_object(storage_bucket, storage_path).await {
+            Ok(()) => conn.mark_file_purged(file_id).await?,
+            Err(err) => tracing::error!(
+                target: TRACING_TARGET,
+                file_id = %file_id,
+                error = %err,
+                "Failed to purge file object; left for the reaper to retry",
+            ),
+        }
+        Ok(())
+    }
+
+    /// Removes an object from whichever internal bucket its row names.
+    async fn delete_object(&self, bucket: &str, storage_path: &str) -> Result<()> {
+        match bucket {
+            b if b == FilesBucket::NAME => {
+                if let Ok(key) = FileKey::from_str(storage_path) {
+                    self.infra
+                        .nats
+                        .object_store::<FilesBucket>()
+                        .await?
+                        .delete(&key)
+                        .await?;
+                }
+            }
+            b if b == AuditBucket::NAME => {
+                if let Ok(key) = AuditKey::from_str(storage_path) {
+                    self.infra
+                        .nats
+                        .object_store::<AuditBucket>()
+                        .await?
+                        .delete(&key)
+                        .await?;
+                }
+            }
+            other => {
+                tracing::warn!(
+                    target: TRACING_TARGET,
+                    bucket = %other,
+                    "File references an unknown bucket; object not removed",
+                );
+            }
+        }
+        Ok(())
     }
 
     /// Reads a workspace file's bytes from object storage and builds an engine
@@ -202,14 +274,17 @@ impl RunBlobStore {
 
     /// Fetches and decrypts a run's stored [`Audit`].
     ///
-    /// Errors if the run has not been analyzed yet or the stored object is
-    /// missing.
+    /// Errors if the run was never analyzed (409) or its analysis has since been
+    /// deleted (404).
     pub async fn load_analyzed_document(
         &self,
         conn: &mut PgConn,
         workspace_id: Uuid,
         run: &WorkspacePipelineRun,
     ) -> Result<Audit> {
+        // A NULL reference means the run never produced an analysis; a reference
+        // to a now-deleted file means it did, but the analysis has been removed.
+        // These are distinct states, so they map to distinct responses.
         let audit_file_id = run.audit_file_id.ok_or_else(|| {
             ErrorKind::Conflict
                 .with_message("Run has no analysis yet")
@@ -219,7 +294,9 @@ impl RunBlobStore {
             .find_file_in_workspace(workspace_id, audit_file_id)
             .await?
             .ok_or_else(|| {
-                ErrorKind::InternalServerError.with_message("Analysis is missing from storage")
+                ErrorKind::NotFound
+                    .with_message("The analysis for this run has been deleted")
+                    .with_resource("pipeline_run")
             })?;
         let key = AuditKey::from_str(&audit_file.storage_path).map_err(|err| {
             ErrorKind::InternalServerError

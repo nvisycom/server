@@ -60,7 +60,15 @@ CREATE TABLE workspace_files (
     CONSTRAINT workspace_files_updated_after_created CHECK (updated_at >= created_at),
     CONSTRAINT workspace_files_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
     CONSTRAINT workspace_files_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at),
-    CONSTRAINT workspace_files_expires_after_created CHECK (expires_at IS NULL OR expires_at >= created_at)
+    CONSTRAINT workspace_files_expires_after_created CHECK (expires_at IS NULL OR expires_at >= created_at),
+
+    -- When the backing object was reclaimed from the store. A soft-deleted row
+    -- keeps its object until the reaper purges it and stamps this; a NULL here on
+    -- a deleted row is the reaper's to-do list (retried until the object is gone).
+    purged_at               TIMESTAMPTZ      DEFAULT NULL,
+    -- An object is only purged once its row is soft-deleted, so purged_at implies
+    -- deleted_at and never precedes it.
+    CONSTRAINT workspace_files_purged_after_deleted CHECK (purged_at IS NULL OR (deleted_at IS NOT NULL AND purged_at >= deleted_at))
 );
 
 -- Keep updated_at current on every row modification.
@@ -95,6 +103,12 @@ CREATE INDEX workspace_files_version_chain_idx
 CREATE INDEX workspace_files_expiry_idx
     ON workspace_files (expires_at)
     WHERE expires_at IS NOT NULL AND deleted_at IS NULL;
+
+-- Reconcile sweep: soft-deleted files whose backing object was not yet reclaimed
+-- (a best-effort purge that failed, or a delete path that bypassed the reaper).
+CREATE INDEX workspace_files_purge_pending_idx
+    ON workspace_files (deleted_at)
+    WHERE deleted_at IS NOT NULL AND purged_at IS NULL;
 
 -- Sets version_number on insert: one past the parent's version, or 1 with no parent.
 CREATE OR REPLACE FUNCTION set_workspace_file_version_number()
@@ -136,5 +150,6 @@ COMMENT ON COLUMN workspace_files.storage_bucket IS 'Storage bucket/container';
 COMMENT ON COLUMN workspace_files.metadata IS 'Extended metadata (JSON)';
 COMMENT ON COLUMN workspace_files.created_at IS 'Upload timestamp';
 COMMENT ON COLUMN workspace_files.updated_at IS 'Last modification timestamp';
-COMMENT ON COLUMN workspace_files.deleted_at IS 'Soft deletion timestamp';
+COMMENT ON COLUMN workspace_files.deleted_at IS 'Soft-deletion timestamp; NULL means live';
 COMMENT ON COLUMN workspace_files.expires_at IS 'Data-retention expiry (NULL = keep indefinitely)';
+COMMENT ON COLUMN workspace_files.purged_at IS 'When the backing object was reclaimed; NULL on a deleted row means purge still pending';
