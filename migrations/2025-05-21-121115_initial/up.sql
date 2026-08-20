@@ -1,6 +1,6 @@
 -- Initial: shared extensions and utility functions every later migration builds
--- on — timestamp triggers, soft-delete/restore helpers, token generation, and
--- email validation.
+-- on — the updated_at timestamp triggers, secure-token generation, and email
+-- validation.
 
 -- pgcrypto: cryptographic primitives (gen_random_bytes for secure tokens).
 CREATE EXTENSION IF NOT EXISTS pgcrypto;

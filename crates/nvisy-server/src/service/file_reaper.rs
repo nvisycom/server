@@ -18,7 +18,7 @@ use nvisy_postgres::query::{ExpiredFileRef, WorkspaceFileRepository};
 use tokio_util::sync::CancellationToken;
 
 use crate::handler::Result;
-use crate::service::{Infra, RunBlobStore, Worker};
+use crate::service::{Infra, PurgeOutcome, RunBlobStore, Worker};
 
 /// Tracing target for the file reaper.
 const TRACING_TARGET: &str = "nvisy_server::worker::reaper";
@@ -101,7 +101,11 @@ impl FileReaper {
             let mut purged = 0i64;
             for file in batch {
                 match self.purge_file(&file).await {
-                    Ok(()) => purged += 1,
+                    // Only a confirmed reclamation is progress. A pending purge
+                    // leaves the row in the sweep's set, so counting it would
+                    // re-fetch the same batch forever.
+                    Ok(PurgeOutcome::Purged) => purged += 1,
+                    Ok(PurgeOutcome::Pending) => {}
                     Err(err) => tracing::error!(
                         target: TRACING_TARGET,
                         sweep = sweep.label(),
@@ -129,8 +133,9 @@ impl FileReaper {
 
     /// Runs the shared teardown for one file: soft-delete the row (a no-op if
     /// already deleted, as in the reconcile sweep), purge its object, and stamp
-    /// `purged_at`. The same path the manual file-delete handler takes.
-    async fn purge_file(&self, file: &ExpiredFileRef) -> Result<()> {
+    /// `purged_at`. Reports whether the object was actually reclaimed. The same
+    /// path the manual file-delete handler takes.
+    async fn purge_file(&self, file: &ExpiredFileRef) -> Result<PurgeOutcome> {
         let mut conn = self.infra.postgres.get_connection().await?;
         self.blob
             .purge_file(&mut conn, file.id, &file.storage_path, &file.storage_bucket)

@@ -1,7 +1,6 @@
 -- Workspaces: the multi-tenant unit that owns documents and connections. This
 -- migration defines the workspace itself, its membership with per-member roles
--- and notification preferences, and the invitation flow (with summary/pending
--- views and an expiry-cleanup function).
+-- and notification preferences, and the invitation flow.
 
 -- Workspaces table: a tenant that owns content and members.
 CREATE TABLE workspaces (

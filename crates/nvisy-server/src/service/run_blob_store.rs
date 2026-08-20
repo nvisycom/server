@@ -29,6 +29,24 @@ use crate::service::Infra;
 /// Tracing target for blob-store operations.
 const TRACING_TARGET: &str = "nvisy_server::service::run_blob_store";
 
+/// Whether [`RunBlobStore::purge_file`] reclaimed a file's backing object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use = "a Pending purge is not reclamation progress and must not be counted as one"]
+pub enum PurgeOutcome {
+    /// The object was removed and `purged_at` was stamped.
+    Purged,
+    /// The object was not reclaimed (store failure, bad key, or unknown bucket);
+    /// the row stays soft-deleted with `purged_at` NULL for the reaper to retry.
+    Pending,
+}
+
+/// Wraps a storage-key parse failure as an internal error.
+fn invalid_key(err: impl std::fmt::Display) -> Error<'static> {
+    ErrorKind::InternalServerError
+        .with_message("Invalid file storage key")
+        .with_context(err.to_string())
+}
+
 /// Reads and writes a pipeline run's blobs in the internal object store.
 ///
 /// Cloneable and cheap to pass around: it holds the shared [`Infra`] clients
@@ -49,14 +67,20 @@ impl RunBlobStore {
         Self { infra }
     }
 
-    /// Tears a stored file down completely: soft-deletes the row (stopping reads)
-    /// and purges its backing object from the bucket the row names.
+    /// Tears a stored file down: soft-deletes the row (stopping reads) and tries
+    /// to purge its backing object from the bucket the row names.
+    ///
+    /// Returns whether the object was reclaimed. Removal is best-effort — an
+    /// object-store failure, an unparseable key, or an unknown bucket all leave
+    /// the row soft-deleted with `purged_at` NULL and return
+    /// [`PurgeOutcome::Pending`], so the reaper's reconcile sweep retries it.
+    /// `purged_at` is stamped only on a confirmed removal
+    /// ([`PurgeOutcome::Purged`]) — the caller observes the row as deleted either
+    /// way, and a `Pending` result must not be counted as reclamation progress.
     ///
     /// Runs keep their references to a deleted file as append-only history; a
-    /// reader resolving one to a soft-deleted row gets "gone", which readers
-    /// distinguish from a NULL reference. Object removal is best-effort: a
-    /// tombstoned row with an orphaned object is logged and left for the reaper's
-    /// reconcile sweep to retry, so the caller still observes the row as deleted.
+    /// reader resolving one to a soft-deleted row gets "gone", distinct from a
+    /// NULL reference.
     ///
     /// Shared by the file reaper (expiring/reconciling files) and the manual
     /// file-delete handler, so both paths reclaim storage identically.
@@ -66,53 +90,50 @@ impl RunBlobStore {
         file_id: Uuid,
         storage_path: &str,
         storage_bucket: &str,
-    ) -> Result<()> {
+    ) -> Result<PurgeOutcome> {
         conn.delete_workspace_file(file_id).await?;
 
-        // Object removal is best-effort: on failure the row stays soft-deleted
-        // with `purged_at` NULL, so the reaper's reconcile sweep retries it. Only
-        // stamp `purged_at` once the object is actually gone.
-        match self.delete_object(storage_bucket, storage_path).await {
-            Ok(()) => conn.mark_file_purged(file_id).await?,
-            Err(err) => tracing::error!(
+        if let Err(err) = self.delete_object(storage_bucket, storage_path).await {
+            tracing::error!(
                 target: TRACING_TARGET,
                 file_id = %file_id,
                 error = %err,
                 "Failed to purge file object; left for the reaper to retry",
-            ),
+            );
+            return Ok(PurgeOutcome::Pending);
         }
-        Ok(())
+
+        conn.mark_file_purged(file_id).await?;
+        Ok(PurgeOutcome::Purged)
     }
 
-    /// Removes an object from whichever internal bucket its row names.
+    /// Removes an object from whichever internal bucket its row names. An
+    /// unparseable storage key or an unknown bucket is an error, not a silent
+    /// success: the object was not reclaimed, so the row stays pending.
     async fn delete_object(&self, bucket: &str, storage_path: &str) -> Result<()> {
         match bucket {
             b if b == FilesBucket::NAME => {
-                if let Ok(key) = FileKey::from_str(storage_path) {
-                    self.infra
-                        .nats
-                        .object_store::<FilesBucket>()
-                        .await?
-                        .delete(&key)
-                        .await?;
-                }
+                let key = FileKey::from_str(storage_path).map_err(invalid_key)?;
+                self.infra
+                    .nats
+                    .object_store::<FilesBucket>()
+                    .await?
+                    .delete(&key)
+                    .await?;
             }
             b if b == AuditBucket::NAME => {
-                if let Ok(key) = AuditKey::from_str(storage_path) {
-                    self.infra
-                        .nats
-                        .object_store::<AuditBucket>()
-                        .await?
-                        .delete(&key)
-                        .await?;
-                }
+                let key = AuditKey::from_str(storage_path).map_err(invalid_key)?;
+                self.infra
+                    .nats
+                    .object_store::<AuditBucket>()
+                    .await?
+                    .delete(&key)
+                    .await?;
             }
             other => {
-                tracing::warn!(
-                    target: TRACING_TARGET,
-                    bucket = %other,
-                    "File references an unknown bucket; object not removed",
-                );
+                return Err(ErrorKind::InternalServerError
+                    .with_message("File references an unknown storage bucket")
+                    .with_context(format!("bucket: {other}")));
             }
         }
         Ok(())

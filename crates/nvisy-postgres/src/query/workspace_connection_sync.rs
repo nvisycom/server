@@ -427,11 +427,13 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
         use schema::workspace_connection_syncs::{self, dsl};
 
         // One latest row per connection: DISTINCT ON keeps the first row for each
-        // connection_id under the matching ORDER BY (newest started_at first).
+        // connection_id under the matching ORDER BY (newest started_at first). The
+        // id tie-breaker makes the pick deterministic when two runs share a
+        // started_at, so the scheduler reads a stable busy state / last attempt.
         let syncs = workspace_connection_syncs::table
             .filter(dsl::connection_id.eq_any(connection_ids))
             .distinct_on(dsl::connection_id)
-            .order((dsl::connection_id, dsl::started_at.desc()))
+            .order((dsl::connection_id, dsl::started_at.desc(), dsl::id.desc()))
             .select(WorkspaceConnectionSync::as_select())
             .load(self)
             .await

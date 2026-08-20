@@ -183,9 +183,11 @@ CREATE TABLE workspace_connection_syncs (
     trigger_type    SYNC_TRIGGER_TYPE   NOT NULL DEFAULT 'manual',
     status          SYNC_STATUS         NOT NULL DEFAULT 'running',
 
-    -- Number of records processed by this sync. Each sync lists the source and
-    -- imports only objects not already imported, so syncs are incremental across
-    -- invocations without any stored cursor.
+    -- Number of records processed by this sync. An import lists the source and
+    -- transfers only objects not already imported, so imports are incremental
+    -- across invocations without any stored cursor; an export transfers workspace
+    -- files out. Only imports can be scheduled (see the schedule table); exports
+    -- are manual.
     records_synced  BIGINT              NOT NULL DEFAULT 0,
     CONSTRAINT workspace_connection_syncs_records_synced_non_negative CHECK (records_synced >= 0),
 

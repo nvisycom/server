@@ -1,5 +1,5 @@
--- Accounts: account identities, their API tokens, and the derived active-session
--- view. The foundational identity tables every other resource references.
+-- Accounts: account identities and their API tokens. The foundational identity
+-- tables every other resource references.
 
 -- Kind of client an API token was issued to.
 CREATE TYPE API_TOKEN_TYPE AS ENUM (

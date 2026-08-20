@@ -604,8 +604,11 @@ async fn delete_file(
 
     // Soft-delete the row and purge its object, reclaiming storage the same way
     // retention expiry does. Runs keep their reference to the file as history; a
-    // reader resolves it to "gone".
-    blob.purge_file(&mut conn, file.id, &file.storage_path, &file.storage_bucket)
+    // reader resolves it to "gone". The purge outcome is not surfaced to the
+    // caller: the file is deleted either way, and a pending object purge is the
+    // reaper's to retry.
+    let _ = blob
+        .purge_file(&mut conn, file.id, &file.storage_path, &file.storage_bucket)
         .await?;
 
     // Emit webhook event (fire-and-forget)
@@ -635,7 +638,7 @@ async fn delete_file(
 
 fn delete_file_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete file")
-        .description("Soft deletes a file by setting a deleted timestamp. The file can be recovered within the retention period.")
+        .description("Deletes a file: the record is retired and its stored content is removed. This is permanent — the file's content cannot be recovered.")
         .response::<204, ()>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()

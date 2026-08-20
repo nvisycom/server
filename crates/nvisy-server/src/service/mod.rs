@@ -43,7 +43,7 @@ pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::infra::Infra;
 pub use crate::service::notification::{NotificationEmitter, UnreadCountEvent};
 pub use crate::service::password::PasswordService;
-pub use crate::service::run_blob_store::RunBlobStore;
+pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
 pub use crate::service::sync::{
     ConnectionSyncJob, ConnectionSyncService, ConnectionSyncWorker, DEFAULT_IMPORT_CONCURRENCY,
