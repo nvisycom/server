@@ -17,7 +17,7 @@ use nvisy_postgres::query::{
     WorkspaceMemberRepository, WorkspaceRepository,
 };
 use nvisy_postgres::types::{
-    MemberInvitedParams, MemberJoinedParams, NotificationPayload, WorkspaceRole,
+    Handle, MemberInvitedParams, MemberJoinedParams, NotificationPayload, WorkspaceRole,
 };
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgError};
 use uuid::Uuid;
@@ -86,7 +86,7 @@ pub struct CreatedInvite {
 pub async fn create_invite(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    workspace_slug: &str,
+    workspace_slug: &Handle,
     actor_id: Uuid,
     security: &SecurityContext,
     request: &CreateInvite,
@@ -123,7 +123,7 @@ pub async fn create_invite(
             let invite = conn.create_workspace_invite(new_invite).await?;
 
             let (notify_type, params) = NotificationPayload::MemberInvited(MemberInvitedParams {
-                workspace_slug: workspace_slug.to_owned(),
+                workspace_slug: workspace_slug.clone(),
                 invited_by: None,
             })
             .into_stored();
@@ -191,7 +191,7 @@ async fn send_invite(
     match create_invite(
         &mut conn,
         workspace.id,
-        workspace.slug.as_str(),
+        &workspace.slug,
         auth_state.account_id,
         &security,
         &request,
@@ -395,8 +395,8 @@ async fn reply_to_invite(
         // Notify the workspace's owners and admins that a new member joined,
         // excluding the joiner themselves (best-effort).
         let payload = NotificationPayload::MemberJoined(MemberJoinedParams {
-            workspace_slug: workspace.slug.to_string(),
-            member_username: account.username.to_string(),
+            workspace_slug: workspace.slug.clone(),
+            member_username: account.username.clone(),
         });
         if let Err(err) = notification_emitter
             .notify_workspace_roles(

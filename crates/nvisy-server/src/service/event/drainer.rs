@@ -21,11 +21,12 @@ use jiff::SignedDuration;
 use nvisy_postgres::model::{EventOutbox, NewWorkspaceActivity};
 use nvisy_postgres::query::{EventOutboxRepository, WorkspaceActivityRepository};
 use nvisy_postgres::types::{
-    ActivityPayload, ConnectionActivityParams, ConnectionSyncCompletedParams,
+    ActivityPayload, ConnectionActivityParams, ConnectionId, ConnectionSyncCompletedParams,
     ConnectionSyncFailedParams, FileActivityParams, Handle, InviteActivityParams, Json,
     MemberActivityParams, NotificationPayload, PipelineActivityParams, PipelineRunActivityParams,
     PipelineRunAnalyzedParams, PipelineRunCompletedParams, PipelineRunFailedParams,
-    PolicyActivityParams, WebhookActivityParams, WebhookEvent, WorkspaceActivityParams,
+    PolicyActivityParams, RunId, WebhookActivityParams, WebhookEvent, WebhookId,
+    WorkspaceActivityParams,
 };
 use nvisy_postgres::{AsyncConnection, PgConn};
 use serde_json::Value;
@@ -278,15 +279,15 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
         email: i.email.clone(),
     };
     let connection = |c: &ConnectionRef| ConnectionActivityParams {
-        connection_id: c.connection_id,
+        connection_id: ConnectionId::from_uuid(c.connection_id),
         connection_name: c.connection_name.clone(),
     };
     let connection_sync = |connection_id: Uuid, connection_name: &str| ConnectionActivityParams {
-        connection_id,
+        connection_id: ConnectionId::from_uuid(connection_id),
         connection_name: connection_name.to_owned(),
     };
     let webhook = |w: &WebhookRef| WebhookActivityParams {
-        webhook_id: w.webhook_id,
+        webhook_id: WebhookId::from_uuid(w.webhook_id),
         webhook_name: w.webhook_name.clone(),
     };
     let file_params = |file: &FileRef| FileActivityParams {
@@ -298,7 +299,7 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
     };
     let run = |run: &PipelineRunRef| PipelineRunActivityParams {
         pipeline_slug: run.pipeline_slug.clone(),
-        run_id: run.run_id,
+        run_id: RunId::from_uuid(run.run_id),
     };
     let policy = |p: &PolicyRef| PolicyActivityParams {
         policy_id: p.policy_id,
@@ -319,6 +320,7 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
         E::ConnectionCreated(c) => ActivityPayload::ConnectionCreated(connection(c)),
         E::ConnectionUpdated(c) => ActivityPayload::ConnectionUpdated(connection(c)),
         E::ConnectionDeleted(c) => ActivityPayload::ConnectionDeleted(connection(c)),
+        E::ConnectionSyncStarted(c) => ActivityPayload::ConnectionSyncStarted(connection(c)),
         E::ConnectionSyncCompleted {
             connection_id,
             connection_name,
@@ -364,6 +366,7 @@ fn webhook_of(event: &WorkspaceEvent) -> Option<(WebhookEvent, Option<Value>)> {
         E::ConnectionCreated(..) => (WebhookEvent::ConnectionCreated, None),
         E::ConnectionUpdated(..) => (WebhookEvent::ConnectionUpdated, None),
         E::ConnectionDeleted(..) => (WebhookEvent::ConnectionDeleted, None),
+        E::ConnectionSyncStarted(..) => (WebhookEvent::ConnectionSyncStarted, None),
         E::ConnectionSyncCompleted { .. } => (WebhookEvent::ConnectionSyncCompleted, None),
         E::ConnectionSyncFailed { .. } => (WebhookEvent::ConnectionSyncFailed, None),
         E::FileCreated {
@@ -414,28 +417,30 @@ fn notification_of(event: WorkspaceEvent) -> Option<(Uuid, NotificationPayload)>
     match event {
         E::ConnectionSyncCompleted {
             connection_id,
+            connection_name,
             records_synced,
             notify,
-            ..
         } => notify.map(|to| {
             (
                 to,
                 NotificationPayload::ConnectionSyncCompleted(ConnectionSyncCompletedParams {
-                    connection_id,
+                    connection_id: ConnectionId::from_uuid(connection_id),
+                    connection_name,
                     records_synced,
                 }),
             )
         }),
         E::ConnectionSyncFailed {
             connection_id,
+            connection_name,
             error,
             notify,
-            ..
         } => notify.map(|to| {
             (
                 to,
                 NotificationPayload::ConnectionSyncFailed(ConnectionSyncFailedParams {
-                    connection_id,
+                    connection_id: ConnectionId::from_uuid(connection_id),
+                    connection_name,
                     error,
                 }),
             )
@@ -447,8 +452,8 @@ fn notification_of(event: WorkspaceEvent) -> Option<(Uuid, NotificationPayload)>
         } => Some((
             notify,
             NotificationPayload::PipelineRunAnalyzed(PipelineRunAnalyzedParams {
-                run_id: run.run_id,
-                pipeline_slug: run.pipeline_slug.to_string(),
+                run_id: RunId::from_uuid(run.run_id),
+                pipeline_slug: run.pipeline_slug,
                 input_file_name,
             }),
         )),
@@ -459,8 +464,8 @@ fn notification_of(event: WorkspaceEvent) -> Option<(Uuid, NotificationPayload)>
         } => Some((
             notify,
             NotificationPayload::PipelineRunCompleted(PipelineRunCompletedParams {
-                run_id: run.run_id,
-                pipeline_slug: run.pipeline_slug.to_string(),
+                run_id: RunId::from_uuid(run.run_id),
+                pipeline_slug: run.pipeline_slug,
                 input_file_name,
             }),
         )),
@@ -472,13 +477,41 @@ fn notification_of(event: WorkspaceEvent) -> Option<(Uuid, NotificationPayload)>
         } => Some((
             notify,
             NotificationPayload::PipelineRunFailed(PipelineRunFailedParams {
-                run_id: run.run_id,
-                pipeline_slug: run.pipeline_slug.to_string(),
+                run_id: RunId::from_uuid(run.run_id),
+                pipeline_slug: run.pipeline_slug,
                 input_file_name,
                 error,
             }),
         )),
-        _ => None,
+        // Events that raise no in-app notification. Listed explicitly (no wildcard)
+        // so a new event forces a deliberate notify / no-notify decision here.
+        E::WorkspaceCreated(_)
+        | E::WorkspaceUpdated(_)
+        | E::WorkspaceDeleted(_)
+        | E::MemberAdded(_)
+        | E::MemberUpdated(_)
+        | E::MemberDeleted(_)
+        | E::InviteCreated(_)
+        | E::InviteAccepted(_)
+        | E::InviteDeclined(_)
+        | E::InviteCanceled(_)
+        | E::ConnectionCreated(_)
+        | E::ConnectionUpdated(_)
+        | E::ConnectionDeleted(_)
+        | E::ConnectionSyncStarted(_)
+        | E::WebhookCreated(_)
+        | E::WebhookUpdated(_)
+        | E::WebhookDeleted(_)
+        | E::FileCreated { .. }
+        | E::FileUpdated(_)
+        | E::FileDeleted(_)
+        | E::PipelineCreated(_)
+        | E::PipelineUpdated(_)
+        | E::PipelineDeleted(_)
+        | E::PipelineRunStarted(_)
+        | E::PolicyCreated(_)
+        | E::PolicyUpdated(_)
+        | E::PolicyDeleted(_) => None,
     }
 }
 
@@ -493,9 +526,10 @@ fn resource_id_of(event: &WorkspaceEvent) -> Uuid {
         | E::InviteAccepted(i)
         | E::InviteDeclined(i)
         | E::InviteCanceled(i) => i.invite_id,
-        E::ConnectionCreated(c) | E::ConnectionUpdated(c) | E::ConnectionDeleted(c) => {
-            c.connection_id
-        }
+        E::ConnectionCreated(c)
+        | E::ConnectionUpdated(c)
+        | E::ConnectionDeleted(c)
+        | E::ConnectionSyncStarted(c) => c.connection_id,
         E::ConnectionSyncCompleted { connection_id, .. }
         | E::ConnectionSyncFailed { connection_id, .. } => *connection_id,
         E::WebhookCreated(w) | E::WebhookUpdated(w) | E::WebhookDeleted(w) => w.webhook_id,

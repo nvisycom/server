@@ -110,50 +110,9 @@ impl AccountNotification {
         }
     }
 
-    /// Returns whether this is a system notification.
-    pub fn is_system_notification(&self) -> bool {
-        self.notify_type.is_system_event()
-    }
-
-    /// Returns whether this is a user activity notification.
-    pub fn is_user_activity(&self) -> bool {
-        self.notify_type.is_member_event()
-    }
-
-    /// Returns whether the notification can be dismissed.
-    pub fn can_be_dismissed(&self) -> bool {
-        !self.is_system_notification() || self.is_read()
-    }
-
-    /// Returns whether the notification should be shown to the user.
-    pub fn should_display(&self) -> bool {
-        !self.is_expired() && (self.is_unread() || self.is_system_notification())
-    }
-
     /// Returns whether the notification carries typed params.
     pub fn has_params(&self) -> bool {
         !self.params.is_empty()
-    }
-
-    /// Returns whether the notification requires action from the user.
-    pub fn requires_action(&self) -> bool {
-        matches!(
-            self.notify_type,
-            NotificationEvent::MemberInvited
-                | NotificationEvent::SystemAnnouncement
-                | NotificationEvent::SystemReport
-        )
-    }
-
-    /// Returns the notification priority level (0 = low, 2 = high).
-    pub fn priority_level(&self) -> u8 {
-        if self.is_system_notification() {
-            2
-        } else if self.requires_action() {
-            1
-        } else {
-            0
-        }
     }
 }
 

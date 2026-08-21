@@ -24,6 +24,7 @@ CREATE TYPE ACTIVITY_TYPE AS ENUM (
     'connection.created',
     'connection.updated',
     'connection.deleted',
+    'connection.sync.started',
     'connection.sync.completed',
     'connection.sync.failed',
 
@@ -31,13 +32,11 @@ CREATE TYPE ACTIVITY_TYPE AS ENUM (
     'webhook.created',
     'webhook.updated',
     'webhook.deleted',
-    'webhook.triggered',
 
     -- File activities
     'file.created',
     'file.updated',
     'file.deleted',
-    'file.verified',
 
     -- Pipeline activities
     'pipeline.created',

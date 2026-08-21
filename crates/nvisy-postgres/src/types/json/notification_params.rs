@@ -1,15 +1,14 @@
 //! Notification payloads stored in `account_notifications.params`.
 //!
 //! A notification stores its `notify_type` (indexed column) plus a self-describing
-//! [`Json`] body. [`NotificationPayload`] is that body — a `notifyType`-tagged
+//! [`Json`] body. [`NotificationPayload`] is that body — a `{type, data}`-tagged
 //! enum, one variant per event, each carrying its own params struct. No rendered
-//! text is stored; the client localizes copy from `notifyType` and the params.
+//! text is stored; the client localizes copy from `type` and the params.
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use super::Json;
-use crate::types::NotificationEvent;
+use crate::types::{ConnectionId, Handle, NotificationEvent, RunId};
 
 /// Params of a `member.invited` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,10 +16,10 @@ use crate::types::NotificationEvent;
 #[serde(rename_all = "camelCase")]
 pub struct MemberInvitedParams {
     /// Slug of the workspace the account was invited to.
-    pub workspace_slug: String,
+    pub workspace_slug: Handle,
     /// Username of the account that sent the invite, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub invited_by: Option<String>,
+    pub invited_by: Option<Handle>,
 }
 
 /// Params of a `member.joined` notification.
@@ -29,9 +28,9 @@ pub struct MemberInvitedParams {
 #[serde(rename_all = "camelCase")]
 pub struct MemberJoinedParams {
     /// Slug of the workspace the member joined.
-    pub workspace_slug: String,
+    pub workspace_slug: Handle,
     /// Username of the member that joined.
-    pub member_username: String,
+    pub member_username: Handle,
 }
 
 /// Params of a `connection.sync.completed` notification.
@@ -40,7 +39,9 @@ pub struct MemberJoinedParams {
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSyncCompletedParams {
     /// Id of the connection that synced.
-    pub connection_id: Uuid,
+    pub connection_id: ConnectionId,
+    /// Display name of the connection that synced.
+    pub connection_name: String,
     /// Number of records synced, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub records_synced: Option<i64>,
@@ -52,7 +53,9 @@ pub struct ConnectionSyncCompletedParams {
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSyncFailedParams {
     /// Id of the connection that failed to sync.
-    pub connection_id: Uuid,
+    pub connection_id: ConnectionId,
+    /// Display name of the connection that failed to sync.
+    pub connection_name: String,
     /// Failure reason, if available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -64,9 +67,9 @@ pub struct ConnectionSyncFailedParams {
 #[serde(rename_all = "camelCase")]
 pub struct PipelineRunAnalyzedParams {
     /// Id of the run.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// Slug of the owning pipeline.
-    pub pipeline_slug: String,
+    pub pipeline_slug: Handle,
     /// Display name of the analyzed file, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_file_name: Option<String>,
@@ -78,9 +81,9 @@ pub struct PipelineRunAnalyzedParams {
 #[serde(rename_all = "camelCase")]
 pub struct PipelineRunCompletedParams {
     /// Id of the run.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// Slug of the owning pipeline.
-    pub pipeline_slug: String,
+    pub pipeline_slug: Handle,
     /// Display name of the analyzed file, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_file_name: Option<String>,
@@ -92,9 +95,9 @@ pub struct PipelineRunCompletedParams {
 #[serde(rename_all = "camelCase")]
 pub struct PipelineRunFailedParams {
     /// Id of the run.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// Slug of the owning pipeline.
-    pub pipeline_slug: String,
+    pub pipeline_slug: Handle,
     /// Display name of the analyzed file, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_file_name: Option<String>,
@@ -103,33 +106,15 @@ pub struct PipelineRunFailedParams {
     pub error: Option<String>,
 }
 
-/// Params of a `system.announcement` notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct SystemAnnouncementParams {
-    /// Announcement message key or body.
-    pub message: String,
-}
-
-/// Params of a `system.report` notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct SystemReportParams {
-    /// Id of the generated report, if any.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub report_id: Option<Uuid>,
-}
-
-/// The typed payload of a notification, tagged by `notifyType`.
+/// The typed payload of a notification, tagged by `type` with its params under
+/// `data` (the same `{type, data}` envelope the activity log and outbox event use).
 ///
 /// Each variant is one notification type carrying its own params struct. The
-/// `notifyType` values match [`NotificationEvent`], so the same key drives the
-/// member's per-event preferences.
+/// `type` values match `NotificationEvent`, so the same key drives the member's
+/// per-event preferences.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(tag = "notifyType", rename_all = "camelCase")]
+#[serde(tag = "type", content = "data")]
 pub enum NotificationPayload {
     /// The account was invited to a workspace.
     #[serde(rename = "member.invited")]
@@ -158,18 +143,10 @@ pub enum NotificationPayload {
     /// A pipeline run failed.
     #[serde(rename = "pipeline.run.failed")]
     PipelineRunFailed(PipelineRunFailedParams),
-
-    /// A system-wide announcement.
-    #[serde(rename = "system.announcement")]
-    SystemAnnouncement(SystemAnnouncementParams),
-
-    /// A system report was generated.
-    #[serde(rename = "system.report")]
-    SystemReport(SystemReportParams),
 }
 
 impl NotificationPayload {
-    /// The [`NotificationEvent`] this payload is for (its `notifyType`).
+    /// The [`NotificationEvent`] this payload is for (its `type` tag).
     pub fn event(&self) -> NotificationEvent {
         match self {
             NotificationPayload::MemberInvited(_) => NotificationEvent::MemberInvited,
@@ -181,8 +158,6 @@ impl NotificationPayload {
             NotificationPayload::PipelineRunAnalyzed(_) => NotificationEvent::PipelineRunAnalyzed,
             NotificationPayload::PipelineRunCompleted(_) => NotificationEvent::PipelineRunCompleted,
             NotificationPayload::PipelineRunFailed(_) => NotificationEvent::PipelineRunFailed,
-            NotificationPayload::SystemAnnouncement(_) => NotificationEvent::SystemAnnouncement,
-            NotificationPayload::SystemReport(_) => NotificationEvent::SystemReport,
         }
     }
 
@@ -193,5 +168,39 @@ impl NotificationPayload {
         let event = self.event();
         let params = Json::encode(&self);
         (event, params)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::types::RunId;
+
+    #[test]
+    fn serializes_as_a_type_data_envelope_and_round_trips() {
+        let run_id = RunId::from_uuid(Uuid::now_v7());
+        let payload = NotificationPayload::PipelineRunAnalyzed(PipelineRunAnalyzedParams {
+            run_id,
+            pipeline_slug: Handle::from_str("redact-invoices").unwrap(),
+            input_file_name: Some("invoice.pdf".to_owned()),
+        });
+
+        let value = serde_json::to_value(&payload).unwrap();
+        // The durable wire shape: a `type` tag and a nested `data` object, matching
+        // the activity payload and outbox event. Stored rows depend on it.
+        assert_eq!(value["type"], "pipeline.run.analyzed");
+        assert_eq!(value["data"]["runId"], run_id.to_string());
+        assert_eq!(value["data"]["pipelineSlug"], "redact-invoices");
+        assert!(
+            value.get("runId").is_none(),
+            "params must nest under `data`"
+        );
+
+        let decoded: NotificationPayload = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded.event(), NotificationEvent::PipelineRunAnalyzed);
     }
 }

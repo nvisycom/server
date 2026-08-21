@@ -117,8 +117,7 @@ CREATE TABLE workspace_members (
     notification_events_app   NOTIFICATION_EVENT[] NOT NULL DEFAULT ARRAY[
         'member.invited', 'member.joined',
         'connection.sync.completed', 'connection.sync.failed',
-        'pipeline.run.analyzed', 'pipeline.run.completed', 'pipeline.run.failed',
-        'system.announcement', 'system.report'
+        'pipeline.run.analyzed', 'pipeline.run.completed', 'pipeline.run.failed'
     ]::NOTIFICATION_EVENT[],
     notification_events_email NOTIFICATION_EVENT[] NOT NULL DEFAULT '{}',
 
