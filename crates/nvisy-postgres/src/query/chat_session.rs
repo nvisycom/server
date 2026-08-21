@@ -7,7 +7,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{ChatSession, NewChatSession, UpdateChatSession};
-use crate::types::OffsetPagination;
+use crate::types::{CursorPage, CursorPagination};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Repository for chat session database operations.
@@ -25,12 +25,15 @@ pub trait ChatSessionRepository {
         session_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<ChatSession>>> + Send;
 
-    /// Lists a workspace's live sessions, most recently active first.
+    /// Lists a workspace's live sessions, newest first, cursor-paginated.
+    ///
+    /// Ordered by `(created_at, id)` — both immutable — so the cursor is stable
+    /// even as sessions are updated during pagination.
     fn list_chat_sessions(
         &mut self,
         workspace_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<ChatSession>>> + Send;
+        pagination: CursorPagination,
+    ) -> impl Future<Output = PgResult<CursorPage<ChatSession>>> + Send;
 
     /// Updates a session (title and/or activity timestamp).
     fn update_chat_session(
@@ -81,20 +84,51 @@ impl ChatSessionRepository for PgConnection {
     async fn list_chat_sessions(
         &mut self,
         workspace_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> PgResult<Vec<ChatSession>> {
+        pagination: CursorPagination,
+    ) -> PgResult<CursorPage<ChatSession>> {
+        use diesel::dsl::count_star;
         use schema::chat_sessions::{self, dsl};
 
-        chat_sessions::table
+        // Count only when the caller asked, so the default page skips the query.
+        let total = if pagination.include_count {
+            Some(
+                chat_sessions::table
+                    .filter(dsl::workspace_id.eq(workspace_id))
+                    .filter(dsl::deleted_at.is_null())
+                    .select(count_star())
+                    .get_result(self)
+                    .await
+                    .map_err(PgError::from)?,
+            )
+        } else {
+            None
+        };
+
+        let mut query = chat_sessions::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
-            .order(dsl::updated_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
+            .into_boxed();
+
+        if let Some(cursor) = &pagination.after {
+            let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
+            query = query.filter(
+                dsl::created_at
+                    .lt(cursor_ts)
+                    .or(dsl::created_at.eq(cursor_ts).and(dsl::id.lt(cursor.id))),
+            );
+        }
+
+        let sessions: Vec<ChatSession> = query
             .select(ChatSession::as_select())
+            .order((dsl::created_at.desc(), dsl::id.desc()))
+            .limit(pagination.fetch_limit())
             .load(self)
             .await
-            .map_err(PgError::from)
+            .map_err(PgError::from)?;
+
+        Ok(CursorPage::new(sessions, total, pagination.limit, |s| {
+            (s.created_at.into(), s.id)
+        }))
     }
 
     async fn update_chat_session(

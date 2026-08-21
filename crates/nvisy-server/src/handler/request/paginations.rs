@@ -71,6 +71,12 @@ pub struct CursorPagination {
     /// Obtain this from the `nextCursor` field in the response.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after: Option<String>,
+
+    /// Whether to include the total item count in the response's `total` field.
+    /// Defaults to `false`, since counting is an extra query; set it to `true`
+    /// only when the count is actually needed.
+    #[serde(default)]
+    pub include_count: bool,
 }
 
 impl CursorPagination {
@@ -83,6 +89,11 @@ impl CursorPagination {
 
 impl From<CursorPagination> for types::CursorPagination {
     fn from(query: CursorPagination) -> Self {
-        Self::from_cursor_string(query.limit() as i64, query.after.as_deref())
+        let pagination = Self::from_cursor_string(query.limit() as i64, query.after.as_deref());
+        if query.include_count {
+            pagination.with_count()
+        } else {
+            pagination
+        }
     }
 }
