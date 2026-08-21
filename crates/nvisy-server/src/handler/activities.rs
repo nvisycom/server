@@ -114,10 +114,12 @@ async fn export_activities(
     let truncated = rows.len() > MAX_EXPORT_ROWS;
     rows.truncate(MAX_EXPORT_ROWS);
     if truncated {
+        // Rows come oldest-first and we keep the leading page, so it is the
+        // newest rows in the window that are dropped past the cap.
         tracing::warn!(
             target: TRACING_TARGET,
             cap = MAX_EXPORT_ROWS,
-            "Activity export hit the row cap; older rows in the window were dropped"
+            "Activity export hit the row cap; the newest rows in the window were dropped"
         );
     }
 
@@ -166,8 +168,8 @@ fn export_activities_docs(op: TransformOperation) -> TransformOperation {
              The window is `from`/`to` (inclusive, YYYY-MM-DD); it defaults to the last 30 days \
              and is capped at 366 days. `format` is `csv` (default) or `json`. Each activity is a \
              flat row: timestamp, the type split into object/action, the actor, and the acted-on \
-             object's id and label. At most 100,000 rows are returned; a truncated export sets the \
-             `X-Export-Truncated` response header.",
+             object's id and label, oldest first. At most 100,000 rows are returned (the oldest in \
+             the window); a truncated export sets the `X-Export-Truncated` response header.",
         )
         .response::<200, ()>()
         .response::<400, Json<ErrorResponse>>()
@@ -176,15 +178,62 @@ fn export_activities_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Renders the rows as a CSV document (header row plus one row per activity).
+/// Column headers for the CSV export, in field order.
+const CSV_HEADER: [&str; 9] = [
+    "timestamp",
+    "activityType",
+    "objectType",
+    "actionType",
+    "actor",
+    "objectId",
+    "objectLabel",
+    "ipAddress",
+    "userAgent",
+];
+
+/// Renders the rows as a CSV document: an explicit header row (so an empty
+/// export is still a valid, self-describing file) followed by one row per
+/// activity. Free-text cells are neutralized against spreadsheet formula
+/// injection ([`csv_cell`]).
 fn render_csv(records: &[ActivityExportRow]) -> Result<Vec<u8>> {
-    let mut writer = csv::Writer::from_writer(Vec::new());
-    for record in records {
-        writer.serialize(record).map_err(serialize_error)?;
+    // The header is written explicitly rather than via `serialize`, which emits
+    // it only alongside the first record and so would omit it for an empty export.
+    let mut writer = csv::WriterBuilder::new()
+        .has_headers(false)
+        .from_writer(Vec::new());
+    writer.write_record(CSV_HEADER).map_err(serialize_error)?;
+    for r in records {
+        writer
+            .write_record([
+                r.timestamp.as_str(),
+                &r.activity_type,
+                &r.object_type,
+                &r.action_type,
+                &csv_cell(&r.actor),
+                &r.object_id,
+                &csv_cell(&r.object_label),
+                &csv_cell(&r.ip_address),
+                &csv_cell(&r.user_agent),
+            ])
+            .map_err(serialize_error)?;
     }
     writer
         .into_inner()
         .map_err(|err| serialize_error(err.error()))
+}
+
+/// Neutralizes a free-text cell against spreadsheet formula injection: a value
+/// that (after leading whitespace) begins with `=`, `+`, `-`, or `@` is executed
+/// as a formula when the CSV is opened in Excel/Sheets, so such a value is
+/// prefixed with an apostrophe to force it to be read as text. Applied only to
+/// CSV output; JSON carries the raw value.
+fn csv_cell(value: &str) -> std::borrow::Cow<'_, str> {
+    let trimmed = value.trim_start();
+    if trimmed.starts_with(['=', '+', '-', '@']) {
+        std::borrow::Cow::Owned(format!("'{value}"))
+    } else {
+        std::borrow::Cow::Borrowed(value)
+    }
 }
 
 /// Maps an export serialization failure to an internal error.
@@ -202,4 +251,62 @@ pub fn routes() -> ApiRouter<ServiceState> {
             get_with(export_activities, export_activities_docs),
         )
         .with_path_items(|item| item.tag("Workspaces"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(actor: &str, user_agent: &str) -> ActivityExportRow {
+        ActivityExportRow {
+            timestamp: "2026-01-01T00:00:00Z".to_owned(),
+            activity_type: "file.created".to_owned(),
+            object_type: "file".to_owned(),
+            action_type: "created".to_owned(),
+            actor: actor.to_owned(),
+            object_id: String::new(),
+            object_label: String::new(),
+            ip_address: String::new(),
+            user_agent: user_agent.to_owned(),
+        }
+    }
+
+    fn csv_string(records: &[ActivityExportRow]) -> String {
+        String::from_utf8(render_csv(records).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn empty_export_still_has_the_header_row() {
+        let csv = csv_string(&[]);
+        assert_eq!(csv.trim(), CSV_HEADER.join(","));
+    }
+
+    #[test]
+    fn header_is_written_once_for_a_non_empty_export() {
+        let csv = csv_string(&[row("alice", "curl/8")]);
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], CSV_HEADER.join(","));
+    }
+
+    #[test]
+    fn neutralizes_formula_prefixes_in_free_text_cells() {
+        // A display name and user-agent starting with a formula char must be
+        // prefixed with an apostrophe so a spreadsheet reads them as text.
+        let csv = csv_string(&[row("=cmd()", "@SUM(A1)")]);
+        let data = csv.lines().nth(1).unwrap();
+        assert!(data.contains("'=cmd()"), "actor not neutralized: {data}");
+        assert!(
+            data.contains("'@SUM(A1)"),
+            "user agent not neutralized: {data}"
+        );
+    }
+
+    #[test]
+    fn leaves_ordinary_values_unchanged() {
+        assert_eq!(csv_cell("alice"), "alice");
+        assert_eq!(csv_cell(""), "");
+        // Neutralization checks the first non-whitespace char.
+        assert_eq!(csv_cell("  =x"), "'  =x");
+    }
 }
