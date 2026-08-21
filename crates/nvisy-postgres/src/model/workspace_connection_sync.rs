@@ -88,16 +88,6 @@ impl WorkspaceConnectionSync {
         self.status.is_in_progress()
     }
 
-    /// Returns whether the sync reached a terminal state.
-    pub fn is_terminal(&self) -> bool {
-        self.status.is_terminal()
-    }
-
-    /// Returns whether the sync finished successfully.
-    pub fn is_completed(&self) -> bool {
-        self.status.is_completed()
-    }
-
     /// Returns whether the sync failed.
     pub fn is_failed(&self) -> bool {
         self.status.is_failed()

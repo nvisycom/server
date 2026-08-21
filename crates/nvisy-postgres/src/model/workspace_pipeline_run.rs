@@ -95,58 +95,8 @@ pub struct UpdateWorkspacePipelineRun {
 }
 
 impl WorkspacePipelineRun {
-    /// Returns whether the run is enqueued and not yet picked up by a worker.
-    pub fn is_queued(&self) -> bool {
-        self.status.is_queued()
-    }
-
-    /// Returns whether a worker is actively analyzing the document.
-    pub fn is_analyzing(&self) -> bool {
-        self.status.is_analyzing()
-    }
-
     /// Returns whether detection is done and the run awaits verification.
     pub fn is_analyzed(&self) -> bool {
         self.status.is_analyzed()
-    }
-
-    /// Returns whether the run completed successfully.
-    pub fn is_completed(&self) -> bool {
-        self.status.is_completed()
-    }
-
-    /// Returns whether the run failed.
-    pub fn is_failed(&self) -> bool {
-        self.status.is_failed()
-    }
-
-    /// Returns whether the run was cancelled.
-    pub fn is_cancelled(&self) -> bool {
-        self.status.is_cancelled()
-    }
-
-    /// Returns whether the run is still active (running or awaiting review).
-    pub fn is_active(&self) -> bool {
-        self.status.is_active()
-    }
-
-    /// Returns whether the run has finished (completed, failed, or cancelled).
-    pub fn is_finished(&self) -> bool {
-        self.status.is_finished()
-    }
-
-    /// Returns whether the run was started directly by a user.
-    pub fn is_user(&self) -> bool {
-        self.trigger_type.is_user()
-    }
-
-    /// Returns whether the run was started automatically by the system.
-    pub fn is_system(&self) -> bool {
-        self.trigger_type.is_system()
-    }
-
-    /// Returns whether the run can be retried.
-    pub fn is_retriable(&self) -> bool {
-        self.status.is_retriable()
     }
 }

@@ -23,7 +23,7 @@ pub struct AccountNotification {
     pub notify_type: NotificationEvent,
     /// When the notification was read; `None` means unread.
     pub read_at: Option<Timestamp>,
-    /// The self-describing tagged payload (its `notifyType` + params).
+    /// The self-describing tagged payload (its `type` tag + params).
     pub params: Json<NotificationPayload>,
     /// Notification creation timestamp.
     pub created_at: Timestamp,
@@ -40,7 +40,7 @@ pub struct NewAccountNotification {
     pub account_id: Uuid,
     /// Notification type; the client-side localization key.
     pub notify_type: NotificationEvent,
-    /// The self-describing tagged payload (its `notifyType` + params).
+    /// The self-describing tagged payload (its `type` tag + params).
     pub params: Json<NotificationPayload>,
     /// Expiration timestamp.
     pub expires_at: Option<Timestamp>,
@@ -53,67 +53,6 @@ pub struct NewAccountNotification {
 pub struct UpdateAccountNotification {
     /// Read timestamp: `Some(Some(ts))` marks read, `Some(None)` marks unread.
     pub read_at: Option<Option<Timestamp>>,
-}
-
-impl AccountNotification {
-    /// Returns whether the notification has been read (`read_at` is set).
-    pub fn is_read(&self) -> bool {
-        self.read_at.is_some()
-    }
-
-    /// Returns whether the notification is currently unread.
-    pub fn is_unread(&self) -> bool {
-        self.read_at.is_none()
-    }
-
-    /// Returns whether the notification has expired.
-    pub fn is_expired(&self) -> bool {
-        if let Some(expires_at) = self.expires_at {
-            jiff::Timestamp::now() > jiff::Timestamp::from(expires_at)
-        } else {
-            false
-        }
-    }
-
-    /// Returns whether the notification is active (unread and not expired).
-    pub fn is_active(&self) -> bool {
-        self.is_unread() && !self.is_expired()
-    }
-
-    /// Returns the time remaining until expiration.
-    pub fn time_until_expiry(&self) -> Option<jiff::Span> {
-        if let Some(expires_at) = self.expires_at {
-            let now = jiff::Timestamp::now();
-            let expires_at = jiff::Timestamp::from(expires_at);
-            if expires_at > now {
-                Some(expires_at - now)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    /// Returns the duration since the notification was created.
-    pub fn age(&self) -> jiff::Span {
-        jiff::Timestamp::now() - jiff::Timestamp::from(self.created_at)
-    }
-
-    /// Returns whether the notification is expiring soon (within 24 hours).
-    pub fn is_expiring_soon(&self) -> bool {
-        if let Some(remaining) = self.time_until_expiry() {
-            remaining.total(jiff::Unit::Second).ok()
-                <= jiff::Span::new().days(1).total(jiff::Unit::Second).ok()
-        } else {
-            false
-        }
-    }
-
-    /// Returns whether the notification carries typed params.
-    pub fn has_params(&self) -> bool {
-        !self.params.is_empty()
-    }
 }
 
 impl HasCreatedAt for AccountNotification {

@@ -152,62 +152,6 @@ pub enum WebhookEvent {
 }
 
 impl WebhookEvent {
-    /// Returns whether this is a file-related event.
-    #[inline]
-    pub fn is_file_event(self) -> bool {
-        matches!(
-            self,
-            WebhookEvent::FileCreated | WebhookEvent::FileUpdated | WebhookEvent::FileDeleted
-        )
-    }
-
-    /// Returns whether this is a member-related event.
-    #[inline]
-    pub fn is_member_event(self) -> bool {
-        matches!(
-            self,
-            WebhookEvent::MemberAdded | WebhookEvent::MemberDeleted | WebhookEvent::MemberUpdated
-        )
-    }
-
-    /// Returns whether this is a connection-related event.
-    #[inline]
-    pub fn is_connection_event(self) -> bool {
-        matches!(
-            self,
-            WebhookEvent::ConnectionCreated
-                | WebhookEvent::ConnectionUpdated
-                | WebhookEvent::ConnectionDeleted
-                | WebhookEvent::ConnectionSyncStarted
-                | WebhookEvent::ConnectionSyncCompleted
-                | WebhookEvent::ConnectionSyncFailed
-        )
-    }
-
-    /// Returns whether this is a pipeline-related event (config or run).
-    #[inline]
-    pub fn is_pipeline_event(self) -> bool {
-        matches!(
-            self,
-            WebhookEvent::PipelineCreated
-                | WebhookEvent::PipelineUpdated
-                | WebhookEvent::PipelineDeleted
-                | WebhookEvent::PipelineRunStarted
-                | WebhookEvent::PipelineRunAnalyzed
-                | WebhookEvent::PipelineRunCompleted
-                | WebhookEvent::PipelineRunFailed
-        )
-    }
-
-    /// Returns whether this is a policy-related event.
-    #[inline]
-    pub fn is_policy_event(self) -> bool {
-        matches!(
-            self,
-            WebhookEvent::PolicyCreated | WebhookEvent::PolicyUpdated | WebhookEvent::PolicyDeleted
-        )
-    }
-
     /// Returns the event category as a string.
     pub fn category(&self) -> &'static str {
         match self {

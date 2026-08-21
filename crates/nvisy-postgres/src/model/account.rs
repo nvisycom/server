@@ -106,54 +106,9 @@ pub struct UpdateAccount {
 }
 
 impl Account {
-    /// Returns whether the account is active and can be used.
-    pub fn is_active(&self) -> bool {
-        !self.is_suspended && !self.is_deleted()
-    }
-
     /// Returns whether the account is suspended.
     pub fn is_suspended(&self) -> bool {
         self.is_suspended
-    }
-
-    /// Returns whether the account is verified.
-    pub fn is_verified(&self) -> bool {
-        self.is_verified
-    }
-
-    /// Returns whether the account has admin privileges.
-    pub fn is_admin(&self) -> bool {
-        self.is_admin
-    }
-
-    /// Returns whether the account can log in.
-    pub fn can_login(&self) -> bool {
-        self.is_active() && self.is_verified()
-    }
-
-    /// Returns whether the account can perform admin actions.
-    pub fn can_admin(&self) -> bool {
-        self.is_active() && self.is_admin()
-    }
-
-    /// Returns whether the account has an avatar URL configured.
-    pub fn has_avatar(&self) -> bool {
-        self.avatar_url.is_some()
-    }
-
-    /// Returns whether the account is eligible for suspension.
-    ///
-    /// Only active, non-admin accounts can be suspended. Admin accounts have
-    /// protection against suspension to prevent system lockout scenarios.
-    pub fn can_be_suspended(&self) -> bool {
-        self.is_active() && !self.is_admin()
-    }
-
-    /// Returns whether the account is eligible for reactivation from suspension.
-    ///
-    /// Only suspended accounts that haven't been deleted can be unsuspended.
-    pub fn can_be_unsuspended(&self) -> bool {
-        self.is_suspended() && !self.is_deleted()
     }
 }
 

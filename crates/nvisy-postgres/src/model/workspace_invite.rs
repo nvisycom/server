@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_invites;
-use crate::types::{HasCreatedAt, HasUpdatedAt, InviteStatus, RECENTLY_SENT_HOURS, WorkspaceRole};
+use crate::types::{HasCreatedAt, HasUpdatedAt, InviteStatus, WorkspaceRole};
 
 /// Workspace invitation model representing an invitation to join a workspace.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -87,81 +87,6 @@ impl WorkspaceInvite {
     /// Returns whether the invitation can still be used.
     pub fn can_be_used(&self) -> bool {
         self.is_valid() && !self.is_expired()
-    }
-
-    /// Returns whether the invitation is pending.
-    pub fn is_pending(&self) -> bool {
-        self.invite_status == InviteStatus::Pending
-    }
-
-    /// Returns whether the invitation was accepted.
-    pub fn is_accepted(&self) -> bool {
-        self.invite_status == InviteStatus::Accepted
-    }
-
-    /// Returns whether the invitation was declined.
-    pub fn is_declined(&self) -> bool {
-        self.invite_status == InviteStatus::Declined
-    }
-
-    /// Returns whether the invitation was canceled.
-    pub fn is_canceled(&self) -> bool {
-        self.invite_status == InviteStatus::Canceled
-    }
-
-    /// Returns whether the invitation was revoked.
-    pub fn is_revoked(&self) -> bool {
-        self.invite_status == InviteStatus::Revoked
-    }
-
-    /// Returns whether the invitee has responded to the invitation.
-    pub fn has_response(&self) -> bool {
-        self.responded_at.is_some()
-    }
-
-    /// Returns whether the invitation was sent recently.
-    pub fn is_recently_sent(&self) -> bool {
-        self.was_created_within(jiff::Span::new().hours(RECENTLY_SENT_HOURS))
-    }
-
-    /// Returns the time remaining until expiration.
-    pub fn time_until_expiry(&self) -> Option<jiff::Span> {
-        let now = jiff::Timestamp::now();
-        let expires_at = jiff::Timestamp::from(self.expires_at);
-        if expires_at > now {
-            Some(expires_at - now)
-        } else {
-            None
-        }
-    }
-
-    /// Returns the age of the invitation since creation.
-    pub fn age(&self) -> jiff::Span {
-        jiff::Timestamp::now() - jiff::Timestamp::from(self.created_at)
-    }
-
-    /// Returns whether the invitation grants owner privileges.
-    pub fn grants_owner_access(&self) -> bool {
-        matches!(self.invited_role, WorkspaceRole::Owner)
-    }
-
-    /// Returns whether the invitation can be canceled.
-    pub fn can_be_canceled(&self) -> bool {
-        self.is_pending() && !self.is_expired()
-    }
-
-    /// Returns whether the invitation can be resent.
-    pub fn can_be_resent(&self) -> bool {
-        self.is_expired() || self.is_declined()
-    }
-
-    /// Returns the invitation token (shortened for display).
-    pub fn token_short(&self) -> String {
-        if self.invite_token.len() > 8 {
-            format!("{}...", &self.invite_token[..8])
-        } else {
-            self.invite_token.clone()
-        }
     }
 }
 

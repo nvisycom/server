@@ -44,26 +44,3 @@ pub enum InviteStatus {
     #[serde(rename = "revoked")]
     Revoked,
 }
-
-impl InviteStatus {
-    /// Returns whether this invitation is still active and can be used.
-    #[inline]
-    pub fn is_active(self) -> bool {
-        matches!(self, InviteStatus::Pending)
-    }
-
-    /// Returns whether this invitation has been resolved (accepted or declined by invitee).
-    #[inline]
-    pub fn is_resolved(self) -> bool {
-        matches!(self, InviteStatus::Accepted | InviteStatus::Declined)
-    }
-
-    /// Returns whether this invitation was terminated by the system or administrators.
-    #[inline]
-    pub fn is_terminated(self) -> bool {
-        matches!(
-            self,
-            InviteStatus::Canceled | InviteStatus::Expired | InviteStatus::Revoked
-        )
-    }
-}

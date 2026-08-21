@@ -61,23 +61,6 @@ pub struct NewWorkspaceActivity {
     pub user_agent: Option<String>,
 }
 
-impl WorkspaceActivity {
-    /// Returns whether the activity carries typed params.
-    pub fn has_params(&self) -> bool {
-        !self.params.is_empty()
-    }
-
-    /// Returns whether the activity has location information.
-    pub fn has_location_info(&self) -> bool {
-        self.ip_address.is_some()
-    }
-
-    /// Returns whether the activity has user agent information.
-    pub fn has_user_agent(&self) -> bool {
-        self.user_agent.as_deref().is_some_and(|ua| !ua.is_empty())
-    }
-}
-
 impl HasCreatedAt for WorkspaceActivity {
     fn created_at(&self) -> jiff::Timestamp {
         self.created_at.into()

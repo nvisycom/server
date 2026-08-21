@@ -26,17 +26,3 @@ pub enum PipelineTriggerType {
     #[serde(rename = "system")]
     System,
 }
-
-impl PipelineTriggerType {
-    /// Returns whether the run was started directly by a user.
-    #[inline]
-    pub fn is_user(self) -> bool {
-        matches!(self, PipelineTriggerType::User)
-    }
-
-    /// Returns whether the run was started automatically by the system.
-    #[inline]
-    pub fn is_system(self) -> bool {
-        matches!(self, PipelineTriggerType::System)
-    }
-}

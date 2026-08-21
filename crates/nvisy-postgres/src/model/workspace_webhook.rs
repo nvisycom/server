@@ -103,21 +103,6 @@ pub struct UpdateWorkspaceWebhook {
 }
 
 impl WorkspaceWebhook {
-    /// Returns whether the webhook is enabled and receiving events.
-    pub fn is_enabled(&self) -> bool {
-        self.status.is_enabled() && self.deleted_at.is_none()
-    }
-
-    /// Returns whether the webhook was disabled by the user.
-    pub fn is_disabled(&self) -> bool {
-        self.status.is_disabled()
-    }
-
-    /// Returns whether the webhook was suspended by the system.
-    pub fn is_suspended(&self) -> bool {
-        self.status.is_suspended()
-    }
-
     /// Returns the list of subscribed events.
     pub fn subscribed_events(&self) -> Vec<WebhookEvent> {
         self.events.iter().filter_map(|e| *e).collect()
@@ -126,11 +111,6 @@ impl WorkspaceWebhook {
     /// Returns the custom headers, or an empty set for an absent/older blob.
     pub fn parsed_headers(&self) -> WebhookHeaders {
         self.headers.or_default()
-    }
-
-    /// Returns whether the webhook subscribes to a specific event type.
-    pub fn subscribes_to(&self, event: WebhookEvent) -> bool {
-        self.events.contains(&Some(event))
     }
 }
 

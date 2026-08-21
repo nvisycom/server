@@ -78,13 +78,6 @@ pub struct UpdateWorkspacePolicy {
     pub deleted_at: Option<Option<Timestamp>>,
 }
 
-impl WorkspacePolicy {
-    /// Returns whether the policy is deleted.
-    pub fn is_deleted(&self) -> bool {
-        self.deleted_at.is_some()
-    }
-}
-
 impl HasCreatedAt for WorkspacePolicy {
     fn created_at(&self) -> jiff::Timestamp {
         self.created_at.into()

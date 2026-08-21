@@ -29,17 +29,3 @@ pub enum ApiTokenType {
     #[serde(rename = "cli")]
     Cli,
 }
-
-impl ApiTokenType {
-    /// Returns whether this token type typically supports interactive user interfaces.
-    #[inline]
-    pub fn is_interactive(self) -> bool {
-        matches!(self, ApiTokenType::Web)
-    }
-
-    /// Returns whether this token type is programmatic (non-interactive).
-    #[inline]
-    pub fn is_programmatic(self) -> bool {
-        matches!(self, ApiTokenType::Api | ApiTokenType::Cli)
-    }
-}

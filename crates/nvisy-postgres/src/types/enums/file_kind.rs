@@ -36,10 +36,4 @@ impl FileKind {
     /// The kinds that are user-facing documents (shown in file lists), as
     /// opposed to internal artifacts and audits.
     pub const DOCUMENTS: [FileKind; 2] = [FileKind::Original, FileKind::Redacted];
-
-    /// Whether this kind is a user-facing document (shown in file lists).
-    #[inline]
-    pub fn is_document(self) -> bool {
-        matches!(self, FileKind::Original | FileKind::Redacted)
-    }
 }

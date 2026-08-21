@@ -38,27 +38,6 @@ pub enum WorkspaceRole {
 }
 
 impl WorkspaceRole {
-    /// Returns whether this role has ownership privileges.
-    #[inline]
-    pub fn is_owner(self) -> bool {
-        matches!(self, WorkspaceRole::Owner)
-    }
-
-    /// Returns whether this role has admin privileges (admin or owner).
-    #[inline]
-    pub fn is_admin(self) -> bool {
-        matches!(self, WorkspaceRole::Owner | WorkspaceRole::Admin)
-    }
-
-    /// Returns whether this role has admin privileges (admin or owner).
-    #[inline]
-    pub fn is_member(self) -> bool {
-        matches!(
-            self,
-            WorkspaceRole::Owner | WorkspaceRole::Admin | WorkspaceRole::Member
-        )
-    }
-
     /// Returns the hierarchical level of this role (higher number = more permissions).
     #[inline]
     pub const fn hierarchy_level(self) -> u8 {

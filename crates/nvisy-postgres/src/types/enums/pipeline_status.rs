@@ -31,21 +31,9 @@ pub enum PipelineStatus {
 }
 
 impl PipelineStatus {
-    /// Returns whether the pipeline is in draft status.
-    #[inline]
-    pub fn is_draft(self) -> bool {
-        matches!(self, PipelineStatus::Draft)
-    }
-
     /// Returns whether the pipeline is enabled.
     #[inline]
     pub fn is_enabled(self) -> bool {
         matches!(self, PipelineStatus::Enabled)
-    }
-
-    /// Returns whether the pipeline is disabled.
-    #[inline]
-    pub fn is_disabled(self) -> bool {
-        matches!(self, PipelineStatus::Disabled)
     }
 }
