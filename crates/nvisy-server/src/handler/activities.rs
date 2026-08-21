@@ -15,11 +15,13 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::WorkspaceActivity;
 use nvisy_postgres::query::WorkspaceActivityRepository;
-use nvisy_postgres::types::{CursorPagination, WithAccountRef};
+use nvisy_postgres::types::WithAccountRef;
 use serde::Serialize;
 
 use crate::extract::{AuthProvider, AuthState, Json, Permission, Query, WorkspaceContext};
-use crate::handler::request::{ActivityExportQuery, ExportFormat, MAX_EXPORT_ROWS};
+use crate::handler::request::{
+    ActivityExportQuery, CursorPagination, ExportFormat, MAX_EXPORT_ROWS,
+};
 use crate::handler::response::{ActivitiesPage, Activity, ErrorResponse};
 use crate::handler::utility::attachment_headers;
 use crate::handler::{Error, ErrorKind, Result, ServiceState};
@@ -121,7 +123,7 @@ async fn list_activities(
         .await?;
 
     let page = conn
-        .cursor_list_workspace_activity(workspace.id, pagination)
+        .cursor_list_workspace_activity(workspace.id, pagination.into())
         .await?;
 
     let response = ActivitiesPage::from_cursor_page(page, |wc| {
