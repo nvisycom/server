@@ -422,5 +422,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/workspaces/{workspaceSlug}/connections/{connectionId}/syncs/{syncId}/cancel/",
             post_with(cancel_connection_sync, cancel_connection_sync_docs),
         )
-        .with_path_items(|item| item.tag("Connections"))
+        .with_path_items(|item| item.tag("Connection Syncs"))
 }

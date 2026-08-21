@@ -1,8 +1,8 @@
-//! Workspace activity export handler.
+//! Workspace activity handlers: the live activity feed and its bounded export.
 //!
-//! Exports a workspace's activity log over a date window as a downloadable file,
-//! in CSV (the default) or JSON. The live, paginated activity feed lives in
-//! [`workspaces`](super::workspaces); this module is only the bounded export.
+//! The feed is a cursor-paginated list of the workspace's activity log; the
+//! export renders a date window of that log as a downloadable file, in CSV (the
+//! default) or JSON.
 
 use aide::axum::ApiRouter;
 use aide::axum::routing::get_with;
@@ -12,12 +12,12 @@ use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceActivityRepository;
-use nvisy_postgres::types::WithAccountRef;
+use nvisy_postgres::types::{CursorPagination, WithAccountRef};
 use serde::Serialize;
 
 use crate::extract::{AuthProvider, AuthState, Json, Permission, Query, WorkspaceContext};
 use crate::handler::request::{ActivityExportQuery, ExportFormat, MAX_EXPORT_ROWS};
-use crate::handler::response::ErrorResponse;
+use crate::handler::response::{ActivitiesPage, Activity, ErrorResponse};
 use crate::handler::utility::attachment_headers;
 use crate::handler::{Error, ErrorKind, Result, ServiceState};
 
@@ -75,6 +75,53 @@ impl ActivityExportRow {
             user_agent: item.user_agent.unwrap_or_default(),
         }
     }
+}
+
+/// Lists a workspace's activity log, most recent first, cursor-paginated.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        workspace_id = %workspace.id,
+    )
+)]
+async fn list_activities(
+    State(pg_client): State<PgClient>,
+    AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
+    Query(pagination): Query<CursorPagination>,
+) -> Result<(StatusCode, Json<ActivitiesPage>)> {
+    tracing::debug!(target: TRACING_TARGET, "Listing workspace activities");
+
+    let mut conn = pg_client.get_connection().await?;
+
+    auth_state
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
+        .await?;
+
+    let page = conn
+        .cursor_list_workspace_activity(workspace.id, pagination)
+        .await?;
+
+    let response = ActivitiesPage::from_cursor_page(page, |wc| {
+        Activity::from_model(wc.item, workspace.slug.clone(), wc.account.into())
+    });
+
+    tracing::debug!(
+        target: TRACING_TARGET,
+        activity_count = response.items.len(),
+        "Workspace activities listed"
+    );
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+fn list_activities_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List workspace activities")
+        .description("Returns the workspace's activity log, most recent first, cursor-paginated.")
+        .response::<200, Json<ActivitiesPage>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Exports a workspace's activity log over a date window as CSV or JSON.
@@ -247,10 +294,14 @@ fn serialize_error(error: impl std::fmt::Display) -> Error<'static> {
 pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
+            "/workspaces/{workspaceSlug}/activities/",
+            get_with(list_activities, list_activities_docs),
+        )
+        .api_route(
             "/workspaces/{workspaceSlug}/activities/export",
             get_with(export_activities, export_activities_docs),
         )
-        .with_path_items(|item| item.tag("Workspaces"))
+        .with_path_items(|item| item.tag("Activities"))
 }
 
 #[cfg(test)]

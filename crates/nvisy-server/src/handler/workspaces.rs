@@ -10,8 +10,7 @@ use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use nvisy_postgres::model::{NewWorkspaceMember, Workspace as WorkspaceModel, WorkspaceMember};
 use nvisy_postgres::query::{
-    WorkspaceActivityRepository, WorkspaceFileRepository, WorkspaceMemberRepository,
-    WorkspaceRepository,
+    WorkspaceFileRepository, WorkspaceMemberRepository, WorkspaceRepository,
 };
 use nvisy_postgres::types::{FileKind, RetentionScope, RetentionSettings};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
@@ -24,8 +23,7 @@ use crate::handler::request::{
     CreateWorkspace, CursorPagination, UpdateNotificationSettings, UpdateWorkspace,
 };
 use crate::handler::response::{
-    AccountRef, ActivitiesPage, Activity, ErrorResponse, NotificationSettings, Page, Workspace,
-    WorkspacesPage,
+    AccountRef, ErrorResponse, NotificationSettings, Page, Workspace, WorkspacesPage,
 };
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
@@ -370,53 +368,6 @@ fn update_notification_settings_docs(op: TransformOperation) -> TransformOperati
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Lists activities for a workspace.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
-    )
-)]
-async fn list_activities(
-    State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
-    Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<ActivitiesPage>)> {
-    tracing::debug!(target: TRACING_TARGET, "Listing workspace activities");
-
-    let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
-        .await?;
-
-    let page = conn
-        .cursor_list_workspace_activity(workspace.id, pagination.into())
-        .await?;
-
-    let response = ActivitiesPage::from_cursor_page(page, |wc| {
-        Activity::from_model(wc.item, workspace.slug.clone(), wc.account.into())
-    });
-
-    tracing::debug!(
-        target: TRACING_TARGET,
-        activity_count = response.items.len(),
-        "Workspace activities listed"
-    );
-
-    Ok((StatusCode::OK, Json(response)))
-}
-
-fn list_activities_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("List workspace activities")
-        .description("Returns all activity log entries for a workspace.")
-        .response::<200, Json<ActivitiesPage>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-}
-
 /// Returns the public identity of the account that created the workspace
 /// addressed by `slug`, or a NotFound error if no such workspace exists.
 async fn find_workspace_creator(conn: &mut PgConn, slug: &str) -> Result<AccountRef> {
@@ -520,10 +471,6 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 update_notification_settings,
                 update_notification_settings_docs,
             ),
-        )
-        .api_route(
-            "/workspaces/{workspaceSlug}/activities/",
-            get_with(list_activities, list_activities_docs),
         )
         .with_path_items(|item| item.tag("Workspaces"))
 }

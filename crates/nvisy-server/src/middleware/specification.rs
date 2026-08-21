@@ -226,6 +226,11 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             ..Default::default()
         })
         .tag(Tag {
+            name: "Activities".into(),
+            description: Some("Workspace activity log and export".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
             name: "Files".into(),
             description: Some("File upload, download, and management".into()),
             ..Default::default()
@@ -248,6 +253,11 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
         .tag(Tag {
             name: "Connections".into(),
             description: Some("External provider connections".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Connection Syncs".into(),
+            description: Some("Connection synchronization runs".into()),
             ..Default::default()
         })
         .tag(Tag {
