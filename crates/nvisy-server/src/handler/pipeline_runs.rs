@@ -158,6 +158,7 @@ async fn create_pipeline_run(
             run.id,
             auth_state.account_id,
             "Failed to enqueue detection",
+            None,
         )
         .await;
         return Err(err);

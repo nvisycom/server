@@ -148,6 +148,21 @@ pub trait WorkspacePipelineRunRepository {
         updates: UpdateWorkspacePipelineRun,
     ) -> impl Future<Output = PgResult<bool>> + Send;
 
+    /// Transitions a run to `Failed` only while the caller still holds its claim
+    /// — the run is still `Analyzing` and its `claimed_at` matches the value
+    /// stamped when the caller claimed it. Returns `true` on success, `false` if
+    /// the claim has gone stale (another worker re-claimed the run). Mirrors
+    /// [`finalize_analyzed_run`](Self::finalize_analyzed_run) for the failure path,
+    /// so a worker whose lease expired mid-analysis cannot fail a run another
+    /// worker now owns. `updates` carries the failure reason and completion time;
+    /// status and the claim guard are applied here.
+    fn finalize_failed_run(
+        &mut self,
+        run_id: Uuid,
+        claimed_at: jiff::Timestamp,
+        updates: UpdateWorkspacePipelineRun,
+    ) -> impl Future<Output = PgResult<bool>> + Send;
+
     /// Records a run's per-model inference usage. A no-op for an empty slice
     /// (a deterministic run spends no tokens). Inserted once, at analyze time.
     fn record_run_usage(
@@ -551,6 +566,33 @@ impl WorkspacePipelineRunRepository for PgConnection {
         // Guard on the claim we hold: same run, still `Analyzing`, and the exact
         // `claimed_at` our claim stamped. A worker that re-claimed a stale run
         // renews `claimed_at`, so a lost claim matches no row and returns false.
+        let updated = diesel::update(
+            workspace_pipeline_runs::table
+                .filter(dsl::id.eq(run_id))
+                .filter(dsl::status.eq(PipelineRunStatus::Analyzing))
+                .filter(dsl::claimed_at.eq(claimed_at)),
+        )
+        .set(&updates)
+        .execute(self)
+        .await
+        .map_err(PgError::from)?;
+
+        Ok(updated == 1)
+    }
+
+    async fn finalize_failed_run(
+        &mut self,
+        run_id: Uuid,
+        claimed_at: jiff::Timestamp,
+        mut updates: UpdateWorkspacePipelineRun,
+    ) -> PgResult<bool> {
+        use schema::workspace_pipeline_runs::{self, dsl};
+
+        updates.status = Some(PipelineRunStatus::Failed);
+        let claimed_at = jiff_diesel::Timestamp::from(claimed_at);
+
+        // Same claim guard as the analyzed finalize: only our still-live claim
+        // (run `Analyzing`, `claimed_at` unchanged) may fail the run.
         let updated = diesel::update(
             workspace_pipeline_runs::table
                 .filter(dsl::id.eq(run_id))

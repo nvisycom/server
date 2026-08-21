@@ -303,16 +303,18 @@ impl WorkspaceAnalyticsRepository for PgConnection {
     ) -> PgResult<Vec<RunDayPoint>> {
         use std::collections::BTreeMap;
 
-        use diesel_async::AsyncConnection;
-
         let from = jiff_diesel::Timestamp::from(from);
         let to = jiff_diesel::Timestamp::from(to);
 
-        // Read the run counts/durations and the token totals in one transaction so
-        // both grouped statements observe the same snapshot; otherwise a run
-        // written between them could show in one series but not the other.
+        // Read the run counts/durations and the token totals in one read-only,
+        // repeatable-read transaction so both grouped statements observe the same
+        // snapshot; otherwise a run written between them could show in one series
+        // but not the other.
         let (run_rows, token_rows): (Vec<RunDayCounts>, Vec<RunDayTokens>) = self
-            .transaction(async |conn| {
+            .build_transaction()
+            .read_only()
+            .repeatable_read()
+            .run(async |conn| {
                 let run_rows = load_run_day_counts(conn, workspace_id, from, to).await?;
                 let token_rows = load_run_day_tokens(conn, workspace_id, from, to).await?;
                 Ok::<_, PgError>((run_rows, token_rows))
@@ -357,6 +359,15 @@ impl WorkspaceAnalyticsRepository for PgConnection {
     }
 }
 
+/// The day bucket a run's start falls in. Shared by both daily queries so the
+/// truncation text cannot drift — they must group on the same expression for the
+/// per-day merge to line up. The column is table-qualified so the join to
+/// pipelines can never make it ambiguous. Returns a fresh fragment per call, as
+/// the builder consumes it in both `group_by` and `select`.
+fn run_day() -> diesel::expression::SqlLiteral<Timestamptz> {
+    diesel::dsl::sql::<Timestamptz>("date_trunc('day', workspace_pipeline_runs.started_at)")
+}
+
 /// Per-day run counts and durations over `[from, to)`, scoped through the live
 /// pipeline. Sparse: only days that have a run. Shared with the token query so
 /// both observe the same snapshot inside one transaction.
@@ -372,14 +383,11 @@ async fn load_run_day_counts(
     use schema::workspace_pipelines::dsl as pipelines;
     use schema::{workspace_pipeline_runs, workspace_pipelines};
 
-    // The day bucket a run's start falls in — the group key, also selected. This
-    // and the ordered-set percentile lack a Diesel builtin, so they are `sql`
-    // fragments; the counts and predicates are fully typed. Conditional counts are
-    // `sum(CASE WHEN cond THEN 1 ELSE 0 END)` since Diesel's aggregate FILTER is
-    // not available on `count(*)`. Columns are table-qualified so the join to
-    // pipelines can never make them ambiguous, even if that table later gains a
-    // same-named column.
-    let day = || sql::<Timestamptz>("date_trunc('day', workspace_pipeline_runs.started_at)");
+    // The percentile is an ordered-set aggregate with no Diesel builtin, so it and
+    // the mean are `sql` fragments; the counts and predicates are fully typed.
+    // Conditional counts are `sum(CASE WHEN cond THEN 1 ELSE 0 END)` since Diesel's
+    // aggregate FILTER is not available on `count(*)`. Columns are table-qualified
+    // so the join to pipelines can never make them ambiguous.
     let avg_secs = sql::<SqlNullable<Double>>(
         "avg(EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
          - workspace_pipeline_runs.started_at))) \
@@ -398,9 +406,9 @@ async fn load_run_day_counts(
         .filter(pipelines::deleted_at.is_null())
         .filter(runs::started_at.ge(from))
         .filter(runs::started_at.lt(to))
-        .group_by(day())
+        .group_by(run_day())
         .select((
-            day(),
+            run_day(),
             count_star(),
             sum(
                 case_when::<_, _, BigInt>(runs::status.eq_any(PipelineRunStatus::OUTCOMES), 1i64)
@@ -429,13 +437,12 @@ async fn load_run_day_tokens(
     from: jiff_diesel::Timestamp,
     to: jiff_diesel::Timestamp,
 ) -> PgResult<Vec<RunDayTokens>> {
-    use diesel::dsl::{sql, sum};
+    use diesel::dsl::sum;
     use schema::workspace_pipeline_run_usage::dsl as usage;
     use schema::workspace_pipeline_runs::dsl as runs;
     use schema::workspace_pipelines::dsl as pipelines;
     use schema::{workspace_pipeline_run_usage, workspace_pipeline_runs, workspace_pipelines};
 
-    let day = || sql::<Timestamptz>("date_trunc('day', workspace_pipeline_runs.started_at)");
     let per_run_input = workspace_pipeline_run_usage::table
         .filter(usage::run_id.eq(runs::id))
         .select(sum(usage::input_tokens))
@@ -455,9 +462,9 @@ async fn load_run_day_tokens(
         .filter(pipelines::deleted_at.is_null())
         .filter(runs::started_at.ge(from))
         .filter(runs::started_at.lt(to))
-        .group_by(day())
+        .group_by(run_day())
         .select((
-            day(),
+            run_day(),
             sum(per_run_input),
             sum(per_run_output),
             sum(per_run_total),

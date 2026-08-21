@@ -107,6 +107,13 @@ fn to_i64(value: u64) -> i64 {
 ///
 /// Shared by the create-run handler (enqueue failed) and the worker (analysis
 /// failed) so a failure takes the same three steps on every path.
+///
+/// `claim` fences the worker path: when `Some(claimed_at)`, the run is failed
+/// only while that claim still holds (still `Analyzing`, `claimed_at` unchanged),
+/// and the broadcast/webhook fire only if it did — so a worker whose lease
+/// expired mid-analysis cannot fail, or announce the failure of, a run another
+/// worker now owns. The handler passes `None`: it fails the run it just created,
+/// with no claim to guard.
 pub(crate) async fn fail_run(
     conn: &mut nvisy_postgres::PgConn,
     detection: &DetectionQueue,
@@ -115,6 +122,7 @@ pub(crate) async fn fail_run(
     run_id: Uuid,
     triggered_by: Uuid,
     reason: &str,
+    claim: Option<jiff::Timestamp>,
 ) {
     let metadata = RunMetadata {
         error: Some(reason.to_owned()),
@@ -126,8 +134,27 @@ pub(crate) async fn fail_run(
         completed_at: Some(Some(jiff::Timestamp::now().into())),
         ..Default::default()
     };
-    if let Err(err) = conn.update_workspace_pipeline_run(run_id, update).await {
-        tracing::warn!(target: TRACING_TARGET, error = %err, %run_id, "Failed to mark run failed");
+
+    match claim {
+        // Worker path: guard on the claim. A stale claim fails nothing and stays
+        // silent — the new owner drives the run to its own outcome.
+        Some(claimed_at) => match conn.finalize_failed_run(run_id, claimed_at, update).await {
+            Ok(true) => {}
+            Ok(false) => {
+                tracing::warn!(target: TRACING_TARGET, %run_id, "Claim went stale before failure; another worker owns the run");
+                return;
+            }
+            Err(err) => {
+                tracing::warn!(target: TRACING_TARGET, error = %err, %run_id, "Failed to mark run failed");
+                return;
+            }
+        },
+        // Handler path: no claim to guard.
+        None => {
+            if let Err(err) = conn.update_workspace_pipeline_run(run_id, update).await {
+                tracing::warn!(target: TRACING_TARGET, error = %err, %run_id, "Failed to mark run failed");
+            }
+        }
     }
 
     detection

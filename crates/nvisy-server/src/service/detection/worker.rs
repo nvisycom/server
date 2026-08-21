@@ -198,19 +198,20 @@ impl DetectionWorker {
                 return JobOutcome::Retry;
             }
         };
-        // The claim stamped `claimed_at`; it fences the finalize against a
-        // concurrent re-claim if this analysis outlives the lease.
+        // The claim stamped `claimed_at`; it fences the finalize (and a failure)
+        // against a concurrent re-claim if this analysis outlives the lease.
         let Some(claim_token) = claimed.claimed_at else {
             tracing::error!(target: TRACING_TARGET, "Claimed run has no claim timestamp; skipping");
             return JobOutcome::Done;
         };
+        let claim_token: jiff::Timestamp = claim_token.into();
 
         self.detection
             .broadcast_status(run.id, PipelineRunStatus::Analyzing)
             .await;
 
         if let Err(err) = self
-            .detect(&mut conn, &job, &claimed, &pipeline, claim_token.into())
+            .detect(&mut conn, &job, &claimed, &pipeline, claim_token)
             .await
         {
             tracing::warn!(target: TRACING_TARGET, error = %err, "Detection failed");
@@ -222,6 +223,7 @@ impl DetectionWorker {
                 run.id,
                 run.account_id,
                 &err.to_string(),
+                Some(claim_token),
             )
             .await;
 

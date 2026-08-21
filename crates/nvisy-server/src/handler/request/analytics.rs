@@ -161,10 +161,30 @@ mod tests {
     }
 
     #[test]
+    fn accepts_window_exactly_at_the_cap() {
+        let from = date(2026, 1, 1);
+        let to = from
+            .checked_add(MAX_WINDOW_DAYS.days())
+            .expect("date in range");
+        assert!(
+            AnalyticsWindow {
+                from: Some(from),
+                to: Some(to),
+            }
+            .resolve()
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn rejects_window_wider_than_the_cap() {
+        let from = date(2026, 1, 1);
+        let to = from
+            .checked_add((MAX_WINDOW_DAYS + 1).days())
+            .expect("date in range");
         let err = AnalyticsWindow {
-            from: Some(date(2024, 1, 1)),
-            to: Some(date(2026, 1, 1)),
+            from: Some(from),
+            to: Some(to),
         }
         .resolve();
         assert!(err.is_err());
