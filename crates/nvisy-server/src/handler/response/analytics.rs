@@ -94,13 +94,13 @@ pub struct RunAnalytics {
     /// state (genuinely no signal, not zero).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_rate: Option<f64>,
-    /// Mean completed-run duration in seconds; omitted until a run completes.
+    /// Mean completed-run duration in milliseconds; omitted until a run completes.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub avg_duration_s: Option<f64>,
-    /// 95th-percentile completed-run duration in seconds; omitted until a run
+    pub avg_duration_ms: Option<i64>,
+    /// 95th-percentile completed-run duration in milliseconds; omitted until a run
     /// completes.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub p95_duration_s: Option<f64>,
+    pub p95_duration_ms: Option<i64>,
 }
 
 /// One status's share of a workspace's runs.
@@ -178,8 +178,8 @@ impl WorkspaceAnalytics {
                 total,
                 by_status,
                 error_rate,
-                avg_duration_s: durations.avg_seconds,
-                p95_duration_s: durations.p95_seconds,
+                avg_duration_ms: durations.avg_ms,
+                p95_duration_ms: durations.p95_ms,
             },
             usage,
         }
@@ -207,12 +207,12 @@ pub struct RunDayEntry {
     /// terminal state that day.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_rate: Option<f64>,
-    /// Mean completed-run duration (seconds) this day; omitted if none completed.
+    /// Mean completed-run duration (milliseconds) this day; omitted if none completed.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub avg_duration_s: Option<f64>,
-    /// 95th-percentile completed-run duration (seconds) this day; omitted if none.
+    pub avg_duration_ms: Option<i64>,
+    /// 95th-percentile completed-run duration (milliseconds) this day; omitted if none.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub p95_duration_s: Option<f64>,
+    pub p95_duration_ms: Option<i64>,
     /// Input/prompt tokens spent by this day's runs; omitted when none used a model.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<i64>,
@@ -246,8 +246,8 @@ impl RunTimeSeries {
                     date,
                     runs: p.runs,
                     error_rate: (p.terminal > 0).then(|| p.failed as f64 / p.terminal as f64),
-                    avg_duration_s: p.avg_seconds,
-                    p95_duration_s: p.p95_seconds,
+                    avg_duration_ms: p.avg_ms,
+                    p95_duration_ms: p.p95_ms,
                     input_tokens: p.input_tokens,
                     output_tokens: p.output_tokens,
                     total_tokens: p.total_tokens,
@@ -256,8 +256,8 @@ impl RunTimeSeries {
                     date,
                     runs: 0,
                     error_rate: None,
-                    avg_duration_s: None,
-                    p95_duration_s: None,
+                    avg_duration_ms: None,
+                    p95_duration_ms: None,
                     input_tokens: None,
                     output_tokens: None,
                     total_tokens: None,
@@ -312,8 +312,8 @@ mod tests {
             },
         ];
         let durations = RunDurations {
-            avg_seconds: Some(30.0),
-            p95_seconds: Some(56.0),
+            avg_ms: Some(30_000),
+            p95_ms: Some(56_000),
         };
 
         let usage = vec![
@@ -357,7 +357,7 @@ mod tests {
 
         // error_rate = failed / (completed + failed) = 1 / 4.
         assert_eq!(a.runs.error_rate, Some(0.25));
-        assert_eq!(a.runs.avg_duration_s, Some(30.0));
+        assert_eq!(a.runs.avg_duration_ms, Some(30_000));
 
         // Usage: per-model entries preserved, workspace totals summed with
         // never-reported fields treated as 0 (not conflated across fields).
@@ -383,8 +383,8 @@ mod tests {
             runs: 3,
             terminal: 3,
             failed: 1,
-            avg_seconds: Some(20.0),
-            p95_seconds: Some(28.0),
+            avg_ms: Some(20_000),
+            p95_ms: Some(28_000),
             input_tokens: Some(1000),
             output_tokens: Some(400),
             total_tokens: None,
@@ -401,7 +401,7 @@ mod tests {
         let d5 = &series.points[0];
         assert_eq!(d5.runs, 3);
         assert_eq!(d5.error_rate, Some(1.0 / 3.0));
-        assert_eq!(d5.avg_duration_s, Some(20.0));
+        assert_eq!(d5.avg_duration_ms, Some(20_000));
         assert_eq!(d5.input_tokens, Some(1000));
         assert_eq!(d5.total_tokens, None);
 
@@ -409,7 +409,7 @@ mod tests {
         let d6 = &series.points[1];
         assert_eq!(d6.runs, 0);
         assert_eq!(d6.error_rate, None);
-        assert_eq!(d6.avg_duration_s, None);
+        assert_eq!(d6.avg_duration_ms, None);
         assert_eq!(d6.input_tokens, None);
     }
 
@@ -424,14 +424,14 @@ mod tests {
             storage: vec![],
             runs,
             durations: RunDurations {
-                avg_seconds: None,
-                p95_seconds: None,
+                avg_ms: None,
+                p95_ms: None,
             },
             usage: Vec::new(),
         });
 
         assert_eq!(a.runs.error_rate, None);
-        assert_eq!(a.runs.avg_duration_s, None);
+        assert_eq!(a.runs.avg_duration_ms, None);
         assert_eq!(a.storage.total_bytes, 0);
         // Still every kind/status present, all zero except queued.
         assert_eq!(a.storage.by_kind.len(), FileKind::iter().count());

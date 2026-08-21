@@ -30,8 +30,9 @@ struct RunDayCounts {
     // Converted to i64 when assembling the point.
     terminal: Option<BigDecimal>,
     failed: Option<BigDecimal>,
-    avg_seconds: Option<f64>,
-    p95_seconds: Option<f64>,
+    // Duration in milliseconds, scaled and rounded to a bigint in SQL.
+    avg_ms: Option<i64>,
+    p95_ms: Option<i64>,
 }
 
 /// Per-day token totals, as loaded from the grouped usage query.
@@ -65,10 +66,10 @@ pub struct RunDayPoint {
     pub terminal: i64,
     /// Runs that failed this day.
     pub failed: i64,
-    /// Mean duration (seconds) of runs that completed this day; null if none did.
-    pub avg_seconds: Option<f64>,
-    /// 95th-percentile duration (seconds) of runs completed this day; null if none.
-    pub p95_seconds: Option<f64>,
+    /// Mean duration (milliseconds) of runs that completed this day; null if none did.
+    pub avg_ms: Option<i64>,
+    /// 95th-percentile duration (milliseconds) of runs completed this day; null if none.
+    pub p95_ms: Option<i64>,
     /// Input/prompt tokens across models used by this day's runs; null if none.
     pub input_tokens: Option<i64>,
     /// Output/completion tokens across models used by this day's runs; null if none.
@@ -132,14 +133,14 @@ pub struct RunStatusCount {
     pub count: i64,
 }
 
-/// Completed-run duration summary for a workspace, in seconds. Both are `None`
-/// until at least one run has completed.
-#[derive(Debug, Clone, Queryable)]
+/// Completed-run duration summary for a workspace, in milliseconds. Both are
+/// `None` until at least one run has completed.
+#[derive(Debug, Clone)]
 pub struct RunDurations {
     /// Mean wall-clock duration of completed runs.
-    pub avg_seconds: Option<f64>,
+    pub avg_ms: Option<i64>,
     /// 95th-percentile duration of completed runs.
-    pub p95_seconds: Option<f64>,
+    pub p95_ms: Option<i64>,
 }
 
 /// A workspace's point-in-time analytics: storage, run health, and token usage
@@ -257,8 +258,8 @@ impl WorkspaceAnalyticsRepository for PgConnection {
                     runs: row.runs,
                     terminal: to_i64(row.terminal).unwrap_or(0),
                     failed: to_i64(row.failed).unwrap_or(0),
-                    avg_seconds: row.avg_seconds,
-                    p95_seconds: row.p95_seconds,
+                    avg_ms: row.avg_ms,
+                    p95_ms: row.p95_ms,
                     input_tokens: t.input,
                     output_tokens: t.output,
                     total_tokens: t.total,
@@ -325,37 +326,41 @@ async fn load_runs_by_status(
         .map_err(PgError::from)
 }
 
-/// Mean and 95th-percentile duration (seconds) of the workspace's completed
+/// Mean and 95th-percentile duration (milliseconds) of the workspace's completed
 /// runs. Both `None` when no run has completed.
 async fn load_run_durations(conn: &mut PgConnection, workspace_id: Uuid) -> PgResult<RunDurations> {
-    use diesel::dsl::{avg, sql};
-    use diesel::sql_types::{Double, Nullable};
+    use diesel::dsl::sql;
+    use diesel::sql_types::{BigInt, Nullable};
     use schema::workspace_pipeline_runs::dsl as runs;
     use schema::workspace_pipelines::dsl as pipelines;
     use schema::{workspace_pipeline_runs, workspace_pipelines};
 
-    // Duration in seconds; `avg` and `percentile_cont` (an ordered-set aggregate
+    // Duration in milliseconds: the interval's epoch-seconds are scaled by 1000
+    // and rounded to a bigint in SQL, so the value crosses the boundary already in
+    // the API unit and type. `avg` and `percentile_cont` (an ordered-set aggregate
     // with no Diesel builtin) both return NULL over no rows. Columns are
     // table-qualified so the join can never make them ambiguous.
-    let duration_secs = sql::<Nullable<Double>>(
-        "EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
-         - workspace_pipeline_runs.started_at))",
+    let avg_ms = sql::<Nullable<BigInt>>(
+        "round(avg(EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
+         - workspace_pipeline_runs.started_at)) * 1000))::bigint",
     );
-    let p95 = sql::<Nullable<Double>>(
-        "percentile_cont(0.95) WITHIN GROUP \
+    let p95_ms = sql::<Nullable<BigInt>>(
+        "round(percentile_cont(0.95) WITHIN GROUP \
          (ORDER BY EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
-         - workspace_pipeline_runs.started_at)))",
+         - workspace_pipeline_runs.started_at))) * 1000)::bigint",
     );
 
-    workspace_pipeline_runs::table
+    let (avg_ms, p95_ms): (Option<i64>, Option<i64>) = workspace_pipeline_runs::table
         .inner_join(workspace_pipelines::table)
         .filter(pipelines::workspace_id.eq(workspace_id))
         .filter(pipelines::deleted_at.is_null())
         .filter(runs::completed_at.is_not_null())
-        .select((avg(duration_secs), p95))
+        .select((avg_ms, p95_ms))
         .first(conn)
         .await
-        .map_err(PgError::from)
+        .map_err(PgError::from)?;
+
+    Ok(RunDurations { avg_ms, p95_ms })
 }
 
 /// Inference token totals per model across the workspace's runs, scoped through
@@ -419,26 +424,28 @@ async fn load_run_day_counts(
     to: jiff_diesel::Timestamp,
 ) -> PgResult<Vec<RunDayCounts>> {
     use diesel::dsl::{case_when, count_star, sql, sum};
-    use diesel::sql_types::{BigInt, Double, Nullable as SqlNullable};
+    use diesel::sql_types::{BigInt, Nullable as SqlNullable};
     use schema::workspace_pipeline_runs::dsl as runs;
     use schema::workspace_pipelines::dsl as pipelines;
     use schema::{workspace_pipeline_runs, workspace_pipelines};
 
-    // The percentile is an ordered-set aggregate with no Diesel builtin, so it and
-    // the mean are `sql` fragments; the counts and predicates are fully typed.
+    // Durations in milliseconds (epoch-seconds scaled by 1000, rounded to bigint),
+    // so the value crosses the boundary already in the API unit and type. The
+    // percentile is an ordered-set aggregate with no Diesel builtin, so it and the
+    // mean are `sql` fragments; the counts and predicates are fully typed.
     // Conditional counts are `sum(CASE WHEN cond THEN 1 ELSE 0 END)` since Diesel's
     // aggregate FILTER is not available on `count(*)`. Columns are table-qualified
     // so the join to pipelines can never make them ambiguous.
-    let avg_secs = sql::<SqlNullable<Double>>(
-        "avg(EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
+    let avg_ms = sql::<SqlNullable<BigInt>>(
+        "round(avg(EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
          - workspace_pipeline_runs.started_at))) \
-         FILTER (WHERE workspace_pipeline_runs.completed_at IS NOT NULL)",
+         FILTER (WHERE workspace_pipeline_runs.completed_at IS NOT NULL) * 1000)::bigint",
     );
-    let p95_secs = sql::<SqlNullable<Double>>(
-        "percentile_cont(0.95) WITHIN GROUP \
+    let p95_ms = sql::<SqlNullable<BigInt>>(
+        "round(percentile_cont(0.95) WITHIN GROUP \
          (ORDER BY EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
          - workspace_pipeline_runs.started_at))) \
-         FILTER (WHERE workspace_pipeline_runs.completed_at IS NOT NULL)",
+         FILTER (WHERE workspace_pipeline_runs.completed_at IS NOT NULL) * 1000)::bigint",
     );
 
     workspace_pipeline_runs::table
@@ -459,8 +466,8 @@ async fn load_run_day_counts(
                 case_when::<_, _, BigInt>(runs::status.eq(PipelineRunStatus::Failed), 1i64)
                     .otherwise(0i64),
             ),
-            avg_secs,
-            p95_secs,
+            avg_ms,
+            p95_ms,
         ))
         .load(conn)
         .await
