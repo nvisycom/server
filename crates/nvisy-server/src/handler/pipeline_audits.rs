@@ -21,7 +21,7 @@ use super::pipeline_runs::find_pipeline_run;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, WorkspaceContext};
 use crate::handler::request::{ExportFormat, ExportQuery, PipelineRunPathParams};
 use crate::handler::response::ErrorResponse;
-use crate::handler::utility::attachment_headers;
+use crate::handler::utility::{DownloadResponseExt, attachment_headers};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{RunBlobStore, ServiceState};
 
@@ -149,7 +149,10 @@ fn download_pipeline_run_audit_docs(op: TransformOperation) -> TransformOperatio
             "Downloads the run's audit as a file. `format` is `csv` (default) — a zip of \
              entities.csv, provenance.csv, and reviews.csv — or `json`, a pretty-printed JSON file.",
         )
-        .response::<200, ()>()
+        .download_response(
+            "The run's exported audit.",
+            &["application/zip", "application/json"],
+        )
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()

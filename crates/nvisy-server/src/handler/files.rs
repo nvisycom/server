@@ -28,7 +28,7 @@ use crate::extract::{
 };
 use crate::handler::request::{CursorPagination, ListFiles, UpdateFile, WorkspaceFilePathParams};
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
-use crate::handler::utility::{attachment_headers, resolve_account_ref};
+use crate::handler::utility::{DownloadResponseExt, attachment_headers, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
 use crate::service::{
@@ -559,7 +559,7 @@ async fn download_file(
 fn download_file_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Download file")
         .description("Downloads a file by ID. Returns the file content as a binary stream.")
-        .response::<200, ()>()
+        .download_response("The file content.", &["application/octet-stream"])
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()

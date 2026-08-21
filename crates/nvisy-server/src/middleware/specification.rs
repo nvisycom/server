@@ -160,9 +160,18 @@ fn collapse_in_value(value: &mut Value) {
 /// A `type` array that collapses to a single member becomes that member as a
 /// plain string. An `anyOf` whose only remaining branch is a single schema is
 /// hoisted into this object, preserving sibling keywords such as `description`.
+///
+/// When a `null` variant is removed, a `default: null` on the same field is
+/// dropped too: it described the now-removed nullable branch, and a `null`
+/// default left on a non-nullable field is a contradiction some client
+/// generators mishandle (e.g. marking the field required).
 fn collapse_in_object(map: &mut serde_json::Map<String, Value>) {
+    let mut collapsed_null = false;
+
     if let Some(Value::Array(types)) = map.get_mut("type") {
+        let before = types.len();
         types.retain(|entry| entry != "null");
+        collapsed_null |= types.len() != before;
         if let [only] = types.as_slice() {
             let only = only.clone();
             map.insert("type".to_owned(), only);
@@ -170,7 +179,9 @@ fn collapse_in_object(map: &mut serde_json::Map<String, Value>) {
     }
 
     if let Some(Value::Array(variants)) = map.get_mut("anyOf") {
+        let before = variants.len();
         variants.retain(|variant| variant.get("type") != Some(&Value::String("null".to_owned())));
+        collapsed_null |= variants.len() != before;
         if let [Value::Object(only)] = variants.as_slice() {
             let only = only.clone();
             map.remove("anyOf");
@@ -178,6 +189,10 @@ fn collapse_in_object(map: &mut serde_json::Map<String, Value>) {
                 map.entry(key).or_insert(value);
             }
         }
+    }
+
+    if collapsed_null && map.get("default") == Some(&Value::Null) {
+        map.remove("default");
     }
 
     for nested in map.values_mut() {
@@ -369,6 +384,63 @@ mod tests {
             schema.pointer("/properties/required/type"),
             Some(&json!("string")),
             "non-nullable fields are unaffected"
+        );
+    }
+
+    #[test]
+    fn drops_null_default_when_the_null_variant_is_collapsed() {
+        let mut api = OpenApi::default();
+        let mut components = Components::default();
+        components.schemas.insert(
+            "Sample".to_owned(),
+            SchemaObject {
+                json_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        // Optional field with schemars' `default: null` — the null
+                        // is stripped from the type, so the null default must go
+                        // too (it would otherwise be a null default on a
+                        // non-nullable field, which trips up client generators).
+                        "optional": { "type": ["string", "null"], "default": null },
+                        // A real default on a nullable field is preserved.
+                        "defaulted": { "type": ["integer", "null"], "default": 7 },
+                        // A null default on an already-non-nullable field is left
+                        // alone (nothing was collapsed).
+                        "plain": { "type": "string", "default": null }
+                    }
+                })
+                .try_into()
+                .expect("valid schema"),
+                external_docs: None,
+                example: None,
+            },
+        );
+        api.components = Some(components);
+
+        collapse_null_types(&mut api);
+
+        let schema = api.components.as_ref().unwrap().schemas["Sample"]
+            .json_schema
+            .as_value();
+
+        assert_eq!(
+            schema.pointer("/properties/optional/type"),
+            Some(&json!("string")),
+            "the null variant is collapsed"
+        );
+        assert!(
+            schema.pointer("/properties/optional/default").is_none(),
+            "the now-invalid null default is dropped alongside the null variant"
+        );
+        assert_eq!(
+            schema.pointer("/properties/defaulted/default"),
+            Some(&json!(7)),
+            "a real default survives the collapse"
+        );
+        assert_eq!(
+            schema.pointer("/properties/plain/default"),
+            Some(&json!(null)),
+            "a null default is left alone when nothing was collapsed"
         );
     }
 

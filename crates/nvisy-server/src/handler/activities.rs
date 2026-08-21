@@ -23,7 +23,7 @@ use crate::handler::request::{
     ActivityExportQuery, CursorPagination, ExportFormat, MAX_EXPORT_ROWS,
 };
 use crate::handler::response::{ActivitiesPage, Activity, ErrorResponse};
-use crate::handler::utility::attachment_headers;
+use crate::handler::utility::{DownloadResponseExt, attachment_headers};
 use crate::handler::{Error, ErrorKind, Result, ServiceState};
 
 /// Tracing target for activity export operations.
@@ -241,7 +241,10 @@ fn export_activities_docs(op: TransformOperation) -> TransformOperation {
              object's id and label, oldest first. At most 100,000 rows are returned (the oldest in \
              the window); a truncated export sets the `X-Export-Truncated` response header.",
         )
-        .response::<200, ()>()
+        .download_response(
+            "The exported activity log.",
+            &["text/csv", "application/json"],
+        )
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()

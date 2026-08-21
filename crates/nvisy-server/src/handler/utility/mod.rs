@@ -7,5 +7,5 @@ mod sse_response;
 
 pub use accounts::{build_password_user_inputs, resolve_account_ref};
 pub use custom_routes::{BuiltinModule, CustomRoutes, RouterMapFn};
-pub use download::attachment_headers;
+pub use download::{DownloadResponseExt, attachment_headers};
 pub use sse_response::SseResponse;
