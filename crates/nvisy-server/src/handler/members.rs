@@ -352,13 +352,16 @@ async fn leave_workspace(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
+    security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Member leaving workspace");
 
     let mut conn = pg_client.get_connection().await?;
 
-    let Some(_member) = conn
-        .find_workspace_member(workspace.id, auth_state.account_id)
+    // Read the member back with its account, both to confirm membership and to
+    // name the departing member in the event.
+    let Some((_member, account)) = conn
+        .find_workspace_member_with_account(workspace.id, auth_state.account_id)
         .await?
     else {
         return Err(ErrorKind::NotFound
@@ -366,8 +369,27 @@ async fn leave_workspace(
             .with_message("You are not a member of this workspace"));
     };
 
-    conn.remove_workspace_member(workspace.id, auth_state.account_id)
+    // Remove the member and record the departure atomically. A self-initiated
+    // leave is the same domain fact as an admin removal, so it records
+    // `MemberDeleted` with the leaving account as both actor and subject.
+    conn.transaction(async |conn| {
+        conn.remove_workspace_member(workspace.id, auth_state.account_id)
+            .await?;
+        conn.emit_event(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id: auth_state.account_id,
+                security: &security,
+            },
+            WorkspaceEvent::MemberDeleted(MemberRef {
+                member_id: auth_state.account_id,
+                member_username: account.username.clone(),
+            }),
+        )
         .await?;
+        Ok::<(), Error>(())
+    })
+    .await?;
 
     tracing::info!(target: TRACING_TARGET, "Member left workspace");
 

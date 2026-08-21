@@ -36,8 +36,10 @@ pub struct MemberActivityParams {
 pub struct InviteActivityParams {
     /// Id of the invite.
     pub invite_id: Uuid,
-    /// Email the invite was addressed to.
-    pub email: String,
+    /// Email the invite was addressed to, when it recorded one. `None` keeps an
+    /// absent address distinct from a blank one.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub email: Option<String>,
 }
 
 /// Params of a connection activity (`connection.*`).
@@ -47,6 +49,8 @@ pub struct InviteActivityParams {
 pub struct ConnectionActivityParams {
     /// Id of the connection.
     pub connection_id: Uuid,
+    /// Display name of the connection.
+    pub connection_name: String,
 }
 
 /// Params of a webhook activity (`webhook.*`).
@@ -56,6 +60,8 @@ pub struct ConnectionActivityParams {
 pub struct WebhookActivityParams {
     /// Id of the webhook.
     pub webhook_id: Uuid,
+    /// Display name of the webhook.
+    pub webhook_name: String,
 }
 
 /// Params of a file activity (`file.*`).
@@ -96,6 +102,8 @@ pub struct PipelineRunActivityParams {
 pub struct PolicyActivityParams {
     /// Id of the policy.
     pub policy_id: Uuid,
+    /// Slug of the policy.
+    pub policy_slug: Handle,
 }
 
 /// The typed payload of an audit-log activity, tagged by `activityType`.
@@ -366,7 +374,7 @@ impl ActivityPayload {
             ActivityPayload::InviteCreated(p)
             | ActivityPayload::InviteAccepted(p)
             | ActivityPayload::InviteDeclined(p)
-            | ActivityPayload::InviteCanceled(p) => Some(p.email.clone()),
+            | ActivityPayload::InviteCanceled(p) => p.email.clone(),
 
             ActivityPayload::FileCreated(p)
             | ActivityPayload::FileUpdated(p)
@@ -382,18 +390,20 @@ impl ActivityPayload {
             | ActivityPayload::PipelineRunCompleted(p)
             | ActivityPayload::PipelineRunFailed(p) => Some(p.pipeline_slug.to_string()),
 
-            ActivityPayload::ConnectionCreated(_)
-            | ActivityPayload::ConnectionUpdated(_)
-            | ActivityPayload::ConnectionDeleted(_)
-            | ActivityPayload::ConnectionSyncCompleted(_)
-            | ActivityPayload::ConnectionSyncFailed(_)
-            | ActivityPayload::WebhookCreated(_)
-            | ActivityPayload::WebhookUpdated(_)
-            | ActivityPayload::WebhookDeleted(_)
-            | ActivityPayload::WebhookTriggered(_)
-            | ActivityPayload::PolicyCreated(_)
-            | ActivityPayload::PolicyUpdated(_)
-            | ActivityPayload::PolicyDeleted(_) => None,
+            ActivityPayload::ConnectionCreated(p)
+            | ActivityPayload::ConnectionUpdated(p)
+            | ActivityPayload::ConnectionDeleted(p)
+            | ActivityPayload::ConnectionSyncCompleted(p)
+            | ActivityPayload::ConnectionSyncFailed(p) => Some(p.connection_name.clone()),
+
+            ActivityPayload::WebhookCreated(p)
+            | ActivityPayload::WebhookUpdated(p)
+            | ActivityPayload::WebhookDeleted(p)
+            | ActivityPayload::WebhookTriggered(p) => Some(p.webhook_name.clone()),
+
+            ActivityPayload::PolicyCreated(p)
+            | ActivityPayload::PolicyUpdated(p)
+            | ActivityPayload::PolicyDeleted(p) => Some(p.policy_slug.to_string()),
         }
     }
 }
@@ -405,11 +415,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn id_only_object_has_id_no_label() {
+    fn connection_object_has_id_and_display_name_label() {
         let id = Uuid::now_v7();
-        let p = ActivityPayload::ConnectionCreated(ConnectionActivityParams { connection_id: id });
+        let p = ActivityPayload::ConnectionCreated(ConnectionActivityParams {
+            connection_id: id,
+            connection_name: "Prod S3".to_owned(),
+        });
         assert_eq!(p.object_id(), Some(id.to_string()));
-        assert_eq!(p.object_label(), None);
+        assert_eq!(p.object_label(), Some("Prod S3".to_owned()));
     }
 
     #[test]
@@ -426,7 +439,7 @@ mod tests {
         let id = Uuid::now_v7();
         let p = ActivityPayload::InviteCreated(InviteActivityParams {
             invite_id: id,
-            email: "a@b.com".to_owned(),
+            email: Some("a@b.com".to_owned()),
         });
         assert_eq!(p.object_id(), Some(id.to_string()));
         assert_eq!(p.object_label(), Some("a@b.com".to_owned()));

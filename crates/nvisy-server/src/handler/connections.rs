@@ -139,6 +139,7 @@ async fn create_connection(
                 },
                 WorkspaceEvent::ConnectionCreated(ConnectionRef {
                     connection_id: connection.id,
+                    connection_name: connection.display_name.clone(),
                 }),
             )
             .await?;
@@ -386,6 +387,12 @@ async fn update_connection(
     // partial write can never leave a sync-capable connection without its
     // schedule, nor record — or lose — the event out of step with the update.
     let connection_id = existing.id;
+    // The effective post-update name: the new one if the request set it, else the
+    // existing name.
+    let connection_name = update_data
+        .display_name
+        .clone()
+        .unwrap_or_else(|| existing.display_name.clone());
     let sync = request.sync;
     conn.transaction(async |conn| {
         conn.update_workspace_connection(connection_id, update_data)
@@ -405,7 +412,10 @@ async fn update_connection(
                 account_id: auth_state.account_id,
                 security: &security,
             },
-            WorkspaceEvent::ConnectionUpdated(ConnectionRef { connection_id }),
+            WorkspaceEvent::ConnectionUpdated(ConnectionRef {
+                connection_id,
+                connection_name,
+            }),
         )
         .await?;
         Ok::<(), Error>(())
@@ -482,6 +492,7 @@ async fn delete_connection(
             },
             WorkspaceEvent::ConnectionDeleted(ConnectionRef {
                 connection_id: existing.id,
+                connection_name: existing.display_name.clone(),
             }),
         )
         .await?;

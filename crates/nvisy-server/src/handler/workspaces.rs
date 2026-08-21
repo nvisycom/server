@@ -29,7 +29,8 @@ use crate::handler::response::{
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
-    AvatarService, EventEmitter, EventOrigin, MAX_AVATAR_UPLOAD_BYTES, ServiceState, WorkspaceEvent,
+    AvatarService, EventEmitter, EventOrigin, MAX_AVATAR_UPLOAD_BYTES, ServiceState,
+    WorkspaceEvent, WorkspaceRef,
 };
 
 /// Tracing target for workspace operations.
@@ -89,9 +90,10 @@ async fn create_workspace(
                     account_id: creator_id,
                     security: &security,
                 },
-                WorkspaceEvent::WorkspaceCreated {
+                WorkspaceEvent::WorkspaceCreated(WorkspaceRef {
+                    workspace_id: workspace.id,
                     workspace_slug: workspace.slug.clone(),
-                },
+                }),
             )
             .await?;
             Ok::<(WorkspaceModel, WorkspaceMember), Error>((workspace, member))
@@ -241,9 +243,10 @@ async fn update_workspace(
                     account_id: auth_state.account_id,
                     security: &security,
                 },
-                WorkspaceEvent::WorkspaceUpdated {
+                WorkspaceEvent::WorkspaceUpdated(WorkspaceRef {
+                    workspace_id: updated.id,
                     workspace_slug: updated.slug.clone(),
-                },
+                }),
             )
             .await?;
             Ok::<_, Error>(updated)
@@ -307,10 +310,10 @@ async fn delete_workspace(
                 account_id: auth_state.account_id,
                 security: &security,
             },
-            WorkspaceEvent::WorkspaceDeleted {
+            WorkspaceEvent::WorkspaceDeleted(WorkspaceRef {
                 workspace_id: workspace.id,
                 workspace_slug: workspace.slug.clone(),
-            },
+            }),
         )
         .await?;
         Ok::<_, Error>(())

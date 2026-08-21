@@ -438,6 +438,7 @@ impl ConnectionSyncService {
 
         let workspace_id = connection.workspace_id;
         let connection_id = connection.id;
+        let connection_name = connection.display_name.clone();
 
         let _ = self
             .webhook
@@ -496,11 +497,13 @@ impl ConnectionSyncService {
                 let event = match &result {
                     Ok(records_synced) => WorkspaceEvent::ConnectionSyncCompleted {
                         connection_id,
+                        connection_name: connection_name.clone(),
                         records_synced: Some(*records_synced as i64),
                         notify: Some(account_id),
                     },
                     Err(err) => WorkspaceEvent::ConnectionSyncFailed {
                         connection_id,
+                        connection_name: connection_name.clone(),
                         error: Some(err.message().unwrap_or("Sync failed").to_owned()),
                         notify: Some(account_id),
                     },
