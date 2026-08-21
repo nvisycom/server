@@ -1,11 +1,13 @@
 //! Request types for HTTP handlers.
 
 mod accounts;
+mod activities;
 mod analytics;
 mod authentications;
 mod chat;
 mod connection_syncs;
 mod connections;
+mod exports;
 mod files;
 mod invites;
 mod members;
@@ -20,11 +22,13 @@ mod webhooks;
 mod workspaces;
 
 pub use accounts::*;
+pub use activities::*;
 pub use analytics::*;
 pub use authentications::*;
 pub use chat::*;
 pub use connection_syncs::*;
 pub use connections::*;
+pub use exports::*;
 pub use files::*;
 pub use invites::*;
 pub use members::*;

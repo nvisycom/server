@@ -214,3 +214,138 @@ pub enum ActivityPayload {
     #[serde(rename = "policy.deleted")]
     PolicyDeleted(PolicyActivityParams),
 }
+
+impl ActivityPayload {
+    /// The stable identifier of the object this activity acted on, when it has
+    /// one. `None` for objects addressed only by a human-readable handle (a
+    /// workspace, member, or pipeline, whose slug/username is the
+    /// [`object_label`](Self::object_label)).
+    ///
+    /// Paired with `object_label`, this flattens the per-variant params into two
+    /// export columns without a per-object-type column explosion.
+    pub fn object_id(&self) -> Option<String> {
+        match self {
+            ActivityPayload::InviteCreated(p)
+            | ActivityPayload::InviteAccepted(p)
+            | ActivityPayload::InviteDeclined(p)
+            | ActivityPayload::InviteCanceled(p) => Some(p.invite_id.to_string()),
+
+            ActivityPayload::ConnectionCreated(p)
+            | ActivityPayload::ConnectionUpdated(p)
+            | ActivityPayload::ConnectionDeleted(p)
+            | ActivityPayload::ConnectionSyncCompleted(p)
+            | ActivityPayload::ConnectionSyncFailed(p) => Some(p.connection_id.to_string()),
+
+            ActivityPayload::WebhookCreated(p)
+            | ActivityPayload::WebhookUpdated(p)
+            | ActivityPayload::WebhookDeleted(p)
+            | ActivityPayload::WebhookTriggered(p) => Some(p.webhook_id.to_string()),
+
+            ActivityPayload::FileCreated(p)
+            | ActivityPayload::FileUpdated(p)
+            | ActivityPayload::FileDeleted(p)
+            | ActivityPayload::FileVerified(p) => Some(p.file_id.to_string()),
+
+            ActivityPayload::PipelineRunStarted(p)
+            | ActivityPayload::PipelineRunAnalyzed(p)
+            | ActivityPayload::PipelineRunCompleted(p)
+            | ActivityPayload::PipelineRunFailed(p) => Some(p.run_id.to_string()),
+
+            ActivityPayload::PolicyCreated(p)
+            | ActivityPayload::PolicyUpdated(p)
+            | ActivityPayload::PolicyDeleted(p) => Some(p.policy_id.to_string()),
+
+            ActivityPayload::WorkspaceCreated(_)
+            | ActivityPayload::WorkspaceUpdated(_)
+            | ActivityPayload::WorkspaceDeleted(_)
+            | ActivityPayload::MemberAdded(_)
+            | ActivityPayload::MemberUpdated(_)
+            | ActivityPayload::MemberDeleted(_)
+            | ActivityPayload::PipelineCreated(_)
+            | ActivityPayload::PipelineUpdated(_)
+            | ActivityPayload::PipelineDeleted(_) => None,
+        }
+    }
+
+    /// The human-readable name of the object this activity acted on, when it has
+    /// one: a slug, username, filename, or email. `None` for objects identified
+    /// only by an [`object_id`](Self::object_id).
+    pub fn object_label(&self) -> Option<String> {
+        match self {
+            ActivityPayload::WorkspaceCreated(p)
+            | ActivityPayload::WorkspaceUpdated(p)
+            | ActivityPayload::WorkspaceDeleted(p) => Some(p.workspace_slug.to_string()),
+
+            ActivityPayload::MemberAdded(p)
+            | ActivityPayload::MemberUpdated(p)
+            | ActivityPayload::MemberDeleted(p) => Some(p.member_username.to_string()),
+
+            ActivityPayload::InviteCreated(p)
+            | ActivityPayload::InviteAccepted(p)
+            | ActivityPayload::InviteDeclined(p)
+            | ActivityPayload::InviteCanceled(p) => Some(p.email.clone()),
+
+            ActivityPayload::FileCreated(p)
+            | ActivityPayload::FileUpdated(p)
+            | ActivityPayload::FileDeleted(p)
+            | ActivityPayload::FileVerified(p) => Some(p.file_name.clone()),
+
+            ActivityPayload::PipelineCreated(p)
+            | ActivityPayload::PipelineUpdated(p)
+            | ActivityPayload::PipelineDeleted(p) => Some(p.pipeline_slug.to_string()),
+
+            ActivityPayload::PipelineRunStarted(p)
+            | ActivityPayload::PipelineRunAnalyzed(p)
+            | ActivityPayload::PipelineRunCompleted(p)
+            | ActivityPayload::PipelineRunFailed(p) => Some(p.pipeline_slug.to_string()),
+
+            ActivityPayload::ConnectionCreated(_)
+            | ActivityPayload::ConnectionUpdated(_)
+            | ActivityPayload::ConnectionDeleted(_)
+            | ActivityPayload::ConnectionSyncCompleted(_)
+            | ActivityPayload::ConnectionSyncFailed(_)
+            | ActivityPayload::WebhookCreated(_)
+            | ActivityPayload::WebhookUpdated(_)
+            | ActivityPayload::WebhookDeleted(_)
+            | ActivityPayload::WebhookTriggered(_)
+            | ActivityPayload::PolicyCreated(_)
+            | ActivityPayload::PolicyUpdated(_)
+            | ActivityPayload::PolicyDeleted(_) => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn id_only_object_has_id_no_label() {
+        let id = Uuid::now_v7();
+        let p = ActivityPayload::ConnectionCreated(ConnectionActivityParams { connection_id: id });
+        assert_eq!(p.object_id(), Some(id.to_string()));
+        assert_eq!(p.object_label(), None);
+    }
+
+    #[test]
+    fn label_only_object_has_label_no_id() {
+        let p = ActivityPayload::MemberAdded(MemberActivityParams {
+            member_username: Handle::from_str("alice").unwrap(),
+        });
+        assert_eq!(p.object_id(), None);
+        assert_eq!(p.object_label(), Some("alice".to_owned()));
+    }
+
+    #[test]
+    fn object_with_both_id_and_label() {
+        let id = Uuid::now_v7();
+        let p = ActivityPayload::InviteCreated(InviteActivityParams {
+            invite_id: id,
+            email: "a@b.com".to_owned(),
+        });
+        assert_eq!(p.object_id(), Some(id.to_string()));
+        assert_eq!(p.object_label(), Some("a@b.com".to_owned()));
+    }
+}

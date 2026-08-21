@@ -93,6 +93,7 @@ clap = { workspace = true, features = ["derive", "env"], optional = true }
 humantime = { workspace = true, features = [], optional = true }
 
 # (De)serialization
+csv = { workspace = true, features = [] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 toml = { workspace = true, features = ["parse"] }
