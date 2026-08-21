@@ -168,6 +168,7 @@ diesel::table! {
         processed_at -> Nullable<Timestamptz>,
         attempts -> Int4,
         next_attempt_at -> Timestamptz,
+        failed_at -> Nullable<Timestamptz>,
         created_at -> Timestamptz,
     }
 }
