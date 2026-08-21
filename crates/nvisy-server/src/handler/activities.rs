@@ -9,7 +9,6 @@ use aide::axum::routing::get_with;
 use aide::transform::TransformOperation;
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::header::{CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceActivityRepository;
@@ -19,6 +18,7 @@ use serde::Serialize;
 use crate::extract::{AuthProvider, AuthState, Json, Permission, Query, WorkspaceContext};
 use crate::handler::request::{ActivityExportQuery, ExportFormat, MAX_EXPORT_ROWS};
 use crate::handler::response::ErrorResponse;
+use crate::handler::utility::attachment_headers;
 use crate::handler::{Error, ErrorKind, Result, ServiceState};
 
 /// Tracing target for activity export operations.
@@ -105,8 +105,8 @@ async fn export_activities(
     let mut rows = conn
         .list_workspace_activity_between(
             workspace.id,
-            export.from_timestamp()?,
-            export.to_timestamp()?,
+            export.window.from_timestamp()?,
+            export.window.to_timestamp()?,
             fetch_limit,
         )
         .await?;
@@ -127,16 +127,23 @@ async fn export_activities(
         .collect();
 
     let (content_type, extension, body) = match export.format {
-        ExportFormat::Csv => ("text/csv; charset=utf-8", "csv", render_csv(&records)?),
+        ExportFormat::Csv => (
+            HeaderValue::from_static("text/csv; charset=utf-8"),
+            "csv",
+            render_csv(&records)?,
+        ),
         ExportFormat::Json => (
-            "application/json",
+            HeaderValue::from_static("application/json"),
             "json",
             serde_json::to_vec(&records).map_err(serialize_error)?,
         ),
     };
 
-    let filename = format!("activities-{}_{}.{extension}", export.from, export.to);
-    let mut headers = attachment_headers(&filename, content_type, body.len());
+    let filename = format!(
+        "activities-{}_{}.{extension}",
+        export.window.from, export.window.to
+    );
+    let mut headers = attachment_headers(&filename, content_type, body.len() as u64);
     // A truncated export is still a valid file; flag the drop in a header so a
     // client can surface it without having to parse the body.
     if truncated {
@@ -185,21 +192,6 @@ fn serialize_error(error: impl std::fmt::Display) -> Error<'static> {
     ErrorKind::InternalServerError
         .with_message("Failed to render activity export")
         .with_context(error.to_string())
-}
-
-/// Builds the download response headers for an attachment.
-///
-/// `filename` is server-generated (a fixed stem plus ISO dates and extension),
-/// so it needs no sanitization for the quoted header value.
-fn attachment_headers(filename: &str, content_type: &'static str, length: usize) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    let disposition = format!("attachment; filename=\"{filename}\"")
-        .parse()
-        .unwrap_or_else(|_| HeaderValue::from_static("attachment"));
-    headers.insert(CONTENT_DISPOSITION, disposition);
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
-    headers.insert(CONTENT_LENGTH, HeaderValue::from(length as u64));
-    headers
 }
 
 /// Builds the activity export routes.

@@ -11,7 +11,6 @@ use aide::transform::TransformOperation;
 use axum::body::Body;
 use axum::extract::multipart::Field;
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::header::{CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use futures::StreamExt;
 use nvisy_nats::NatsClient;
@@ -29,7 +28,7 @@ use crate::extract::{
 };
 use crate::handler::request::{CursorPagination, ListFiles, UpdateFile, WorkspaceFilePathParams};
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
-use crate::handler::utility::resolve_account_ref;
+use crate::handler::utility::{attachment_headers, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
 use crate::service::{
@@ -526,28 +525,20 @@ async fn download_file(
             ErrorKind::NotFound.with_message("File content not found")
         })?;
 
-    // Set up response headers.
-    //
-    // The display name is user-controlled, so strip characters that are
-    // invalid in a quoted header value to avoid header injection and a
-    // failed parse; fall back to a generic disposition if it still fails.
+    // The display name is user-controlled, so strip characters that are invalid
+    // in a quoted header value to avoid header injection and a failed parse
+    // before it goes into the (server-trusting) attachment header.
     let safe_name: String = file
         .display_name
         .chars()
         .filter(|c| !c.is_control() && *c != '"' && *c != '\\')
         .collect();
-    let disposition = format!("attachment; filename=\"{safe_name}\"")
-        .parse()
-        .unwrap_or_else(|_| HeaderValue::from_static("attachment"));
-
-    let mut headers = HeaderMap::new();
-    headers.insert(CONTENT_DISPOSITION, disposition);
     // Content-length is the plaintext size from the record; storage holds the
     // larger ciphertext, which the decrypting reader unwraps as it streams.
-    headers.insert(CONTENT_LENGTH, HeaderValue::from(file.file_size_bytes));
-    headers.insert(
-        CONTENT_TYPE,
+    let headers = attachment_headers(
+        &safe_name,
         HeaderValue::from_static("application/octet-stream"),
+        file.file_size_bytes as u64,
     );
 
     tracing::debug!(

@@ -12,7 +12,6 @@ use aide::axum::routing::get_with;
 use aide::transform::TransformOperation;
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::header::{CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use elide_pipeline::Audit;
 use nvisy_postgres::PgClient;
@@ -22,6 +21,7 @@ use super::pipeline_runs::find_pipeline_run;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, WorkspaceContext};
 use crate::handler::request::{ExportFormat, ExportQuery, PipelineRunPathParams};
 use crate::handler::response::ErrorResponse;
+use crate::handler::utility::attachment_headers;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{RunBlobStore, ServiceState};
 
@@ -136,7 +136,7 @@ async fn download_pipeline_run_audit(
     let headers = attachment_headers(
         &filename,
         HeaderValue::from_static(content_type),
-        body.len(),
+        body.len() as u64,
     );
 
     tracing::debug!(target: TRACING_TARGET, "Pipeline run audit exported");
@@ -195,21 +195,6 @@ fn archive_error(error: impl std::fmt::Display) -> Error<'static> {
     ErrorKind::InternalServerError
         .with_message("Failed to build audit archive")
         .with_context(error.to_string())
-}
-
-/// Builds the download response headers for an attachment.
-///
-/// `filename` is server-generated (a run UUID plus a fixed extension), so it
-/// needs no sanitization for the quoted header value.
-fn attachment_headers(filename: &str, content_type: HeaderValue, length: usize) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    let disposition = format!("attachment; filename=\"{filename}\"")
-        .parse()
-        .unwrap_or_else(|_| HeaderValue::from_static("attachment"));
-    headers.insert(CONTENT_DISPOSITION, disposition);
-    headers.insert(CONTENT_TYPE, content_type);
-    headers.insert(CONTENT_LENGTH, HeaderValue::from(length as u64));
-    headers
 }
 
 /// Builds the pipeline-run audit routes.

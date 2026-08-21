@@ -2,7 +2,6 @@
 
 mod accounts;
 mod activities;
-mod analytics;
 mod authentications;
 mod chat;
 mod connection_syncs;
@@ -19,11 +18,11 @@ mod policies;
 mod tokens;
 mod validations;
 mod webhooks;
+mod windows;
 mod workspaces;
 
 pub use accounts::*;
 pub use activities::*;
-pub use analytics::*;
 pub use authentications::*;
 pub use chat::*;
 pub use connection_syncs::*;
@@ -40,4 +39,5 @@ pub use policies::*;
 pub use tokens::*;
 pub use validations::*;
 pub use webhooks::*;
+pub use windows::*;
 pub use workspaces::*;

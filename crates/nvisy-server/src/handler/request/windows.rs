@@ -1,4 +1,8 @@
-//! Workspace analytics request types.
+//! Shared date-window request type for endpoints scoped to a day range.
+//!
+//! A `from`/`to` day range (inclusive), defaulted and bounded uniformly so every
+//! range-scoped endpoint — analytics series, activity export — validates the same
+//! way and resolves to the same half-open `[from, to)` timestamp bounds.
 
 use jiff::civil::Date;
 use jiff::{ToSpan, Zoned};
@@ -7,23 +11,23 @@ use serde::Deserialize;
 
 use crate::handler::{Error, ErrorKind, Result};
 
-/// Longest run time-series window, in days. The response is gap-filled to one
-/// point per day in the window, so the window is capped to bound the response
-/// point count and the query cost.
-const MAX_WINDOW_DAYS: i64 = 366;
+/// Longest window, in days. Ranges are materialized per day (a gap-filled series,
+/// an exported row set), so the span is capped to bound the response and cost.
+pub const MAX_WINDOW_DAYS: i64 = 366;
 
 /// Default window when the caller gives no dates: the last 30 days through today.
-const DEFAULT_WINDOW_DAYS: i64 = 30;
+pub const DEFAULT_WINDOW_DAYS: i64 = 30;
 
-/// Query parameters for the run time-series: an inclusive `[from, to]` day range.
-/// Both are optional — see [`AnalyticsWindow::resolve`] for the defaults.
+/// A `from`/`to` day range (inclusive), both optional. Flatten it into an
+/// endpoint's query struct with `#[serde(flatten)]`, or use it directly when the
+/// range is the only parameter.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct AnalyticsWindow {
-    /// First day of the series (inclusive), `YYYY-MM-DD`. Defaults to 30 days
-    /// before `to`.
+pub struct DateWindow {
+    /// First day of the range (inclusive), `YYYY-MM-DD`. Defaults to
+    /// `DEFAULT_WINDOW_DAYS` before `to`.
     pub from: Option<Date>,
-    /// Last day of the series (inclusive), `YYYY-MM-DD`. Defaults to today (UTC).
+    /// Last day of the range (inclusive), `YYYY-MM-DD`. Defaults to today (UTC).
     pub to: Option<Date>,
 }
 
@@ -37,13 +41,13 @@ pub struct ResolvedWindow {
     pub to: Date,
 }
 
-impl AnalyticsWindow {
+impl DateWindow {
     /// Resolves the window, filling defaults and validating bounds.
     ///
     /// `to` defaults to today (UTC); `from` defaults to `DEFAULT_WINDOW_DAYS`
     /// before `to`. Rejects `from > to` (400) and a span wider than
-    /// `MAX_WINDOW_DAYS` (400), so a dense daily series can never be unbounded.
-    pub fn resolve(self) -> Result<ResolvedWindow> {
+    /// `MAX_WINDOW_DAYS` (400).
+    pub fn resolve(&self) -> Result<ResolvedWindow> {
         let to = self.to.unwrap_or_else(today_utc);
         let from = match self.from {
             Some(from) => from,
@@ -57,8 +61,7 @@ impl AnalyticsWindow {
         }
 
         let span = to.since(from).map_err(|_| invalid("Invalid window"))?;
-        let days = span.get_days() as i64;
-        if days > MAX_WINDOW_DAYS {
+        if span.get_days() as i64 > MAX_WINDOW_DAYS {
             return Err(invalid(format!(
                 "Window is too wide (max {MAX_WINDOW_DAYS} days)"
             )));
@@ -76,8 +79,8 @@ impl ResolvedWindow {
     }
 
     /// The window's end as an *exclusive* upper bound: the first instant of the
-    /// day after `to`. The query filters `started_at < to_timestamp()`, so the
-    /// whole `to` day is included without spilling into the next.
+    /// day after `to`. A filter of `column < to_timestamp()` therefore includes
+    /// the whole `to` day without spilling into the next.
     pub fn to_timestamp(&self) -> Result<jiff::Timestamp> {
         let next = self
             .to
@@ -112,7 +115,7 @@ mod tests {
     use super::*;
 
     fn window(from: Date, to: Date) -> ResolvedWindow {
-        AnalyticsWindow {
+        DateWindow {
             from: Some(from),
             to: Some(to),
         }
@@ -132,7 +135,7 @@ mod tests {
                 .timestamp()
         );
         // Upper bound is the first instant of the day *after* `to`, so a filter of
-        // `started_at < to_timestamp()` includes every run on the `to` day.
+        // `column < to_timestamp()` includes every row on the `to` day.
         assert_eq!(
             w.to_timestamp().unwrap(),
             date(2026, 2, 1)
@@ -152,7 +155,7 @@ mod tests {
 
     #[test]
     fn rejects_from_after_to() {
-        let err = AnalyticsWindow {
+        let err = DateWindow {
             from: Some(date(2026, 2, 1)),
             to: Some(date(2026, 1, 1)),
         }
@@ -167,7 +170,7 @@ mod tests {
             .checked_add(MAX_WINDOW_DAYS.days())
             .expect("date in range");
         assert!(
-            AnalyticsWindow {
+            DateWindow {
                 from: Some(from),
                 to: Some(to),
             }
@@ -182,7 +185,7 @@ mod tests {
         let to = from
             .checked_add((MAX_WINDOW_DAYS + 1).days())
             .expect("date in range");
-        let err = AnalyticsWindow {
+        let err = DateWindow {
             from: Some(from),
             to: Some(to),
         }
