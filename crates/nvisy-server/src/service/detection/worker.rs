@@ -12,22 +12,22 @@ use elide_pipeline::RasterMode;
 use nvisy_nats::stream::DetectionStream;
 use nvisy_postgres::model::{UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun};
 use nvisy_postgres::query::{
-    WorkspaceFileRepository, WorkspacePipelineRunRepository, WorkspaceRepository,
+    EventOutboxRepository, WorkspaceFileRepository, WorkspacePipelineRunRepository,
+    WorkspaceRepository,
 };
-use nvisy_postgres::types::{
-    Json, NotificationPayload, OcrPolicy, PipelineRunAnalyzedParams, PipelineRunFailedParams,
-    PipelineRunStatus, WorkspaceSettings,
-};
+use nvisy_postgres::types::{Json, OcrPolicy, PipelineRunStatus, WorkspaceSettings};
 use nvisy_postgres::{AsyncConnection, DieselError, PgConn, PgError};
 use tokio_util::sync::CancellationToken;
 
 use super::job::DetectionJob;
 use super::service::DetectionQueue;
-use super::support::{extract_run_usage, fail_run, resolve_policies};
+use super::support::{FailRun, extract_run_usage, fail_run, resolve_policies};
+use crate::extract::SecurityContext;
 use crate::handler::request::PipelineDefinition;
 use crate::handler::{ErrorKind, Result};
 use crate::service::{
-    EngineService, Infra, NotificationEmitter, RunBlobStore, WebhookEmitter, Worker,
+    EngineService, EventOrigin, Infra, PipelineRunRef, RunBlobStore, Worker, WorkspaceEvent,
+    event_outbox_row,
 };
 
 /// Tracing target for detection worker operations.
@@ -44,8 +44,6 @@ pub struct DetectionWorker {
     infra: Infra,
     engine: EngineService,
     blob: RunBlobStore,
-    webhook_emitter: WebhookEmitter,
-    notification_emitter: NotificationEmitter,
     detection: DetectionQueue,
 }
 
@@ -79,16 +77,12 @@ impl DetectionWorker {
         infra: Infra,
         engine: EngineService,
         blob: RunBlobStore,
-        webhook_emitter: WebhookEmitter,
-        notification_emitter: NotificationEmitter,
         detection: DetectionQueue,
     ) -> Self {
         Self {
             infra,
             engine,
             blob,
-            webhook_emitter,
-            notification_emitter,
             detection,
         }
     }
@@ -218,22 +212,16 @@ impl DetectionWorker {
             fail_run(
                 &mut conn,
                 &self.detection,
-                &self.webhook_emitter,
-                job.workspace_id,
-                run.id,
-                run.account_id,
-                &err.to_string(),
-                Some(claim_token),
+                FailRun {
+                    workspace_id: job.workspace_id,
+                    run_id: run.id,
+                    pipeline_slug: pipeline.slug.clone(),
+                    triggered_by: run.account_id,
+                    reason: &err.to_string(),
+                    claim: Some(claim_token),
+                },
             )
             .await;
-
-            let payload = NotificationPayload::PipelineRunFailed(PipelineRunFailedParams {
-                run_id: run.id,
-                pipeline_slug: pipeline.slug.to_string(),
-                input_file_name: None,
-                error: Some(err.to_string()),
-            });
-            self.notify(job.workspace_id, run.account_id, payload).await;
         }
         JobOutcome::Done
     }
@@ -248,22 +236,6 @@ impl DetectionWorker {
                 storage_path = %staged.storage_path,
                 "Failed to reclaim orphaned audit object; left for a later sweep",
             );
-        }
-    }
-
-    /// Notifies the run's triggering account, logging (never failing) on error.
-    async fn notify(
-        &self,
-        workspace_id: uuid::Uuid,
-        account_id: uuid::Uuid,
-        payload: NotificationPayload,
-    ) {
-        if let Err(err) = self
-            .notification_emitter
-            .notify_account(workspace_id, account_id, payload)
-            .await
-        {
-            tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to create notification");
         }
     }
 
@@ -338,8 +310,27 @@ impl DetectionWorker {
         // Kept to reclaim the just-staged object if the transaction does not
         // commit: on rollback its `workspace_files` row never lands, so the
         // row-driven reaper could never find the object otherwise.
+        // Build the outbox row here so the finalize transaction is `PgError`-typed
+        // for its rollback sentinel, and insert it alongside the finalize so the
+        // `Analyzed` event commits atomically with the run.
+        let analyzed_event = WorkspaceEvent::PipelineRunAnalyzed {
+            run: PipelineRunRef {
+                run_id: run.id,
+                pipeline_slug: pipeline.slug.clone(),
+            },
+            input_file_name: Some(file.display_name.clone()),
+            notify: run.account_id,
+        };
+        let outbox_row = event_outbox_row(
+            EventOrigin {
+                workspace_id: job.workspace_id,
+                account_id: run.account_id,
+                security: &SecurityContext::default(),
+            },
+            &analyzed_event,
+        )?;
+
         let staged_audit = audit_file.clone();
-        let run_id = run.id;
         let finalized = conn
             .transaction(async |conn| {
                 let audit_file_id = conn.create_workspace_file(audit_file).await?.id;
@@ -348,7 +339,7 @@ impl DetectionWorker {
                 }
                 let finalized = conn
                     .finalize_analyzed_run(
-                        run_id,
+                        run.id,
                         claim_token,
                         UpdateWorkspacePipelineRun {
                             audit_file_id: Some(Some(audit_file_id)),
@@ -363,6 +354,7 @@ impl DetectionWorker {
                     // without being a real error; it is matched below.
                     return Err(PgError::Query(DieselError::RollbackTransaction));
                 }
+                conn.insert_event_outbox(outbox_row).await?;
                 Ok::<_, PgError>(())
             })
             .await;
@@ -386,21 +378,6 @@ impl DetectionWorker {
         self.detection
             .broadcast_status(run.id, PipelineRunStatus::Analyzed)
             .await;
-
-        if let Err(err) = self
-            .webhook_emitter
-            .emit_pipeline_run_analyzed(job.workspace_id, run.id, Some(run.account_id), None)
-            .await
-        {
-            tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to emit pipeline:run.analyzed webhook event");
-        }
-
-        let payload = NotificationPayload::PipelineRunAnalyzed(PipelineRunAnalyzedParams {
-            run_id: run.id,
-            pipeline_slug: pipeline.slug.to_string(),
-            input_file_name: Some(file.display_name.clone()),
-        });
-        self.notify(job.workspace_id, run.account_id, payload).await;
 
         Ok(())
     }

@@ -13,5 +13,5 @@ mod worker;
 
 pub use job::{DetectionJob, RunStatusEvent, run_subject};
 pub use service::DetectionQueue;
-pub(crate) use support::{fail_run, resolve_policies};
+pub(crate) use support::{FailRun, fail_run, resolve_policies};
 pub use worker::DetectionWorker;

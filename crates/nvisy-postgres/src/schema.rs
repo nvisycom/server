@@ -157,6 +157,22 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+
+    event_outbox (id) {
+        id -> Uuid,
+        workspace_id -> Uuid,
+        account_id -> Uuid,
+        event -> Jsonb,
+        ip_address -> Nullable<Inet>,
+        user_agent -> Nullable<Text>,
+        processed_at -> Nullable<Timestamptz>,
+        attempts -> Int4,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
     use super::sql_types::ActivityType;
 
     workspace_activities (id) {
@@ -433,6 +449,8 @@ diesel::joinable!(account_api_tokens -> accounts (account_id));
 diesel::joinable!(account_notifications -> accounts (account_id));
 diesel::joinable!(chat_sessions -> accounts (account_id));
 diesel::joinable!(chat_sessions -> workspaces (workspace_id));
+diesel::joinable!(event_outbox -> accounts (account_id));
+diesel::joinable!(event_outbox -> workspaces (workspace_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
 diesel::joinable!(workspace_connection_schedule -> workspace_connections (connection_id));
@@ -464,6 +482,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     accounts,
     chat_messages,
     chat_sessions,
+    event_outbox,
     workspace_activities,
     workspace_connection_schedule,
     workspace_connection_syncs,

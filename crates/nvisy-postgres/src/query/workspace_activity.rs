@@ -15,6 +15,23 @@ use crate::types::{
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
+/// Predicates that narrow an activity listing, all optional (an empty filter
+/// matches every activity in the workspace). Shared by the paginated feed and the
+/// export so both apply the same constraints.
+#[derive(Debug, Clone, Default)]
+pub struct ActivityFilter {
+    /// Keep only these activity types. Empty means no type constraint.
+    pub types: Vec<ActivityType>,
+    /// Keep only activities performed by this account. `None` means any actor.
+    pub actor: Option<Uuid>,
+    /// Keep only activities at or after this instant (inclusive). `None` means
+    /// no lower bound.
+    pub from: Option<Timestamp>,
+    /// Keep only activities strictly before this instant (exclusive). `None`
+    /// means no upper bound.
+    pub to: Option<Timestamp>,
+}
+
 /// Parameters for logging entity-specific activities.
 #[derive(Debug, Clone)]
 pub struct LogEntityActivityParams {
@@ -47,24 +64,26 @@ pub trait WorkspaceActivityRepository {
         pagination: OffsetPagination,
     ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
 
-    /// Lists activities for a specific workspace with cursor pagination, each
-    /// paired with the handle and avatar of the account that performed it, if
-    /// any.
+    /// Lists a workspace's activities with cursor pagination, newest first, each
+    /// paired with the handle and avatar of the account that performed it. The
+    /// `filter` narrows by type, actor, and/or time window (an empty filter lists
+    /// everything).
     fn cursor_list_workspace_activity(
         &mut self,
         workspace_id: Uuid,
+        filter: ActivityFilter,
         pagination: CursorPagination,
     ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceActivity>>>> + Send;
 
-    /// Lists a workspace's activities in the half-open window `[from, to)`, each
-    /// paired with the performing account's handle and avatar, oldest first (the
-    /// natural order for an export). At most `limit` rows are returned; the caller
-    /// sets `limit` one above its cap so a full result signals truncation.
-    fn list_workspace_activity_between(
+    /// Lists a workspace's filtered activities oldest first (the natural order for
+    /// an export), each paired with the performing account's handle and avatar. At
+    /// most `limit` rows are returned; the caller sets `limit` one above its cap so
+    /// a full result signals truncation. The `filter` applies the same type/actor/
+    /// window constraints as the feed.
+    fn list_workspace_activity_for_export(
         &mut self,
         workspace_id: Uuid,
-        from: Timestamp,
-        to: Timestamp,
+        filter: ActivityFilter,
         limit: i64,
     ) -> impl Future<Output = PgResult<Vec<WithAccountRef<WorkspaceActivity>>>> + Send;
 
@@ -181,17 +200,20 @@ impl WorkspaceActivityRepository for PgConnection {
     async fn cursor_list_workspace_activity(
         &mut self,
         workspace_id: Uuid,
+        filter: ActivityFilter,
         pagination: CursorPagination,
     ) -> PgResult<CursorPage<WithAccountRef<WorkspaceActivity>>> {
         use diesel::dsl::count_star;
         use schema::workspace_activities::dsl;
         use schema::{accounts, workspace_activities};
 
-        // Get total count only if requested
+        // Count over the same filter, only when requested.
         let total = if pagination.include_count {
+            let count_query = workspace_activities::table
+                .filter(dsl::workspace_id.eq(workspace_id))
+                .into_boxed();
             Some(
-                workspace_activities::table
-                    .filter(dsl::workspace_id.eq(workspace_id))
+                apply_activity_filter(count_query, &filter)
                     .select(count_star())
                     .get_result(self)
                     .await
@@ -201,11 +223,12 @@ impl WorkspaceActivityRepository for PgConnection {
             None
         };
 
-        // Build query with cursor
-        let mut query = workspace_activities::table
-            .inner_join(accounts::table)
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .into_boxed();
+        let mut query = apply_activity_filter(
+            workspace_activities::table
+                .filter(dsl::workspace_id.eq(workspace_id))
+                .into_boxed(),
+            &filter,
+        );
 
         if let Some(cursor) = &pagination.after {
             let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
@@ -217,6 +240,7 @@ impl WorkspaceActivityRepository for PgConnection {
         }
 
         let rows: Vec<(WorkspaceActivity, AccountRefRow)> = query
+            .inner_join(accounts::table)
             .select((
                 WorkspaceActivity::as_select(),
                 (
@@ -241,24 +265,24 @@ impl WorkspaceActivityRepository for PgConnection {
         }))
     }
 
-    async fn list_workspace_activity_between(
+    async fn list_workspace_activity_for_export(
         &mut self,
         workspace_id: Uuid,
-        from: Timestamp,
-        to: Timestamp,
+        filter: ActivityFilter,
         limit: i64,
     ) -> PgResult<Vec<WithAccountRef<WorkspaceActivity>>> {
         use schema::workspace_activities::dsl;
         use schema::{accounts, workspace_activities};
 
-        let from = jiff_diesel::Timestamp::from(from);
-        let to = jiff_diesel::Timestamp::from(to);
+        let query = apply_activity_filter(
+            workspace_activities::table
+                .filter(dsl::workspace_id.eq(workspace_id))
+                .into_boxed(),
+            &filter,
+        );
 
-        let rows: Vec<(WorkspaceActivity, AccountRefRow)> = workspace_activities::table
+        let rows: Vec<(WorkspaceActivity, AccountRefRow)> = query
             .inner_join(accounts::table)
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::created_at.ge(from))
-            .filter(dsl::created_at.lt(to))
             .select((
                 WorkspaceActivity::as_select(),
                 (
@@ -499,4 +523,28 @@ impl WorkspaceActivityRepository for PgConnection {
 
         Ok(deleted_count)
     }
+}
+
+/// Applies an [`ActivityFilter`]'s predicates (type, actor, time window) to a
+/// boxed activity query. Kept separate so the paginated feed and the export apply
+/// identical constraints; an empty filter is a no-op.
+fn apply_activity_filter<'a>(
+    mut query: schema::workspace_activities::BoxedQuery<'a, diesel::pg::Pg>,
+    filter: &ActivityFilter,
+) -> schema::workspace_activities::BoxedQuery<'a, diesel::pg::Pg> {
+    use schema::workspace_activities::dsl;
+
+    if !filter.types.is_empty() {
+        query = query.filter(dsl::activity_type.eq_any(filter.types.clone()));
+    }
+    if let Some(actor) = filter.actor {
+        query = query.filter(dsl::account_id.eq(actor));
+    }
+    if let Some(from) = filter.from {
+        query = query.filter(dsl::created_at.ge(jiff_diesel::Timestamp::from(from)));
+    }
+    if let Some(to) = filter.to {
+        query = query.filter(dsl::created_at.lt(jiff_diesel::Timestamp::from(to)));
+    }
+    query
 }

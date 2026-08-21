@@ -12,7 +12,7 @@ use axum::http::StatusCode;
 use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
 use nvisy_postgres::types::{WebhookId, WithAccountRef};
-use nvisy_postgres::{PgClient, PgConn};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use nvisy_webhook::WebhookService;
 use nvisy_webhook::guard::UrlGuardExt;
 use nvisy_webhook::provider::{WebhookContext, WebhookRequest};
@@ -20,7 +20,8 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
+    AuthProvider, AuthState, Json, Path, Permission, Query, SecurityContext, ValidateJson,
+    WorkspaceContext,
 };
 use crate::handler::request::{
     CreateWebhook, CursorPagination, TestWebhook, UpdateWebhook as UpdateWebhookRequest,
@@ -31,7 +32,9 @@ use crate::handler::response::{
 };
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{CryptoService, ServiceState};
+use crate::service::{
+    CryptoService, EventEmitter, EventOrigin, ServiceState, WebhookRef, WorkspaceEvent,
+};
 
 /// Tracing target for workspace webhook operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::webhooks";
@@ -51,6 +54,7 @@ async fn create_webhook(
     State(crypto): State<CryptoService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateWebhook>,
 ) -> Result<(StatusCode, Json<WebhookCreated>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace webhook");
@@ -69,7 +73,26 @@ async fn create_webhook(
     let encrypted_secret = crypto.encrypt(workspace.id, secret.as_bytes())?;
 
     let new_webhook = request.into_model(workspace.id, auth_state.account_id, encrypted_secret)?;
-    let webhook = conn.create_workspace_webhook(new_webhook).await?;
+
+    // Create the webhook and record the outbox event atomically, so the event is
+    // never lost, nor recorded for a create that rolled back.
+    let webhook = conn
+        .transaction(async |conn| {
+            let webhook = conn.create_workspace_webhook(new_webhook).await?;
+            conn.emit_event(
+                EventOrigin {
+                    workspace_id: workspace.id,
+                    account_id: auth_state.account_id,
+                    security: &security,
+                },
+                WorkspaceEvent::WebhookCreated(WebhookRef {
+                    webhook_id: webhook.id,
+                }),
+            )
+            .await?;
+            Ok::<_, Error>(webhook)
+        })
+        .await?;
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -219,6 +242,7 @@ async fn update_webhook(
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<WebhookPathParams>,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWebhookRequest>,
 ) -> Result<(StatusCode, Json<Webhook>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace webhook");
@@ -238,8 +262,26 @@ async fn update_webhook(
     }
 
     let update_data = request.into_model(existing.status)?;
-    conn.update_workspace_webhook(existing.id, update_data)
+
+    // Update the webhook and record the outbox event atomically, so the event is
+    // never lost, nor recorded for an update that rolled back.
+    conn.transaction(async |conn| {
+        conn.update_workspace_webhook(existing.id, update_data)
+            .await?;
+        conn.emit_event(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id: auth_state.account_id,
+                security: &security,
+            },
+            WorkspaceEvent::WebhookUpdated(WebhookRef {
+                webhook_id: existing.id,
+            }),
+        )
         .await?;
+        Ok::<(), Error>(())
+    })
+    .await?;
 
     let found = find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid()).await?;
 
@@ -281,6 +323,7 @@ async fn delete_webhook(
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<WebhookPathParams>,
+    security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace webhook");
 
@@ -294,7 +337,24 @@ async fn delete_webhook(
         .await?
         .item;
 
-    conn.delete_workspace_webhook(existing.id).await?;
+    // Delete the webhook and record the outbox event atomically, so the event is
+    // never lost, nor recorded for a delete that rolled back.
+    conn.transaction(async |conn| {
+        conn.delete_workspace_webhook(existing.id).await?;
+        conn.emit_event(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id: auth_state.account_id,
+                security: &security,
+            },
+            WorkspaceEvent::WebhookDeleted(WebhookRef {
+                webhook_id: existing.id,
+            }),
+        )
+        .await?;
+        Ok::<(), Error>(())
+    })
+    .await?;
 
     tracing::info!(target: TRACING_TARGET, "Webhook deleted");
 

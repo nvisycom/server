@@ -6,6 +6,7 @@ mod connection_config;
 mod crypto;
 mod detection;
 mod engine;
+mod event;
 mod external_object_store;
 mod file_reaper;
 mod health;
@@ -35,8 +36,12 @@ pub(crate) use crate::service::crypto::{CryptoError, HashingReader, Measurements
 pub use crate::service::detection::{
     DetectionJob, DetectionQueue, DetectionWorker, RunStatusEvent, run_subject,
 };
-pub(crate) use crate::service::detection::{fail_run, resolve_policies};
+pub(crate) use crate::service::detection::{FailRun, fail_run, resolve_policies};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
+pub use crate::service::event::{
+    ConnectionRef, EventEmitter, EventOrigin, EventOutboxDrainer, FileRef, InviteRef, MemberRef,
+    PipelineRef, PipelineRunRef, PolicyRef, WebhookRef, WorkspaceEvent, event_outbox_row,
+};
 pub use crate::service::external_object_store::ExternalObjectStore;
 pub use crate::service::file_reaper::FileReaper;
 pub use crate::service::health::{HealthCache, HealthConfig};
@@ -130,7 +135,6 @@ impl ServiceState {
             infra.clone(),
             ExternalObjectStore::new(),
             WebhookEmitter::new(infra.clone()),
-            NotificationEmitter::new(infra.clone()),
             sync_config,
         );
 
@@ -172,12 +176,11 @@ impl ServiceState {
             self.connection_sync.clone(),
         ));
         workers.spawn(FileReaper::new(self.infra.clone()));
+        workers.spawn(EventOutboxDrainer::new(self.infra.clone()));
         workers.spawn(DetectionWorker::new(
             self.infra.clone(),
             self.engine.clone(),
             RunBlobStore::from_ref(self),
-            WebhookEmitter::from_ref(self),
-            NotificationEmitter::from_ref(self),
             DetectionQueue::from_ref(self),
         ));
         workers

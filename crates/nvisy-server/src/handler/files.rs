@@ -18,13 +18,13 @@ use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
 use nvisy_postgres::query::WorkspaceFileRepository;
 use nvisy_postgres::types::{FileKind, WithAccountRef};
-use nvisy_postgres::{PgClient, PgConn};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Multipart, Path, Permission, Query, ValidateJson,
-    WorkspaceContext,
+    AuthProvider, AuthState, Json, Multipart, Path, Permission, Query, SecurityContext,
+    ValidateJson, WorkspaceContext,
 };
 use crate::handler::request::{CursorPagination, ListFiles, UpdateFile, WorkspaceFilePathParams};
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
@@ -32,7 +32,8 @@ use crate::handler::utility::{DownloadResponseExt, attachment_headers, resolve_a
 use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
 use crate::service::{
-    CryptoService, EngineService, HashingReader, RunBlobStore, ServiceState, WebhookEmitter,
+    CryptoService, EngineService, EventEmitter, EventOrigin, FileRef, HashingReader, RunBlobStore,
+    ServiceState, WorkspaceEvent,
 };
 
 /// Tracing target for workspace file operations.
@@ -128,12 +129,14 @@ struct FileUploadContext {
     expires_at: Option<jiff::Timestamp>,
 }
 
-/// Processes a single file from a multipart upload using streaming.
+/// Streams one multipart file to storage and builds its unsaved row.
+///
+/// The row is returned rather than inserted, so the caller can persist it and
+/// record its creation event in one transaction.
 async fn process_single_file(
-    conn: &mut PgConn,
     ctx: &FileUploadContext,
     field: Field<'_>,
-) -> Result<FileModel> {
+) -> Result<NewWorkspaceFile> {
     let filename = field
         .file_name()
         .map(ToString::to_string)
@@ -196,9 +199,7 @@ async fn process_single_file(
         ..Default::default()
     };
 
-    let created_file = conn.create_workspace_file(file_record).await?;
-
-    Ok(created_file)
+    Ok(file_record)
 }
 
 /// Uploads input files to a workspace for processing.
@@ -212,11 +213,11 @@ async fn process_single_file(
 async fn upload_file(
     State(pg_client): State<PgClient>,
     State(nats_client): State<NatsClient>,
-    State(webhook_emitter): State<WebhookEmitter>,
     State(crypto): State<CryptoService>,
     State(engine): State<EngineService>,
     WorkspaceContext(workspace): WorkspaceContext,
     AuthState(auth_claims): AuthState,
+    security: SecurityContext,
     Multipart(mut multipart): Multipart,
 ) -> Result<(StatusCode, Json<Files>)> {
     tracing::info!(target: TRACING_TARGET, "Uploading files");
@@ -266,7 +267,32 @@ async fn upload_file(
             continue;
         }
 
-        let created_file = process_single_file(&mut conn, &ctx, field).await?;
+        let file_record = process_single_file(&ctx, field).await?;
+
+        // Persist the row and record its creation event in one transaction, so
+        // the event is never lost, nor recorded for a row that rolled back.
+        let created_file = conn
+            .transaction(async |conn| {
+                let created_file = conn.create_workspace_file(file_record).await?;
+                conn.emit_event(
+                    EventOrigin {
+                        workspace_id: workspace.id,
+                        account_id: auth_claims.account_id,
+                        security: &security,
+                    },
+                    WorkspaceEvent::FileCreated {
+                        file: FileRef {
+                            file_id: created_file.id,
+                            file_name: created_file.display_name.clone(),
+                        },
+                        file_size_bytes: created_file.file_size_bytes,
+                    },
+                )
+                .await?;
+                Ok::<_, Error>(created_file)
+            })
+            .await?;
+
         uploaded_files.push(response::File::from_model(
             created_file,
             workspace.slug.clone(),
@@ -276,30 +302,6 @@ async fn upload_file(
 
     if uploaded_files.is_empty() {
         return Err(ErrorKind::BadRequest.with_message("No files provided in multipart request"));
-    }
-
-    // Emit webhook events for created files (fire-and-forget)
-    for file in &uploaded_files {
-        let data = serde_json::json!({
-            "displayName": file.display_name,
-            "fileSizeBytes": file.file_size,
-        });
-        if let Err(err) = webhook_emitter
-            .emit_file_created(
-                workspace.id,
-                file.id,
-                Some(auth_claims.account_id),
-                Some(data),
-            )
-            .await
-        {
-            tracing::warn!(
-                target: TRACING_TARGET,
-                error = %err,
-                file_id = %file.id,
-                "Failed to emit file:created webhook event"
-            );
-        }
     }
 
     tracing::info!(
@@ -377,10 +379,10 @@ fn read_file_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_file(
     State(pg_client): State<PgClient>,
-    State(webhook_emitter): State<WebhookEmitter>,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<WorkspaceFilePathParams>,
     AuthState(auth_claims): AuthState,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateFile>,
 ) -> Result<(StatusCode, Json<File>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating file");
@@ -396,37 +398,35 @@ async fn update_file(
 
     let updates = request.into_model();
 
-    conn.update_workspace_file(path_params.file_id, updates)
-        .await
-        .map_err(|err| {
-            tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
-            ErrorKind::InternalServerError.with_message("Failed to update file")
-        })?;
+    // Update the file and record its update event in one transaction, so the
+    // event is never lost, nor recorded for an update that rolled back.
+    conn.transaction(async |conn| {
+        let updated_file = conn
+            .update_workspace_file(path_params.file_id, updates)
+            .await
+            .map_err(|err| {
+                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update file");
+                ErrorKind::InternalServerError.with_message("Failed to update file")
+            })?;
+        conn.emit_event(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id: auth_claims.account_id,
+                security: &security,
+            },
+            WorkspaceEvent::FileUpdated(FileRef {
+                file_id: path_params.file_id,
+                file_name: updated_file.display_name.clone(),
+            }),
+        )
+        .await?;
+        Ok::<_, Error>(())
+    })
+    .await?;
 
     let found = find_file_with_creator(&mut conn, workspace.id, path_params.file_id).await?;
     let updated_file = found.item;
     let uploaded_by = found.account;
-
-    // Emit webhook event (fire-and-forget)
-    let data = serde_json::json!({
-        "displayName": updated_file.display_name,
-    });
-    if let Err(err) = webhook_emitter
-        .emit_file_updated(
-            workspace.id,
-            path_params.file_id,
-            Some(auth_claims.account_id),
-            Some(data),
-        )
-        .await
-    {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %err,
-            file_id = %path_params.file_id,
-            "Failed to emit file:updated webhook event"
-        );
-    }
 
     tracing::info!(target: TRACING_TARGET, "File updated");
 
@@ -577,10 +577,10 @@ fn download_file_docs(op: TransformOperation) -> TransformOperation {
 async fn delete_file(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
-    State(webhook_emitter): State<WebhookEmitter>,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<WorkspaceFilePathParams>,
     AuthState(auth_claims): AuthState,
+    security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting file");
 
@@ -593,35 +593,34 @@ async fn delete_file(
     // Confirm the file exists in this workspace before deleting.
     let file = find_file(&mut conn, workspace.id, path_params.file_id).await?;
 
-    // Soft-delete the row and purge its object, reclaiming storage the same way
-    // retention expiry does. Runs keep their reference to the file as history; a
-    // reader resolves it to "gone". The purge outcome is not surfaced to the
-    // caller: the file is deleted either way, and a pending object purge is the
-    // reaper's to retry.
+    // Soft-delete the row and record the deletion event in one transaction, so
+    // the event is never lost, nor recorded for a delete that rolled back.
+    conn.transaction(async |conn| {
+        conn.delete_workspace_file(file.id).await?;
+        conn.emit_event(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id: auth_claims.account_id,
+                security: &security,
+            },
+            WorkspaceEvent::FileDeleted(FileRef {
+                file_id: path_params.file_id,
+                file_name: file.display_name.clone(),
+            }),
+        )
+        .await?;
+        Ok::<_, Error>(())
+    })
+    .await?;
+
+    // Purge the object, reclaiming storage the same way retention expiry does.
+    // The soft-delete already committed above; `purge_file` re-runs it
+    // idempotently, then removes the object. Runs keep their reference to the file
+    // as history; a reader resolves it to "gone". The purge outcome is not
+    // surfaced to the caller: a pending object purge is the reaper's to retry.
     let _ = blob
         .purge_file(&mut conn, file.id, &file.storage_path, &file.storage_bucket)
         .await?;
-
-    // Emit webhook event (fire-and-forget)
-    let data = serde_json::json!({
-        "displayName": file.display_name,
-    });
-    if let Err(err) = webhook_emitter
-        .emit_file_deleted(
-            workspace.id,
-            path_params.file_id,
-            Some(auth_claims.account_id),
-            Some(data),
-        )
-        .await
-    {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %err,
-            file_id = %path_params.file_id,
-            "Failed to emit file:deleted webhook event"
-        );
-    }
 
     tracing::info!(target: TRACING_TARGET, "File deleted");
     Ok(StatusCode::NO_CONTENT)

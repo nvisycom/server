@@ -29,11 +29,12 @@ use nvisy_postgres::query::{
     WorkspaceConnectionSyncRepository,
 };
 use nvisy_postgres::types::{ConnectionId, WithAccountRef};
-use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgError};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
+    AuthProvider, AuthState, Json, Path, Permission, Query, SecurityContext, ValidateJson,
+    WorkspaceContext,
 };
 use crate::handler::request::{
     ConnectionPathParams, ConnectionsQuery, CreateConnection, CursorPagination, SyncScheduleInput,
@@ -45,7 +46,8 @@ use crate::handler::response::{
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
-    ConnectionConfig, CryptoService, ExternalObjectStore, ServiceState, StandardCronSchedule,
+    ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin, ExternalObjectStore,
+    ServiceState, StandardCronSchedule, WorkspaceEvent,
 };
 
 /// Tracing target for workspace connection operations.
@@ -67,6 +69,7 @@ async fn create_connection(
     State(crypto): State<CryptoService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateConnection>,
 ) -> Result<(StatusCode, Json<Connection>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace connection");
@@ -105,8 +108,10 @@ async fn create_connection(
         metadata: None,
     };
 
-    // Insert the connection and (if sync-capable) its schedule atomically, so a
-    // partial write can never leave a sync-capable connection without a schedule.
+    // Insert the connection, its schedule (if sync-capable), and the outbox event
+    // atomically, so a partial write can never leave a sync-capable connection
+    // without a schedule, nor record — or lose — the event out of step with the
+    // insert.
     let sync = request.sync.unwrap_or_default();
     let (connection, schedule) = conn
         .transaction(async |conn| {
@@ -126,7 +131,18 @@ async fn create_connection(
             } else {
                 None
             };
-            Ok::<_, PgError>((connection, schedule))
+            conn.emit_event(
+                EventOrigin {
+                    workspace_id: workspace.id,
+                    account_id: auth_state.account_id,
+                    security: &security,
+                },
+                WorkspaceEvent::ConnectionCreated(ConnectionRef {
+                    connection_id: connection.id,
+                }),
+            )
+            .await?;
+            Ok::<_, Error>((connection, schedule))
         })
         .await?;
 
@@ -317,6 +333,7 @@ async fn update_connection(
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionPathParams>,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateConnection>,
 ) -> Result<(StatusCode, Json<Connection>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace connection");
@@ -365,8 +382,9 @@ async fn update_connection(
         ..Default::default()
     };
 
-    // Update the connection and its schedule atomically so a partial write can
-    // never leave a sync-capable connection without its schedule.
+    // Update the connection, its schedule, and the outbox event atomically so a
+    // partial write can never leave a sync-capable connection without its
+    // schedule, nor record — or lose — the event out of step with the update.
     let connection_id = existing.id;
     let sync = request.sync;
     conn.transaction(async |conn| {
@@ -381,7 +399,16 @@ async fn update_connection(
             })
             .await?;
         }
-        Ok::<(), PgError>(())
+        conn.emit_event(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id: auth_state.account_id,
+                security: &security,
+            },
+            WorkspaceEvent::ConnectionUpdated(ConnectionRef { connection_id }),
+        )
+        .await?;
+        Ok::<(), Error>(())
     })
     .await?;
 
@@ -428,6 +455,7 @@ async fn delete_connection(
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionPathParams>,
+    security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace connection");
 
@@ -442,7 +470,24 @@ async fn delete_connection(
         .0
         .item;
 
-    conn.delete_workspace_connection(existing.id).await?;
+    // Delete the connection and record the outbox event atomically, so the event
+    // is never lost, nor recorded for a delete that rolled back.
+    conn.transaction(async |conn| {
+        conn.delete_workspace_connection(existing.id).await?;
+        conn.emit_event(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id: auth_state.account_id,
+                security: &security,
+            },
+            WorkspaceEvent::ConnectionDeleted(ConnectionRef {
+                connection_id: existing.id,
+            }),
+        )
+        .await?;
+        Ok::<(), Error>(())
+    })
+    .await?;
 
     tracing::info!(target: TRACING_TARGET, "Connection deleted");
 
