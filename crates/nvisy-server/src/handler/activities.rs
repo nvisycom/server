@@ -4,6 +4,8 @@
 //! export renders a date window of that log as a downloadable file, in CSV (the
 //! default) or JSON.
 
+use std::borrow::Cow;
+
 use aide::axum::ApiRouter;
 use aide::axum::routing::get_with;
 use aide::transform::TransformOperation;
@@ -11,6 +13,7 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use nvisy_postgres::PgClient;
+use nvisy_postgres::model::WorkspaceActivity;
 use nvisy_postgres::query::WorkspaceActivityRepository;
 use nvisy_postgres::types::{CursorPagination, WithAccountRef};
 use serde::Serialize;
@@ -54,7 +57,7 @@ struct ActivityExportRow {
 impl ActivityExportRow {
     /// Builds a row from a joined activity, deriving the split columns from the
     /// activity type and its typed params.
-    fn from_activity(row: WithAccountRef<nvisy_postgres::model::WorkspaceActivity>) -> Self {
+    fn from_activity(row: WithAccountRef<WorkspaceActivity>) -> Self {
         let WithAccountRef { item, account } = row;
         let payload = item.params.optional();
         let actor = account
@@ -74,6 +77,24 @@ impl ActivityExportRow {
             ip_address: item.ip_address.map(|ip| ip.to_string()).unwrap_or_default(),
             user_agent: item.user_agent.unwrap_or_default(),
         }
+    }
+
+    /// The row's cells in [`CSV_HEADER`] order, with the free-text ones
+    /// (`actor`, `object_label`, `ip_address`, `user_agent`) neutralized against
+    /// spreadsheet formula injection ([`csv_cell`]). Server-controlled cells (the
+    /// timestamp, the type halves, the object id) are passed through as-is.
+    fn csv_fields(&self) -> [Cow<'_, str>; 9] {
+        [
+            Cow::Borrowed(self.timestamp.as_str()),
+            Cow::Borrowed(&self.activity_type),
+            Cow::Borrowed(&self.object_type),
+            Cow::Borrowed(&self.action_type),
+            csv_cell(&self.actor),
+            Cow::Borrowed(&self.object_id),
+            csv_cell(&self.object_label),
+            csv_cell(&self.ip_address),
+            csv_cell(&self.user_agent),
+        ]
     }
 }
 
@@ -250,18 +271,9 @@ fn render_csv(records: &[ActivityExportRow]) -> Result<Vec<u8>> {
         .from_writer(Vec::new());
     writer.write_record(CSV_HEADER).map_err(serialize_error)?;
     for r in records {
+        let fields = r.csv_fields();
         writer
-            .write_record([
-                r.timestamp.as_str(),
-                &r.activity_type,
-                &r.object_type,
-                &r.action_type,
-                &csv_cell(&r.actor),
-                &r.object_id,
-                &csv_cell(&r.object_label),
-                &csv_cell(&r.ip_address),
-                &csv_cell(&r.user_agent),
-            ])
+            .write_record(fields.iter().map(AsRef::<str>::as_ref))
             .map_err(serialize_error)?;
     }
     writer
@@ -274,12 +286,12 @@ fn render_csv(records: &[ActivityExportRow]) -> Result<Vec<u8>> {
 /// as a formula when the CSV is opened in Excel/Sheets, so such a value is
 /// prefixed with an apostrophe to force it to be read as text. Applied only to
 /// CSV output; JSON carries the raw value.
-fn csv_cell(value: &str) -> std::borrow::Cow<'_, str> {
+fn csv_cell(value: &str) -> Cow<'_, str> {
     let trimmed = value.trim_start();
     if trimmed.starts_with(['=', '+', '-', '@']) {
-        std::borrow::Cow::Owned(format!("'{value}"))
+        Cow::Owned(format!("'{value}"))
     } else {
-        std::borrow::Cow::Borrowed(value)
+        Cow::Borrowed(value)
     }
 }
 
@@ -359,5 +371,20 @@ mod tests {
         assert_eq!(csv_cell(""), "");
         // Neutralization checks the first non-whitespace char.
         assert_eq!(csv_cell("  =x"), "'  =x");
+    }
+
+    #[test]
+    fn csv_header_matches_the_struct_serde_field_names() {
+        // The header is written by hand (the row cells are too, so `csv_cell` can
+        // neutralize a subset), so guard it against drift from the struct: the
+        // `csv` serializer emits headers from the serde field names, honoring
+        // `rename_all = "camelCase"`, so what it emits is the source of truth.
+        let mut w = csv::WriterBuilder::new()
+            .has_headers(true)
+            .from_writer(Vec::new());
+        w.serialize(row("a", "b")).unwrap();
+        let out = String::from_utf8(w.into_inner().unwrap()).unwrap();
+        let derived_header = out.lines().next().unwrap();
+        assert_eq!(derived_header, CSV_HEADER.join(","));
     }
 }

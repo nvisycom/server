@@ -4,7 +4,10 @@
 //! range-scoped endpoint — analytics series, activity export — validates the same
 //! way and resolves to the same half-open `[from, to)` timestamp bounds.
 
+use std::borrow::Cow;
+
 use jiff::civil::Date;
+use jiff::tz::TimeZone;
 use jiff::{ToSpan, Zoned};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -26,8 +29,8 @@ pub const DEFAULT_WINDOW_DAYS: i64 = 30;
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DateWindow {
-    /// First day of the range (inclusive), `YYYY-MM-DD`. Defaults to
-    /// `DEFAULT_WINDOW_DAYS` before `to`.
+    /// First day of the range (inclusive), `YYYY-MM-DD`. Defaults so the range
+    /// spans the last `DEFAULT_WINDOW_DAYS` days through `to`.
     pub from: Option<Date>,
     /// Last day of the range (inclusive), `YYYY-MM-DD`. Defaults to today (UTC).
     pub to: Option<Date>,
@@ -100,19 +103,19 @@ impl ResolvedWindow {
 
 /// Today's date in UTC.
 fn today_utc() -> Date {
-    Zoned::now().with_time_zone(jiff::tz::TimeZone::UTC).date()
+    Zoned::now().with_time_zone(TimeZone::UTC).date()
 }
 
 /// The first instant of `date` in UTC. Fails (400) rather than silently widening
 /// the query if the date cannot be represented as a zoned timestamp.
 fn day_start_utc(date: Date) -> Result<jiff::Timestamp> {
-    date.to_zoned(jiff::tz::TimeZone::UTC)
+    date.to_zoned(TimeZone::UTC)
         .map(|z| z.timestamp())
         .map_err(|_| invalid("Window bound is out of range"))
 }
 
 /// A 400 for an invalid window.
-fn invalid(message: impl Into<std::borrow::Cow<'static, str>>) -> Error<'static> {
+fn invalid(message: impl Into<Cow<'static, str>>) -> Error<'static> {
     ErrorKind::BadRequest.with_message(message)
 }
 
@@ -138,7 +141,7 @@ mod tests {
         assert_eq!(
             w.from_timestamp().unwrap(),
             date(2026, 1, 1)
-                .to_zoned(jiff::tz::TimeZone::UTC)
+                .to_zoned(TimeZone::UTC)
                 .unwrap()
                 .timestamp()
         );
@@ -147,7 +150,7 @@ mod tests {
         assert_eq!(
             w.to_timestamp().unwrap(),
             date(2026, 2, 1)
-                .to_zoned(jiff::tz::TimeZone::UTC)
+                .to_zoned(TimeZone::UTC)
                 .unwrap()
                 .timestamp()
         );
