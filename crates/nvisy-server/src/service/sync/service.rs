@@ -18,18 +18,17 @@ use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceConnection, WorkspaceFile
 use nvisy_postgres::query::{
     WorkspaceConnectionSyncRepository, WorkspaceFileRepository, WorkspaceRepository,
 };
-use nvisy_postgres::types::{
-    ConnectionSyncCompletedParams, ConnectionSyncFailedParams, FileKind, NotificationPayload,
-    SyncDeletionPolicy,
-};
+use nvisy_postgres::types::{FileKind, SyncDeletionPolicy};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::SyncConfig;
 use super::bridge::{reader_to_stream, stream_to_reader};
+use crate::extract::SecurityContext;
 use crate::handler::{ErrorKind, Result};
 use crate::service::{
-    ExternalObjectStore, HashingReader, Infra, Measurements, NotificationEmitter, WebhookEmitter,
+    EventEmitter, EventOrigin, ExternalObjectStore, HashingReader, Infra, Measurements,
+    WebhookEmitter, WorkspaceEvent,
 };
 
 /// Tracing target for connection sync operations.
@@ -50,8 +49,9 @@ enum Outcome {
 pub struct ConnectionSyncService {
     infra: Infra,
     object: ExternalObjectStore,
+    // Emits the `pipeline:connection.sync.started` webhook directly, since it has
+    // no activity-log or notification counterpart to carry through the outbox.
     webhook: WebhookEmitter,
-    notification: NotificationEmitter,
     /// Maximum objects imported concurrently within a single sync.
     import_concurrency: usize,
     // Cancellation tokens for transfers running in this process, keyed by run id.
@@ -67,14 +67,12 @@ impl ConnectionSyncService {
         infra: Infra,
         object: ExternalObjectStore,
         webhook: WebhookEmitter,
-        notification: NotificationEmitter,
         config: SyncConfig,
     ) -> Self {
         Self {
             infra,
             object,
             webhook,
-            notification,
             import_concurrency: config.import_concurrency.max(1),
             running: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -493,67 +491,42 @@ impl ConnectionSyncService {
 
         match outcome {
             Outcome::Finished(result) => {
-                let sync_event = match &result {
-                    Ok(records_synced) => (
-                        true,
-                        serde_json::json!({
-                            "connection_id": connection_id,
-                            "records_synced": records_synced,
-                        }),
-                    ),
-                    Err(err) => (
-                        false,
-                        serde_json::json!({
-                            "connection_id": connection_id,
-                            "error": err.message().unwrap_or("Sync failed"),
-                        }),
-                    ),
+                // Build the terminal event before `finish_run` consumes `result`,
+                // notifying the connection owner in the same emit.
+                let event = match &result {
+                    Ok(records_synced) => WorkspaceEvent::ConnectionSyncCompleted {
+                        connection_id,
+                        records_synced: Some(*records_synced as i64),
+                        notify: Some(account_id),
+                    },
+                    Err(err) => WorkspaceEvent::ConnectionSyncFailed {
+                        connection_id,
+                        error: Some(err.message().unwrap_or("Sync failed").to_owned()),
+                        notify: Some(account_id),
+                    },
                 };
 
-                self.finish_run(run_id, result.clone()).await;
+                self.finish_run(run_id, result).await;
 
-                let (succeeded, data) = sync_event;
-                let _ = if succeeded {
-                    self.webhook
-                        .emit_connection_sync_completed(
-                            workspace_id,
-                            run_id,
-                            Some(account_id),
-                            Some(data),
-                        )
-                        .await
-                } else {
-                    self.webhook
-                        .emit_connection_sync_failed(
-                            workspace_id,
-                            run_id,
-                            Some(account_id),
-                            Some(data),
-                        )
-                        .await
-                };
-
-                // Notify the connection owner (best-effort).
-                let payload = match &result {
-                    Ok(records_synced) => NotificationPayload::ConnectionSyncCompleted(
-                        ConnectionSyncCompletedParams {
-                            connection_id,
-                            records_synced: Some(*records_synced as i64),
-                        },
-                    ),
-                    Err(err) => {
-                        NotificationPayload::ConnectionSyncFailed(ConnectionSyncFailedParams {
-                            connection_id,
-                            error: Some(err.message().unwrap_or("Sync failed").to_owned()),
-                        })
+                match self.infra.postgres.get_connection().await {
+                    Ok(mut conn) => {
+                        if let Err(err) = conn
+                            .emit_event(
+                                EventOrigin {
+                                    workspace_id,
+                                    account_id,
+                                    security: &SecurityContext::default(),
+                                },
+                                event,
+                            )
+                            .await
+                        {
+                            tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to record sync event");
+                        }
                     }
-                };
-                if let Err(err) = self
-                    .notification
-                    .notify_account(workspace_id, account_id, payload)
-                    .await
-                {
-                    tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to create sync notification");
+                    Err(err) => {
+                        tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to acquire connection for sync event");
+                    }
                 }
             }
             Outcome::Cancelled => self.cancel_run(run_id).await,

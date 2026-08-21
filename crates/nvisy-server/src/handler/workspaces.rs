@@ -17,7 +17,8 @@ use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Avatar, Json, Permission, Query, ValidateJson, WorkspaceContext,
+    AuthProvider, AuthState, Avatar, Json, Permission, Query, SecurityContext, ValidateJson,
+    WorkspaceContext,
 };
 use crate::handler::request::{
     CreateWorkspace, CursorPagination, UpdateNotificationSettings, UpdateWorkspace,
@@ -27,7 +28,9 @@ use crate::handler::response::{
 };
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState};
+use crate::service::{
+    AvatarService, EventEmitter, EventOrigin, MAX_AVATAR_UPLOAD_BYTES, ServiceState, WorkspaceEvent,
+};
 
 /// Tracing target for workspace operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspaces";
@@ -63,6 +66,7 @@ async fn backfill_retention(
 async fn create_workspace(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateWorkspace>,
 ) -> Result<(StatusCode, Json<Workspace>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace");
@@ -71,12 +75,26 @@ async fn create_workspace(
     let mut conn = pg_client.get_connection().await?;
     let creator_id = auth_state.account_id;
 
+    // The workspace, its owner membership, and the creation event commit
+    // together, so the event is never lost, nor recorded for a workspace that
+    // rolled back.
     let (workspace, membership) = conn
         .transaction(async |conn| {
             let workspace = conn.create_workspace(new_workspace).await?;
             let new_member = NewWorkspaceMember::new_owner(workspace.id, creator_id);
             let member = conn.add_workspace_member(new_member).await?;
-            Ok::<(WorkspaceModel, WorkspaceMember), nvisy_postgres::PgError>((workspace, member))
+            conn.emit_event(
+                EventOrigin {
+                    workspace_id: workspace.id,
+                    account_id: creator_id,
+                    security: &security,
+                },
+                WorkspaceEvent::WorkspaceCreated {
+                    workspace_slug: workspace.slug.clone(),
+                },
+            )
+            .await?;
+            Ok::<(WorkspaceModel, WorkspaceMember), Error>((workspace, member))
         })
         .await?;
 
@@ -190,6 +208,7 @@ async fn update_workspace(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWorkspace>,
 ) -> Result<(StatusCode, Json<Workspace>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace");
@@ -205,9 +224,10 @@ async fn update_workspace(
 
     let update_data = request.into_model()?;
 
-    // The settings write and the retention backfill must be atomic: otherwise a
-    // mid-operation failure could persist the new settings while existing files
-    // keep stale `expires_at`, or update only some file kinds.
+    // The settings write, the retention backfill, and the update event must be
+    // atomic: otherwise a mid-operation failure could persist the new settings
+    // while existing files keep stale `expires_at`, update only some file kinds,
+    // or record the event out of step with the update.
     let workspace_id = workspace.id;
     let updated = conn
         .transaction(async |conn| {
@@ -215,6 +235,17 @@ async fn update_workspace(
             if let Some(retention) = new_retention {
                 backfill_retention(conn, workspace_id, &retention).await?;
             }
+            conn.emit_event(
+                EventOrigin {
+                    workspace_id,
+                    account_id: auth_state.account_id,
+                    security: &security,
+                },
+                WorkspaceEvent::WorkspaceUpdated {
+                    workspace_slug: updated.slug.clone(),
+                },
+            )
+            .await?;
             Ok::<_, Error>(updated)
         })
         .await?;
@@ -227,6 +258,7 @@ async fn update_workspace(
         Some(member) => Workspace::from_model_with_membership(updated, member, creator),
         None => Workspace::from_model(updated, creator),
     };
+
     Ok((StatusCode::OK, Json(response)))
 }
 
@@ -256,6 +288,7 @@ async fn delete_workspace(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
+    security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace");
 
@@ -264,7 +297,25 @@ async fn delete_workspace(
         .authorize_workspace(&mut conn, workspace.id, Permission::DeleteWorkspace)
         .await?;
 
-    conn.delete_workspace(workspace.id).await?;
+    // Soft-delete the workspace and record the deletion event in one transaction,
+    // so the event is never lost, nor recorded for a delete that rolled back.
+    conn.transaction(async |conn| {
+        conn.delete_workspace(workspace.id).await?;
+        conn.emit_event(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id: auth_state.account_id,
+                security: &security,
+            },
+            WorkspaceEvent::WorkspaceDeleted {
+                workspace_id: workspace.id,
+                workspace_slug: workspace.slug.clone(),
+            },
+        )
+        .await?;
+        Ok::<_, Error>(())
+    })
+    .await?;
 
     tracing::info!(target: TRACING_TARGET, "Workspace deleted");
 

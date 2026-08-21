@@ -14,17 +14,20 @@ use elide_pipeline::policy::PolicyDefinition;
 use nvisy_postgres::model::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 use nvisy_postgres::query::WorkspacePolicyRepository;
 use nvisy_postgres::types::WithAccountRef;
-use nvisy_postgres::{PgClient, PgConn};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
+    AuthProvider, AuthState, Json, Path, Permission, Query, SecurityContext, ValidateJson,
+    WorkspaceContext,
 };
 use crate::handler::request::{CreatePolicy, CursorPagination, PolicyPathParams, UpdatePolicy};
 use crate::handler::response::{ErrorResponse, PoliciesPage, Policy, PolicySummary};
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, Result};
-use crate::service::{CryptoService, ServiceState, WebhookEmitter};
+use crate::service::{
+    CryptoService, EventEmitter, EventOrigin, PolicyRef, ServiceState, WorkspaceEvent,
+};
 
 /// Tracing target for workspace policy operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::policies";
@@ -44,9 +47,9 @@ const TRACING_TARGET: &str = "nvisy_server::handler::policies";
 async fn create_policy(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
-    State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<CreatePolicy>,
 ) -> Result<(StatusCode, Json<Policy>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace policy");
@@ -79,8 +82,25 @@ async fn create_policy(
         metadata: None,
     };
 
-    let policy = conn.create_workspace_policy(new_policy).await?;
-    let policy_id = policy.id;
+    // Insert the policy and record the outbox event atomically, so the event is
+    // never lost, nor recorded for an insert that rolled back.
+    let policy = conn
+        .transaction(async |conn| {
+            let policy = conn.create_workspace_policy(new_policy).await?;
+            conn.emit_event(
+                EventOrigin {
+                    workspace_id: workspace.id,
+                    account_id: auth_state.account_id,
+                    security: &security,
+                },
+                WorkspaceEvent::PolicyCreated(PolicyRef {
+                    policy_id: policy.id,
+                }),
+            )
+            .await?;
+            Ok::<_, Error>(policy)
+        })
+        .await?;
 
     tracing::info!(target: TRACING_TARGET, policy_slug = %policy.slug, "Policy created");
 
@@ -88,23 +108,6 @@ async fn create_policy(
     let creator = resolve_account_ref(&mut conn, auth_state.account_id).await?;
 
     let response = Policy::from_model(policy, workspace.slug, creator, &crypto)?;
-
-    if let Err(err) = webhook_emitter
-        .emit_policy_created(
-            workspace.id,
-            policy_id,
-            Some(auth_state.account_id),
-            Some(serde_json::json!({ "displayName": response.display_name })),
-        )
-        .await
-    {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %err,
-            policy_id = %policy_id,
-            "Failed to emit policy:created webhook event"
-        );
-    }
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -230,10 +233,10 @@ fn read_policy_docs(op: TransformOperation) -> TransformOperation {
 async fn update_policy(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
-    State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PolicyPathParams>,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdatePolicy>,
 ) -> Result<(StatusCode, Json<Policy>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace policy");
@@ -270,29 +273,27 @@ async fn update_policy(
         ..Default::default()
     };
 
+    // Update the policy and record the outbox event atomically, so the event is
+    // never lost, nor recorded for an update that rolled back.
     let policy_id = existing.id;
-    conn.update_workspace_policy(policy_id, updates).await?;
+    conn.transaction(async |conn| {
+        conn.update_workspace_policy(policy_id, updates).await?;
+        conn.emit_event(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id: auth_state.account_id,
+                security: &security,
+            },
+            WorkspaceEvent::PolicyUpdated(PolicyRef { policy_id }),
+        )
+        .await?;
+        Ok::<(), Error>(())
+    })
+    .await?;
 
     let found = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
 
     let response = Policy::from_model(found.item, workspace.slug, found.account.into(), &crypto)?;
-
-    if let Err(err) = webhook_emitter
-        .emit_policy_updated(
-            workspace.id,
-            policy_id,
-            Some(auth_state.account_id),
-            Some(serde_json::json!({ "displayName": response.display_name })),
-        )
-        .await
-    {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %err,
-            policy_id = %policy_id,
-            "Failed to emit policy:updated webhook event"
-        );
-    }
 
     tracing::info!(target: TRACING_TARGET, "Policy updated");
 
@@ -320,10 +321,10 @@ fn update_policy_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_policy(
     State(pg_client): State<PgClient>,
-    State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PolicyPathParams>,
+    security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace policy");
 
@@ -339,19 +340,22 @@ async fn delete_policy(
         .item;
     let policy_id = existing.id;
 
-    conn.delete_workspace_policy(policy_id).await?;
-
-    if let Err(err) = webhook_emitter
-        .emit_policy_deleted(workspace.id, policy_id, Some(auth_state.account_id), None)
-        .await
-    {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %err,
-            policy_id = %policy_id,
-            "Failed to emit policy:deleted webhook event"
-        );
-    }
+    // Delete the policy and record the outbox event atomically, so the event is
+    // never lost, nor recorded for a delete that rolled back.
+    conn.transaction(async |conn| {
+        conn.delete_workspace_policy(policy_id).await?;
+        conn.emit_event(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id: auth_state.account_id,
+                security: &security,
+            },
+            WorkspaceEvent::PolicyDeleted(PolicyRef { policy_id }),
+        )
+        .await?;
+        Ok::<(), Error>(())
+    })
+    .await?;
 
     tracing::info!(target: TRACING_TARGET, "Policy deleted");
 

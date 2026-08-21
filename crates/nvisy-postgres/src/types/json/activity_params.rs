@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::types::Handle;
+use crate::types::{ActivityType, Handle, WebhookEvent};
 
 /// Params of a workspace-scoped activity (`workspace.*`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,6 +216,89 @@ pub enum ActivityPayload {
 }
 
 impl ActivityPayload {
+    /// The [`ActivityType`] this payload records, so a caller logs an activity
+    /// from the payload alone and the two can never disagree.
+    pub fn activity_type(&self) -> ActivityType {
+        match self {
+            ActivityPayload::WorkspaceCreated(_) => ActivityType::WorkspaceCreated,
+            ActivityPayload::WorkspaceUpdated(_) => ActivityType::WorkspaceUpdated,
+            ActivityPayload::WorkspaceDeleted(_) => ActivityType::WorkspaceDeleted,
+            ActivityPayload::MemberAdded(_) => ActivityType::MemberAdded,
+            ActivityPayload::MemberUpdated(_) => ActivityType::MemberUpdated,
+            ActivityPayload::MemberDeleted(_) => ActivityType::MemberDeleted,
+            ActivityPayload::InviteCreated(_) => ActivityType::InviteCreated,
+            ActivityPayload::InviteAccepted(_) => ActivityType::InviteAccepted,
+            ActivityPayload::InviteDeclined(_) => ActivityType::InviteDeclined,
+            ActivityPayload::InviteCanceled(_) => ActivityType::InviteCanceled,
+            ActivityPayload::ConnectionCreated(_) => ActivityType::ConnectionCreated,
+            ActivityPayload::ConnectionUpdated(_) => ActivityType::ConnectionUpdated,
+            ActivityPayload::ConnectionDeleted(_) => ActivityType::ConnectionDeleted,
+            ActivityPayload::ConnectionSyncCompleted(_) => ActivityType::ConnectionSyncCompleted,
+            ActivityPayload::ConnectionSyncFailed(_) => ActivityType::ConnectionSyncFailed,
+            ActivityPayload::WebhookCreated(_) => ActivityType::WebhookCreated,
+            ActivityPayload::WebhookUpdated(_) => ActivityType::WebhookUpdated,
+            ActivityPayload::WebhookDeleted(_) => ActivityType::WebhookDeleted,
+            ActivityPayload::WebhookTriggered(_) => ActivityType::WebhookTriggered,
+            ActivityPayload::FileCreated(_) => ActivityType::FileCreated,
+            ActivityPayload::FileUpdated(_) => ActivityType::FileUpdated,
+            ActivityPayload::FileDeleted(_) => ActivityType::FileDeleted,
+            ActivityPayload::FileVerified(_) => ActivityType::FileVerified,
+            ActivityPayload::PipelineCreated(_) => ActivityType::PipelineCreated,
+            ActivityPayload::PipelineUpdated(_) => ActivityType::PipelineUpdated,
+            ActivityPayload::PipelineDeleted(_) => ActivityType::PipelineDeleted,
+            ActivityPayload::PipelineRunStarted(_) => ActivityType::PipelineRunStarted,
+            ActivityPayload::PipelineRunAnalyzed(_) => ActivityType::PipelineRunAnalyzed,
+            ActivityPayload::PipelineRunCompleted(_) => ActivityType::PipelineRunCompleted,
+            ActivityPayload::PipelineRunFailed(_) => ActivityType::PipelineRunFailed,
+            ActivityPayload::PolicyCreated(_) => ActivityType::PolicyCreated,
+            ActivityPayload::PolicyUpdated(_) => ActivityType::PolicyUpdated,
+            ActivityPayload::PolicyDeleted(_) => ActivityType::PolicyDeleted,
+        }
+    }
+
+    /// The webhook event this activity also raises, when the webhook vocabulary
+    /// carries it. `None` for activities with no webhook counterpart — webhook
+    /// CRUD (a webhook does not fire on its own management) and invite lifecycle.
+    pub fn webhook_event(&self) -> Option<WebhookEvent> {
+        use WebhookEvent as W;
+        Some(match self {
+            ActivityPayload::WorkspaceCreated(_)
+            | ActivityPayload::WorkspaceUpdated(_)
+            | ActivityPayload::WorkspaceDeleted(_)
+            | ActivityPayload::InviteCreated(_)
+            | ActivityPayload::InviteAccepted(_)
+            | ActivityPayload::InviteDeclined(_)
+            | ActivityPayload::InviteCanceled(_)
+            | ActivityPayload::WebhookCreated(_)
+            | ActivityPayload::WebhookUpdated(_)
+            | ActivityPayload::WebhookDeleted(_)
+            | ActivityPayload::WebhookTriggered(_) => return None,
+
+            ActivityPayload::MemberAdded(_) => W::MemberAdded,
+            ActivityPayload::MemberUpdated(_) => W::MemberUpdated,
+            ActivityPayload::MemberDeleted(_) => W::MemberDeleted,
+            ActivityPayload::ConnectionCreated(_) => W::ConnectionCreated,
+            ActivityPayload::ConnectionUpdated(_) => W::ConnectionUpdated,
+            ActivityPayload::ConnectionDeleted(_) => W::ConnectionDeleted,
+            ActivityPayload::ConnectionSyncCompleted(_) => W::ConnectionSyncCompleted,
+            ActivityPayload::ConnectionSyncFailed(_) => W::ConnectionSyncFailed,
+            ActivityPayload::FileCreated(_) => W::FileCreated,
+            ActivityPayload::FileUpdated(_) => W::FileUpdated,
+            ActivityPayload::FileDeleted(_) => W::FileDeleted,
+            ActivityPayload::FileVerified(_) => return None,
+            ActivityPayload::PipelineCreated(_) => W::PipelineCreated,
+            ActivityPayload::PipelineUpdated(_) => W::PipelineUpdated,
+            ActivityPayload::PipelineDeleted(_) => W::PipelineDeleted,
+            ActivityPayload::PipelineRunStarted(_) => W::PipelineRunStarted,
+            ActivityPayload::PipelineRunAnalyzed(_) => W::PipelineRunAnalyzed,
+            ActivityPayload::PipelineRunCompleted(_) => W::PipelineRunCompleted,
+            ActivityPayload::PipelineRunFailed(_) => W::PipelineRunFailed,
+            ActivityPayload::PolicyCreated(_) => W::PolicyCreated,
+            ActivityPayload::PolicyUpdated(_) => W::PolicyUpdated,
+            ActivityPayload::PolicyDeleted(_) => W::PolicyDeleted,
+        })
+    }
+
     /// The stable identifier of the object this activity acted on, when it has
     /// one. `None` for objects addressed only by a human-readable handle (a
     /// workspace, member, or pipeline, whose slug/username is the

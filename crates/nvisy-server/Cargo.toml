@@ -113,6 +113,7 @@ anyhow = { workspace = true, features = [] }
 # Primitive datatypes
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
+ipnet = { workspace = true, features = [] }
 
 # Image processing
 image = { workspace = true }

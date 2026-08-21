@@ -11,16 +11,17 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::query::{AccountRepository, WorkspaceMemberRepository};
 use nvisy_postgres::types::{Handle, WorkspaceRole};
-use nvisy_postgres::{PgClient, PgConn};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
+    AuthProvider, AuthState, Json, Path, Permission, Query, SecurityContext, ValidateJson,
+    WorkspaceContext,
 };
 use crate::handler::request::{CursorPagination, ListMembers, MemberPathParams, UpdateMember};
 use crate::handler::response::{ErrorResponse, Member, MembersPage, Page};
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{ServiceState, WebhookEmitter};
+use crate::service::{EventEmitter, EventOrigin, MemberRef, ServiceState, WorkspaceEvent};
 
 /// Tracing target for workspace member operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::members";
@@ -155,10 +156,10 @@ fn get_member_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_member(
     State(pg_client): State<PgClient>,
-    State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<MemberPathParams>,
+    security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Removing workspace member");
 
@@ -191,28 +192,26 @@ async fn delete_member(
             .with_context("Owners can only leave the workspace themselves"));
     }
 
-    conn.remove_workspace_member(workspace.id, member_account_id)
-        .await?;
-
-    // Emit webhook event (fire-and-forget)
-    let data = serde_json::json!({
-        "removedUsername": path_params.username,
-    });
-    if let Err(err) = webhook_emitter
-        .emit_member_deleted(
-            workspace.id,
-            member_account_id,
-            Some(auth_state.account_id),
-            Some(data),
+    // Remove the member and record the outbox event atomically, so the event is
+    // never lost, nor recorded for a removal that rolled back.
+    conn.transaction(async |conn| {
+        conn.remove_workspace_member(workspace.id, member_account_id)
+            .await?;
+        conn.emit_event(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id: auth_state.account_id,
+                security: &security,
+            },
+            WorkspaceEvent::MemberDeleted(MemberRef {
+                member_id: member_account_id,
+                member_username: path_params.username.clone(),
+            }),
         )
-        .await
-    {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %err,
-            "Failed to emit member:deleted webhook event"
-        );
-    }
+        .await?;
+        Ok::<(), Error>(())
+    })
+    .await?;
 
     tracing::info!(target: TRACING_TARGET, "Workspace member removed");
 
@@ -247,10 +246,10 @@ fn delete_member_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_member(
     State(pg_client): State<PgClient>,
-    State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<MemberPathParams>,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateMember>,
 ) -> Result<(StatusCode, Json<Member>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace member role");
@@ -285,9 +284,26 @@ async fn update_member(
             .with_context("Owners can only leave the workspace themselves"));
     }
 
-    let new_role = request.role;
-    conn.update_workspace_member(workspace.id, member_account_id, request.into_model())
+    // Update the member and record the outbox event atomically, so the event is
+    // never lost, nor recorded for an update that rolled back.
+    conn.transaction(async |conn| {
+        conn.update_workspace_member(workspace.id, member_account_id, request.into_model())
+            .await?;
+        conn.emit_event(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id: auth_state.account_id,
+                security: &security,
+            },
+            WorkspaceEvent::MemberUpdated(MemberRef {
+                member_id: member_account_id,
+                member_username: path_params.username.clone(),
+            }),
+        )
         .await?;
+        Ok::<(), Error>(())
+    })
+    .await?;
 
     let Some((updated_member, account)) = conn
         .find_workspace_member_with_account(workspace.id, member_account_id)
@@ -295,28 +311,6 @@ async fn update_member(
     else {
         return Err(ErrorKind::NotFound.with_resource("workspace_member"));
     };
-
-    // Emit webhook event (fire-and-forget)
-    let data = serde_json::json!({
-        "username": path_params.username,
-        "previousRole": current_member.member_role.to_string(),
-        "newRole": new_role.to_string(),
-    });
-    if let Err(err) = webhook_emitter
-        .emit_member_updated(
-            workspace.id,
-            member_account_id,
-            Some(auth_state.account_id),
-            Some(data),
-        )
-        .await
-    {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %err,
-            "Failed to emit member:updated webhook event"
-        );
-    }
 
     tracing::info!(
         target: TRACING_TARGET,

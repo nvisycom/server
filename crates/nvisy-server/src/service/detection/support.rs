@@ -5,12 +5,13 @@ use nvisy_postgres::model::{NewWorkspacePipelineRunUsage, UpdateWorkspacePipelin
 use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspacePipelineRunRepository, WorkspacePolicyRepository,
 };
-use nvisy_postgres::types::{Json, PipelineRunStatus, RunMetadata};
+use nvisy_postgres::types::{Handle, Json, PipelineRunStatus, RunMetadata};
 use uuid::Uuid;
 
 use super::service::DetectionQueue;
+use crate::extract::SecurityContext;
 use crate::handler::Result;
-use crate::service::{CryptoService, WebhookEmitter};
+use crate::service::{CryptoService, EventEmitter, EventOrigin, PipelineRunRef, WorkspaceEvent};
 
 /// Tracing target for shared detection operations.
 const TRACING_TARGET: &str = "nvisy_server::service::detection";
@@ -101,29 +102,51 @@ fn to_i64(value: u64) -> i64 {
     value.try_into().unwrap_or(i64::MAX)
 }
 
-/// Marks a run `Failed` (best effort), recording `reason` in its metadata,
+/// Identifies the run to fail and how, so [`fail_run`] takes one bundle rather
+/// than a long positional list.
+pub(crate) struct FailRun<'a> {
+    /// The workspace the run belongs to.
+    pub workspace_id: Uuid,
+    /// The run to fail.
+    pub run_id: Uuid,
+    /// Slug of the run's pipeline, for the emitted event.
+    pub pipeline_slug: Handle,
+    /// The account that triggered the run (the failure's actor and notify target).
+    pub triggered_by: Uuid,
+    /// Human-readable failure reason, stored in the run's metadata.
+    pub reason: &'a str,
+    /// The worker's claim timestamp, guarding the transition; `None` on the
+    /// handler path, which has no claim to fence.
+    pub claim: Option<jiff::Timestamp>,
+}
+
+/// Marks a run `Failed` (best effort), recording the reason in its metadata,
 /// broadcasting the terminal status for SSE watchers, and emitting the
-/// `pipeline:run.failed` webhook event.
+/// `PipelineRunFailed` event (activity log, webhook, and owner notification).
 ///
 /// Shared by the create-run handler (enqueue failed) and the worker (analysis
-/// failed) so a failure takes the same three steps on every path.
+/// failed) so a failure takes the same steps on every path.
 ///
-/// `claim` fences the worker path: when `Some(claimed_at)`, the run is failed
-/// only while that claim still holds (still `Analyzing`, `claimed_at` unchanged),
-/// and the broadcast/webhook fire only if it did — so a worker whose lease
-/// expired mid-analysis cannot fail, or announce the failure of, a run another
-/// worker now owns. The handler passes `None`: it fails the run it just created,
-/// with no claim to guard.
+/// `params.claim` fences the worker path: when `Some(claimed_at)`, the run is
+/// failed only while that claim still holds (still `Analyzing`, `claimed_at`
+/// unchanged), and the broadcast/event fire only if it did — so a worker whose
+/// lease expired mid-analysis cannot fail, or announce the failure of, a run
+/// another worker now owns. The handler passes `None`: it fails the run it just
+/// created, with no claim to guard.
 pub(crate) async fn fail_run(
     conn: &mut nvisy_postgres::PgConn,
     detection: &DetectionQueue,
-    webhook_emitter: &WebhookEmitter,
-    workspace_id: Uuid,
-    run_id: Uuid,
-    triggered_by: Uuid,
-    reason: &str,
-    claim: Option<jiff::Timestamp>,
+    params: FailRun<'_>,
 ) {
+    let FailRun {
+        workspace_id,
+        run_id,
+        pipeline_slug,
+        triggered_by,
+        reason,
+        claim,
+    } = params;
+
     let metadata = RunMetadata {
         error: Some(reason.to_owned()),
         ..Default::default()
@@ -161,16 +184,26 @@ pub(crate) async fn fail_run(
         .broadcast_status(run_id, PipelineRunStatus::Failed)
         .await;
 
-    if let Err(err) = webhook_emitter
-        .emit_pipeline_run_failed(workspace_id, run_id, Some(triggered_by), None)
+    if let Err(err) = conn
+        .emit_event(
+            EventOrigin {
+                workspace_id,
+                account_id: triggered_by,
+                security: &SecurityContext::default(),
+            },
+            WorkspaceEvent::PipelineRunFailed {
+                run: PipelineRunRef {
+                    run_id,
+                    pipeline_slug,
+                },
+                input_file_name: None,
+                error: Some(reason.to_owned()),
+                notify: triggered_by,
+            },
+        )
         .await
     {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %err,
-            %run_id,
-            "Failed to emit pipeline:run.failed webhook event"
-        );
+        tracing::warn!(target: TRACING_TARGET, error = %err, %run_id, "Failed to record run-failed event");
     }
 }
 

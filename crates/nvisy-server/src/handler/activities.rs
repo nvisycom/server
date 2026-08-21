@@ -20,7 +20,7 @@ use serde::Serialize;
 
 use crate::extract::{AuthProvider, AuthState, Json, Permission, Query, WorkspaceContext};
 use crate::handler::request::{
-    ActivityExportQuery, CursorPagination, ExportFormat, MAX_EXPORT_ROWS,
+    ActivityExportQuery, ActivityListQuery, ExportFormat, MAX_EXPORT_ROWS,
 };
 use crate::handler::response::{ActivitiesPage, Activity, ErrorResponse};
 use crate::handler::utility::{DownloadResponseExt, attachment_headers};
@@ -112,9 +112,11 @@ async fn list_activities(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
-    Query(pagination): Query<CursorPagination>,
+    Query(query): Query<ActivityListQuery>,
 ) -> Result<(StatusCode, Json<ActivitiesPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace activities");
+
+    let filter = query.to_filter()?;
 
     let mut conn = pg_client.get_connection().await?;
 
@@ -123,7 +125,7 @@ async fn list_activities(
         .await?;
 
     let page = conn
-        .cursor_list_workspace_activity(workspace.id, pagination.into())
+        .cursor_list_workspace_activity(workspace.id, filter, query.pagination.into())
         .await?;
 
     let response = ActivitiesPage::from_cursor_page(page, |wc| {
@@ -141,7 +143,12 @@ async fn list_activities(
 
 fn list_activities_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List workspace activities")
-        .description("Returns the workspace's activity log, most recent first, cursor-paginated.")
+        .description(
+            "Returns the workspace's activity log, most recent first, cursor-paginated. \
+             Optional filters: `type` (repeatable, e.g. `file.created`), `actor` (an account id), \
+             and a `from`/`to` day range (each bound narrows only when given; the feed is \
+             otherwise all-time).",
+        )
         .response::<200, Json<ActivitiesPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -173,12 +180,7 @@ async fn export_activities(
     // Fetch one past the cap so a full result signals truncation.
     let fetch_limit = (MAX_EXPORT_ROWS + 1) as i64;
     let mut rows = conn
-        .list_workspace_activity_between(
-            workspace.id,
-            export.window.from_timestamp()?,
-            export.window.to_timestamp()?,
-            fetch_limit,
-        )
+        .list_workspace_activity_for_export(workspace.id, export.filter.clone(), fetch_limit)
         .await?;
 
     let truncated = rows.len() > MAX_EXPORT_ROWS;
@@ -236,10 +238,11 @@ fn export_activities_docs(op: TransformOperation) -> TransformOperation {
         .description(
             "Exports a workspace's activity log over a date window as a downloadable file. \
              The window is `from`/`to` (inclusive, YYYY-MM-DD); it defaults to the last 30 days \
-             and is capped at 366 days. `format` is `csv` (default) or `json`. Each activity is a \
-             flat row: timestamp, the type split into object/action, the actor, and the acted-on \
-             object's id and label, oldest first. At most 100,000 rows are returned (the oldest in \
-             the window); a truncated export sets the `X-Export-Truncated` response header.",
+             and is capped at 366 days. The same `type` (repeatable) and `actor` filters as the \
+             feed apply. `format` is `csv` (default) or `json`. Each activity is a flat row: \
+             timestamp, the type split into object/action, the actor, and the acted-on object's \
+             id and label, oldest first. At most 100,000 rows are returned (the oldest in the \
+             window); a truncated export sets the `X-Export-Truncated` response header.",
         )
         .download_response(
             "The exported activity log.",

@@ -80,6 +80,36 @@ impl DateWindow {
 
         Ok(ResolvedWindow { from, to })
     }
+
+    /// Resolves the window as an *optional* filter, without defaulting or capping:
+    /// a bound is applied only if given. Returns `(from, to)` as half-open UTC
+    /// timestamps — `from` inclusive at the day's start, `to` exclusive at the
+    /// start of the day after — so `column >= from AND column < to` covers whole
+    /// days. Either may be `None` (no bound). Rejects `from > to` (400).
+    ///
+    /// Use this where the range only narrows an already-bounded result (a
+    /// cursor-paginated feed); use [`resolve`](Self::resolve) where the range must
+    /// bound the whole result (an export).
+    pub fn resolve_optional_bounds(
+        &self,
+    ) -> Result<(Option<jiff::Timestamp>, Option<jiff::Timestamp>)> {
+        if let (Some(from), Some(to)) = (self.from, self.to)
+            && from > to
+        {
+            return Err(invalid("`from` must not be after `to`"));
+        }
+
+        let from = self.from.map(day_start_utc).transpose()?;
+        let to = self
+            .to
+            .map(|to| {
+                to.checked_add(1.days())
+                    .map_err(|_| invalid("Window end is out of range"))
+                    .and_then(day_start_utc)
+            })
+            .transpose()?;
+        Ok((from, to))
+    }
 }
 
 impl ResolvedWindow {

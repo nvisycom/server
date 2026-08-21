@@ -13,11 +13,12 @@ use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineRepository,
 };
 use nvisy_postgres::types::{FileKind, Handle, RetentionScope, WithAccountRef};
-use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, PgError, PgResult};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, PgResult};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
+    AuthProvider, AuthState, Json, Path, Permission, Query, SecurityContext, ValidateJson,
+    WorkspaceContext,
 };
 use crate::handler::request::{
     CreatePipeline, CursorPagination, PipelineFilter, PipelinePathParams, PipelineReferences,
@@ -26,7 +27,7 @@ use crate::handler::request::{
 use crate::handler::response::{AccountRef, ErrorResponse, Page, Pipeline, PipelineSummary};
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{ServiceState, WebhookEmitter};
+use crate::service::{EventEmitter, EventOrigin, PipelineRef, ServiceState, WorkspaceEvent};
 
 /// Tracing target for pipeline operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::pipelines";
@@ -44,9 +45,9 @@ const TRACING_TARGET: &str = "nvisy_server::handler::pipelines";
 )]
 async fn create_pipeline(
     State(pg_client): State<PgClient>,
-    State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<CreatePipeline>,
 ) -> Result<(StatusCode, Json<Pipeline>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating pipeline");
@@ -67,36 +68,29 @@ async fn create_pipeline(
         .transaction(async |conn| {
             let pipeline = conn.create_workspace_pipeline(new_pipeline).await?;
             replace_references(conn, &pipeline, &policy_ids).await?;
-            Ok::<WorkspacePipeline, PgError>(pipeline)
+            conn.emit_event(
+                EventOrigin {
+                    workspace_id: workspace.id,
+                    account_id: auth_state.account_id,
+                    security: &security,
+                },
+                WorkspaceEvent::PipelineCreated(PipelineRef {
+                    pipeline_id: pipeline.id,
+                    pipeline_slug: pipeline.slug.clone(),
+                }),
+            )
+            .await?;
+            Ok::<WorkspacePipeline, Error>(pipeline)
         })
         .await?;
 
     // The creator is the authenticated caller; resolve their handle directly.
     let creator = resolve_account_ref(&mut conn, auth_state.account_id).await?;
 
-    let pipeline_id = pipeline.id;
-
     // The references were just written from the request, so build the response
     // from its slugs directly instead of reading the join table back.
     let response = Pipeline::from_model(pipeline, workspace.slug, creator, references.policy_slugs)
         .map_err(serialize_error)?;
-
-    if let Err(err) = webhook_emitter
-        .emit_pipeline_created(
-            workspace.id,
-            pipeline_id,
-            Some(auth_state.account_id),
-            Some(serde_json::json!({ "displayName": response.display_name })),
-        )
-        .await
-    {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %err,
-            pipeline_id = %pipeline_id,
-            "Failed to emit pipeline:created webhook event"
-        );
-    }
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -231,10 +225,10 @@ fn get_pipeline_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_pipeline(
     State(pg_client): State<PgClient>,
-    State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelinePathParams>,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdatePipeline>,
 ) -> Result<(StatusCode, Json<Pipeline>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating pipeline");
@@ -299,7 +293,19 @@ async fn update_pipeline(
                         .await?;
                 }
             }
-            Ok::<WorkspacePipeline, PgError>(pipeline)
+            conn.emit_event(
+                EventOrigin {
+                    workspace_id: workspace.id,
+                    account_id: auth_state.account_id,
+                    security: &security,
+                },
+                WorkspaceEvent::PipelineUpdated(PipelineRef {
+                    pipeline_id,
+                    pipeline_slug: pipeline.slug.clone(),
+                }),
+            )
+            .await?;
+            Ok::<WorkspacePipeline, Error>(pipeline)
         })
         .await?;
 
@@ -312,23 +318,6 @@ async fn update_pipeline(
         // Partial update left the references untouched: read them back.
         None => build_response(&mut conn, pipeline, workspace.slug, creator).await?,
     };
-
-    if let Err(err) = webhook_emitter
-        .emit_pipeline_updated(
-            workspace.id,
-            pipeline_id,
-            Some(auth_state.account_id),
-            Some(serde_json::json!({ "displayName": response.display_name })),
-        )
-        .await
-    {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %err,
-            pipeline_id = %pipeline_id,
-            "Failed to emit pipeline:updated webhook event"
-        );
-    }
 
     tracing::info!(target: TRACING_TARGET, "Pipeline updated");
 
@@ -359,10 +348,10 @@ fn update_pipeline_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_pipeline(
     State(pg_client): State<PgClient>,
-    State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelinePathParams>,
+    security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting pipeline");
 
@@ -377,20 +366,27 @@ async fn delete_pipeline(
         .await?
         .item;
     let pipeline_id = existing.id;
+    let pipeline_slug = existing.slug.clone();
 
-    conn.delete_workspace_pipeline(pipeline_id).await?;
-
-    if let Err(err) = webhook_emitter
-        .emit_pipeline_deleted(workspace.id, pipeline_id, Some(auth_state.account_id), None)
-        .await
-    {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %err,
-            pipeline_id = %pipeline_id,
-            "Failed to emit pipeline:deleted webhook event"
-        );
-    }
+    // Delete the pipeline and record the event in one transaction so the two
+    // commit atomically.
+    conn.transaction(async |conn| {
+        conn.delete_workspace_pipeline(pipeline_id).await?;
+        conn.emit_event(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id: auth_state.account_id,
+                security: &security,
+            },
+            WorkspaceEvent::PipelineDeleted(PipelineRef {
+                pipeline_id,
+                pipeline_slug,
+            }),
+        )
+        .await?;
+        Ok::<(), Error>(())
+    })
+    .await?;
 
     tracing::info!(target: TRACING_TARGET, "Pipeline deleted");
 

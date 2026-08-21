@@ -18,13 +18,13 @@ use nvisy_postgres::query::{
     PipelineReferenceRepository, RunFiles, WorkspaceFileRepository, WorkspacePipelineRepository,
     WorkspacePipelineRunRepository,
 };
-use nvisy_postgres::types::{NotificationPayload, PipelineRunCompletedParams, PipelineRunStatus};
-use nvisy_postgres::{PgClient, PgConn};
+use nvisy_postgres::types::PipelineRunStatus;
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, IdempotencyKey, Json, Path, Permission, Query, ValidateJson,
-    WorkspaceContext,
+    AuthProvider, AuthState, IdempotencyKey, Json, Path, Permission, Query, SecurityContext,
+    ValidateJson, WorkspaceContext,
 };
 use crate::handler::request::{
     CreatePipelineRun, CursorPagination, PipelineDefinition, PipelinePathParams,
@@ -34,8 +34,9 @@ use crate::handler::response::{ErrorResponse, PipelineRun, PipelineRunsPage};
 use crate::handler::utility::{SseResponse, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
-    CryptoService, DetectionJob, DetectionQueue, EngineService, NotificationEmitter, RunBlobStore,
-    RunStatusEvent, ServiceState, WebhookEmitter, fail_run, resolve_policies,
+    CryptoService, DetectionJob, DetectionQueue, EngineService, EventEmitter, EventOrigin, FailRun,
+    PipelineRunRef, RunBlobStore, RunStatusEvent, ServiceState, WorkspaceEvent, fail_run,
+    resolve_policies,
 };
 
 /// Tracing target for pipeline run operations.
@@ -57,11 +58,11 @@ const TRACING_TARGET: &str = "nvisy_server::handler::runs";
 async fn create_pipeline_run(
     State(pg_client): State<PgClient>,
     State(detection): State<DetectionQueue>,
-    State(webhook_emitter): State<WebhookEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelinePathParams>,
     IdempotencyKey(idempotency_key): IdempotencyKey,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<CreatePipelineRun>,
 ) -> Result<(StatusCode, Json<PipelineRun>)> {
     tracing::debug!(target: TRACING_TARGET, "Starting pipeline run (detect)");
@@ -140,7 +141,27 @@ async fn create_pipeline_run(
         idempotency_key: idempotency_key.clone(),
         ..Default::default()
     };
-    let run = conn.create_workspace_pipeline_run(new_run).await?;
+
+    // Create the run and record its start event in one transaction, so the event
+    // is never lost, nor recorded for a run that rolled back.
+    let run = conn
+        .transaction(async |conn| {
+            let run = conn.create_workspace_pipeline_run(new_run).await?;
+            conn.emit_event(
+                EventOrigin {
+                    workspace_id: workspace.id,
+                    account_id: auth_state.account_id,
+                    security: &security,
+                },
+                WorkspaceEvent::PipelineRunStarted(PipelineRunRef {
+                    run_id: run.id,
+                    pipeline_slug: pipeline.slug.clone(),
+                }),
+            )
+            .await?;
+            Ok::<_, Error>(run)
+        })
+        .await?;
 
     let job = DetectionJob {
         workspace_id: workspace.id,
@@ -153,12 +174,14 @@ async fn create_pipeline_run(
         fail_run(
             &mut conn,
             &detection,
-            &webhook_emitter,
-            workspace.id,
-            run.id,
-            auth_state.account_id,
-            "Failed to enqueue detection",
-            None,
+            FailRun {
+                workspace_id: workspace.id,
+                run_id: run.id,
+                pipeline_slug: pipeline.slug.clone(),
+                triggered_by: auth_state.account_id,
+                reason: "Failed to enqueue detection",
+                claim: None,
+            },
         )
         .await;
         return Err(err);
@@ -167,23 +190,6 @@ async fn create_pipeline_run(
     detection
         .broadcast_status(run.id, PipelineRunStatus::Queued)
         .await;
-
-    if let Err(err) = webhook_emitter
-        .emit_pipeline_run_started(
-            workspace.id,
-            run.id,
-            Some(auth_state.account_id),
-            Some(serde_json::json!({ "pipelineId": pipeline.id, "fileId": file.id })),
-        )
-        .await
-    {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %err,
-            run_id = %run.id,
-            "Failed to emit pipeline:run.started webhook event"
-        );
-    }
 
     tracing::info!(target: TRACING_TARGET, run_id = %run.id, "Pipeline run enqueued for detection");
 
@@ -566,11 +572,10 @@ async fn redact_pipeline_run(
     State(blob): State<RunBlobStore>,
     State(crypto): State<CryptoService>,
     State(engine): State<EngineService>,
-    State(webhook_emitter): State<WebhookEmitter>,
-    State(notification_emitter): State<NotificationEmitter>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelineRunPathParams>,
+    security: SecurityContext,
 ) -> Result<(StatusCode, Json<PipelineRun>)> {
     tracing::debug!(target: TRACING_TARGET, "Redacting pipeline run");
 
@@ -626,34 +631,40 @@ async fn redact_pipeline_run(
         )
         .await?;
 
+    // Complete the run and record its completion event in one transaction, so the
+    // event is never lost, nor recorded for an update that rolled back.
     let run = conn
-        .update_workspace_pipeline_run(
-            run.id,
-            UpdateWorkspacePipelineRun {
-                status: Some(PipelineRunStatus::Completed),
-                output_file_id: Some(Some(output_file.id)),
-                completed_at: Some(Some(jiff::Timestamp::now().into())),
-                ..Default::default()
-            },
-        )
+        .transaction(async |conn| {
+            let run = conn
+                .update_workspace_pipeline_run(
+                    run.id,
+                    UpdateWorkspacePipelineRun {
+                        status: Some(PipelineRunStatus::Completed),
+                        output_file_id: Some(Some(output_file.id)),
+                        completed_at: Some(Some(jiff::Timestamp::now().into())),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+            conn.emit_event(
+                EventOrigin {
+                    workspace_id: workspace.id,
+                    account_id: auth_state.account_id,
+                    security: &security,
+                },
+                WorkspaceEvent::PipelineRunCompleted {
+                    run: PipelineRunRef {
+                        run_id: run.id,
+                        pipeline_slug: pipeline.slug.clone(),
+                    },
+                    input_file_name: Some(file.display_name.clone()),
+                    notify: run.account_id,
+                },
+            )
+            .await?;
+            Ok::<_, Error>(run)
+        })
         .await?;
-
-    if let Err(err) = webhook_emitter
-        .emit_pipeline_run_completed(
-            workspace.id,
-            run.id,
-            Some(auth_state.account_id),
-            Some(serde_json::json!({ "outputFileId": output_file.id })),
-        )
-        .await
-    {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %err,
-            run_id = %run.id,
-            "Failed to emit pipeline:run.completed webhook event"
-        );
-    }
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -664,22 +675,6 @@ async fn redact_pipeline_run(
 
     let trigger = resolve_account_ref(&mut conn, run.account_id).await?;
     let files = conn.run_file_names(workspace.id, &run).await?;
-
-    // Notify the run's trigger that redaction completed (best-effort).
-    if let Err(err) = notification_emitter
-        .notify_account(
-            workspace.id,
-            run.account_id,
-            NotificationPayload::PipelineRunCompleted(PipelineRunCompletedParams {
-                run_id: run.id,
-                pipeline_slug: pipeline.slug.to_string(),
-                input_file_name: files.input.clone(),
-            }),
-        )
-        .await
-    {
-        tracing::warn!(target: TRACING_TARGET, error = %err, run_id = %run.id, "Failed to create run-completed notification");
-    }
 
     Ok((
         StatusCode::OK,
