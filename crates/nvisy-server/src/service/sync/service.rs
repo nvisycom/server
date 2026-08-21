@@ -14,6 +14,7 @@ use futures::stream::{self, StreamExt};
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectBucket};
 use nvisy_object::client::ObjectStoreClient;
 use nvisy_object::providers::StorageConfig;
+use nvisy_postgres::AsyncConnection;
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceConnection, WorkspaceFile};
 use nvisy_postgres::query::{
     WorkspaceConnectionSyncRepository, WorkspaceFileRepository, WorkspaceRepository,
@@ -41,6 +42,17 @@ const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60
 enum Outcome {
     Finished(Result<u64>),
     Cancelled,
+}
+
+/// The inputs to [`ConnectionSyncService::finish_run`]: the run to finalize, the
+/// connection it synced (for the terminal event), and the transfer's result.
+struct FinishRun {
+    run_id: Uuid,
+    workspace_id: Uuid,
+    connection_id: Uuid,
+    connection_name: String,
+    account_id: Uuid,
+    result: Result<u64>,
 }
 
 /// Moves objects between an external connection and the internal file store.
@@ -501,90 +513,113 @@ impl ConnectionSyncService {
 
         match outcome {
             Outcome::Finished(result) => {
-                // Build the terminal event before `finish_run` consumes `result`,
-                // notifying the connection owner in the same emit.
-                let event = match &result {
-                    Ok(records_synced) => WorkspaceEvent::ConnectionSyncCompleted {
-                        connection_id,
-                        connection_name: connection_name.clone(),
-                        records_synced: Some(*records_synced as i64),
-                        notify: Some(account_id),
-                    },
-                    Err(err) => WorkspaceEvent::ConnectionSyncFailed {
-                        connection_id,
-                        connection_name: connection_name.clone(),
-                        error: Some(err.message().unwrap_or("Sync failed").to_owned()),
-                        notify: Some(account_id),
-                    },
-                };
-
-                self.finish_run(run_id, result).await;
-
-                match self.infra.postgres.get_connection().await {
-                    Ok(mut conn) => {
-                        if let Err(err) = conn
-                            .emit_event(
-                                EventOrigin {
-                                    workspace_id,
-                                    account_id,
-                                    security: &SecurityContext::default(),
-                                },
-                                event,
-                            )
-                            .await
-                        {
-                            tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to record sync event");
-                        }
-                    }
-                    Err(err) => {
-                        tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to acquire connection for sync event");
-                    }
-                }
+                self.finish_run(FinishRun {
+                    run_id,
+                    workspace_id,
+                    connection_id,
+                    connection_name,
+                    account_id,
+                    result,
+                })
+                .await;
             }
             Outcome::Cancelled => self.cancel_run(run_id).await,
         }
     }
 
-    /// Records the outcome of a background sync run: completes it (one object
-    /// transferred) on success, or marks it failed with a safe error message.
+    /// Finalizes a background sync run and records its terminal event atomically.
     ///
-    /// Errors updating the run are logged rather than propagated, since this
-    /// runs after the response has already been sent.
-    pub async fn finish_run(&self, run_id: Uuid, result: Result<u64>) {
+    /// The status-guarded finalize and the outbox event commit in one transaction,
+    /// and the event is recorded only when the finalize actually transitioned the
+    /// run (its guarded update matched a row). So a run that a cancellation or reap
+    /// already moved to a terminal state produces no spurious completed/failed
+    /// event, and a finalized run never lacks its event. Errors are logged rather
+    /// than propagated, since this runs after the response was already sent.
+    async fn finish_run(&self, finish: FinishRun) {
+        let FinishRun {
+            run_id,
+            workspace_id,
+            connection_id,
+            connection_name,
+            account_id,
+            result,
+        } = finish;
+
+        // Build the terminal event before `result` is consumed.
+        let event = match &result {
+            Ok(records_synced) => WorkspaceEvent::ConnectionSyncCompleted {
+                connection_id,
+                connection_name,
+                records_synced: Some(*records_synced as i64),
+                notify: Some(account_id),
+            },
+            Err(err) => {
+                // Log the full error (may include backend URLs/details) but record
+                // only the safe summary; the stored message is exposed to clients.
+                tracing::warn!(target: TRACING_TARGET, %run_id, error = %err, "Sync failed");
+                WorkspaceEvent::ConnectionSyncFailed {
+                    connection_id,
+                    connection_name,
+                    error: Some(err.message().unwrap_or("Sync failed").to_owned()),
+                    notify: Some(account_id),
+                }
+            }
+        };
+
         let mut conn = match self.infra.postgres.get_connection().await {
             Ok(conn) => conn,
             Err(err) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    %run_id, error = %err,
-                    "Failed to record sync outcome: no connection",
-                );
+                tracing::error!(target: TRACING_TARGET, %run_id, error = %err, "Failed to record sync outcome: no connection");
                 return;
             }
         };
 
-        let outcome = match result {
-            Ok(records_synced) => {
-                conn.complete_workspace_connection_sync(run_id, records_synced as i64)
-                    .await
-            }
-            Err(err) => {
-                // Log the full error (may include backend URLs/details) but
-                // persist only the safe summary: the stored message is exposed
-                // to clients via the sync's `error_message`.
-                tracing::warn!(target: TRACING_TARGET, %run_id, error = %err, "Sync failed");
-                let safe_message = err.message().unwrap_or("Sync failed").to_owned();
-                conn.fail_workspace_connection_sync(run_id, &safe_message)
-                    .await
-            }
+        let origin = EventOrigin {
+            workspace_id,
+            account_id,
+            security: &SecurityContext::default(),
         };
+        let finalized = conn
+            .transaction(async |conn| {
+                // The guarded update returns `Some` only if it transitioned an
+                // active run; a run already terminal (cancelled/reaped) returns
+                // `None`, and we record no event for it.
+                let transitioned = match &result {
+                    Ok(records_synced) => conn
+                        .complete_workspace_connection_sync(run_id, *records_synced as i64)
+                        .await?
+                        .is_some(),
+                    Err(_) => {
+                        let safe_message = match &event {
+                            WorkspaceEvent::ConnectionSyncFailed { error, .. } => {
+                                error.clone().unwrap_or_else(|| "Sync failed".to_owned())
+                            }
+                            _ => "Sync failed".to_owned(),
+                        };
+                        conn.fail_workspace_connection_sync(run_id, &safe_message)
+                            .await?
+                            .is_some()
+                    }
+                };
+                if transitioned {
+                    conn.emit_event(origin, event).await?;
+                }
+                Ok::<_, crate::handler::Error>(transitioned)
+            })
+            .await;
 
-        if let Err(err) = outcome {
-            tracing::error!(
-                target: TRACING_TARGET,
-                %run_id, error = %err,
-                "Failed to finalize sync run",
-            );
+        match finalized {
+            Ok(false) => {
+                tracing::debug!(target: TRACING_TARGET, %run_id, "Sync run already terminal; no event recorded");
+            }
+            Ok(true) => {}
+            Err(err) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    %run_id, error = %err,
+                    "Failed to finalize sync run",
+                );
+            }
         }
     }
 

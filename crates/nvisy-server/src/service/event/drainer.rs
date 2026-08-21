@@ -17,7 +17,6 @@
 
 use std::time::Duration;
 
-use jiff::SignedDuration;
 use nvisy_postgres::model::{EventOutbox, NewWorkspaceActivity};
 use nvisy_postgres::query::{EventOutboxRepository, WorkspaceActivityRepository};
 use nvisy_postgres::types::{
@@ -50,12 +49,19 @@ const TICK_INTERVAL: Duration = Duration::from_secs(5);
 /// Maximum events drained per tick, bounding the work (and lock hold) per pass.
 const DRAIN_BATCH: i64 = 100;
 
-/// Base unit of the retry backoff: a failed row's next attempt is deferred by
-/// `RETRY_BACKOFF_BASE * attempts` (linear), capped at [`RETRY_BACKOFF_MAX`].
-const RETRY_BACKOFF_BASE: SignedDuration = SignedDuration::from_secs(30);
+/// Base unit of the retry backoff (seconds): a failed row's next attempt is
+/// deferred by `RETRY_BACKOFF_BASE_SECS * attempts` (linear), capped at
+/// [`RETRY_BACKOFF_MAX_SECS`].
+const RETRY_BACKOFF_BASE_SECS: i64 = 30;
 
-/// Ceiling on the retry backoff, so a long-failing row still retries periodically.
-const RETRY_BACKOFF_MAX: SignedDuration = SignedDuration::from_hours(1);
+/// Ceiling on the retry backoff (seconds), so a long-failing row still retries
+/// periodically rather than backing off unboundedly.
+const RETRY_BACKOFF_MAX_SECS: i64 = 60 * 60;
+
+/// How many failed attempts a row gets before the drainer gives up on it and
+/// dead-letters it (stamps `failed_at`), so a poison event — one that can never
+/// decode or project — stops consuming drain cycles instead of retrying forever.
+const MAX_ATTEMPTS: i32 = 10;
 
 /// Drains the event outbox, projecting each pending event onto its sinks.
 pub struct EventOutboxDrainer {
@@ -170,9 +176,16 @@ impl EventOutboxDrainer {
                             conn.mark_outbox_processed(row.id).await?;
                             committed.push((row, event));
                         }
+                        // `attempts` counts prior failures; this attempt makes it
+                        // `attempts + 1`. Once that reaches the cap, give up on the
+                        // row (dead-letter) instead of deferring it forever.
+                        Err(()) if row.attempts + 1 >= MAX_ATTEMPTS => {
+                            tracing::error!(target: TRACING_TARGET, id = %row.id, attempts = row.attempts + 1, "Dead-lettering outbox event after too many failed attempts");
+                            conn.mark_outbox_failed(row.id).await?;
+                        }
                         Err(()) => {
-                            let backoff = retry_backoff(row.attempts);
-                            conn.defer_outbox_attempt(row.id, backoff).await?;
+                            conn.defer_outbox_attempt(row.id, retry_backoff(row.attempts))
+                                .await?;
                         }
                     }
                 }
@@ -253,15 +266,15 @@ impl EventOutboxDrainer {
     }
 }
 
-/// The delay before a failed row's next attempt: linear in `attempts` (the count
-/// before this failure), capped at [`RETRY_BACKOFF_MAX`], so a transient failure
-/// retries soon while a persistently failing row backs off the queue head.
-fn retry_backoff(attempts: i32) -> SignedDuration {
-    let steps = attempts.max(0).saturating_add(1);
-    RETRY_BACKOFF_BASE
-        .checked_mul(steps)
-        .unwrap_or(RETRY_BACKOFF_MAX)
-        .min(RETRY_BACKOFF_MAX)
+/// The delay in seconds before a failed row's next attempt: linear in `attempts`
+/// (the count before this failure), capped at [`RETRY_BACKOFF_MAX_SECS`], so a
+/// transient failure retries soon while a persistently failing row backs off the
+/// queue head.
+fn retry_backoff(attempts: i32) -> i64 {
+    let steps = i64::from(attempts.max(0)) + 1;
+    RETRY_BACKOFF_BASE_SECS
+        .saturating_mul(steps)
+        .min(RETRY_BACKOFF_MAX_SECS)
 }
 
 /// The activity-log payload for an event. Total: every event is recorded.

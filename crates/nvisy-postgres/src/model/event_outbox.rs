@@ -36,6 +36,9 @@ pub struct EventOutbox {
     /// Earliest time the row may next be claimed; advanced by a backoff after
     /// each failed attempt.
     pub next_attempt_at: Timestamp,
+    /// When the drainer gave up on the row after too many failed attempts; `None`
+    /// unless dead-lettered.
+    pub failed_at: Option<Timestamp>,
     /// When the event was raised.
     pub created_at: Timestamp,
 }
