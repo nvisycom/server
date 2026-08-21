@@ -22,7 +22,7 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
 };
 use crate::handler::request::{
-    ChatSessionPathParams, CreateChatSession, OffsetPagination, SendChatMessage,
+    ChatSessionPathParams, CreateChatSession, CursorPagination, SendChatMessage,
 };
 use crate::handler::response::{ChatMessage, ChatSession, ChatSessionsPage, ErrorResponse};
 use crate::handler::utility::SseResponse;
@@ -82,27 +82,24 @@ async fn list_sessions(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
-    Query(pagination): Query<OffsetPagination>,
+    Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<ChatSessionsPage>)> {
     let mut conn = pg_client.get_connection().await?;
     auth_state
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
         .await?;
 
-    let sessions = conn
+    let page = conn
         .list_chat_sessions(workspace.id, pagination.into())
         .await?;
-    let items = sessions.into_iter().map(ChatSession::from_model).collect();
+    let response = ChatSessionsPage::from_cursor_page(page, ChatSession::from_model);
 
-    Ok((
-        StatusCode::OK,
-        Json(ChatSessionsPage::new(items, None, None)),
-    ))
+    Ok((StatusCode::OK, Json(response)))
 }
 
 fn list_sessions_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List chat sessions")
-        .description("Returns the workspace's chat sessions, most recently active first.")
+        .description("Returns the workspace's chat sessions, newest first, cursor-paginated.")
         .response::<200, Json<ChatSessionsPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()

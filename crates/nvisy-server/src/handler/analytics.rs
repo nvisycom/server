@@ -9,7 +9,7 @@ use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceAnalyticsRepository;
 
 use crate::extract::{AuthProvider, AuthState, Json, Permission, Query, WorkspaceContext};
-use crate::handler::request::AnalyticsWindow;
+use crate::handler::request::DateWindow;
 use crate::handler::response::{ErrorResponse, RunTimeSeries, WorkspaceAnalytics};
 use crate::handler::{Result, ServiceState};
 
@@ -67,7 +67,7 @@ async fn get_run_timeseries(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
-    Query(window): Query<AnalyticsWindow>,
+    Query(window): Query<DateWindow>,
 ) -> Result<(StatusCode, Json<RunTimeSeries>)> {
     tracing::debug!(target: TRACING_TARGET, "Computing run time series");
 

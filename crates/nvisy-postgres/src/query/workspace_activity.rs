@@ -56,6 +56,18 @@ pub trait WorkspaceActivityRepository {
         pagination: CursorPagination,
     ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceActivity>>>> + Send;
 
+    /// Lists a workspace's activities in the half-open window `[from, to)`, each
+    /// paired with the performing account's handle and avatar, oldest first (the
+    /// natural order for an export). At most `limit` rows are returned; the caller
+    /// sets `limit` one above its cap so a full result signals truncation.
+    fn list_workspace_activity_between(
+        &mut self,
+        workspace_id: Uuid,
+        from: Timestamp,
+        to: Timestamp,
+        limit: i64,
+    ) -> impl Future<Output = PgResult<Vec<WithAccountRef<WorkspaceActivity>>>> + Send;
+
     /// Gets recent activities across all workspaces for a specific user.
     fn get_account_recent_activity(
         &mut self,
@@ -227,6 +239,44 @@ impl WorkspaceActivityRepository for PgConnection {
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
             (wc.item.created_at.into(), wc.item.id)
         }))
+    }
+
+    async fn list_workspace_activity_between(
+        &mut self,
+        workspace_id: Uuid,
+        from: Timestamp,
+        to: Timestamp,
+        limit: i64,
+    ) -> PgResult<Vec<WithAccountRef<WorkspaceActivity>>> {
+        use schema::workspace_activities::dsl;
+        use schema::{accounts, workspace_activities};
+
+        let from = jiff_diesel::Timestamp::from(from);
+        let to = jiff_diesel::Timestamp::from(to);
+
+        let rows: Vec<(WorkspaceActivity, AccountRefRow)> = workspace_activities::table
+            .inner_join(accounts::table)
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::created_at.ge(from))
+            .filter(dsl::created_at.lt(to))
+            .select((
+                WorkspaceActivity::as_select(),
+                (
+                    accounts::username,
+                    accounts::display_name,
+                    accounts::avatar_url,
+                ),
+            ))
+            .order((dsl::created_at.asc(), dsl::id.asc()))
+            .limit(limit)
+            .load(self)
+            .await
+            .map_err(PgError::from)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(item, account)| WithAccountRef { item, account })
+            .collect())
     }
 
     async fn get_account_recent_activity(
