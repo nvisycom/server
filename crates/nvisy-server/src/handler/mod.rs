@@ -4,6 +4,7 @@
 //! [`Handler`]: axum::handler::Handler
 
 mod accounts;
+mod analytics;
 mod authentication;
 mod avatars;
 mod catalog;
@@ -79,6 +80,7 @@ fn private_routes(
     router = router
         .merge(accounts::routes(service_state.clone()))
         .merge(workspaces::routes())
+        .merge(analytics::routes())
         .merge(members::routes())
         .merge(connections::routes())
         .merge(chat::routes())

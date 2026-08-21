@@ -50,6 +50,13 @@ pub enum PipelineRunStatus {
 }
 
 impl PipelineRunStatus {
+    /// Statuses that carry a success/failure outcome: a run reached one of these
+    /// iff it either completed redaction or failed. `Cancelled` is excluded — a
+    /// cancelled run has no outcome — so this is the correct basis for an error
+    /// rate (`failed / (completed + failed)`).
+    pub const OUTCOMES: [PipelineRunStatus; 2] =
+        [PipelineRunStatus::Completed, PipelineRunStatus::Failed];
+
     /// Returns whether the run is enqueued and not yet picked up by a worker.
     #[inline]
     pub fn is_queued(self) -> bool {
@@ -110,6 +117,16 @@ impl PipelineRunStatus {
         matches!(
             self,
             PipelineRunStatus::Completed | PipelineRunStatus::Failed | PipelineRunStatus::Cancelled
+        )
+    }
+
+    /// Returns whether the run settled with a success/failure outcome (completed
+    /// or failed, not cancelled). See [`OUTCOMES`](Self::OUTCOMES).
+    #[inline]
+    pub fn is_outcome(self) -> bool {
+        matches!(
+            self,
+            PipelineRunStatus::Completed | PipelineRunStatus::Failed
         )
     }
 

@@ -20,6 +20,7 @@ mod workspace_invite;
 mod workspace_member;
 mod workspace_pipeline;
 mod workspace_pipeline_run;
+mod workspace_pipeline_run_usage;
 mod workspace_policy;
 mod workspace_webhook;
 
@@ -54,5 +55,6 @@ pub use workspace_pipeline::{NewWorkspacePipeline, UpdateWorkspacePipeline, Work
 pub use workspace_pipeline_run::{
     NewWorkspacePipelineRun, UpdateWorkspacePipelineRun, WorkspacePipelineRun,
 };
+pub use workspace_pipeline_run_usage::{NewWorkspacePipelineRunUsage, WorkspacePipelineRunUsage};
 pub use workspace_policy::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 pub use workspace_webhook::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};

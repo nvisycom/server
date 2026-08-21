@@ -235,21 +235,28 @@ impl RunBlobStore {
         Ok(conn.create_workspace_file(new_file).await?)
     }
 
-    /// Encrypts an [`Audit`], stores it in the audit bucket, and records it as an
-    /// `audit`-kind [`WorkspaceFile`], returning that file's id.
+    /// Encrypts the analysis, writes it to the audit bucket, and builds the
+    /// `audit`-kind [`WorkspaceFile`] row that will point at it — but does not
+    /// insert the row.
     ///
     /// The analysis is the map of detected PII, so it is encrypted with the
     /// workspace key before it leaves the process. Modeling it as a file lets
     /// data-retention expire it with the same `expires_at` sweep as documents;
     /// its bytes live in the audit bucket, not the files bucket.
-    pub async fn store_analyzed_document(
+    ///
+    /// The object write is not transactional, so it is kept out of the caller's
+    /// database transaction: the bytes are written first, then the returned row is
+    /// inserted (with the run's other writes) atomically. A rollback therefore
+    /// leaves at worst an orphan object in the bucket, never a file row that points
+    /// at bytes that were never written; the caller reclaims that orphan via
+    /// [`discard_staged_audit`](Self::discard_staged_audit).
+    pub async fn stage_analyzed_document(
         &self,
-        conn: &mut PgConn,
         pipeline: &WorkspacePipeline,
         workspace_settings: &RetentionSettings,
         account_id: Uuid,
         analyzed: &Audit,
-    ) -> Result<Uuid> {
+    ) -> Result<NewWorkspaceFile> {
         let workspace_id = pipeline.workspace_id;
         let plaintext = serde_json::to_vec(analyzed).map_err(analysis_serde_error)?;
         let hash = Sha256::digest(&plaintext).to_vec();
@@ -275,7 +282,7 @@ impl RunBlobStore {
             .resolve(RetentionScope::AuditLogs, over.as_ref())
             .expires_at(jiff::Timestamp::now());
 
-        let new_file = NewWorkspaceFile {
+        Ok(NewWorkspaceFile {
             workspace_id,
             account_id,
             display_name: Some("analysis.audit".to_owned()),
@@ -288,9 +295,20 @@ impl RunBlobStore {
             storage_bucket: store.bucket().to_owned(),
             expires_at: expires_at.map(Into::into),
             ..Default::default()
-        };
-        let file = conn.create_workspace_file(new_file).await?;
-        Ok(file.id)
+        })
+    }
+
+    /// Deletes a staged audit object whose file row was never committed.
+    ///
+    /// [`stage_analyzed_document`](Self::stage_analyzed_document) writes the object
+    /// before its `workspace_files` row; if the committing transaction rolls back,
+    /// the object has no row and the row-driven reaper can never find it. The
+    /// caller invokes this on that path so the orphan is removed immediately
+    /// instead of accumulating. Best effort: a failure here only leaves the object
+    /// for a later manual sweep, so callers log rather than propagate.
+    pub async fn discard_staged_audit(&self, staged: &NewWorkspaceFile) -> Result<()> {
+        self.delete_object(&staged.storage_bucket, &staged.storage_path)
+            .await
     }
 
     /// Fetches and decrypts a run's stored [`Audit`].

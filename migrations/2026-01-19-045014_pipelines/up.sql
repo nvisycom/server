@@ -157,7 +157,10 @@ CREATE TABLE workspace_pipeline_runs (
     idempotency_key TEXT                    DEFAULT NULL,
     CONSTRAINT workspace_pipeline_runs_idempotency_key_length CHECK (idempotency_key IS NULL OR length(idempotency_key) BETWEEN 1 AND 255),
 
-    -- Non-encrypted metadata for filtering and display.
+    -- Non-encrypted metadata for filtering and display. The engine's full
+    -- per-recognizer usage report (durations, per-model token counts) is kept
+    -- here under `usage` for drill-down; per-model token totals for usage
+    -- aggregation live in the workspace_pipeline_run_usage table below.
     metadata        JSONB                   NOT NULL DEFAULT '{}',
     CONSTRAINT workspace_pipeline_runs_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
 
@@ -211,7 +214,64 @@ COMMENT ON COLUMN workspace_pipeline_runs.output_file_id IS 'Redacted document p
 COMMENT ON COLUMN workspace_pipeline_runs.trigger_type IS 'How the run was initiated';
 COMMENT ON COLUMN workspace_pipeline_runs.status IS 'Current run status';
 COMMENT ON COLUMN workspace_pipeline_runs.idempotency_key IS 'Detect idempotency key (dedupes retries)';
-COMMENT ON COLUMN workspace_pipeline_runs.metadata IS 'Non-encrypted metadata for filtering/display';
+COMMENT ON COLUMN workspace_pipeline_runs.metadata IS 'Non-encrypted metadata for filtering/display; holds the full per-recognizer usage report under `usage`';
 COMMENT ON COLUMN workspace_pipeline_runs.claimed_at IS 'Detection lease: when a worker last claimed this run';
 COMMENT ON COLUMN workspace_pipeline_runs.started_at IS 'When the run started';
 COMMENT ON COLUMN workspace_pipeline_runs.completed_at IS 'When the run completed; NULL while in flight';
+
+-- Per-model inference usage for a run: one row per distinct model a run's
+-- recognizers used. Token counts are aggregated across the recognizers that
+-- shared a model, letting usage analytics report tokens broken down by model
+-- (a run's summed tokens cannot, since a run may mix models). The full
+-- per-recognizer report is kept on the run (metadata.usage) for drill-down;
+-- this table is the aggregation surface.
+CREATE TABLE workspace_pipeline_run_usage (
+    -- Primary identifier
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- The run this usage belongs to; usage is deleted with its run.
+    run_id          UUID                    NOT NULL REFERENCES workspace_pipeline_runs (id) ON DELETE CASCADE,
+
+    -- The model and its optional version. Identity is (run, model, version):
+    -- a run may use the same model at more than one version, and each is its own
+    -- row (uniqueness enforced by an index below that normalizes a NULL version).
+    model           TEXT                    NOT NULL,
+    version         TEXT                    DEFAULT NULL,
+    CONSTRAINT workspace_pipeline_run_usage_model_length CHECK (length(model) BETWEEN 1 AND 255),
+    CONSTRAINT workspace_pipeline_run_usage_version_length CHECK (version IS NULL OR length(version) BETWEEN 1 AND 255),
+
+    -- Token counts as the provider reported them. Each is independently nullable:
+    -- `total` is NOT necessarily input + output (a provider may report only a
+    -- total, or a total that also counts cached/reasoning tokens), so all three
+    -- are carried faithfully and never derived from one another.
+    input_tokens    BIGINT                  DEFAULT NULL,
+    output_tokens   BIGINT                  DEFAULT NULL,
+    total_tokens    BIGINT                  DEFAULT NULL,
+    CONSTRAINT workspace_pipeline_run_usage_input_non_negative CHECK (input_tokens IS NULL OR input_tokens >= 0),
+    CONSTRAINT workspace_pipeline_run_usage_output_non_negative CHECK (output_tokens IS NULL OR output_tokens >= 0),
+    CONSTRAINT workspace_pipeline_run_usage_total_non_negative CHECK (total_tokens IS NULL OR total_tokens >= 0),
+
+    -- Wall-clock time this model's recognizers spent, in milliseconds.
+    duration_ms     BIGINT                  NOT NULL DEFAULT 0,
+    CONSTRAINT workspace_pipeline_run_usage_duration_non_negative CHECK (duration_ms >= 0)
+);
+
+-- One row per (run, model, version); a NULL version is normalized so two
+-- unversioned rows for the same model collide instead of both being inserted.
+-- Leads with run_id, so it also serves per-run drill-down lookups.
+CREATE UNIQUE INDEX workspace_pipeline_run_usage_run_model_version_key
+    ON workspace_pipeline_run_usage (run_id, model, COALESCE(version, ''));
+
+-- Usage rollups by model across runs.
+CREATE INDEX workspace_pipeline_run_usage_model_idx
+    ON workspace_pipeline_run_usage (model);
+
+COMMENT ON TABLE workspace_pipeline_run_usage IS 'Per-model inference token usage for a pipeline run.';
+COMMENT ON COLUMN workspace_pipeline_run_usage.id IS 'Unique usage row identifier';
+COMMENT ON COLUMN workspace_pipeline_run_usage.run_id IS 'Run this usage belongs to';
+COMMENT ON COLUMN workspace_pipeline_run_usage.model IS 'Model identifier the recognizers used';
+COMMENT ON COLUMN workspace_pipeline_run_usage.version IS 'Model version, if the provider reported one';
+COMMENT ON COLUMN workspace_pipeline_run_usage.input_tokens IS 'Input/prompt tokens for this model; NULL if not reported';
+COMMENT ON COLUMN workspace_pipeline_run_usage.output_tokens IS 'Output/completion tokens for this model; NULL if not reported';
+COMMENT ON COLUMN workspace_pipeline_run_usage.total_tokens IS 'Total tokens as reported (not necessarily input + output); NULL if not reported';
+COMMENT ON COLUMN workspace_pipeline_run_usage.duration_ms IS 'Wall-clock time this model spent, in milliseconds';

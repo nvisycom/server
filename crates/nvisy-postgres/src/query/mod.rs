@@ -16,6 +16,7 @@
 mod account;
 mod account_api_token;
 mod account_notification;
+mod analytics;
 mod chat_message;
 mod chat_session;
 mod pipeline_reference;
@@ -36,6 +37,10 @@ mod workspace_webhook;
 pub use account::AccountRepository;
 pub use account_api_token::AccountApiTokenRepository;
 pub use account_notification::AccountNotificationRepository;
+pub use analytics::{
+    AnalyticsSnapshot, RunDayPoint, RunDurations, RunStatusCount, StorageByKind, UsageByModel,
+    WorkspaceAnalyticsRepository,
+};
 pub use chat_message::{AppendSessionUpdate, ChatMessageRepository};
 pub use chat_session::ChatSessionRepository;
 pub use pipeline_reference::PipelineReferenceRepository;
