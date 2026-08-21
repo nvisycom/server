@@ -8,9 +8,7 @@ use std::collections::BTreeMap;
 
 use jiff::ToSpan;
 use jiff::civil::Date;
-use nvisy_postgres::query::{
-    RunDayPoint, RunDurations, RunStatusCount, StorageByKind, UsageByModel,
-};
+use nvisy_postgres::query::{AnalyticsSnapshot, RunDayPoint};
 use nvisy_postgres::types::{FileKind, PipelineRunStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -116,14 +114,15 @@ pub struct RunStatusEntry {
 }
 
 impl WorkspaceAnalytics {
-    /// Assembles the response from the raw aggregate rows, zero-filling every
-    /// enum value and deriving the scalar totals and error rate.
-    pub fn from_parts(
-        storage: Vec<StorageByKind>,
-        runs: Vec<RunStatusCount>,
-        durations: RunDurations,
-        usage: Vec<UsageByModel>,
-    ) -> Self {
+    /// Assembles the response from a workspace analytics snapshot, zero-filling
+    /// every enum value and deriving the scalar totals and error rate.
+    pub fn from_snapshot(snapshot: AnalyticsSnapshot) -> Self {
+        let AnalyticsSnapshot {
+            storage,
+            runs,
+            durations,
+            usage,
+        } = snapshot;
         let by_kind: Vec<StorageKindEntry> = FileKind::iter()
             .map(|kind| {
                 let row = storage.iter().find(|r| r.file_kind == kind);
@@ -284,6 +283,8 @@ fn count_of(by_status: &[RunStatusEntry], status: PipelineRunStatus) -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use nvisy_postgres::query::{RunDurations, RunStatusCount, StorageByKind, UsageByModel};
+
     use super::*;
 
     #[test]
@@ -329,7 +330,12 @@ mod tests {
                 total_tokens: Some(250),
             },
         ];
-        let a = WorkspaceAnalytics::from_parts(storage, runs, durations, usage);
+        let a = WorkspaceAnalytics::from_snapshot(AnalyticsSnapshot {
+            storage,
+            runs,
+            durations,
+            usage,
+        });
 
         // Every FileKind / PipelineRunStatus is present (zero-filled), so the
         // breakdown lengths equal the enum sizes.
@@ -414,15 +420,15 @@ mod tests {
             status: PipelineRunStatus::Queued,
             count: 5,
         }];
-        let a = WorkspaceAnalytics::from_parts(
-            vec![],
+        let a = WorkspaceAnalytics::from_snapshot(AnalyticsSnapshot {
+            storage: vec![],
             runs,
-            RunDurations {
+            durations: RunDurations {
                 avg_seconds: None,
                 p95_seconds: None,
             },
-            Vec::new(),
-        );
+            usage: Vec::new(),
+        });
 
         assert_eq!(a.runs.error_rate, None);
         assert_eq!(a.runs.avg_duration_s, None);

@@ -38,7 +38,7 @@ pub use account::AccountRepository;
 pub use account_api_token::AccountApiTokenRepository;
 pub use account_notification::AccountNotificationRepository;
 pub use analytics::{
-    RunDayPoint, RunDurations, RunStatusCount, StorageByKind, UsageByModel,
+    AnalyticsSnapshot, RunDayPoint, RunDurations, RunStatusCount, StorageByKind, UsageByModel,
     WorkspaceAnalyticsRepository,
 };
 pub use chat_message::{AppendSessionUpdate, ChatMessageRepository};

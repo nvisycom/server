@@ -37,12 +37,9 @@ async fn get_analytics(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
         .await?;
 
-    let storage = conn.storage_by_kind(workspace.id).await?;
-    let runs = conn.runs_by_status(workspace.id).await?;
-    let durations = conn.run_durations(workspace.id).await?;
-    let usage = conn.usage_by_model(workspace.id).await?;
+    let snapshot = conn.snapshot(workspace.id).await?;
 
-    let analytics = WorkspaceAnalytics::from_parts(storage, runs, durations, usage);
+    let analytics = WorkspaceAnalytics::from_snapshot(snapshot);
 
     Ok((StatusCode::OK, Json(analytics)))
 }

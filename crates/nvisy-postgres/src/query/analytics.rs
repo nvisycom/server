@@ -1,10 +1,13 @@
 //! Workspace analytics: aggregate queries over a workspace's files and pipeline
 //! runs, for the analytics endpoint.
 //!
-//! Each method is a single grouped aggregate. The rows are returned as-is (one
-//! per group, and never zero-filled here) — the handler maps them onto the full
-//! set of enum values, filling absent groups with zero, so the response is stable
-//! regardless of what data exists.
+//! Two entry points, each reading a consistent snapshot in one read-only
+//! transaction: `snapshot` (storage, run health, token usage) and `runs_by_day`
+//! (the daily time series). Both compose several grouped aggregates from private
+//! `load_*` helpers. Rows come back sparse (one per group that has data, never
+//! zero-filled here) — the handler maps them onto the full set of enum values,
+//! filling absent groups with zero, so the response is stable regardless of what
+//! data exists.
 
 use std::future::Future;
 
@@ -74,6 +77,16 @@ pub struct RunDayPoint {
     pub total_tokens: Option<i64>,
 }
 
+/// Per-model token totals as loaded; each `SUM(bigint)` is `numeric`, so it
+/// arrives as `BigDecimal` and is narrowed to `i64` when building [`UsageByModel`].
+#[derive(Debug, Clone, Queryable)]
+struct UsageByModelRow {
+    model: String,
+    input_tokens: Option<BigDecimal>,
+    output_tokens: Option<BigDecimal>,
+    total_tokens: Option<BigDecimal>,
+}
+
 /// Inference token totals for one model across a workspace's runs. Each field is
 /// independently nullable because a provider may report only some of them (a
 /// `total` that is not `input + output`, or no breakdown at all).
@@ -87,6 +100,16 @@ pub struct UsageByModel {
     pub output_tokens: Option<i64>,
     /// Summed reported totals, or `None` if none reported.
     pub total_tokens: Option<i64>,
+}
+
+/// Live-file count and byte total for one `file_kind`, as loaded. `SUM(bigint)`
+/// is `numeric`, so the byte total arrives as `BigDecimal` and is narrowed to
+/// `i64` when building [`StorageByKind`].
+#[derive(Debug, Clone, Queryable)]
+struct StorageKindRow {
+    file_kind: FileKind,
+    file_count: i64,
+    total_bytes: Option<BigDecimal>,
 }
 
 /// Live-file count and byte total for one `file_kind` in a workspace.
@@ -119,36 +142,32 @@ pub struct RunDurations {
     pub p95_seconds: Option<f64>,
 }
 
+/// A workspace's point-in-time analytics: storage, run health, and token usage
+/// read together so the parts agree. Produced by
+/// [`snapshot`](WorkspaceAnalyticsRepository::snapshot).
+#[derive(Debug, Clone)]
+pub struct AnalyticsSnapshot {
+    /// Live-file counts and byte totals, one per `file_kind` present.
+    pub storage: Vec<StorageByKind>,
+    /// Run counts, one per `status` present.
+    pub runs: Vec<RunStatusCount>,
+    /// Completed-run duration summary.
+    pub durations: RunDurations,
+    /// Inference token totals, one per model used.
+    pub usage: Vec<UsageByModel>,
+}
+
 /// Read-only aggregate queries backing the workspace analytics endpoint.
 pub trait WorkspaceAnalyticsRepository {
-    /// Live-file count and byte total per `file_kind` for a workspace. Only kinds
-    /// with at least one live file appear; the caller zero-fills the rest.
-    fn storage_by_kind(
+    /// A workspace's point-in-time analytics — storage by kind, run counts by
+    /// status, completed-run durations, and per-model token usage — read in one
+    /// read-only, repeatable-read transaction so the parts reflect a single
+    /// snapshot. Each breakdown lists only the groups that have data; the caller
+    /// zero-fills the rest.
+    fn snapshot(
         &mut self,
         workspace_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<StorageByKind>>> + Send;
-
-    /// Run count per `status` for a workspace (runs scoped through their live
-    /// pipeline). Only statuses with at least one run appear.
-    fn runs_by_status(
-        &mut self,
-        workspace_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<RunStatusCount>>> + Send;
-
-    /// Mean and 95th-percentile duration of a workspace's completed runs, in
-    /// seconds. Both `None` when no run has completed.
-    fn run_durations(
-        &mut self,
-        workspace_id: Uuid,
-    ) -> impl Future<Output = PgResult<RunDurations>> + Send;
-
-    /// Inference token totals per model across a workspace's runs (scoped through
-    /// their live pipeline). Only models that were actually used appear. Kept
-    /// per-model rather than summed to a single total, since a run may mix models.
-    fn usage_by_model(
-        &mut self,
-        workspace_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<UsageByModel>>> + Send;
+    ) -> impl Future<Output = PgResult<AnalyticsSnapshot>> + Send;
 
     /// Daily pipeline-run activity for a workspace over `[from, to)` (UTC day
     /// boundaries; `to` exclusive). Returns one row per day that has at least one
@@ -168,131 +187,23 @@ pub trait WorkspaceAnalyticsRepository {
 }
 
 impl WorkspaceAnalyticsRepository for PgConnection {
-    async fn storage_by_kind(&mut self, workspace_id: Uuid) -> PgResult<Vec<StorageByKind>> {
-        use diesel::dsl::{count_star, sum};
-        use schema::workspace_files::{self, dsl};
-
-        let rows = workspace_files::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .group_by(dsl::file_kind)
-            .select((dsl::file_kind, count_star(), sum(dsl::file_size_bytes)))
-            .load::<(FileKind, i64, Option<BigDecimal>)>(self)
-            .await
-            .map_err(PgError::from)?;
-
-        // Byte totals are converted to i64 at the boundary so callers do not
-        // depend on BigDecimal. NULL (an empty group) and the physically
-        // impossible i64 overflow both fall back to 0, so a failed conversion
-        // never fabricates a huge total that would poison the workspace sum.
-        use bigdecimal::ToPrimitive;
-        Ok(rows
-            .into_iter()
-            .map(|(file_kind, file_count, total_bytes)| StorageByKind {
-                file_kind,
-                file_count,
-                total_bytes: total_bytes.and_then(|b| b.to_i64()).unwrap_or(0),
+    async fn snapshot(&mut self, workspace_id: Uuid) -> PgResult<AnalyticsSnapshot> {
+        // The four reads run in one read-only, repeatable-read transaction so the
+        // snapshot is internally consistent: a run cannot appear in the status
+        // counts while its tokens are missing from the usage totals because a
+        // write landed between two of the reads.
+        self.build_transaction()
+            .read_only()
+            .repeatable_read()
+            .run(async |conn| {
+                Ok(AnalyticsSnapshot {
+                    storage: load_storage_by_kind(conn, workspace_id).await?,
+                    runs: load_runs_by_status(conn, workspace_id).await?,
+                    durations: load_run_durations(conn, workspace_id).await?,
+                    usage: load_usage_by_model(conn, workspace_id).await?,
+                })
             })
-            .collect())
-    }
-
-    async fn runs_by_status(&mut self, workspace_id: Uuid) -> PgResult<Vec<RunStatusCount>> {
-        use diesel::dsl::count_star;
-        use schema::workspace_pipeline_runs::dsl as runs;
-        use schema::workspace_pipelines::dsl as pipelines;
-        use schema::{workspace_pipeline_runs, workspace_pipelines};
-
-        let rows = workspace_pipeline_runs::table
-            .inner_join(workspace_pipelines::table)
-            .filter(pipelines::workspace_id.eq(workspace_id))
-            .filter(pipelines::deleted_at.is_null())
-            .group_by(runs::status)
-            .select((runs::status, count_star()))
-            .load::<(PipelineRunStatus, i64)>(self)
             .await
-            .map_err(PgError::from)?;
-
-        Ok(rows
-            .into_iter()
-            .map(|(status, count)| RunStatusCount { status, count })
-            .collect())
-    }
-
-    async fn run_durations(&mut self, workspace_id: Uuid) -> PgResult<RunDurations> {
-        use diesel::dsl::{avg, sql};
-        use diesel::sql_types::{Double, Nullable};
-        use schema::workspace_pipeline_runs::dsl as runs;
-        use schema::workspace_pipelines::dsl as pipelines;
-        use schema::{workspace_pipeline_runs, workspace_pipelines};
-
-        // Duration in seconds; `avg` and `percentile_cont` (an ordered-set
-        // aggregate with no Diesel builtin) both return NULL over no rows. Columns
-        // are table-qualified so the join can never make them ambiguous.
-        let duration_secs = sql::<Nullable<Double>>(
-            "EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
-             - workspace_pipeline_runs.started_at))",
-        );
-        let p95 = sql::<Nullable<Double>>(
-            "percentile_cont(0.95) WITHIN GROUP \
-             (ORDER BY EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
-             - workspace_pipeline_runs.started_at)))",
-        );
-
-        let (avg_seconds, p95_seconds) = workspace_pipeline_runs::table
-            .inner_join(workspace_pipelines::table)
-            .filter(pipelines::workspace_id.eq(workspace_id))
-            .filter(pipelines::deleted_at.is_null())
-            .filter(runs::completed_at.is_not_null())
-            .select((avg(duration_secs), p95))
-            .first::<(Option<f64>, Option<f64>)>(self)
-            .await
-            .map_err(PgError::from)?;
-
-        Ok(RunDurations {
-            avg_seconds,
-            p95_seconds,
-        })
-    }
-
-    async fn usage_by_model(&mut self, workspace_id: Uuid) -> PgResult<Vec<UsageByModel>> {
-        use diesel::dsl::sum;
-        use schema::workspace_pipeline_run_usage::dsl as usage;
-        use schema::workspace_pipeline_runs::dsl as runs;
-        use schema::workspace_pipelines::dsl as pipelines;
-        use schema::{workspace_pipeline_run_usage, workspace_pipeline_runs, workspace_pipelines};
-
-        let rows = workspace_pipeline_run_usage::table
-            .inner_join(workspace_pipeline_runs::table.on(runs::id.eq(usage::run_id)))
-            .inner_join(workspace_pipelines::table.on(pipelines::id.eq(runs::pipeline_id)))
-            .filter(pipelines::workspace_id.eq(workspace_id))
-            .filter(pipelines::deleted_at.is_null())
-            .group_by(usage::model)
-            .select((
-                usage::model,
-                sum(usage::input_tokens),
-                sum(usage::output_tokens),
-                sum(usage::total_tokens),
-            ))
-            .load::<(
-                String,
-                Option<BigDecimal>,
-                Option<BigDecimal>,
-                Option<BigDecimal>,
-            )>(self)
-            .await
-            .map_err(PgError::from)?;
-
-        use bigdecimal::ToPrimitive;
-        let to_i64 = |v: Option<BigDecimal>| v.and_then(|b| b.to_i64());
-        Ok(rows
-            .into_iter()
-            .map(|(model, input, output, total)| UsageByModel {
-                model,
-                input_tokens: to_i64(input),
-                output_tokens: to_i64(output),
-                total_tokens: to_i64(total),
-            })
-            .collect())
     }
 
     async fn runs_by_day(
@@ -357,6 +268,136 @@ impl WorkspaceAnalyticsRepository for PgConnection {
 
         Ok(points)
     }
+}
+
+/// Live-file count and byte total per `file_kind`. Only kinds with a live file
+/// appear; the caller zero-fills the rest.
+async fn load_storage_by_kind(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> PgResult<Vec<StorageByKind>> {
+    use bigdecimal::ToPrimitive;
+    use diesel::dsl::{count_star, sum};
+    use schema::workspace_files::{self, dsl};
+
+    let rows: Vec<StorageKindRow> = workspace_files::table
+        .filter(dsl::workspace_id.eq(workspace_id))
+        .filter(dsl::deleted_at.is_null())
+        .group_by(dsl::file_kind)
+        .select((dsl::file_kind, count_star(), sum(dsl::file_size_bytes)))
+        .load(conn)
+        .await
+        .map_err(PgError::from)?;
+
+    // Byte totals are converted to i64 at the boundary so callers do not depend
+    // on BigDecimal. NULL (an empty group) and the physically impossible i64
+    // overflow both fall back to 0, so a failed conversion never fabricates a
+    // huge total that would poison the workspace sum.
+    Ok(rows
+        .into_iter()
+        .map(|row| StorageByKind {
+            file_kind: row.file_kind,
+            file_count: row.file_count,
+            total_bytes: row.total_bytes.and_then(|b| b.to_i64()).unwrap_or(0),
+        })
+        .collect())
+}
+
+/// Run count per `status`, scoped through the live pipeline. Only statuses with
+/// a run appear.
+async fn load_runs_by_status(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> PgResult<Vec<RunStatusCount>> {
+    use diesel::dsl::count_star;
+    use schema::workspace_pipeline_runs::dsl as runs;
+    use schema::workspace_pipelines::dsl as pipelines;
+    use schema::{workspace_pipeline_runs, workspace_pipelines};
+
+    workspace_pipeline_runs::table
+        .inner_join(workspace_pipelines::table)
+        .filter(pipelines::workspace_id.eq(workspace_id))
+        .filter(pipelines::deleted_at.is_null())
+        .group_by(runs::status)
+        .select((runs::status, count_star()))
+        .load(conn)
+        .await
+        .map_err(PgError::from)
+}
+
+/// Mean and 95th-percentile duration (seconds) of the workspace's completed
+/// runs. Both `None` when no run has completed.
+async fn load_run_durations(conn: &mut PgConnection, workspace_id: Uuid) -> PgResult<RunDurations> {
+    use diesel::dsl::{avg, sql};
+    use diesel::sql_types::{Double, Nullable};
+    use schema::workspace_pipeline_runs::dsl as runs;
+    use schema::workspace_pipelines::dsl as pipelines;
+    use schema::{workspace_pipeline_runs, workspace_pipelines};
+
+    // Duration in seconds; `avg` and `percentile_cont` (an ordered-set aggregate
+    // with no Diesel builtin) both return NULL over no rows. Columns are
+    // table-qualified so the join can never make them ambiguous.
+    let duration_secs = sql::<Nullable<Double>>(
+        "EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
+         - workspace_pipeline_runs.started_at))",
+    );
+    let p95 = sql::<Nullable<Double>>(
+        "percentile_cont(0.95) WITHIN GROUP \
+         (ORDER BY EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
+         - workspace_pipeline_runs.started_at)))",
+    );
+
+    workspace_pipeline_runs::table
+        .inner_join(workspace_pipelines::table)
+        .filter(pipelines::workspace_id.eq(workspace_id))
+        .filter(pipelines::deleted_at.is_null())
+        .filter(runs::completed_at.is_not_null())
+        .select((avg(duration_secs), p95))
+        .first(conn)
+        .await
+        .map_err(PgError::from)
+}
+
+/// Inference token totals per model across the workspace's runs, scoped through
+/// the live pipeline. Only models actually used appear. Kept per-model rather
+/// than summed to one total, since a run may mix models.
+async fn load_usage_by_model(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> PgResult<Vec<UsageByModel>> {
+    use bigdecimal::ToPrimitive;
+    use diesel::dsl::sum;
+    use schema::workspace_pipeline_run_usage::dsl as usage;
+    use schema::workspace_pipeline_runs::dsl as runs;
+    use schema::workspace_pipelines::dsl as pipelines;
+    use schema::{workspace_pipeline_run_usage, workspace_pipeline_runs, workspace_pipelines};
+
+    let rows: Vec<UsageByModelRow> = workspace_pipeline_run_usage::table
+        .inner_join(workspace_pipeline_runs::table.on(runs::id.eq(usage::run_id)))
+        .inner_join(workspace_pipelines::table.on(pipelines::id.eq(runs::pipeline_id)))
+        .filter(pipelines::workspace_id.eq(workspace_id))
+        .filter(pipelines::deleted_at.is_null())
+        .group_by(usage::model)
+        .select((
+            usage::model,
+            sum(usage::input_tokens),
+            sum(usage::output_tokens),
+            sum(usage::total_tokens),
+        ))
+        .load(conn)
+        .await
+        .map_err(PgError::from)?;
+
+    let to_i64 = |v: Option<BigDecimal>| v.and_then(|b| b.to_i64());
+    Ok(rows
+        .into_iter()
+        .map(|row| UsageByModel {
+            model: row.model,
+            input_tokens: to_i64(row.input_tokens),
+            output_tokens: to_i64(row.output_tokens),
+            total_tokens: to_i64(row.total_tokens),
+        })
+        .collect())
 }
 
 /// The day bucket a run's start falls in. Shared by both daily queries so the
