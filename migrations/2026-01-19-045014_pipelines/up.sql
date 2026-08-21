@@ -232,12 +232,13 @@ CREATE TABLE workspace_pipeline_run_usage (
     -- The run this usage belongs to; usage is deleted with its run.
     run_id          UUID                    NOT NULL REFERENCES workspace_pipeline_runs (id) ON DELETE CASCADE,
 
-    -- The model and its optional version. At most one row per (run, model).
+    -- The model and its optional version. Identity is (run, model, version):
+    -- a run may use the same model at more than one version, and each is its own
+    -- row (uniqueness enforced by an index below that normalizes a NULL version).
     model           TEXT                    NOT NULL,
     version         TEXT                    DEFAULT NULL,
     CONSTRAINT workspace_pipeline_run_usage_model_length CHECK (length(model) BETWEEN 1 AND 255),
     CONSTRAINT workspace_pipeline_run_usage_version_length CHECK (version IS NULL OR length(version) BETWEEN 1 AND 255),
-    CONSTRAINT workspace_pipeline_run_usage_run_model_key UNIQUE (run_id, model),
 
     -- Token counts as the provider reported them. Each is independently nullable:
     -- `total` is NOT necessarily input + output (a provider may report only a
@@ -255,11 +256,13 @@ CREATE TABLE workspace_pipeline_run_usage (
     CONSTRAINT workspace_pipeline_run_usage_duration_non_negative CHECK (duration_ms >= 0)
 );
 
--- Aggregate usage across a run's models (drill-down for one run).
-CREATE INDEX workspace_pipeline_run_usage_run_idx
-    ON workspace_pipeline_run_usage (run_id);
+-- One row per (run, model, version); a NULL version is normalized so two
+-- unversioned rows for the same model collide instead of both being inserted.
+-- Leads with run_id, so it also serves per-run drill-down lookups.
+CREATE UNIQUE INDEX workspace_pipeline_run_usage_run_model_version_key
+    ON workspace_pipeline_run_usage (run_id, model, COALESCE(version, ''));
 
--- Cost/usage rollups by model across runs.
+-- Usage rollups by model across runs.
 CREATE INDEX workspace_pipeline_run_usage_model_idx
     ON workspace_pipeline_run_usage (model);
 

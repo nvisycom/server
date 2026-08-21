@@ -16,9 +16,9 @@ use nvisy_postgres::query::{
 };
 use nvisy_postgres::types::{
     Json, NotificationPayload, OcrPolicy, PipelineRunAnalyzedParams, PipelineRunFailedParams,
-    PipelineRunStatus, RunMetadata, WorkspaceSettings,
+    PipelineRunStatus, WorkspaceSettings,
 };
-use nvisy_postgres::{AsyncConnection, PgConn, PgError};
+use nvisy_postgres::{AsyncConnection, DieselError, PgConn, PgError};
 use tokio_util::sync::CancellationToken;
 
 use super::job::DetectionJob;
@@ -188,7 +188,7 @@ impl DetectionWorker {
         // re-claimed.
         let stale_before = jiff::Timestamp::now() - DETECTION_LEASE;
         let claimed = match conn.claim_run_for_detection(run.id, stale_before).await {
-            Ok(Some(_)) => true,
+            Ok(Some(claimed)) => claimed,
             Ok(None) => {
                 tracing::debug!(target: TRACING_TARGET, "Run already claimed by another worker; skipping");
                 return JobOutcome::Done;
@@ -198,13 +198,21 @@ impl DetectionWorker {
                 return JobOutcome::Retry;
             }
         };
-        debug_assert!(claimed);
+        // The claim stamped `claimed_at`; it fences the finalize against a
+        // concurrent re-claim if this analysis outlives the lease.
+        let Some(claim_token) = claimed.claimed_at else {
+            tracing::error!(target: TRACING_TARGET, "Claimed run has no claim timestamp; skipping");
+            return JobOutcome::Done;
+        };
 
         self.detection
             .broadcast_status(run.id, PipelineRunStatus::Analyzing)
             .await;
 
-        if let Err(err) = self.detect(&mut conn, &job, &run, &pipeline).await {
+        if let Err(err) = self
+            .detect(&mut conn, &job, &claimed, &pipeline, claim_token.into())
+            .await
+        {
             tracing::warn!(target: TRACING_TARGET, error = %err, "Detection failed");
             fail_run(
                 &mut conn,
@@ -226,6 +234,19 @@ impl DetectionWorker {
             self.notify(job.workspace_id, run.account_id, payload).await;
         }
         JobOutcome::Done
+    }
+
+    /// Best-effort reclaim of a staged audit object whose file row did not
+    /// commit. A failure only defers cleanup, so it is logged, never propagated.
+    async fn discard_staged_audit(&self, staged: &nvisy_postgres::model::NewWorkspaceFile) {
+        if let Err(err) = self.blob.discard_staged_audit(staged).await {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                error = %err,
+                storage_path = %staged.storage_path,
+                "Failed to reclaim orphaned audit object; left for a later sweep",
+            );
+        }
     }
 
     /// Notifies the run's triggering account, logging (never failing) on error.
@@ -251,6 +272,7 @@ impl DetectionWorker {
         job: &DetectionJob,
         run: &WorkspacePipelineRun,
         pipeline: &WorkspacePipeline,
+        claim_token: jiff::Timestamp,
     ) -> Result<()> {
         let workspace = conn
             .find_workspace_by_id(job.workspace_id)
@@ -295,37 +317,68 @@ impl DetectionWorker {
 
         // Record inference usage: per-model token rows into the usage table (the
         // usage aggregation surface) and the full per-recognizer report into
-        // metadata for drill-down. Absent for a purely deterministic run.
+        // metadata for drill-down. Absent for a purely deterministic run. The
+        // report is layered onto the run's existing metadata so tags and any
+        // recorded error survive the write.
         let usage = extract_run_usage(run.id, &analyzed);
         let metadata = usage.as_ref().map(|u| {
-            Json::encode(&RunMetadata {
-                usage: Some(u.report.clone()),
-                ..Default::default()
-            })
+            let mut current = run.metadata.or_default();
+            current.usage = Some(u.report.clone());
+            Json::encode(&current)
         });
 
         // Persist the audit file row, per-model usage, and the run's transition to
         // `Analyzed` atomically: a partial failure would otherwise strand usage
-        // rows or an audit pointer on a run still marked `Analyzing`.
+        // rows or an audit pointer on a run still marked `Analyzing`. The finalize
+        // is fenced on our claim; if it went stale (another worker re-claimed the
+        // run past the lease), the whole transaction rolls back so we do not stamp
+        // over the new owner's work or leak usage/audit rows for a run we lost.
+        // Kept to reclaim the just-staged object if the transaction does not
+        // commit: on rollback its `workspace_files` row never lands, so the
+        // row-driven reaper could never find the object otherwise.
+        let staged_audit = audit_file.clone();
         let run_id = run.id;
-        conn.transaction(async |conn| {
-            let audit_file_id = conn.create_workspace_file(audit_file).await?.id;
-            if let Some(usage) = &usage {
-                conn.record_run_usage(&usage.per_model).await?;
+        let finalized = conn
+            .transaction(async |conn| {
+                let audit_file_id = conn.create_workspace_file(audit_file).await?.id;
+                if let Some(usage) = &usage {
+                    conn.record_run_usage(&usage.per_model).await?;
+                }
+                let finalized = conn
+                    .finalize_analyzed_run(
+                        run_id,
+                        claim_token,
+                        UpdateWorkspacePipelineRun {
+                            audit_file_id: Some(Some(audit_file_id)),
+                            metadata,
+                            ..Default::default()
+                        },
+                    )
+                    .await?;
+                if !finalized {
+                    // Abort the audit-file and usage inserts: the run is no longer
+                    // ours to finalize. `RollbackTransaction` unwinds the writes
+                    // without being a real error; it is matched below.
+                    return Err(PgError::Query(DieselError::RollbackTransaction));
+                }
+                Ok::<_, PgError>(())
+            })
+            .await;
+
+        match finalized {
+            Ok(()) => {}
+            Err(PgError::Query(DieselError::RollbackTransaction)) => {
+                self.discard_staged_audit(&staged_audit).await;
+                tracing::warn!(target: TRACING_TARGET, run_id = %run.id, "Claim went stale before finalize; another worker owns the run");
+                return Ok(());
             }
-            conn.update_workspace_pipeline_run(
-                run_id,
-                UpdateWorkspacePipelineRun {
-                    status: Some(PipelineRunStatus::Analyzed),
-                    audit_file_id: Some(Some(audit_file_id)),
-                    metadata,
-                    ..Default::default()
-                },
-            )
-            .await?;
-            Ok::<_, PgError>(())
-        })
-        .await?;
+            Err(err) => {
+                // The transaction rolled back, so the audit row never committed;
+                // reclaim its object before surfacing the failure.
+                self.discard_staged_audit(&staged_audit).await;
+                return Err(err.into());
+            }
+        }
 
         tracing::info!(target: TRACING_TARGET, run_id = %run.id, "Run analyzed");
         self.detection

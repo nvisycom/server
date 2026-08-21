@@ -298,6 +298,19 @@ impl RunBlobStore {
         })
     }
 
+    /// Deletes a staged audit object whose file row was never committed.
+    ///
+    /// [`stage_analyzed_document`](Self::stage_analyzed_document) writes the object
+    /// before its `workspace_files` row; if the committing transaction rolls back,
+    /// the object has no row and the row-driven reaper can never find it. The
+    /// caller invokes this on that path so the orphan is removed immediately
+    /// instead of accumulating. Best effort: a failure here only leaves the object
+    /// for a later manual sweep, so callers log rather than propagate.
+    pub async fn discard_staged_audit(&self, staged: &NewWorkspaceFile) -> Result<()> {
+        self.delete_object(&staged.storage_bucket, &staged.storage_path)
+            .await
+    }
+
     /// Fetches and decrypts a run's stored [`Audit`].
     ///
     /// Errors if the run was never analyzed (409) or its analysis has since been

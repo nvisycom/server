@@ -7,9 +7,9 @@ use serde::Deserialize;
 
 use crate::handler::{Error, ErrorKind, Result};
 
-/// Longest run time-series window, in days. A day-bucketed series is dense
-/// (`generate_series` produces a row per day), so the window is capped to bound
-/// the row count and the query cost.
+/// Longest run time-series window, in days. The response is gap-filled to one
+/// point per day in the window, so the window is capped to bound the response
+/// point count and the query cost.
 const MAX_WINDOW_DAYS: i64 = 366;
 
 /// Default window when the caller gives no dates: the last 30 days through today.
@@ -69,15 +69,21 @@ impl AnalyticsWindow {
 }
 
 impl ResolvedWindow {
-    /// The window's start as a UTC timestamp at the day's first instant.
-    pub fn from_timestamp(&self) -> jiff::Timestamp {
+    /// The window's start as a UTC timestamp at the day's first instant
+    /// (inclusive lower bound).
+    pub fn from_timestamp(&self) -> Result<jiff::Timestamp> {
         day_start_utc(self.from)
     }
 
-    /// The window's end as a UTC timestamp at the day's first instant. The series
-    /// buckets by `date_trunc('day', ...)`, so the `to` day is fully included.
-    pub fn to_timestamp(&self) -> jiff::Timestamp {
-        day_start_utc(self.to)
+    /// The window's end as an *exclusive* upper bound: the first instant of the
+    /// day after `to`. The query filters `started_at < to_timestamp()`, so the
+    /// whole `to` day is included without spilling into the next.
+    pub fn to_timestamp(&self) -> Result<jiff::Timestamp> {
+        let next = self
+            .to
+            .checked_add(1.days())
+            .map_err(|_| invalid("Window end is out of range"))?;
+        day_start_utc(next)
     }
 }
 
@@ -86,14 +92,81 @@ fn today_utc() -> Date {
     Zoned::now().with_time_zone(jiff::tz::TimeZone::UTC).date()
 }
 
-/// The first instant of `date` in UTC.
-fn day_start_utc(date: Date) -> jiff::Timestamp {
+/// The first instant of `date` in UTC. Fails (400) rather than silently widening
+/// the query if the date cannot be represented as a zoned timestamp.
+fn day_start_utc(date: Date) -> Result<jiff::Timestamp> {
     date.to_zoned(jiff::tz::TimeZone::UTC)
         .map(|z| z.timestamp())
-        .unwrap_or_else(|_| jiff::Timestamp::UNIX_EPOCH)
+        .map_err(|_| invalid("Window bound is out of range"))
 }
 
 /// A 400 for an invalid window.
 fn invalid(message: impl Into<std::borrow::Cow<'static, str>>) -> Error<'static> {
     ErrorKind::BadRequest.with_message(message)
+}
+
+#[cfg(test)]
+mod tests {
+    use jiff::civil::date;
+
+    use super::*;
+
+    fn window(from: Date, to: Date) -> ResolvedWindow {
+        AnalyticsWindow {
+            from: Some(from),
+            to: Some(to),
+        }
+        .resolve()
+        .expect("window resolves")
+    }
+
+    #[test]
+    fn to_timestamp_is_an_exclusive_next_day_bound() {
+        let w = window(date(2026, 1, 1), date(2026, 1, 31));
+        // Lower bound is the first instant of `from`.
+        assert_eq!(
+            w.from_timestamp().unwrap(),
+            date(2026, 1, 1)
+                .to_zoned(jiff::tz::TimeZone::UTC)
+                .unwrap()
+                .timestamp()
+        );
+        // Upper bound is the first instant of the day *after* `to`, so a filter of
+        // `started_at < to_timestamp()` includes every run on the `to` day.
+        assert_eq!(
+            w.to_timestamp().unwrap(),
+            date(2026, 2, 1)
+                .to_zoned(jiff::tz::TimeZone::UTC)
+                .unwrap()
+                .timestamp()
+        );
+    }
+
+    #[test]
+    fn single_day_window_spans_exactly_one_day() {
+        let w = window(date(2026, 1, 15), date(2026, 1, 15));
+        let seconds =
+            w.to_timestamp().unwrap().as_second() - w.from_timestamp().unwrap().as_second();
+        assert_eq!(seconds, 24 * 60 * 60);
+    }
+
+    #[test]
+    fn rejects_from_after_to() {
+        let err = AnalyticsWindow {
+            from: Some(date(2026, 2, 1)),
+            to: Some(date(2026, 1, 1)),
+        }
+        .resolve();
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn rejects_window_wider_than_the_cap() {
+        let err = AnalyticsWindow {
+            from: Some(date(2024, 1, 1)),
+            to: Some(date(2026, 1, 1)),
+        }
+        .resolve();
+        assert!(err.is_err());
+    }
 }

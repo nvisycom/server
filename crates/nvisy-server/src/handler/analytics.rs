@@ -50,7 +50,7 @@ async fn get_analytics(
 fn get_analytics_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Workspace analytics")
         .description(
-            "Returns aggregate analytics for a workspace: stored-file totals with a per-kind breakdown, and pipeline-run health (status mix, error rate, and durations). Breakdowns list every kind/status, zero-filled, in a stable order.",
+            "Returns aggregate analytics for a workspace: stored-file totals with a per-kind breakdown, pipeline-run health (status mix, error rate, and durations), and inference token usage (workspace totals plus a per-model breakdown). Breakdowns list every kind/status, zero-filled, in a stable order.",
         )
         .response::<200, Json<WorkspaceAnalytics>>()
         .response::<401, Json<ErrorResponse>>()
@@ -83,7 +83,11 @@ async fn get_run_timeseries(
         .await?;
 
     let points = conn
-        .runs_by_day(workspace.id, window.from_timestamp(), window.to_timestamp())
+        .runs_by_day(
+            workspace.id,
+            window.from_timestamp()?,
+            window.to_timestamp()?,
+        )
         .await?;
     let series = RunTimeSeries::from_window(window.from, window.to, points);
 
