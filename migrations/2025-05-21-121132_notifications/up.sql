@@ -1,6 +1,6 @@
 -- Notifications: per-account notification inbox for member, connection-sync,
--- pipeline-run, and system events. Account-scoped but a standalone feature;
--- the client renders copy from the event type and its typed params.
+-- and pipeline-run events. Account-scoped but a standalone feature; the client
+-- renders copy from the event type and its typed params.
 
 -- Type of a notification event: what happened that the account is told about.
 CREATE TYPE NOTIFICATION_EVENT AS ENUM (
@@ -12,10 +12,7 @@ CREATE TYPE NOTIFICATION_EVENT AS ENUM (
 
     'pipeline.run.analyzed',     -- A run finished detection, awaiting review
     'pipeline.run.completed',    -- A run completed (redaction produced)
-    'pipeline.run.failed',       -- A run failed
-
-    'system.announcement',       -- System-wide announcement
-    'system.report'              -- System report generated
+    'pipeline.run.failed'        -- A run failed
 );
 
 COMMENT ON TYPE NOTIFICATION_EVENT IS 'Type of a notification event delivered to an account.';

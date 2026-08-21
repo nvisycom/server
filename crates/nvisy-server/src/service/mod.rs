@@ -132,12 +132,8 @@ impl ServiceState {
 
         // The stateful sync singleton composes the stateless emitters/object
         // service from the same `Infra` their `FromRef` impls use.
-        let connection_sync = ConnectionSyncService::new(
-            infra.clone(),
-            ExternalObjectStore::new(),
-            WebhookEmitter::new(infra.clone()),
-            sync_config,
-        );
+        let connection_sync =
+            ConnectionSyncService::new(infra.clone(), ExternalObjectStore::new(), sync_config);
 
         let service_state = Self {
             infra,

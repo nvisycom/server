@@ -9,17 +9,9 @@ use strum::{Display, EnumIter, EnumString, IntoStaticStr};
 /// This enumeration corresponds to the `ACTIVITY_TYPE` PostgreSQL enum and is used
 /// to categorize different types of activities that occur within workspaces for comprehensive
 /// audit trail and activity tracking.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(
-    Serialize,
-    Deserialize,
-    DbEnum,
-    Display,
-    EnumIter,
-    EnumString,
-    IntoStaticStr
-)]
+#[derive(DbEnum, Display, EnumIter, EnumString, IntoStaticStr)]
 #[ExistingTypePath = "crate::schema::sql_types::ActivityType"]
 pub enum ActivityType {
     // Workspace activities
@@ -104,6 +96,12 @@ pub enum ActivityType {
     #[strum(serialize = "connection.deleted")]
     ConnectionDeleted,
 
+    /// Connection started synchronization
+    #[db_rename = "connection.sync.started"]
+    #[serde(rename = "connection.sync.started")]
+    #[strum(serialize = "connection.sync.started")]
+    ConnectionSyncStarted,
+
     /// Connection completed synchronization
     #[db_rename = "connection.sync.completed"]
     #[serde(rename = "connection.sync.completed")]
@@ -135,12 +133,6 @@ pub enum ActivityType {
     #[strum(serialize = "webhook.deleted")]
     WebhookDeleted,
 
-    /// Webhook was triggered
-    #[db_rename = "webhook.triggered"]
-    #[serde(rename = "webhook.triggered")]
-    #[strum(serialize = "webhook.triggered")]
-    WebhookTriggered,
-
     // File activities
     /// File was created
     #[db_rename = "file.created"]
@@ -159,12 +151,6 @@ pub enum ActivityType {
     #[serde(rename = "file.deleted")]
     #[strum(serialize = "file.deleted")]
     FileDeleted,
-
-    /// File was verified
-    #[db_rename = "file.verified"]
-    #[serde(rename = "file.verified")]
-    #[strum(serialize = "file.verified")]
-    FileVerified,
 
     // Pipeline activities
     /// Pipeline was created
@@ -230,53 +216,6 @@ pub enum ActivityType {
 }
 
 impl ActivityType {
-    /// Returns the category of this activity type.
-    #[inline]
-    pub fn category(self) -> ActivityCategory {
-        match self {
-            ActivityType::WorkspaceCreated
-            | ActivityType::WorkspaceUpdated
-            | ActivityType::WorkspaceDeleted => ActivityCategory::Workspace,
-
-            ActivityType::MemberAdded
-            | ActivityType::MemberUpdated
-            | ActivityType::MemberDeleted => ActivityCategory::Member,
-
-            ActivityType::InviteCreated
-            | ActivityType::InviteAccepted
-            | ActivityType::InviteDeclined
-            | ActivityType::InviteCanceled => ActivityCategory::Invite,
-
-            ActivityType::ConnectionCreated
-            | ActivityType::ConnectionUpdated
-            | ActivityType::ConnectionDeleted
-            | ActivityType::ConnectionSyncCompleted
-            | ActivityType::ConnectionSyncFailed => ActivityCategory::Connection,
-
-            ActivityType::WebhookCreated
-            | ActivityType::WebhookUpdated
-            | ActivityType::WebhookDeleted
-            | ActivityType::WebhookTriggered => ActivityCategory::Webhook,
-
-            ActivityType::FileCreated
-            | ActivityType::FileUpdated
-            | ActivityType::FileDeleted
-            | ActivityType::FileVerified => ActivityCategory::File,
-
-            ActivityType::PipelineCreated
-            | ActivityType::PipelineUpdated
-            | ActivityType::PipelineDeleted
-            | ActivityType::PipelineRunStarted
-            | ActivityType::PipelineRunAnalyzed
-            | ActivityType::PipelineRunCompleted
-            | ActivityType::PipelineRunFailed => ActivityCategory::Pipeline,
-
-            ActivityType::PolicyCreated
-            | ActivityType::PolicyUpdated
-            | ActivityType::PolicyDeleted => ActivityCategory::Policy,
-        }
-    }
-
     /// Returns whether this activity type represents a creation event.
     #[inline]
     pub fn is_creation(self) -> bool {
@@ -304,15 +243,6 @@ impl ActivityType {
                 | ActivityType::FileDeleted
                 | ActivityType::PipelineDeleted
                 | ActivityType::PolicyDeleted
-        )
-    }
-
-    /// Returns whether this activity type represents a security-sensitive event.
-    #[inline]
-    pub fn is_security_sensitive(self) -> bool {
-        matches!(
-            self.category(),
-            ActivityCategory::Member | ActivityCategory::Invite
         )
     }
 
@@ -392,25 +322,4 @@ mod tests {
         );
         assert_eq!(ActivityType::ConnectionSyncFailed.action_type(), "failed");
     }
-}
-
-/// Categories for grouping activity types.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum ActivityCategory {
-    /// Workspace-related activities
-    Workspace,
-    /// Member-related activities
-    Member,
-    /// Invite-related activities
-    Invite,
-    /// Connection-related activities
-    Connection,
-    /// Webhook-related activities
-    Webhook,
-    /// File-related activities
-    File,
-    /// Pipeline-related activities
-    Pipeline,
-    /// Policy-related activities
-    Policy,
 }

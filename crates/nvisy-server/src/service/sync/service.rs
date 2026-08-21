@@ -27,8 +27,8 @@ use super::bridge::{reader_to_stream, stream_to_reader};
 use crate::extract::SecurityContext;
 use crate::handler::{ErrorKind, Result};
 use crate::service::{
-    EventEmitter, EventOrigin, ExternalObjectStore, HashingReader, Infra, Measurements,
-    WebhookEmitter, WorkspaceEvent,
+    ConnectionRef, EventEmitter, EventOrigin, ExternalObjectStore, HashingReader, Infra,
+    Measurements, WorkspaceEvent,
 };
 
 /// Tracing target for connection sync operations.
@@ -49,9 +49,6 @@ enum Outcome {
 pub struct ConnectionSyncService {
     infra: Infra,
     object: ExternalObjectStore,
-    // Emits the `pipeline:connection.sync.started` webhook directly, since it has
-    // no activity-log or notification counterpart to carry through the outbox.
-    webhook: WebhookEmitter,
     /// Maximum objects imported concurrently within a single sync.
     import_concurrency: usize,
     // Cancellation tokens for transfers running in this process, keyed by run id.
@@ -63,16 +60,10 @@ pub struct ConnectionSyncService {
 
 impl ConnectionSyncService {
     /// Creates a new [`ConnectionSyncService`].
-    pub fn new(
-        infra: Infra,
-        object: ExternalObjectStore,
-        webhook: WebhookEmitter,
-        config: SyncConfig,
-    ) -> Self {
+    pub fn new(infra: Infra, object: ExternalObjectStore, config: SyncConfig) -> Self {
         Self {
             infra,
             object,
-            webhook,
             import_concurrency: config.import_concurrency.max(1),
             running: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -440,15 +431,33 @@ impl ConnectionSyncService {
         let connection_id = connection.id;
         let connection_name = connection.display_name.clone();
 
-        let _ = self
-            .webhook
-            .emit_connection_sync_started(
-                workspace_id,
-                run_id,
-                Some(account_id),
-                Some(serde_json::json!({ "connection_id": connection_id })),
-            )
-            .await;
+        // Record sync-started through the outbox, the same path as sync-completed
+        // and sync-failed, so the whole sync-status family is projected uniformly
+        // (activity log + webhook). Best-effort: a failure here must not abort the
+        // sync it is only announcing.
+        match self.infra.postgres.get_connection().await {
+            Ok(mut conn) => {
+                if let Err(err) = conn
+                    .emit_event(
+                        EventOrigin {
+                            workspace_id,
+                            account_id,
+                            security: &SecurityContext::default(),
+                        },
+                        WorkspaceEvent::ConnectionSyncStarted(ConnectionRef {
+                            connection_id,
+                            connection_name: connection_name.clone(),
+                        }),
+                    )
+                    .await
+                {
+                    tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to record sync-started event");
+                }
+            }
+            Err(err) => {
+                tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to acquire connection for sync-started event");
+            }
+        }
 
         let transfer = self.clone();
         let mut work = tokio::spawn(async move {

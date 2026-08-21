@@ -22,7 +22,7 @@ pub use activity_params::{
 pub use notification_params::{
     ConnectionSyncCompletedParams, ConnectionSyncFailedParams, MemberInvitedParams,
     MemberJoinedParams, NotificationPayload, PipelineRunAnalyzedParams, PipelineRunCompletedParams,
-    PipelineRunFailedParams, SystemAnnouncementParams, SystemReportParams,
+    PipelineRunFailedParams,
 };
 pub use pipeline_metadata::{PipelineMetadata, RetentionOverride};
 pub use pipeline_run_metadata::RunMetadata;

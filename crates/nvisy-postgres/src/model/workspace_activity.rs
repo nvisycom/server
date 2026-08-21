@@ -9,9 +9,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_activities;
-use crate::types::{
-    ActivityCategory, ActivityPayload, ActivityType, HasCreatedAt, HasSecurityContext, Json,
-};
+use crate::types::{ActivityPayload, ActivityType, HasCreatedAt, HasSecurityContext, Json};
 
 /// Workspace activity log entry representing an action performed in a workspace.
 ///
@@ -77,45 +75,6 @@ impl WorkspaceActivity {
     /// Returns whether the activity has user agent information.
     pub fn has_user_agent(&self) -> bool {
         self.user_agent.as_deref().is_some_and(|ua| !ua.is_empty())
-    }
-
-    /// Returns the high-level category of this activity.
-    pub fn category(&self) -> ActivityCategory {
-        self.activity_type.category()
-    }
-
-    /// Returns whether this is a high-priority activity requiring attention.
-    pub fn is_high_priority(&self) -> bool {
-        matches!(
-            self.category(),
-            ActivityCategory::Member | ActivityCategory::Workspace
-        )
-    }
-
-    /// Returns whether this represents a direct user action.
-    pub fn is_user_action(&self) -> bool {
-        matches!(
-            self.category(),
-            ActivityCategory::Member | ActivityCategory::File
-        )
-    }
-
-    /// Returns whether this represents a system event.
-    pub fn is_system_event(&self) -> bool {
-        matches!(
-            self.category(),
-            ActivityCategory::Workspace | ActivityCategory::Connection
-        )
-    }
-
-    /// Returns whether this activity requires special audit attention.
-    pub fn requires_audit(&self) -> bool {
-        self.is_high_priority() || matches!(self.category(), ActivityCategory::Member)
-    }
-
-    /// Returns the IP address as a formatted string.
-    pub fn ip_address_string(&self) -> Option<String> {
-        self.ip_address.map(|ip| ip.to_string())
     }
 }
 

@@ -108,56 +108,12 @@ impl AccountApiToken {
         }
     }
 
-    /// Returns the duration since the token was last used.
-    pub fn time_since_last_used(&self) -> jiff::Span {
-        let now = jiff::Timestamp::now();
-        if let Some(last_used) = self.last_used_at {
-            now - jiff::Timestamp::from(last_used)
-        } else {
-            now - jiff::Timestamp::from(self.issued_at)
-        }
-    }
-
-    /// Returns the total duration the token has been active.
-    pub fn token_duration(&self) -> jiff::Span {
-        if let Some(last_used) = self.last_used_at {
-            jiff::Timestamp::from(last_used) - jiff::Timestamp::from(self.issued_at)
-        } else {
-            jiff::Span::new()
-        }
-    }
-
     /// Returns whether the token is about to expire (within specified minutes).
     pub fn is_expiring_soon(&self, minutes: i64) -> bool {
         if let Some(remaining) = self.time_until_expiry() {
             remaining.get_minutes() <= minutes
         } else {
             false
-        }
-    }
-
-    /// Returns whether this is a web token.
-    pub fn is_web_token(&self) -> bool {
-        self.session_type == ApiTokenType::Web
-    }
-
-    /// Returns whether this is an API token.
-    pub fn is_api_token(&self) -> bool {
-        self.session_type == ApiTokenType::Api
-    }
-
-    /// Returns whether this is a CLI token.
-    pub fn is_cli_token(&self) -> bool {
-        self.session_type == ApiTokenType::Cli
-    }
-
-    /// Returns a shortened version of the token ID for logging/display.
-    pub fn id_short(&self) -> String {
-        let id_str = self.id.to_string();
-        if id_str.len() > 8 {
-            format!("{}...", &id_str[..8])
-        } else {
-            id_str
         }
     }
 }

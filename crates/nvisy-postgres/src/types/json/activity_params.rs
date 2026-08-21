@@ -1,15 +1,15 @@
 //! Activity payloads stored in `workspace_activities.params`.
 //!
 //! An activity stores its `activity_type` (indexed column) plus a self-describing
-//! [`Json`](super::Json) body. [`ActivityPayload`] is that body — an
-//! `activityType`-tagged enum, one variant per event, each carrying its own
-//! params. No rendered text is stored; the client localizes copy from
-//! `activityType` and the params.
+//! [`Json`](super::Json) body. [`ActivityPayload`] is that body — a
+//! `{type, data}`-tagged enum, one variant per event, each carrying its own
+//! params. No rendered text is stored; the client localizes copy from `type` and
+//! the params.
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::types::{ActivityType, Handle, WebhookEvent};
+use crate::types::{ActivityType, ConnectionId, Handle, RunId, WebhookEvent, WebhookId};
 
 /// Params of a workspace-scoped activity (`workspace.*`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,7 +48,7 @@ pub struct InviteActivityParams {
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionActivityParams {
     /// Id of the connection.
-    pub connection_id: Uuid,
+    pub connection_id: ConnectionId,
     /// Display name of the connection.
     pub connection_name: String,
 }
@@ -59,7 +59,7 @@ pub struct ConnectionActivityParams {
 #[serde(rename_all = "camelCase")]
 pub struct WebhookActivityParams {
     /// Id of the webhook.
-    pub webhook_id: Uuid,
+    pub webhook_id: WebhookId,
     /// Display name of the webhook.
     pub webhook_name: String,
 }
@@ -92,7 +92,7 @@ pub struct PipelineRunActivityParams {
     /// Slug of the owning pipeline.
     pub pipeline_slug: Handle,
     /// Id of the run.
-    pub run_id: Uuid,
+    pub run_id: RunId,
 }
 
 /// Params of a policy activity (`policy.*`).
@@ -106,14 +106,16 @@ pub struct PolicyActivityParams {
     pub policy_slug: Handle,
 }
 
-/// The typed payload of an audit-log activity, tagged by `activityType`.
+/// The typed payload of an audit-log activity, tagged by `type` with its params
+/// under `data` (the same `{type, data}` envelope the notification payload and
+/// outbox event use).
 ///
 /// Each variant is one activity type carrying its own params. No rendered text is
-/// included — the client localizes the copy from `activityType` and the params.
-/// The `activityType` values match the `ACTIVITY_TYPE` enum.
+/// included — the client localizes the copy from `type` and the params. The `type`
+/// values match the `ACTIVITY_TYPE` enum.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(tag = "activityType", rename_all = "camelCase")]
+#[serde(tag = "type", content = "data")]
 pub enum ActivityPayload {
     /// A workspace was created.
     #[serde(rename = "workspace.created")]
@@ -157,6 +159,9 @@ pub enum ActivityPayload {
     /// A connection was deleted.
     #[serde(rename = "connection.deleted")]
     ConnectionDeleted(ConnectionActivityParams),
+    /// A connection sync started.
+    #[serde(rename = "connection.sync.started")]
+    ConnectionSyncStarted(ConnectionActivityParams),
     /// A connection sync completed.
     #[serde(rename = "connection.sync.completed")]
     ConnectionSyncCompleted(ConnectionActivityParams),
@@ -173,9 +178,6 @@ pub enum ActivityPayload {
     /// A webhook was deleted.
     #[serde(rename = "webhook.deleted")]
     WebhookDeleted(WebhookActivityParams),
-    /// A webhook was triggered.
-    #[serde(rename = "webhook.triggered")]
-    WebhookTriggered(WebhookActivityParams),
 
     /// A file was created.
     #[serde(rename = "file.created")]
@@ -186,9 +188,6 @@ pub enum ActivityPayload {
     /// A file was deleted.
     #[serde(rename = "file.deleted")]
     FileDeleted(FileActivityParams),
-    /// A file was verified.
-    #[serde(rename = "file.verified")]
-    FileVerified(FileActivityParams),
 
     /// A pipeline was created.
     #[serde(rename = "pipeline.created")]
@@ -241,16 +240,15 @@ impl ActivityPayload {
             ActivityPayload::ConnectionCreated(_) => ActivityType::ConnectionCreated,
             ActivityPayload::ConnectionUpdated(_) => ActivityType::ConnectionUpdated,
             ActivityPayload::ConnectionDeleted(_) => ActivityType::ConnectionDeleted,
+            ActivityPayload::ConnectionSyncStarted(_) => ActivityType::ConnectionSyncStarted,
             ActivityPayload::ConnectionSyncCompleted(_) => ActivityType::ConnectionSyncCompleted,
             ActivityPayload::ConnectionSyncFailed(_) => ActivityType::ConnectionSyncFailed,
             ActivityPayload::WebhookCreated(_) => ActivityType::WebhookCreated,
             ActivityPayload::WebhookUpdated(_) => ActivityType::WebhookUpdated,
             ActivityPayload::WebhookDeleted(_) => ActivityType::WebhookDeleted,
-            ActivityPayload::WebhookTriggered(_) => ActivityType::WebhookTriggered,
             ActivityPayload::FileCreated(_) => ActivityType::FileCreated,
             ActivityPayload::FileUpdated(_) => ActivityType::FileUpdated,
             ActivityPayload::FileDeleted(_) => ActivityType::FileDeleted,
-            ActivityPayload::FileVerified(_) => ActivityType::FileVerified,
             ActivityPayload::PipelineCreated(_) => ActivityType::PipelineCreated,
             ActivityPayload::PipelineUpdated(_) => ActivityType::PipelineUpdated,
             ActivityPayload::PipelineDeleted(_) => ActivityType::PipelineDeleted,
@@ -279,8 +277,7 @@ impl ActivityPayload {
             | ActivityPayload::InviteCanceled(_)
             | ActivityPayload::WebhookCreated(_)
             | ActivityPayload::WebhookUpdated(_)
-            | ActivityPayload::WebhookDeleted(_)
-            | ActivityPayload::WebhookTriggered(_) => return None,
+            | ActivityPayload::WebhookDeleted(_) => return None,
 
             ActivityPayload::MemberAdded(_) => W::MemberAdded,
             ActivityPayload::MemberUpdated(_) => W::MemberUpdated,
@@ -288,12 +285,12 @@ impl ActivityPayload {
             ActivityPayload::ConnectionCreated(_) => W::ConnectionCreated,
             ActivityPayload::ConnectionUpdated(_) => W::ConnectionUpdated,
             ActivityPayload::ConnectionDeleted(_) => W::ConnectionDeleted,
+            ActivityPayload::ConnectionSyncStarted(_) => W::ConnectionSyncStarted,
             ActivityPayload::ConnectionSyncCompleted(_) => W::ConnectionSyncCompleted,
             ActivityPayload::ConnectionSyncFailed(_) => W::ConnectionSyncFailed,
             ActivityPayload::FileCreated(_) => W::FileCreated,
             ActivityPayload::FileUpdated(_) => W::FileUpdated,
             ActivityPayload::FileDeleted(_) => W::FileDeleted,
-            ActivityPayload::FileVerified(_) => return None,
             ActivityPayload::PipelineCreated(_) => W::PipelineCreated,
             ActivityPayload::PipelineUpdated(_) => W::PipelineUpdated,
             ActivityPayload::PipelineDeleted(_) => W::PipelineDeleted,
@@ -324,18 +321,17 @@ impl ActivityPayload {
             ActivityPayload::ConnectionCreated(p)
             | ActivityPayload::ConnectionUpdated(p)
             | ActivityPayload::ConnectionDeleted(p)
+            | ActivityPayload::ConnectionSyncStarted(p)
             | ActivityPayload::ConnectionSyncCompleted(p)
             | ActivityPayload::ConnectionSyncFailed(p) => Some(p.connection_id.to_string()),
 
             ActivityPayload::WebhookCreated(p)
             | ActivityPayload::WebhookUpdated(p)
-            | ActivityPayload::WebhookDeleted(p)
-            | ActivityPayload::WebhookTriggered(p) => Some(p.webhook_id.to_string()),
+            | ActivityPayload::WebhookDeleted(p) => Some(p.webhook_id.to_string()),
 
             ActivityPayload::FileCreated(p)
             | ActivityPayload::FileUpdated(p)
-            | ActivityPayload::FileDeleted(p)
-            | ActivityPayload::FileVerified(p) => Some(p.file_id.to_string()),
+            | ActivityPayload::FileDeleted(p) => Some(p.file_id.to_string()),
 
             ActivityPayload::PipelineRunStarted(p)
             | ActivityPayload::PipelineRunAnalyzed(p)
@@ -378,8 +374,7 @@ impl ActivityPayload {
 
             ActivityPayload::FileCreated(p)
             | ActivityPayload::FileUpdated(p)
-            | ActivityPayload::FileDeleted(p)
-            | ActivityPayload::FileVerified(p) => Some(p.file_name.clone()),
+            | ActivityPayload::FileDeleted(p) => Some(p.file_name.clone()),
 
             ActivityPayload::PipelineCreated(p)
             | ActivityPayload::PipelineUpdated(p)
@@ -393,13 +388,13 @@ impl ActivityPayload {
             ActivityPayload::ConnectionCreated(p)
             | ActivityPayload::ConnectionUpdated(p)
             | ActivityPayload::ConnectionDeleted(p)
+            | ActivityPayload::ConnectionSyncStarted(p)
             | ActivityPayload::ConnectionSyncCompleted(p)
             | ActivityPayload::ConnectionSyncFailed(p) => Some(p.connection_name.clone()),
 
             ActivityPayload::WebhookCreated(p)
             | ActivityPayload::WebhookUpdated(p)
-            | ActivityPayload::WebhookDeleted(p)
-            | ActivityPayload::WebhookTriggered(p) => Some(p.webhook_name.clone()),
+            | ActivityPayload::WebhookDeleted(p) => Some(p.webhook_name.clone()),
 
             ActivityPayload::PolicyCreated(p)
             | ActivityPayload::PolicyUpdated(p)
@@ -415,13 +410,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn connection_object_has_id_and_display_name_label() {
+    fn connection_object_has_prefixed_id_and_display_name_label() {
         let id = Uuid::now_v7();
+        let connection_id = ConnectionId::from_uuid(id);
         let p = ActivityPayload::ConnectionCreated(ConnectionActivityParams {
-            connection_id: id,
+            connection_id,
             connection_name: "Prod S3".to_owned(),
         });
-        assert_eq!(p.object_id(), Some(id.to_string()));
+        // `object_id` carries the client-facing prefixed id (`conn_…`), matching
+        // how the REST API exposes the same connection.
+        assert_eq!(p.object_id(), Some(connection_id.to_string()));
+        assert!(p.object_id().unwrap().starts_with("conn_"));
         assert_eq!(p.object_label(), Some("Prod S3".to_owned()));
     }
 
@@ -443,5 +442,29 @@ mod tests {
         });
         assert_eq!(p.object_id(), Some(id.to_string()));
         assert_eq!(p.object_label(), Some("a@b.com".to_owned()));
+    }
+
+    #[test]
+    fn serializes_as_a_type_data_envelope_and_round_trips() {
+        let file_id = Uuid::now_v7();
+        let payload = ActivityPayload::FileCreated(FileActivityParams {
+            file_id,
+            file_name: "report.pdf".to_owned(),
+        });
+
+        let value = serde_json::to_value(&payload).unwrap();
+        // The durable wire shape: a `type` tag and a nested `data` object (the same
+        // envelope the notification payload and outbox event use). The stored rows
+        // depend on this, so pin it.
+        assert_eq!(value["type"], "file.created");
+        assert_eq!(value["data"]["fileId"], file_id.to_string());
+        assert_eq!(value["data"]["fileName"], "report.pdf");
+        assert!(
+            value.get("fileId").is_none(),
+            "params must nest under `data`"
+        );
+
+        let decoded: ActivityPayload = serde_json::from_value(value).unwrap();
+        assert!(matches!(decoded, ActivityPayload::FileCreated(_)));
     }
 }

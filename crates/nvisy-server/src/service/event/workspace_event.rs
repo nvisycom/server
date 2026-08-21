@@ -54,6 +54,8 @@ pub enum WorkspaceEvent {
     ConnectionUpdated(ConnectionRef),
     #[serde(rename = "connection.deleted")]
     ConnectionDeleted(ConnectionRef),
+    #[serde(rename = "connection.sync.started")]
+    ConnectionSyncStarted(ConnectionRef),
     #[serde(rename = "connection.sync.completed")]
     ConnectionSyncCompleted {
         connection_id: Uuid,

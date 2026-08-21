@@ -107,11 +107,6 @@ impl Workspace {
         !self.settings.is_empty()
     }
 
-    /// Returns whether the workspace allows file uploads.
-    pub fn allows_file_uploads(&self) -> bool {
-        !self.is_deleted()
-    }
-
     /// Returns the age of the workspace since creation.
     pub fn age(&self) -> jiff::Span {
         jiff::Timestamp::now() - jiff::Timestamp::from(self.created_at)
