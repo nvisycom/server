@@ -41,48 +41,15 @@ pub enum SyncStatus {
 }
 
 impl SyncStatus {
-    /// Returns whether the sync is pending.
-    #[inline]
-    pub fn is_pending(self) -> bool {
-        matches!(self, SyncStatus::Pending)
-    }
-
-    /// Returns whether the sync is running.
-    #[inline]
-    pub fn is_running(self) -> bool {
-        matches!(self, SyncStatus::Running)
-    }
-
-    /// Returns whether the sync finished successfully.
-    #[inline]
-    pub fn is_completed(self) -> bool {
-        matches!(self, SyncStatus::Completed)
-    }
-
     /// Returns whether the sync failed.
     #[inline]
     pub fn is_failed(self) -> bool {
         matches!(self, SyncStatus::Failed)
     }
 
-    /// Returns whether the sync was cancelled.
-    #[inline]
-    pub fn is_cancelled(self) -> bool {
-        matches!(self, SyncStatus::Cancelled)
-    }
-
     /// Returns whether the sync is in progress (pending or running).
     #[inline]
     pub fn is_in_progress(self) -> bool {
         matches!(self, SyncStatus::Pending | SyncStatus::Running)
-    }
-
-    /// Returns whether the sync reached a terminal state.
-    #[inline]
-    pub fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            SyncStatus::Completed | SyncStatus::Failed | SyncStatus::Cancelled
-        )
     }
 }

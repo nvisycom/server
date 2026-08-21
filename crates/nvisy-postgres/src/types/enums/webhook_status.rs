@@ -38,22 +38,9 @@ impl WebhookStatus {
         matches!(self, WebhookStatus::Enabled)
     }
 
-    /// Returns whether the webhook was disabled by the user.
-    #[inline]
-    pub fn is_disabled(self) -> bool {
-        matches!(self, WebhookStatus::Disabled)
-    }
-
     /// Returns whether the webhook was suspended by the system.
     #[inline]
     pub fn is_suspended(self) -> bool {
         matches!(self, WebhookStatus::Suspended)
-    }
-
-    /// Returns whether the webhook can be re-enabled (it is off, whether by the
-    /// user or the system).
-    #[inline]
-    pub fn can_enable(self) -> bool {
-        matches!(self, WebhookStatus::Disabled | WebhookStatus::Suspended)
     }
 }

@@ -28,24 +28,9 @@ pub enum SyncDeletionPolicy {
     Delete,
 }
 
-impl SyncDeletionPolicy {
-    /// Returns whether deleted source objects are reconciled at all.
-    #[inline]
-    pub fn removes_files(self) -> bool {
-        matches!(self, SyncDeletionPolicy::Delete)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::SyncDeletionPolicy;
-
-    #[test]
-    fn default_is_ignore_and_never_removes() {
-        assert_eq!(SyncDeletionPolicy::default(), SyncDeletionPolicy::Ignore);
-        assert!(!SyncDeletionPolicy::Ignore.removes_files());
-        assert!(SyncDeletionPolicy::Delete.removes_files());
-    }
 
     #[test]
     fn serde_uses_snake_case() {

@@ -216,36 +216,6 @@ pub enum ActivityType {
 }
 
 impl ActivityType {
-    /// Returns whether this activity type represents a creation event.
-    #[inline]
-    pub fn is_creation(self) -> bool {
-        matches!(
-            self,
-            ActivityType::WorkspaceCreated
-                | ActivityType::InviteCreated
-                | ActivityType::ConnectionCreated
-                | ActivityType::WebhookCreated
-                | ActivityType::FileCreated
-                | ActivityType::PipelineCreated
-                | ActivityType::PolicyCreated
-        )
-    }
-
-    /// Returns whether this activity type represents a deletion event.
-    #[inline]
-    pub fn is_deletion(self) -> bool {
-        matches!(
-            self,
-            ActivityType::WorkspaceDeleted
-                | ActivityType::MemberDeleted
-                | ActivityType::ConnectionDeleted
-                | ActivityType::WebhookDeleted
-                | ActivityType::FileDeleted
-                | ActivityType::PipelineDeleted
-                | ActivityType::PolicyDeleted
-        )
-    }
-
     /// The canonical dotted tag for this type, e.g. `file.created` or
     /// `pipeline.run.completed` — the same string used on the wire and in the DB,
     /// from the variant's `strum(serialize)`.

@@ -26,12 +26,6 @@ pub enum SyncMode {
 }
 
 impl SyncMode {
-    /// Returns whether the connection imports data into the workspace.
-    #[inline]
-    pub fn is_import(self) -> bool {
-        matches!(self, SyncMode::Import)
-    }
-
     /// Returns whether the connection exports data out of the workspace.
     #[inline]
     pub fn is_export(self) -> bool {

@@ -94,39 +94,6 @@ pub struct UpdateWorkspaceMember {
 }
 
 impl WorkspaceMember {
-    /// Returns whether the member has owner privileges.
-    pub fn is_owner(&self) -> bool {
-        matches!(self.member_role, WorkspaceRole::Owner)
-    }
-
-    /// Returns whether the member can invite others.
-    pub fn can_invite(&self) -> bool {
-        matches!(self.member_role, WorkspaceRole::Owner)
-    }
-
-    /// Returns whether the member is a regular member.
-    pub fn is_member(&self) -> bool {
-        self.member_role == WorkspaceRole::Member
-    }
-
-    /// Returns whether the member is a guest.
-    pub fn is_guest(&self) -> bool {
-        self.member_role == WorkspaceRole::Guest
-    }
-
-    /// Returns whether the member can edit workspace content.
-    pub fn can_edit(&self) -> bool {
-        matches!(
-            self.member_role,
-            WorkspaceRole::Owner | WorkspaceRole::Member
-        )
-    }
-
-    /// Returns whether the member can manage other members.
-    pub fn can_manage_members(&self) -> bool {
-        matches!(self.member_role, WorkspaceRole::Owner)
-    }
-
     /// Returns the in-app notification events (without None values).
     pub fn app_notification_events(&self) -> Vec<NotificationEvent> {
         self.notification_events_app
@@ -141,41 +108,6 @@ impl WorkspaceMember {
             .iter()
             .filter_map(|e| *e)
             .collect()
-    }
-
-    /// Returns whether the member has any in-app notification events enabled.
-    pub fn has_app_notifications(&self) -> bool {
-        self.notification_events_app.iter().any(|e| e.is_some())
-    }
-
-    /// Returns whether the member has any email notification events enabled.
-    pub fn has_email_notifications(&self) -> bool {
-        self.notify_via_email && self.notification_events_email.iter().any(|e| e.is_some())
-    }
-
-    /// Returns whether the member can perform administrative actions.
-    pub fn can_administrate(&self) -> bool {
-        self.is_owner()
-    }
-
-    /// Returns whether the member can modify workspace settings.
-    pub fn can_modify_settings(&self) -> bool {
-        self.is_owner()
-    }
-
-    /// Returns whether the member can delete the workspace.
-    pub fn can_delete_workspace(&self) -> bool {
-        self.is_owner()
-    }
-
-    /// Returns whether the member can be promoted to the given role.
-    pub fn can_be_promoted_to(&self, role: WorkspaceRole) -> bool {
-        role > self.member_role
-    }
-
-    /// Returns whether the member can be demoted to the given role.
-    pub fn can_be_demoted_to(&self, role: WorkspaceRole) -> bool {
-        role < self.member_role
     }
 }
 

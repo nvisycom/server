@@ -75,49 +75,6 @@ pub struct UpdateAccountApiToken {
     pub deleted_at: Option<Option<Timestamp>>,
 }
 
-impl AccountApiToken {
-    /// Returns whether the token is currently valid (not expired or deleted).
-    pub fn is_valid(&self) -> bool {
-        !self.is_expired() && !self.is_deleted()
-    }
-
-    /// Returns whether the token has expired.
-    /// Returns false if the token never expires (expired_at is None).
-    pub fn is_expired(&self) -> bool {
-        match self.expired_at {
-            Some(expired_at) => jiff::Timestamp::now() > jiff::Timestamp::from(expired_at),
-            None => false,
-        }
-    }
-
-    /// Returns whether the token is deleted.
-    pub fn is_deleted(&self) -> bool {
-        self.deleted_at.is_some()
-    }
-
-    /// Returns the remaining time until token expires.
-    /// Returns None if the token never expires or has already expired.
-    pub fn time_until_expiry(&self) -> Option<jiff::Span> {
-        let expired_at = self.expired_at?;
-        let now = jiff::Timestamp::now();
-        let expired_at = jiff::Timestamp::from(expired_at);
-        if expired_at > now {
-            Some(expired_at - now)
-        } else {
-            None
-        }
-    }
-
-    /// Returns whether the token is about to expire (within specified minutes).
-    pub fn is_expiring_soon(&self, minutes: i64) -> bool {
-        if let Some(remaining) = self.time_until_expiry() {
-            remaining.get_minutes() <= minutes
-        } else {
-            false
-        }
-    }
-}
-
 impl HasCreatedAt for AccountApiToken {
     fn created_at(&self) -> jiff::Timestamp {
         self.issued_at.into()

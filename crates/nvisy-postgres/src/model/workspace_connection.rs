@@ -87,13 +87,6 @@ pub struct UpdateWorkspaceConnection {
     pub deleted_at: Option<Option<Timestamp>>,
 }
 
-impl WorkspaceConnection {
-    /// Returns whether the connection is deleted.
-    pub fn is_deleted(&self) -> bool {
-        self.deleted_at.is_some()
-    }
-}
-
 impl HasCreatedAt for WorkspaceConnection {
     fn created_at(&self) -> jiff::Timestamp {
         self.created_at.into()

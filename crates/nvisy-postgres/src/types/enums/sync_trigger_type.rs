@@ -29,35 +29,3 @@ pub enum SyncTriggerType {
     #[serde(rename = "webhook")]
     Webhook,
 }
-
-impl SyncTriggerType {
-    /// Returns whether the run was manually triggered.
-    #[inline]
-    pub fn is_manual(self) -> bool {
-        matches!(self, SyncTriggerType::Manual)
-    }
-
-    /// Returns whether the run was scheduled.
-    #[inline]
-    pub fn is_scheduled(self) -> bool {
-        matches!(self, SyncTriggerType::Scheduled)
-    }
-
-    /// Returns whether the run was triggered by a webhook.
-    #[inline]
-    pub fn is_webhook(self) -> bool {
-        matches!(self, SyncTriggerType::Webhook)
-    }
-
-    /// Returns whether the run was triggered automatically (scheduled or webhook).
-    #[inline]
-    pub fn is_automatic(self) -> bool {
-        matches!(self, SyncTriggerType::Scheduled | SyncTriggerType::Webhook)
-    }
-
-    /// Returns whether the run was triggered by user action.
-    #[inline]
-    pub fn is_user_initiated(self) -> bool {
-        matches!(self, SyncTriggerType::Manual)
-    }
-}

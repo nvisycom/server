@@ -82,33 +82,6 @@ pub struct UpdateWorkspacePipeline {
     pub deleted_at: Option<Option<Timestamp>>,
 }
 
-impl WorkspacePipeline {
-    /// Returns whether the pipeline is deleted.
-    pub fn is_deleted(&self) -> bool {
-        self.deleted_at.is_some()
-    }
-
-    /// Returns whether the pipeline is in draft status.
-    pub fn is_draft(&self) -> bool {
-        self.status.is_draft()
-    }
-
-    /// Returns whether the pipeline is enabled.
-    pub fn is_enabled(&self) -> bool {
-        self.status.is_enabled()
-    }
-
-    /// Returns whether the pipeline is disabled.
-    pub fn is_disabled(&self) -> bool {
-        self.status.is_disabled()
-    }
-
-    /// Returns whether the pipeline has a description.
-    pub fn has_description(&self) -> bool {
-        self.description.as_ref().is_some_and(|d| !d.is_empty())
-    }
-}
-
 impl HasCreatedAt for WorkspacePipeline {
     fn created_at(&self) -> jiff::Timestamp {
         self.created_at.into()

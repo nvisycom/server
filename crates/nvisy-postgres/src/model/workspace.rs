@@ -77,51 +77,6 @@ pub struct UpdateWorkspace {
     pub settings: Option<Json<WorkspaceSettings>>,
 }
 
-impl Workspace {
-    /// Returns whether the workspace is deleted.
-    pub fn is_deleted(&self) -> bool {
-        self.deleted_at.is_some()
-    }
-
-    /// Returns whether the workspace has a description.
-    pub fn has_description(&self) -> bool {
-        self.description
-            .as_deref()
-            .is_some_and(|desc| !desc.is_empty())
-    }
-
-    /// Returns whether the workspace has an avatar.
-    pub fn has_avatar(&self) -> bool {
-        self.avatar_url
-            .as_deref()
-            .is_some_and(|url| !url.is_empty())
-    }
-
-    /// Returns whether the workspace has custom metadata.
-    pub fn has_metadata(&self) -> bool {
-        !self.metadata.is_empty()
-    }
-
-    /// Returns whether the workspace has custom settings.
-    pub fn has_settings(&self) -> bool {
-        !self.settings.is_empty()
-    }
-
-    /// Returns the age of the workspace since creation.
-    pub fn age(&self) -> jiff::Span {
-        jiff::Timestamp::now() - jiff::Timestamp::from(self.created_at)
-    }
-
-    /// Returns the display name or a default.
-    pub fn display_name_or_default(&self) -> &str {
-        if self.display_name.is_empty() {
-            "Untitled Workspace"
-        } else {
-            &self.display_name
-        }
-    }
-}
-
 impl HasCreatedAt for Workspace {
     fn created_at(&self) -> jiff::Timestamp {
         self.created_at.into()
