@@ -167,6 +167,7 @@ diesel::table! {
         user_agent -> Nullable<Text>,
         processed_at -> Nullable<Timestamptz>,
         attempts -> Int4,
+        next_attempt_at -> Timestamptz,
         created_at -> Timestamptz,
     }
 }

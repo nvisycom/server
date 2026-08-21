@@ -138,3 +138,4 @@ axum-test = { workspace = true, features = [] }
 anyhow = { workspace = true, features = ["backtrace"] }
 tempfile = { workspace = true, features = [] }
 dotenvy = { workspace = true, features = [] }
+tokio = { workspace = true, features = ["macros", "rt"] }

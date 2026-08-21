@@ -87,6 +87,7 @@ async fn create_webhook(
                 },
                 WorkspaceEvent::WebhookCreated(WebhookRef {
                     webhook_id: webhook.id,
+                    webhook_name: webhook.display_name.clone(),
                 }),
             )
             .await?;
@@ -262,6 +263,12 @@ async fn update_webhook(
     }
 
     let update_data = request.into_model(existing.status)?;
+    // The effective post-update name: the new one if the request set it, else the
+    // existing name.
+    let webhook_name = update_data
+        .display_name
+        .clone()
+        .unwrap_or_else(|| existing.display_name.clone());
 
     // Update the webhook and record the outbox event atomically, so the event is
     // never lost, nor recorded for an update that rolled back.
@@ -276,6 +283,7 @@ async fn update_webhook(
             },
             WorkspaceEvent::WebhookUpdated(WebhookRef {
                 webhook_id: existing.id,
+                webhook_name,
             }),
         )
         .await?;
@@ -349,6 +357,7 @@ async fn delete_webhook(
             },
             WorkspaceEvent::WebhookDeleted(WebhookRef {
                 webhook_id: existing.id,
+                webhook_name: existing.display_name.clone(),
             }),
         )
         .await?;

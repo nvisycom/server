@@ -95,6 +95,7 @@ async fn create_policy(
                 },
                 WorkspaceEvent::PolicyCreated(PolicyRef {
                     policy_id: policy.id,
+                    policy_slug: policy.slug.clone(),
                 }),
             )
             .await?;
@@ -276,6 +277,7 @@ async fn update_policy(
     // Update the policy and record the outbox event atomically, so the event is
     // never lost, nor recorded for an update that rolled back.
     let policy_id = existing.id;
+    let policy_slug = existing.slug.clone();
     conn.transaction(async |conn| {
         conn.update_workspace_policy(policy_id, updates).await?;
         conn.emit_event(
@@ -284,7 +286,10 @@ async fn update_policy(
                 account_id: auth_state.account_id,
                 security: &security,
             },
-            WorkspaceEvent::PolicyUpdated(PolicyRef { policy_id }),
+            WorkspaceEvent::PolicyUpdated(PolicyRef {
+                policy_id,
+                policy_slug,
+            }),
         )
         .await?;
         Ok::<(), Error>(())
@@ -339,6 +344,7 @@ async fn delete_policy(
         .await?
         .item;
     let policy_id = existing.id;
+    let policy_slug = existing.slug.clone();
 
     // Delete the policy and record the outbox event atomically, so the event is
     // never lost, nor recorded for a delete that rolled back.
@@ -350,7 +356,10 @@ async fn delete_policy(
                 account_id: auth_state.account_id,
                 security: &security,
             },
-            WorkspaceEvent::PolicyDeleted(PolicyRef { policy_id }),
+            WorkspaceEvent::PolicyDeleted(PolicyRef {
+                policy_id,
+                policy_slug,
+            }),
         )
         .await?;
         Ok::<(), Error>(())

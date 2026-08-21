@@ -1,14 +1,23 @@
 //! The event-outbox drainer: projects pending events onto their sinks.
 //!
-//! A background worker claims batches of pending [`EventOutbox`] rows, decodes
-//! each into a [`WorkspaceEvent`], and fans it out to the three sinks — the
-//! activity log, the webhook stream, and notifications — then marks the row
-//! processed. A sink failure leaves the row pending for a later retry. This is
-//! the one place the event → sink projection lives, off the request path.
+//! A background worker claims batches of due [`EventOutbox`] rows, decodes each
+//! into a [`WorkspaceEvent`], and projects it onto the three sinks — the activity
+//! log, the webhook stream, and notifications. This is the one place the event →
+//! sink projection lives, off the request path.
+//!
+//! Each batch runs in one transaction: the claim (`FOR UPDATE SKIP LOCKED`), the
+//! durable activity-log write, and the row's completion all commit together, so a
+//! competing drainer never double-projects a row and a crash mid-batch rolls back
+//! cleanly. The activity log is the durable sink and gates the row's completion;
+//! a failed activity write defers the row with a backoff (so a bad row cannot spin
+//! at the head of the queue) instead of blocking the batch. The webhook and
+//! notification sinks are best-effort and fire after the transaction commits — off
+//! the durable events — so their network work never holds a database transaction
+//! open (webhook delivery has its own retry pipeline).
 
 use std::time::Duration;
 
-use nvisy_postgres::PgConn;
+use jiff::SignedDuration;
 use nvisy_postgres::model::{EventOutbox, NewWorkspaceActivity};
 use nvisy_postgres::query::{EventOutboxRepository, WorkspaceActivityRepository};
 use nvisy_postgres::types::{
@@ -18,29 +27,56 @@ use nvisy_postgres::types::{
     PipelineRunAnalyzedParams, PipelineRunCompletedParams, PipelineRunFailedParams,
     PolicyActivityParams, WebhookActivityParams, WebhookEvent, WorkspaceActivityParams,
 };
+use nvisy_postgres::{AsyncConnection, PgConn};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::handler::Result;
-use crate::service::event::{FileRef, PipelineRunRef, WorkspaceEvent};
+use crate::handler::{Error, Result};
+use crate::service::event::{
+    ConnectionRef, FileRef, InviteRef, MemberRef, PipelineRunRef, PolicyRef, WebhookRef,
+    WorkspaceEvent, WorkspaceRef,
+};
 use crate::service::{Infra, NotificationEmitter, WebhookEmitter, Worker};
 
 /// Tracing target for the outbox drainer.
 const TRACING_TARGET: &str = "nvisy_server::service::event::drainer";
 
-/// How often the drainer polls for pending events. Short, since it is the
-/// delivery latency for the activity log, webhooks, and notifications.
+/// How often the drainer polls for due events. Short, since it is the delivery
+/// latency for the activity log, webhooks, and notifications.
 const TICK_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Maximum events drained per tick, bounding the work (and lock hold) per pass.
 const DRAIN_BATCH: i64 = 100;
+
+/// Base unit of the retry backoff: a failed row's next attempt is deferred by
+/// `RETRY_BACKOFF_BASE * attempts` (linear), capped at [`RETRY_BACKOFF_MAX`].
+const RETRY_BACKOFF_BASE: SignedDuration = SignedDuration::from_secs(30);
+
+/// Ceiling on the retry backoff, so a long-failing row still retries periodically.
+const RETRY_BACKOFF_MAX: SignedDuration = SignedDuration::from_hours(1);
 
 /// Drains the event outbox, projecting each pending event onto its sinks.
 pub struct EventOutboxDrainer {
     infra: Infra,
     webhook: WebhookEmitter,
     notification: NotificationEmitter,
+}
+
+/// The tally of one [`drain_batch`](EventOutboxDrainer::drain_batch) pass: how
+/// many due rows were claimed and how many of those durably processed. The
+/// remainder were deferred (failing, backing off) — a rising deferred count is
+/// the signal that events are not draining.
+struct DrainPass {
+    claimed: usize,
+    processed: usize,
+}
+
+impl DrainPass {
+    /// Rows claimed but not processed this pass: deferred with a backoff.
+    fn deferred(&self) -> usize {
+        self.claimed - self.processed
+    }
 }
 
 impl Worker for EventOutboxDrainer {
@@ -77,12 +113,28 @@ impl EventOutboxDrainer {
     }
 
     /// One drain pass: claim and project batches until a short page signals the
-    /// pending set is drained.
+    /// due set is drained.
     async fn tick(&self) {
         loop {
             match self.drain_batch().await {
-                Ok(count) if count < DRAIN_BATCH as usize => break,
-                Ok(_) => {}
+                Ok(pass) => {
+                    // A pass where rows were claimed but few committed means events
+                    // are failing and backing off — surface it for monitoring.
+                    if pass.deferred() > 0 {
+                        tracing::warn!(
+                            target: TRACING_TARGET,
+                            claimed = pass.claimed,
+                            processed = pass.processed,
+                            deferred = pass.deferred(),
+                            "Outbox drain pass deferred failing events",
+                        );
+                    } else if pass.claimed > 0 {
+                        tracing::debug!(target: TRACING_TARGET, processed = pass.processed, "Outbox drain pass processed events");
+                    }
+                    if pass.claimed < DRAIN_BATCH as usize {
+                        break;
+                    }
+                }
                 Err(err) => {
                     tracing::error!(target: TRACING_TARGET, error = %err, "Outbox drain pass failed");
                     break;
@@ -91,71 +143,94 @@ impl EventOutboxDrainer {
         }
     }
 
-    /// Claims one batch and projects each event, returning how many rows it
-    /// claimed. Each row is marked processed on success, or has its attempt
-    /// recorded (staying pending) on a decode/sink failure.
-    async fn drain_batch(&self) -> Result<usize> {
+    /// Drains one batch: claims due rows and writes their durable activity-log
+    /// entries in a single transaction, then dispatches the best-effort side
+    /// effects for the rows that committed. Returns the [`DrainPass`] tally.
+    ///
+    /// The transaction holds the claim's `FOR UPDATE SKIP LOCKED` locks through
+    /// completion, so the claim, each activity write, and each row's state
+    /// transition commit atomically and no other drainer can take the same rows. A
+    /// row whose event cannot decode or whose activity write fails is deferred with
+    /// a backoff rather than blocking the batch.
+    async fn drain_batch(&self) -> Result<DrainPass> {
         let mut conn = self.infra.postgres.get_connection().await?;
-        let batch = conn.claim_outbox_batch(DRAIN_BATCH).await?;
-        let count = batch.len();
 
-        for row in batch {
-            let id = row.id;
-            let outcome = match serde_json::from_value::<WorkspaceEvent>(row.event.clone()) {
-                Ok(event) => self.deliver(&mut conn, &row, event).await,
-                // A row that will never decode is poison; treat it as a failure so
-                // it stays pending and surfaces rather than blocking silently.
-                Err(err) => {
-                    tracing::error!(target: TRACING_TARGET, error = %err, %id, "Failed to decode outbox event");
-                    Err(())
+        // The transaction returns the claimed count and the committed events, so
+        // the side effects below run only for rows that durably landed.
+        let (claimed, committed) = conn
+            .transaction(async |conn| {
+                let batch = conn.claim_outbox_batch(DRAIN_BATCH).await?;
+                let claimed = batch.len();
+                let mut committed = Vec::with_capacity(claimed);
+
+                for row in batch {
+                    match self.record_activity(conn, &row).await {
+                        Ok(event) => {
+                            conn.mark_outbox_processed(row.id).await?;
+                            committed.push((row, event));
+                        }
+                        Err(()) => {
+                            let backoff = retry_backoff(row.attempts);
+                            conn.defer_outbox_attempt(row.id, backoff).await?;
+                        }
+                    }
                 }
-            };
 
-            let marked = match outcome {
-                Ok(()) => conn.mark_outbox_processed(id).await,
-                Err(()) => conn.record_outbox_failure(id).await,
-            };
-            if let Err(err) = marked {
-                tracing::warn!(target: TRACING_TARGET, error = %err, %id, "Failed to update outbox row after delivery");
-            }
+                Ok::<_, Error>((claimed, committed))
+            })
+            .await?;
+
+        let processed = committed.len();
+        for (row, event) in committed {
+            self.dispatch_side_effects(&row, &event).await;
         }
 
-        Ok(count)
+        Ok(DrainPass { claimed, processed })
     }
 
-    /// Projects one event onto its sinks, returning `Ok` once the durable sink —
-    /// the activity log — is written; the row is then marked processed. A failed
-    /// activity write returns `Err`, leaving the row pending for a later retry.
-    /// The webhook and notification sinks are best-effort: a failure there is
-    /// logged and does not hold up the row (delivery to them is at-most-once).
-    async fn deliver(
+    /// Writes the durable activity-log entry for one row, returning its decoded
+    /// event so the caller can drive the side effects. Returns `Err` if the row
+    /// cannot decode or the activity write fails, so the caller defers it.
+    ///
+    /// Runs inside the batch transaction: the activity write and the row's
+    /// `mark_outbox_processed` commit together, so the activity log is the durable
+    /// record and no event is recorded for a row that did not complete.
+    async fn record_activity(
         &self,
         conn: &mut PgConn,
         row: &EventOutbox,
-        event: WorkspaceEvent,
-    ) -> std::result::Result<(), ()> {
-        let workspace_id = row.workspace_id;
-        let actor = row.account_id;
+    ) -> std::result::Result<WorkspaceEvent, ()> {
+        let event = serde_json::from_value::<WorkspaceEvent>(row.event.clone()).map_err(|err| {
+            tracing::error!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to decode outbox event");
+        })?;
 
-        // Activity log — the durable sink. Every event produces one entry, stamped
-        // with the stored security context.
         let activity = activity_of(&event);
         let activity_row = NewWorkspaceActivity {
-            workspace_id,
-            account_id: actor,
+            workspace_id: row.workspace_id,
+            account_id: row.account_id,
             activity_type: activity.activity_type(),
             params: Json::encode(&activity),
             ip_address: row.ip_address,
             user_agent: row.user_agent.clone(),
         };
-        if let Err(err) = conn.log_activity(activity_row).await {
-            tracing::warn!(target: TRACING_TARGET, error = %err, %workspace_id, "Failed to record activity; leaving event pending");
-            return Err(());
-        }
+        conn.log_activity(activity_row).await.map_err(|err| {
+            tracing::warn!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to record activity; deferring event");
+        })?;
+
+        Ok(event)
+    }
+
+    /// Dispatches the best-effort side effects for a committed event: the webhook
+    /// stream and in-app notifications. Runs after the batch transaction commits,
+    /// so these never hold a database transaction open across their network work;
+    /// each is at-most-once (webhook delivery has its own retry pipeline).
+    async fn dispatch_side_effects(&self, row: &EventOutbox, event: &WorkspaceEvent) {
+        let workspace_id = row.workspace_id;
+        let actor = row.account_id;
 
         // Webhook — only the events the webhook vocabulary carries.
-        if let Some((webhook_event, data)) = webhook_of(&event) {
-            let resource_id = resource_id_of(&event);
+        if let Some((webhook_event, data)) = webhook_of(event) {
+            let resource_id = resource_id_of(event);
             if let Err(err) = self
                 .webhook
                 .emit(workspace_id, webhook_event, resource_id, Some(actor), data)
@@ -166,7 +241,7 @@ impl EventOutboxDrainer {
         }
 
         // Notification — only the events that raise one.
-        if let Some((recipient, payload)) = notification_of(event)
+        if let Some((recipient, payload)) = notification_of(event.clone())
             && let Err(err) = self
                 .notification
                 .notify_account(workspace_id, recipient, payload)
@@ -174,27 +249,46 @@ impl EventOutboxDrainer {
         {
             tracing::warn!(target: TRACING_TARGET, error = %err, %workspace_id, %recipient, "Failed to notify");
         }
-
-        Ok(())
     }
+}
+
+/// The delay before a failed row's next attempt: linear in `attempts` (the count
+/// before this failure), capped at [`RETRY_BACKOFF_MAX`], so a transient failure
+/// retries soon while a persistently failing row backs off the queue head.
+fn retry_backoff(attempts: i32) -> SignedDuration {
+    let steps = attempts.max(0).saturating_add(1);
+    RETRY_BACKOFF_BASE
+        .checked_mul(steps)
+        .unwrap_or(RETRY_BACKOFF_MAX)
+        .min(RETRY_BACKOFF_MAX)
 }
 
 /// The activity-log payload for an event. Total: every event is recorded.
 fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
     use WorkspaceEvent as E;
 
-    let workspace = |workspace_slug: &Handle| WorkspaceActivityParams {
-        workspace_slug: workspace_slug.clone(),
+    let workspace = |w: &WorkspaceRef| WorkspaceActivityParams {
+        workspace_slug: w.workspace_slug.clone(),
     };
-    let member = |member_username: &Handle| MemberActivityParams {
-        member_username: member_username.clone(),
+    let member = |m: &MemberRef| MemberActivityParams {
+        member_username: m.member_username.clone(),
     };
-    let invite = |invite_id: Uuid, email: &str| InviteActivityParams {
-        invite_id,
-        email: email.to_owned(),
+    let invite = |i: &InviteRef| InviteActivityParams {
+        invite_id: i.invite_id,
+        email: i.email.clone(),
     };
-    let connection = |connection_id: Uuid| ConnectionActivityParams { connection_id };
-    let webhook = |webhook_id: Uuid| WebhookActivityParams { webhook_id };
+    let connection = |c: &ConnectionRef| ConnectionActivityParams {
+        connection_id: c.connection_id,
+        connection_name: c.connection_name.clone(),
+    };
+    let connection_sync = |connection_id: Uuid, connection_name: &str| ConnectionActivityParams {
+        connection_id,
+        connection_name: connection_name.to_owned(),
+    };
+    let webhook = |w: &WebhookRef| WebhookActivityParams {
+        webhook_id: w.webhook_id,
+        webhook_name: w.webhook_name.clone(),
+    };
     let file_params = |file: &FileRef| FileActivityParams {
         file_id: file.file_id,
         file_name: file.file_name.clone(),
@@ -206,37 +300,43 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
         pipeline_slug: run.pipeline_slug.clone(),
         run_id: run.run_id,
     };
-    let policy = |policy_id: Uuid| PolicyActivityParams { policy_id };
+    let policy = |p: &PolicyRef| PolicyActivityParams {
+        policy_id: p.policy_id,
+        policy_slug: p.policy_slug.clone(),
+    };
 
     match event {
-        E::WorkspaceCreated { workspace_slug } => {
-            ActivityPayload::WorkspaceCreated(workspace(workspace_slug))
+        E::WorkspaceCreated(w) => ActivityPayload::WorkspaceCreated(workspace(w)),
+        E::WorkspaceUpdated(w) => ActivityPayload::WorkspaceUpdated(workspace(w)),
+        E::WorkspaceDeleted(w) => ActivityPayload::WorkspaceDeleted(workspace(w)),
+        E::MemberAdded(m) => ActivityPayload::MemberAdded(member(m)),
+        E::MemberUpdated(m) => ActivityPayload::MemberUpdated(member(m)),
+        E::MemberDeleted(m) => ActivityPayload::MemberDeleted(member(m)),
+        E::InviteCreated(i) => ActivityPayload::InviteCreated(invite(i)),
+        E::InviteAccepted(i) => ActivityPayload::InviteAccepted(invite(i)),
+        E::InviteDeclined(i) => ActivityPayload::InviteDeclined(invite(i)),
+        E::InviteCanceled(i) => ActivityPayload::InviteCanceled(invite(i)),
+        E::ConnectionCreated(c) => ActivityPayload::ConnectionCreated(connection(c)),
+        E::ConnectionUpdated(c) => ActivityPayload::ConnectionUpdated(connection(c)),
+        E::ConnectionDeleted(c) => ActivityPayload::ConnectionDeleted(connection(c)),
+        E::ConnectionSyncCompleted {
+            connection_id,
+            connection_name,
+            ..
+        } => ActivityPayload::ConnectionSyncCompleted(connection_sync(
+            *connection_id,
+            connection_name,
+        )),
+        E::ConnectionSyncFailed {
+            connection_id,
+            connection_name,
+            ..
+        } => {
+            ActivityPayload::ConnectionSyncFailed(connection_sync(*connection_id, connection_name))
         }
-        E::WorkspaceUpdated { workspace_slug } => {
-            ActivityPayload::WorkspaceUpdated(workspace(workspace_slug))
-        }
-        E::WorkspaceDeleted { workspace_slug, .. } => {
-            ActivityPayload::WorkspaceDeleted(workspace(workspace_slug))
-        }
-        E::MemberAdded { member_username } => ActivityPayload::MemberAdded(member(member_username)),
-        E::MemberUpdated(m) => ActivityPayload::MemberUpdated(member(&m.member_username)),
-        E::MemberDeleted(m) => ActivityPayload::MemberDeleted(member(&m.member_username)),
-        E::InviteCreated(i) => ActivityPayload::InviteCreated(invite(i.invite_id, &i.email)),
-        E::InviteAccepted(i) => ActivityPayload::InviteAccepted(invite(i.invite_id, &i.email)),
-        E::InviteDeclined(i) => ActivityPayload::InviteDeclined(invite(i.invite_id, &i.email)),
-        E::InviteCanceled(i) => ActivityPayload::InviteCanceled(invite(i.invite_id, &i.email)),
-        E::ConnectionCreated(c) => ActivityPayload::ConnectionCreated(connection(c.connection_id)),
-        E::ConnectionUpdated(c) => ActivityPayload::ConnectionUpdated(connection(c.connection_id)),
-        E::ConnectionDeleted(c) => ActivityPayload::ConnectionDeleted(connection(c.connection_id)),
-        E::ConnectionSyncCompleted { connection_id, .. } => {
-            ActivityPayload::ConnectionSyncCompleted(connection(*connection_id))
-        }
-        E::ConnectionSyncFailed { connection_id, .. } => {
-            ActivityPayload::ConnectionSyncFailed(connection(*connection_id))
-        }
-        E::WebhookCreated(w) => ActivityPayload::WebhookCreated(webhook(w.webhook_id)),
-        E::WebhookUpdated(w) => ActivityPayload::WebhookUpdated(webhook(w.webhook_id)),
-        E::WebhookDeleted(w) => ActivityPayload::WebhookDeleted(webhook(w.webhook_id)),
+        E::WebhookCreated(w) => ActivityPayload::WebhookCreated(webhook(w)),
+        E::WebhookUpdated(w) => ActivityPayload::WebhookUpdated(webhook(w)),
+        E::WebhookDeleted(w) => ActivityPayload::WebhookDeleted(webhook(w)),
         E::FileCreated { file, .. } => ActivityPayload::FileCreated(file_params(file)),
         E::FileUpdated(f) => ActivityPayload::FileUpdated(file_params(f)),
         E::FileDeleted(f) => ActivityPayload::FileDeleted(file_params(f)),
@@ -247,9 +347,9 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
         E::PipelineRunAnalyzed { run: r, .. } => ActivityPayload::PipelineRunAnalyzed(run(r)),
         E::PipelineRunCompleted { run: r, .. } => ActivityPayload::PipelineRunCompleted(run(r)),
         E::PipelineRunFailed { run: r, .. } => ActivityPayload::PipelineRunFailed(run(r)),
-        E::PolicyCreated(p) => ActivityPayload::PolicyCreated(policy(p.policy_id)),
-        E::PolicyUpdated(p) => ActivityPayload::PolicyUpdated(policy(p.policy_id)),
-        E::PolicyDeleted(p) => ActivityPayload::PolicyDeleted(policy(p.policy_id)),
+        E::PolicyCreated(p) => ActivityPayload::PolicyCreated(policy(p)),
+        E::PolicyUpdated(p) => ActivityPayload::PolicyUpdated(policy(p)),
+        E::PolicyDeleted(p) => ActivityPayload::PolicyDeleted(policy(p)),
     }
 }
 
@@ -258,7 +358,7 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
 fn webhook_of(event: &WorkspaceEvent) -> Option<(WebhookEvent, Option<Value>)> {
     use WorkspaceEvent as E;
     let webhook = match event {
-        E::MemberAdded { .. } => (WebhookEvent::MemberAdded, None),
+        E::MemberAdded(..) => (WebhookEvent::MemberAdded, None),
         E::MemberUpdated(..) => (WebhookEvent::MemberUpdated, None),
         E::MemberDeleted(..) => (WebhookEvent::MemberDeleted, None),
         E::ConnectionCreated(..) => (WebhookEvent::ConnectionCreated, None),
@@ -293,9 +393,9 @@ fn webhook_of(event: &WorkspaceEvent) -> Option<(WebhookEvent, Option<Value>)> {
         E::PolicyCreated(..) => (WebhookEvent::PolicyCreated, None),
         E::PolicyUpdated(..) => (WebhookEvent::PolicyUpdated, None),
         E::PolicyDeleted(..) => (WebhookEvent::PolicyDeleted, None),
-        E::WorkspaceCreated { .. }
-        | E::WorkspaceUpdated { .. }
-        | E::WorkspaceDeleted { .. }
+        E::WorkspaceCreated(..)
+        | E::WorkspaceUpdated(..)
+        | E::WorkspaceDeleted(..)
         | E::InviteCreated(..)
         | E::InviteAccepted(..)
         | E::InviteDeclined(..)
@@ -316,6 +416,7 @@ fn notification_of(event: WorkspaceEvent) -> Option<(Uuid, NotificationPayload)>
             connection_id,
             records_synced,
             notify,
+            ..
         } => notify.map(|to| {
             (
                 to,
@@ -329,6 +430,7 @@ fn notification_of(event: WorkspaceEvent) -> Option<(Uuid, NotificationPayload)>
             connection_id,
             error,
             notify,
+            ..
         } => notify.map(|to| {
             (
                 to,
@@ -380,13 +482,13 @@ fn notification_of(event: WorkspaceEvent) -> Option<(Uuid, NotificationPayload)>
     }
 }
 
-/// The affected resource's id, for the webhook payload. Meaningful only for
-/// events that raise a webhook (see [`webhook_of`]).
+/// The affected resource's id, for the webhook payload. Every event carries its
+/// resource's id, so consumers always receive a real identifier.
 fn resource_id_of(event: &WorkspaceEvent) -> Uuid {
     use WorkspaceEvent as E;
     match event {
-        E::WorkspaceDeleted { workspace_id, .. } => *workspace_id,
-        E::MemberUpdated(m) | E::MemberDeleted(m) => m.member_id,
+        E::WorkspaceCreated(w) | E::WorkspaceUpdated(w) | E::WorkspaceDeleted(w) => w.workspace_id,
+        E::MemberAdded(m) | E::MemberUpdated(m) | E::MemberDeleted(m) => m.member_id,
         E::InviteCreated(i)
         | E::InviteAccepted(i)
         | E::InviteDeclined(i)
@@ -405,8 +507,5 @@ fn resource_id_of(event: &WorkspaceEvent) -> Uuid {
         | E::PipelineRunCompleted { run, .. }
         | E::PipelineRunFailed { run, .. } => run.run_id,
         E::PolicyCreated(p) | E::PolicyUpdated(p) | E::PolicyDeleted(p) => p.policy_id,
-        E::WorkspaceCreated { .. } | E::WorkspaceUpdated { .. } | E::MemberAdded { .. } => {
-            Uuid::nil()
-        }
     }
 }

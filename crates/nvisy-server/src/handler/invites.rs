@@ -35,7 +35,8 @@ use crate::handler::response::{
 };
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
-    EventEmitter, EventOrigin, InviteRef, NotificationEmitter, ServiceState, WorkspaceEvent,
+    EventEmitter, EventOrigin, InviteRef, MemberRef, NotificationEmitter, ServiceState,
+    WorkspaceEvent,
 };
 
 /// Tracing target for workspace invite operations.
@@ -142,7 +143,7 @@ pub async fn create_invite(
                 },
                 WorkspaceEvent::InviteCreated(InviteRef {
                     invite_id: invite.id,
-                    email: request.invitee_email.clone(),
+                    email: Some(request.invitee_email.clone()),
                 }),
             )
             .await?;
@@ -327,7 +328,7 @@ async fn cancel_invite(
             },
             WorkspaceEvent::InviteCanceled(InviteRef {
                 invite_id: invite.id,
-                email: invite.invitee_email.unwrap_or_default(),
+                email: invite.invitee_email,
             }),
         )
         .await?;
@@ -426,7 +427,7 @@ async fn reply_to_invite(
                 },
                 WorkspaceEvent::InviteDeclined(InviteRef {
                     invite_id: invite.id,
-                    email: invite.invitee_email.clone().unwrap_or_default(),
+                    email: invite.invitee_email.clone(),
                 }),
             )
             .await?;
@@ -629,7 +630,7 @@ async fn reply_to_invite_code(
                 },
                 WorkspaceEvent::InviteDeclined(InviteRef {
                     invite_id: invite.id,
-                    email: invite.invitee_email.clone().unwrap_or_default(),
+                    email: invite.invitee_email.clone(),
                 }),
             )
             .await?;
@@ -684,7 +685,7 @@ async fn accept_invite_as_member(
     let invite_id = invite.id;
     let workspace_id = invite.workspace_id;
     let invited_role = invite.invited_role;
-    let email = invite.invitee_email.clone().unwrap_or_default();
+    let email = invite.invitee_email.clone();
 
     let member = conn
         .transaction(async |conn| {
@@ -693,7 +694,9 @@ async fn accept_invite_as_member(
             let new_member = NewWorkspaceMember::new(workspace_id, account_id, invited_role);
             conn.add_workspace_member(new_member).await?;
 
-            let member = conn
+            // Read the member back with its account to name the added member in
+            // the event; the member is keyed by `account_id`.
+            let (workspace_member, account) = conn
                 .find_workspace_member_with_account(workspace_id, account_id)
                 .await?
                 .ok_or_else(|| PgError::Unexpected("Member not found after insert".into()))?;
@@ -710,13 +713,14 @@ async fn accept_invite_as_member(
             .await?;
             conn.emit_event(
                 origin,
-                WorkspaceEvent::MemberAdded {
-                    member_username: member.1.username.clone(),
-                },
+                WorkspaceEvent::MemberAdded(MemberRef {
+                    member_id: account_id,
+                    member_username: account.username.clone(),
+                }),
             )
             .await?;
 
-            Ok::<_, Error>(member)
+            Ok::<_, Error>((workspace_member, account))
         })
         .await?;
 

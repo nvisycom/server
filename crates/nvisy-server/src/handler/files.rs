@@ -131,12 +131,13 @@ struct FileUploadContext {
 
 /// Streams one multipart file to storage and builds its unsaved row.
 ///
-/// The row is returned rather than inserted, so the caller can persist it and
-/// record its creation event in one transaction.
+/// Returns the object's storage key alongside the row (rather than inserting it),
+/// so the caller can persist the row and record its creation event in one
+/// transaction, and reclaim the already-stored object if that transaction fails.
 async fn process_single_file(
     ctx: &FileUploadContext,
     field: Field<'_>,
-) -> Result<NewWorkspaceFile> {
+) -> Result<(FileKey, NewWorkspaceFile)> {
     let filename = field
         .file_name()
         .map(ToString::to_string)
@@ -199,7 +200,7 @@ async fn process_single_file(
         ..Default::default()
     };
 
-    Ok(file_record)
+    Ok((file_key, file_record))
 }
 
 /// Uploads input files to a workspace for processing.
@@ -267,11 +268,11 @@ async fn upload_file(
             continue;
         }
 
-        let file_record = process_single_file(&ctx, field).await?;
+        let (file_key, file_record) = process_single_file(&ctx, field).await?;
 
         // Persist the row and record its creation event in one transaction, so
         // the event is never lost, nor recorded for a row that rolled back.
-        let created_file = conn
+        let created_file = match conn
             .transaction(async |conn| {
                 let created_file = conn.create_workspace_file(file_record).await?;
                 conn.emit_event(
@@ -291,7 +292,25 @@ async fn upload_file(
                 .await?;
                 Ok::<_, Error>(created_file)
             })
-            .await?;
+            .await
+        {
+            Ok(created_file) => created_file,
+            Err(err) => {
+                // The object was streamed to storage before this transaction, so a
+                // rollback leaves it with no row and nothing can reclaim it later
+                // (the reaper works from file rows). Remove it best-effort before
+                // surfacing the error.
+                if let Err(cleanup) = ctx.file_store.delete(&file_key).await {
+                    tracing::warn!(
+                        target: TRACING_TARGET,
+                        error = %cleanup,
+                        object_id = %file_key.object_id,
+                        "Failed to remove orphaned object after rolled-back file insert",
+                    );
+                }
+                return Err(err);
+            }
+        };
 
         uploaded_files.push(response::File::from_model(
             created_file,

@@ -33,6 +33,9 @@ pub struct EventOutbox {
     pub processed_at: Option<Timestamp>,
     /// Number of delivery attempts the drainer has made.
     pub attempts: i32,
+    /// Earliest time the row may next be claimed; advanced by a backoff after
+    /// each failed attempt.
+    pub next_attempt_at: Timestamp,
     /// When the event was raised.
     pub created_at: Timestamp,
 }
