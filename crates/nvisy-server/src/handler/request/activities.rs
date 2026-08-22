@@ -1,7 +1,8 @@
 //! Workspace activity request types.
 
+use jiff::civil::Date;
 use nvisy_postgres::query::ActivityFilter;
-use nvisy_postgres::types::ActivityType;
+use nvisy_postgres::types::{ActivityType, Handle};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -13,83 +14,99 @@ use crate::handler::request::{CursorPagination, DateWindow, ExportFormat, Resolv
 /// materialize an unbounded result; a truncated export says so in its response.
 pub const MAX_EXPORT_ROWS: usize = 100_000;
 
-/// The non-window activity filters — type and actor — shared by the feed and the
-/// export so both narrow the log the same way.
-///
-/// The two fields are inlined into each query struct rather than `#[serde(flatten)]`ed
-/// as a nested group: the query extractor only collects a repeated key like
-/// `type=a&type=b` into a `Vec` for a top-level field, not one reached through a
-/// flattened map. The shared conversion lives here, in
-/// [`build`](ActivityFilterFields::build), instead.
-struct ActivityFilterFields {
-    types: Option<Vec<ActivityType>>,
-    actor: Option<Uuid>,
-}
-
-impl ActivityFilterFields {
-    /// Builds the repository filter, attaching the resolved half-open time bounds
-    /// (either may be `None`).
-    fn build(self, from: Option<jiff::Timestamp>, to: Option<jiff::Timestamp>) -> ActivityFilter {
-        ActivityFilter {
-            types: self.types.unwrap_or_default(),
-            actor: self.actor,
-            from,
-            to,
-        }
-    }
-}
-
 /// Query parameters for the activity feed: the type/actor filter, an optional date
 /// window (narrows only when given — the feed is otherwise all-time), and cursor
 /// pagination.
+///
+/// Every field is a top-level query key rather than a `#[serde(flatten)]`ed
+/// sub-struct: the query extractor (`serde_html_form`) mis-handles flattened
+/// structs — a flattened `CursorPagination` fails to deserialize even a bare
+/// `?limit=` — so the window and pagination fields are inlined and their helper
+/// types rebuilt in the accessors.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityListQuery {
     /// Keep only these activity types (e.g. `file.created`). Repeat the `type`
-    /// parameter for several; omit for no type constraint. The field is `types`
-    /// since `type` is a reserved word.
+    /// parameter for several; omit for no type constraint.
+    // Named `types` because `type` is a reserved word; exposed as `type`.
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub types: Option<Vec<ActivityType>>,
-    /// Keep only activities performed by this account. Omit for any actor.
+    /// Username of the account whose activities to keep. Omit for any actor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor: Option<Uuid>,
-    /// Optional `from`/`to` day range; each bound narrows the feed only if given.
-    #[serde(flatten)]
-    pub window: DateWindow,
-    /// Cursor pagination.
-    #[serde(flatten)]
-    pub pagination: CursorPagination,
+    pub actor: Option<Handle>,
+    /// First day of the range (inclusive), `YYYY-MM-DD`. Narrows the feed only if
+    /// given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<Date>,
+    /// Last day of the range (inclusive), `YYYY-MM-DD`. Narrows the feed only if
+    /// given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<Date>,
+    /// Maximum number of records to return (1-100, default 20).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// Cursor pointing to the last item of the previous page (from `nextCursor`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
+    /// Whether to include the total item count in the response's `total` field.
+    #[serde(default)]
+    pub include_count: bool,
 }
 
 impl ActivityListQuery {
     /// Resolves the repository filter, validating the optional window bounds.
-    pub fn to_filter(&self) -> Result<ActivityFilter> {
-        let (from, to) = self.window.resolve_optional_bounds()?;
-        let fields = ActivityFilterFields {
-            types: self.types.clone(),
-            actor: self.actor,
-        };
-        Ok(fields.build(from, to))
+    /// `actor_id` is the account id the [`actor`](Self::actor) username resolved to
+    /// (the handler resolves it); `None` means no actor constraint.
+    pub fn to_filter(&self, actor_id: Option<Uuid>) -> Result<ActivityFilter> {
+        let (from, to) = self.window().resolve_optional_bounds()?;
+        Ok(ActivityFilter {
+            types: self.types.clone().unwrap_or_default(),
+            actor: actor_id,
+            from,
+            to,
+        })
+    }
+
+    /// The cursor pagination for this request.
+    pub fn pagination(&self) -> CursorPagination {
+        CursorPagination {
+            limit: self.limit,
+            after: self.after.clone(),
+            include_count: self.include_count,
+        }
+    }
+
+    fn window(&self) -> DateWindow {
+        DateWindow {
+            from: self.from,
+            to: self.to,
+        }
     }
 }
 
 /// Query parameters for the activity export: the type/actor filter, a bounded date
 /// window (defaulted and capped, since the export materializes rows), and the
 /// output `format`. See [`DateWindow`] for the range defaults and bounds.
+///
+/// Fields are inlined rather than `#[serde(flatten)]`ed for the same reason as
+/// [`ActivityListQuery`].
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityExportQuery {
     /// Keep only these activity types (e.g. `file.created`). Repeat the `type`
-    /// parameter for several; omit for no type constraint. The field is `types`
-    /// since `type` is a reserved word.
+    /// parameter for several; omit for no type constraint.
+    // Named `types` because `type` is a reserved word; exposed as `type`.
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub types: Option<Vec<ActivityType>>,
-    /// Keep only activities performed by this account. Omit for any actor.
+    /// Username of the account whose activities to keep. Omit for any actor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor: Option<Uuid>,
-    /// The `from`/`to` day range.
-    #[serde(flatten)]
-    pub window: DateWindow,
+    pub actor: Option<Handle>,
+    /// First day of the range (inclusive), `YYYY-MM-DD`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<Date>,
+    /// Last day of the range (inclusive), `YYYY-MM-DD`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<Date>,
     /// Output format; defaults to `csv`.
     #[serde(default)]
     pub format: ExportFormat,
@@ -110,13 +127,19 @@ pub struct ResolvedExport {
 impl ActivityExportQuery {
     /// Resolves the request: validates and defaults the window, folds it plus the
     /// type/actor filter into one repository filter, and carries the format.
-    pub fn resolve(&self) -> Result<ResolvedExport> {
-        let window = self.window.resolve()?;
-        let fields = ActivityFilterFields {
-            types: self.types.clone(),
-            actor: self.actor,
+    /// `actor_id` is the account id the [`actor`](Self::actor) username resolved to.
+    pub fn resolve(&self, actor_id: Option<Uuid>) -> Result<ResolvedExport> {
+        let window = DateWindow {
+            from: self.from,
+            to: self.to,
+        }
+        .resolve()?;
+        let filter = ActivityFilter {
+            types: self.types.clone().unwrap_or_default(),
+            actor: actor_id,
+            from: Some(window.from_timestamp()?),
+            to: Some(window.to_timestamp()?),
         };
-        let filter = fields.build(Some(window.from_timestamp()?), Some(window.to_timestamp()?));
         Ok(ResolvedExport {
             filter,
             window,
@@ -195,5 +218,28 @@ mod tests {
         assert_eq!(list.types, None, "no `type` means no type constraint");
         let export: ActivityExportQuery = extract("").await;
         assert_eq!(export.types, None);
+    }
+
+    #[tokio::test]
+    async fn list_query_parses_pagination_and_window_without_flatten() {
+        // Regression: with the fields flattened, `serde_html_form` rejected even a
+        // bare `?limit=`. Inlining them fixes it.
+        let query: ActivityListQuery = extract("limit=50").await;
+        assert_eq!(query.limit, Some(50));
+        assert_eq!(query.pagination().limit, Some(50));
+
+        let query: ActivityListQuery = extract("limit=25&after=abc&includeCount=true").await;
+        assert_eq!(query.limit, Some(25));
+        assert_eq!(query.after.as_deref(), Some("abc"));
+        assert!(query.include_count);
+
+        let query: ActivityListQuery = extract("from=2026-01-01&to=2026-01-31").await;
+        assert!(query.from.is_some() && query.to.is_some());
+    }
+
+    #[tokio::test]
+    async fn actor_is_parsed_as_a_username_handle() {
+        let query: ActivityListQuery = extract("actor=alice").await;
+        assert_eq!(query.actor.map(|h| h.to_string()), Some("alice".to_owned()));
     }
 }
