@@ -22,7 +22,7 @@ pub use constraint::{
     WorkspacePolicyConstraints, WorkspaceWebhookConstraints,
 };
 pub use enums::{
-    ActivityType, ApiTokenType, ChatRole, FileKind, InviteStatus, NotificationEvent,
+    ActivityType, ApiTokenType, ChatRole, FileKind, InviteStatus, NotificationEvent, OutboxStatus,
     PipelineRunStatus, PipelineStatus, PipelineTriggerType, ProviderType, SyncDeletionPolicy,
     SyncMode, SyncStatus, SyncTriggerType, WebhookEvent, WebhookStatus, WorkspaceRole,
 };

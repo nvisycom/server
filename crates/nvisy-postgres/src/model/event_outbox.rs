@@ -6,6 +6,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::event_outbox;
+use crate::types::OutboxStatus;
 
 /// A pending or processed outbox row: a serialized workspace event awaiting (or
 /// past) projection onto its sinks.
@@ -29,18 +30,18 @@ pub struct EventOutbox {
     pub ip_address: Option<IpNet>,
     /// Client user agent at the time of the action, if captured.
     pub user_agent: Option<String>,
-    /// When the drainer finished projecting it; `None` while pending.
-    pub processed_at: Option<Timestamp>,
+    /// Processing state: pending, processed, or failed (dead-lettered).
+    pub status: OutboxStatus,
     /// Number of delivery attempts the drainer has made.
     pub attempts: i32,
     /// Earliest time the row may next be claimed; advanced by a backoff after
     /// each failed attempt.
     pub next_attempt_at: Timestamp,
-    /// When the drainer gave up on the row after too many failed attempts; `None`
-    /// unless dead-lettered.
-    pub failed_at: Option<Timestamp>,
     /// When the event was raised.
     pub created_at: Timestamp,
+    /// When a terminal (processed or failed) row was resolved by an operator;
+    /// `None` until then. A manual affordance for inspecting the outbox.
+    pub resolved_at: Option<Timestamp>,
 }
 
 /// A new outbox row, inserted in the same transaction as the action it records.

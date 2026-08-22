@@ -15,6 +15,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{EventOutbox, NewEventOutbox};
+use crate::types::OutboxStatus;
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Read and write operations on the event outbox.
@@ -75,8 +76,7 @@ impl EventOutboxRepository for PgConnection {
         use schema::event_outbox::{self, dsl};
 
         event_outbox::table
-            .filter(dsl::processed_at.is_null())
-            .filter(dsl::failed_at.is_null())
+            .filter(dsl::status.eq(OutboxStatus::Pending))
             .filter(dsl::next_attempt_at.le(diesel::dsl::now))
             .order((dsl::next_attempt_at.asc(), dsl::created_at.asc()))
             .limit(limit)
@@ -93,7 +93,7 @@ impl EventOutboxRepository for PgConnection {
 
         diesel::update(event_outbox::table.filter(dsl::id.eq(id)))
             .set((
-                dsl::processed_at.eq(diesel::dsl::now),
+                dsl::status.eq(OutboxStatus::Processed),
                 dsl::attempts.eq(dsl::attempts + 1),
             ))
             .execute(self)
@@ -105,8 +105,9 @@ impl EventOutboxRepository for PgConnection {
     async fn defer_outbox_attempt(&mut self, id: Uuid, backoff_secs: i64) -> PgResult<()> {
         use schema::event_outbox::{self, dsl};
 
-        // `now() + (backoff_secs || ' seconds')::interval` — the next attempt is
-        // scheduled by the database clock, not the drainer's.
+        // The row stays `Pending`; only its attempt count and next-due time move.
+        // `now() + (backoff_secs * interval '1 second')` schedules the next attempt
+        // by the database clock, not the drainer's.
         let next_attempt_at = diesel::dsl::sql::<Timestamptz>("now() + (")
             .bind::<BigInt, _>(backoff_secs)
             .sql(" * interval '1 second')");
@@ -126,8 +127,8 @@ impl EventOutboxRepository for PgConnection {
 
         diesel::update(event_outbox::table.filter(dsl::id.eq(id)))
             .set((
+                dsl::status.eq(OutboxStatus::Failed),
                 dsl::attempts.eq(dsl::attempts + 1),
-                dsl::failed_at.eq(diesel::dsl::now),
             ))
             .execute(self)
             .await
