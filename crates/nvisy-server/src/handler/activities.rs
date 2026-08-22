@@ -12,19 +12,21 @@ use aide::transform::TransformOperation;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use nvisy_postgres::PgClient;
 use nvisy_postgres::model::WorkspaceActivity;
-use nvisy_postgres::query::{AccountRepository, WorkspaceActivityRepository};
-use nvisy_postgres::types::{Handle, WithAccountRef};
-use nvisy_postgres::{PgClient, PgConn};
+use nvisy_postgres::query::WorkspaceActivityRepository;
+use nvisy_postgres::types::WithAccountRef;
 use serde::Serialize;
-use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Permission, Query, WorkspaceContext};
 use crate::handler::request::{
-    ActivityExportQuery, ActivityListQuery, ExportFormat, MAX_EXPORT_ROWS,
+    ActivityExportOptions, ActivityFilterQuery, CursorPagination, DateWindow, ExportFormat,
+    MAX_EXPORT_ROWS,
 };
 use crate::handler::response::{ActivitiesPage, Activity, ErrorResponse};
-use crate::handler::utility::{DownloadResponseExt, attachment_headers};
+use crate::handler::utility::{
+    ActorFilter, DownloadResponseExt, attachment_headers, resolve_actor,
+};
 use crate::handler::{Error, ErrorKind, Result, ServiceState};
 
 /// Tracing target for activity export operations.
@@ -101,23 +103,6 @@ impl ActivityExportRow {
     }
 }
 
-/// Resolves an optional `actor` filter (a username) to the account id the activity
-/// query filters on.
-///
-/// `None` (no `actor` given) means no actor constraint. An unknown username
-/// resolves to [`Uuid::nil`] — an id no account has — so the filter matches nothing
-/// and the request returns an empty result rather than an error.
-async fn resolve_actor(conn: &mut PgConn, actor: Option<&Handle>) -> Result<Option<Uuid>> {
-    let Some(username) = actor else {
-        return Ok(None);
-    };
-    let account_id = conn
-        .find_account_by_username(username)
-        .await?
-        .map_or_else(Uuid::nil, |account| account.id);
-    Ok(Some(account_id))
-}
-
 /// Lists a workspace's activity log, most recent first, cursor-paginated.
 #[tracing::instrument(
     skip_all,
@@ -130,7 +115,9 @@ async fn list_activities(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
-    Query(query): Query<ActivityListQuery>,
+    Query(filter_query): Query<ActivityFilterQuery>,
+    Query(window): Query<DateWindow>,
+    Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<ActivitiesPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace activities");
 
@@ -140,11 +127,17 @@ async fn list_activities(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
         .await?;
 
-    let actor_id = resolve_actor(&mut conn, query.actor.as_ref()).await?;
-    let filter = query.to_filter(actor_id)?;
+    // An `actor` that matches no account narrows the feed to nobody, so return an
+    // empty page rather than an unfiltered one.
+    let actor_id = match resolve_actor(&mut conn, filter_query.actor.as_ref()).await? {
+        ActorFilter::Unknown => return Ok((StatusCode::OK, Json(ActivitiesPage::empty()))),
+        ActorFilter::Any => None,
+        ActorFilter::Account(id) => Some(id),
+    };
+    let filter = filter_query.to_filter(actor_id, &window)?;
 
     let page = conn
-        .cursor_list_workspace_activity(workspace.id, filter, query.pagination().into())
+        .cursor_list_workspace_activity(workspace.id, filter, pagination.into())
         .await?;
 
     let response = ActivitiesPage::from_cursor_page(page, |wc| {
@@ -185,7 +178,9 @@ async fn export_activities(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
-    Query(query): Query<ActivityExportQuery>,
+    Query(filter_query): Query<ActivityFilterQuery>,
+    Query(window_query): Query<DateWindow>,
+    Query(export_query): Query<ActivityExportOptions>,
 ) -> Result<(StatusCode, HeaderMap, Body)> {
     tracing::debug!(target: TRACING_TARGET, "Exporting workspace activities");
 
@@ -194,14 +189,25 @@ async fn export_activities(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
         .await?;
 
-    let actor_id = resolve_actor(&mut conn, query.actor.as_ref()).await?;
-    let export = query.resolve(actor_id)?;
+    let window = window_query.resolve()?;
 
-    // Fetch one past the cap so a full result signals truncation.
-    let fetch_limit = (MAX_EXPORT_ROWS + 1) as i64;
-    let mut rows = conn
-        .list_workspace_activity_for_export(workspace.id, export.filter.clone(), fetch_limit)
-        .await?;
+    // An `actor` that matches no account narrows the export to nobody: emit an
+    // empty (but valid) file rather than one filtered on a sentinel id.
+    let actor = resolve_actor(&mut conn, filter_query.actor.as_ref()).await?;
+    let mut rows = match actor {
+        ActorFilter::Unknown => Vec::new(),
+        ActorFilter::Any | ActorFilter::Account(_) => {
+            let actor_id = match actor {
+                ActorFilter::Account(id) => Some(id),
+                _ => None,
+            };
+            let filter = filter_query.to_export_filter(actor_id, &window)?;
+            // Fetch one past the cap so a full result signals truncation.
+            let fetch_limit = (MAX_EXPORT_ROWS + 1) as i64;
+            conn.list_workspace_activity_for_export(workspace.id, filter, fetch_limit)
+                .await?
+        }
+    };
 
     let truncated = rows.len() > MAX_EXPORT_ROWS;
     rows.truncate(MAX_EXPORT_ROWS);
@@ -220,7 +226,7 @@ async fn export_activities(
         .map(ActivityExportRow::from_activity)
         .collect();
 
-    let (content_type, extension, body) = match export.format {
+    let (content_type, extension, body) = match export_query.format {
         ExportFormat::Csv => (
             HeaderValue::from_static("text/csv; charset=utf-8"),
             "csv",
@@ -233,10 +239,7 @@ async fn export_activities(
         ),
     };
 
-    let filename = format!(
-        "activities-{}_{}.{extension}",
-        export.window.from, export.window.to
-    );
+    let filename = format!("activities-{}_{}.{extension}", window.from, window.to);
     let mut headers = attachment_headers(&filename, content_type, body.len() as u64);
     // A truncated export is still a valid file; flag the drop in a header so a
     // client can surface it without having to parse the body.
