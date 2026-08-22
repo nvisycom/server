@@ -100,7 +100,7 @@ impl Worker for EventOutboxDrainer {
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => break,
-                _ = ticker.tick() => self.tick().await,
+                _ = ticker.tick() => self.tick(&cancel).await,
             }
         }
 
@@ -120,9 +120,16 @@ impl EventOutboxDrainer {
     }
 
     /// One drain pass: claim and project batches until a short page signals the
-    /// due set is drained.
-    async fn tick(&self) {
+    /// due set is drained, or until cancellation is requested.
+    ///
+    /// The cancellation check between batches keeps shutdown prompt even under a
+    /// sustained backlog: a full due set would otherwise loop here indefinitely,
+    /// starving the caller's `select!` of the chance to observe `cancel`.
+    async fn tick(&self, cancel: &CancellationToken) {
         loop {
+            if cancel.is_cancelled() {
+                break;
+            }
             match self.drain_batch().await {
                 Ok(pass) => {
                     // A pass where rows were claimed but few committed means events
