@@ -12,11 +12,12 @@ use aide::transform::TransformOperation;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::WorkspaceActivity;
-use nvisy_postgres::query::WorkspaceActivityRepository;
-use nvisy_postgres::types::WithAccountRef;
+use nvisy_postgres::query::{AccountRepository, WorkspaceActivityRepository};
+use nvisy_postgres::types::{Handle, WithAccountRef};
+use nvisy_postgres::{PgClient, PgConn};
 use serde::Serialize;
+use uuid::Uuid;
 
 use crate::extract::{AuthProvider, AuthState, Json, Permission, Query, WorkspaceContext};
 use crate::handler::request::{
@@ -100,6 +101,23 @@ impl ActivityExportRow {
     }
 }
 
+/// Resolves an optional `actor` filter (a username) to the account id the activity
+/// query filters on.
+///
+/// `None` (no `actor` given) means no actor constraint. An unknown username
+/// resolves to [`Uuid::nil`] — an id no account has — so the filter matches nothing
+/// and the request returns an empty result rather than an error.
+async fn resolve_actor(conn: &mut PgConn, actor: Option<&Handle>) -> Result<Option<Uuid>> {
+    let Some(username) = actor else {
+        return Ok(None);
+    };
+    let account_id = conn
+        .find_account_by_username(username)
+        .await?
+        .map_or_else(Uuid::nil, |account| account.id);
+    Ok(Some(account_id))
+}
+
 /// Lists a workspace's activity log, most recent first, cursor-paginated.
 #[tracing::instrument(
     skip_all,
@@ -116,16 +134,17 @@ async fn list_activities(
 ) -> Result<(StatusCode, Json<ActivitiesPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace activities");
 
-    let filter = query.to_filter()?;
-
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
         .await?;
 
+    let actor_id = resolve_actor(&mut conn, query.actor.as_ref()).await?;
+    let filter = query.to_filter(actor_id)?;
+
     let page = conn
-        .cursor_list_workspace_activity(workspace.id, filter, query.pagination.into())
+        .cursor_list_workspace_activity(workspace.id, filter, query.pagination().into())
         .await?;
 
     let response = ActivitiesPage::from_cursor_page(page, |wc| {
@@ -145,7 +164,7 @@ fn list_activities_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List workspace activities")
         .description(
             "Returns the workspace's activity log, most recent first, cursor-paginated. \
-             Optional filters: `type` (repeatable, e.g. `file.created`), `actor` (an account id), \
+             Optional filters: `type` (repeatable, e.g. `file.created`), `actor` (a username), \
              and a `from`/`to` day range (each bound narrows only when given; the feed is \
              otherwise all-time).",
         )
@@ -170,12 +189,13 @@ async fn export_activities(
 ) -> Result<(StatusCode, HeaderMap, Body)> {
     tracing::debug!(target: TRACING_TARGET, "Exporting workspace activities");
 
-    let export = query.resolve()?;
-
     let mut conn = pg_client.get_connection().await?;
     auth_state
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
         .await?;
+
+    let actor_id = resolve_actor(&mut conn, query.actor.as_ref()).await?;
+    let export = query.resolve(actor_id)?;
 
     // Fetch one past the cap so a full result signals truncation.
     let fetch_limit = (MAX_EXPORT_ROWS + 1) as i64;
