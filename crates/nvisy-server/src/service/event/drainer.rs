@@ -206,9 +206,11 @@ impl EventOutboxDrainer {
     /// event so the caller can drive the side effects. Returns `Err` if the row
     /// cannot decode or the activity write fails, so the caller defers it.
     ///
-    /// Runs inside the batch transaction: the activity write and the row's
-    /// `mark_outbox_processed` commit together, so the activity log is the durable
-    /// record and no event is recorded for a row that did not complete.
+    /// Runs inside the batch transaction. The activity write itself runs in a
+    /// nested transaction (a savepoint): a Postgres statement error there — which
+    /// would otherwise poison the whole batch transaction and abort every later
+    /// `mark_*`/`defer_*` — is contained to the savepoint, so the outer transaction
+    /// stays healthy and the caller can still defer or dead-letter this row.
     async fn record_activity(
         &self,
         conn: &mut PgConn,
@@ -227,9 +229,11 @@ impl EventOutboxDrainer {
             ip_address: row.ip_address,
             user_agent: row.user_agent.clone(),
         };
-        conn.log_activity(activity_row).await.map_err(|err| {
-            tracing::warn!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to record activity; deferring event");
-        })?;
+        conn.transaction(async |conn| conn.log_activity(activity_row).await)
+            .await
+            .map_err(|err| {
+                tracing::warn!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to record activity; deferring event");
+            })?;
 
         Ok(event)
     }

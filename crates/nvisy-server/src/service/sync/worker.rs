@@ -466,7 +466,8 @@ impl ConnectionSyncWorker {
             attempt: Some(attempt),
             metadata: None,
         };
-        let run = conn.create_workspace_connection_sync(new_run).await?;
+        // Create the run and record its start event atomically.
+        let run = self.sync.create_run(&mut conn, new_run, connection).await?;
         Ok((config, deletion_policy, run.id))
     }
 }

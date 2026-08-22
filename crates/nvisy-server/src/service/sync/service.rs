@@ -14,12 +14,15 @@ use futures::stream::{self, StreamExt};
 use nvisy_nats::object::{FileKey, FilesBucket, ObjectBucket};
 use nvisy_object::client::ObjectStoreClient;
 use nvisy_object::providers::StorageConfig;
-use nvisy_postgres::AsyncConnection;
-use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceConnection, WorkspaceFile};
+use nvisy_postgres::model::{
+    NewWorkspaceConnectionSync, NewWorkspaceFile, WorkspaceConnection, WorkspaceConnectionSync,
+    WorkspaceFile,
+};
 use nvisy_postgres::query::{
     WorkspaceConnectionSyncRepository, WorkspaceFileRepository, WorkspaceRepository,
 };
 use nvisy_postgres::types::{FileKind, SyncDeletionPolicy};
+use nvisy_postgres::{AsyncConnection, PgConn};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -79,6 +82,35 @@ impl ConnectionSyncService {
             import_concurrency: config.import_concurrency.max(1),
             running: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Creates a sync run row and records its `ConnectionSyncStarted` event in one
+    /// transaction on the caller's connection, so the run and its start event
+    /// commit together — the start event can never be lost for a run that was
+    /// created. Returns the persisted run.
+    pub async fn create_run(
+        &self,
+        conn: &mut PgConn,
+        new_run: NewWorkspaceConnectionSync,
+        connection: &WorkspaceConnection,
+    ) -> Result<WorkspaceConnectionSync> {
+        let origin = EventOrigin {
+            workspace_id: connection.workspace_id,
+            account_id: new_run.account_id,
+            security: &SecurityContext::default(),
+        };
+        let started = WorkspaceEvent::ConnectionSyncStarted(ConnectionRef {
+            connection_id: connection.id,
+            connection_name: connection.display_name.clone(),
+        });
+        let run = conn
+            .transaction(async |conn| {
+                let run = conn.create_workspace_connection_sync(new_run).await?;
+                conn.emit_event(origin, started).await?;
+                Ok::<_, crate::handler::Error>(run)
+            })
+            .await?;
+        Ok(run)
     }
 
     /// Signals a locally-running transfer to stop, if this instance is running
@@ -439,37 +471,11 @@ impl ConnectionSyncService {
             .expect("sync cancel registry poisoned")
             .insert(run_id, token.clone());
 
+        // Capture the connection's identity for the terminal event before the
+        // transfer task takes ownership of `connection`.
         let workspace_id = connection.workspace_id;
         let connection_id = connection.id;
         let connection_name = connection.display_name.clone();
-
-        // Record sync-started through the outbox, the same path as sync-completed
-        // and sync-failed, so the whole sync-status family is projected uniformly
-        // (activity log + webhook). Best-effort: a failure here must not abort the
-        // sync it is only announcing.
-        match self.infra.postgres.get_connection().await {
-            Ok(mut conn) => {
-                if let Err(err) = conn
-                    .emit_event(
-                        EventOrigin {
-                            workspace_id,
-                            account_id,
-                            security: &SecurityContext::default(),
-                        },
-                        WorkspaceEvent::ConnectionSyncStarted(ConnectionRef {
-                            connection_id,
-                            connection_name: connection_name.clone(),
-                        }),
-                    )
-                    .await
-                {
-                    tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to record sync-started event");
-                }
-            }
-            Err(err) => {
-                tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to acquire connection for sync-started event");
-            }
-        }
 
         let transfer = self.clone();
         let mut work = tokio::spawn(async move {
