@@ -159,4 +159,16 @@ mod tests {
         let window: DateWindow = extract("from=2026-01-01&to=2026-01-31").await;
         assert!(window.from.is_some() && window.to.is_some());
     }
+
+    #[tokio::test]
+    async fn to_filter_rejects_an_inverted_window() {
+        // `to_filter` validates the window, so a `from` after `to` is a 400 the
+        // handler surfaces before any actor short-circuit.
+        let filter = ActivityFilterQuery::default();
+        let window: DateWindow = extract("from=2026-02-01&to=2026-01-01").await;
+        assert!(
+            filter.to_filter(None, &window).is_err(),
+            "an inverted window should be rejected"
+        );
+    }
 }

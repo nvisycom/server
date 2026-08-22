@@ -127,14 +127,19 @@ async fn list_activities(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
         .await?;
 
-    // An `actor` that matches no account narrows the feed to nobody, so return an
-    // empty page rather than an unfiltered one.
-    let actor_id = match resolve_actor(&mut conn, filter_query.actor.as_ref()).await? {
-        ActorFilter::Unknown => return Ok((StatusCode::OK, Json(ActivitiesPage::empty()))),
-        ActorFilter::Any => None,
+    let actor = resolve_actor(&mut conn, filter_query.actor.as_ref()).await?;
+
+    // Build the filter unconditionally so an invalid date window is rejected (400)
+    // regardless of the actor; only then does an actor matching no account
+    // short-circuit to an empty page (rather than an unfiltered one).
+    let actor_id = match actor {
+        ActorFilter::Any | ActorFilter::Unknown => None,
         ActorFilter::Account(id) => Some(id),
     };
     let filter = filter_query.to_filter(actor_id, &window)?;
+    if actor == ActorFilter::Unknown {
+        return Ok((StatusCode::OK, Json(ActivitiesPage::empty())));
+    }
 
     let page = conn
         .cursor_list_workspace_activity(workspace.id, filter, pagination.into())
