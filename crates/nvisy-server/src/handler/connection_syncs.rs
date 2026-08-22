@@ -126,7 +126,10 @@ async fn sync_connection(
         attempt: Some(1),
         metadata: None,
     };
-    let run = conn.create_workspace_connection_sync(new_run).await?;
+    // Create the run and record its start event atomically.
+    let run = connection_sync
+        .create_run(&mut conn, new_run, &connection)
+        .await?;
 
     // Perform the transfer in the background; the sync tracks its outcome. The
     // transfer runs in an inner task so that a panic is caught (via the join
