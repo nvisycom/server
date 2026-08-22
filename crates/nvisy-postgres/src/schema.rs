@@ -26,6 +26,10 @@ pub mod sql_types {
     pub struct NotificationEvent;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "outbox_status"))]
+    pub struct OutboxStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "pipeline_run_status"))]
     pub struct PipelineRunStatus;
 
@@ -157,6 +161,7 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+    use super::sql_types::OutboxStatus;
 
     event_outbox (id) {
         id -> Uuid,
@@ -165,11 +170,11 @@ diesel::table! {
         event -> Jsonb,
         ip_address -> Nullable<Inet>,
         user_agent -> Nullable<Text>,
-        processed_at -> Nullable<Timestamptz>,
+        status -> OutboxStatus,
         attempts -> Int4,
         next_attempt_at -> Timestamptz,
-        failed_at -> Nullable<Timestamptz>,
         created_at -> Timestamptz,
+        resolved_at -> Nullable<Timestamptz>,
     }
 }
 

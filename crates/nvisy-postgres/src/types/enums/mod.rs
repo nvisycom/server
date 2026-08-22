@@ -7,6 +7,7 @@
 // Account-related enumerations
 pub mod api_token_type;
 pub mod notification_event;
+pub mod outbox_status;
 
 // Chat-related enumerations
 pub mod chat_role;
@@ -39,6 +40,7 @@ pub use chat_role::ChatRole;
 pub use file_kind::FileKind;
 pub use invite_status::InviteStatus;
 pub use notification_event::NotificationEvent;
+pub use outbox_status::OutboxStatus;
 pub use pipeline_run_status::PipelineRunStatus;
 pub use pipeline_status::PipelineStatus;
 pub use pipeline_trigger_type::PipelineTriggerType;

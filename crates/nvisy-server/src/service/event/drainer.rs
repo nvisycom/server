@@ -70,20 +70,16 @@ pub struct EventOutboxDrainer {
     notification: NotificationEmitter,
 }
 
-/// The tally of one [`drain_batch`](EventOutboxDrainer::drain_batch) pass: how
-/// many due rows were claimed and how many of those durably processed. The
-/// remainder were deferred (failing, backing off) — a rising deferred count is
-/// the signal that events are not draining.
+/// The tally of one [`drain_batch`](EventOutboxDrainer::drain_batch) pass: of the
+/// rows claimed, how many durably processed, how many were deferred for a later
+/// retry (failing, backing off), and how many were dead-lettered (given up on).
+/// A rising deferred count signals events are struggling to drain; a rising
+/// dead-lettered count signals poison rows.
 struct DrainPass {
     claimed: usize,
     processed: usize,
-}
-
-impl DrainPass {
-    /// Rows claimed but not processed this pass: deferred with a backoff.
-    fn deferred(&self) -> usize {
-        self.claimed - self.processed
-    }
+    deferred: usize,
+    dead_lettered: usize,
 }
 
 impl Worker for EventOutboxDrainer {
@@ -132,15 +128,17 @@ impl EventOutboxDrainer {
             }
             match self.drain_batch().await {
                 Ok(pass) => {
-                    // A pass where rows were claimed but few committed means events
-                    // are failing and backing off — surface it for monitoring.
-                    if pass.deferred() > 0 {
+                    // Deferred (retrying) and dead-lettered (given up on) are
+                    // distinct failure signals — report them separately rather than
+                    // lumping every non-processed row together.
+                    if pass.deferred > 0 || pass.dead_lettered > 0 {
                         tracing::warn!(
                             target: TRACING_TARGET,
                             claimed = pass.claimed,
                             processed = pass.processed,
-                            deferred = pass.deferred(),
-                            "Outbox drain pass deferred failing events",
+                            deferred = pass.deferred,
+                            dead_lettered = pass.dead_lettered,
+                            "Outbox drain pass had failing events",
                         );
                     } else if pass.claimed > 0 {
                         tracing::debug!(target: TRACING_TARGET, processed = pass.processed, "Outbox drain pass processed events");
@@ -169,13 +167,18 @@ impl EventOutboxDrainer {
     async fn drain_batch(&self) -> Result<DrainPass> {
         let mut conn = self.infra.postgres.get_connection().await?;
 
-        // The transaction returns the claimed count and the committed events, so
-        // the side effects below run only for rows that durably landed.
-        let (claimed, committed) = conn
+        // The transaction returns the pass tally and the committed events, so the
+        // side effects below run only for rows that durably landed.
+        let (mut pass, committed) = conn
             .transaction(async |conn| {
                 let batch = conn.claim_outbox_batch(DRAIN_BATCH).await?;
-                let claimed = batch.len();
-                let mut committed = Vec::with_capacity(claimed);
+                let mut pass = DrainPass {
+                    claimed: batch.len(),
+                    processed: 0,
+                    deferred: 0,
+                    dead_lettered: 0,
+                };
+                let mut committed = Vec::with_capacity(pass.claimed);
 
                 for row in batch {
                     match self.record_activity(conn, &row).await {
@@ -189,24 +192,26 @@ impl EventOutboxDrainer {
                         Err(()) if row.attempts + 1 >= MAX_ATTEMPTS => {
                             tracing::error!(target: TRACING_TARGET, id = %row.id, attempts = row.attempts + 1, "Dead-lettering outbox event after too many failed attempts");
                             conn.mark_outbox_failed(row.id).await?;
+                            pass.dead_lettered += 1;
                         }
                         Err(()) => {
                             conn.defer_outbox_attempt(row.id, retry_backoff(row.attempts))
                                 .await?;
+                            pass.deferred += 1;
                         }
                     }
                 }
 
-                Ok::<_, Error>((claimed, committed))
+                Ok::<_, Error>((pass, committed))
             })
             .await?;
 
-        let processed = committed.len();
+        pass.processed = committed.len();
         for (row, event) in committed {
             self.dispatch_side_effects(&row, &event).await;
         }
 
-        Ok(DrainPass { claimed, processed })
+        Ok(pass)
     }
 
     /// Writes the durable activity-log entry for one row, returning its decoded
