@@ -195,7 +195,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -206,7 +206,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -861,9 +861,9 @@ dependencies = [
 
 [[package]]
 name = "axum-test"
-version = "21.1.0"
+version = "21.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bf0893561659ea1365921a0aed8bbb620fae83dae00b53fe64d41fea4877640"
+checksum = "3ce104337e4cced59ded9c61f9f18dab0a4670fd339e84f334312686440a9958"
 dependencies = [
  "anyhow",
  "axum",
@@ -2776,7 +2776,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2861,14 +2861,14 @@ dependencies = [
 
 [[package]]
 name = "educe"
-version = "0.7.6"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e451fac8dd8dece16234604bf1efce6e90fddd8ab6ad4d66eec0eca5160959dd"
+checksum = "1d7bc049e1bd8cdeb31b68bbd586a9464ecf9f3944af3958a7a9d0f8b9799417"
 dependencies = [
  "enum-ordinalize",
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2880,7 +2880,7 @@ checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
 [[package]]
 name = "elide"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "async-trait",
  "elide-codec",
@@ -2901,7 +2901,7 @@ dependencies = [
 [[package]]
 name = "elide-bento"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide-bento?branch=main#68d4cae3615aa164c34c1646c332ca1d13824c6b"
+source = "git+https://github.com/nvisycom/elide-bento?branch=main#391c8ec6c1f5ff614d32c8a9888eacdb8f546ed5"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -2918,7 +2918,7 @@ dependencies = [
 [[package]]
 name = "elide-codec"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2940,7 +2940,7 @@ dependencies = [
 [[package]]
 name = "elide-context"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "async-trait",
  "elide-core",
@@ -2951,7 +2951,7 @@ dependencies = [
 [[package]]
 name = "elide-core"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "async-trait",
  "blake3",
@@ -2971,7 +2971,7 @@ dependencies = [
 [[package]]
 name = "elide-detection"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "elide-core",
  "futures",
@@ -2983,7 +2983,7 @@ dependencies = [
 [[package]]
 name = "elide-engine"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "bytes",
  "elide-codec",
@@ -2991,14 +2991,29 @@ dependencies = [
  "elide-detection",
  "elide-redaction",
  "erased-serde",
+ "schemars 1.2.2",
  "serde",
+ "serde-value",
+ "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "elide-export"
+version = "0.1.0"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#cf0758d50a9697c0cc1530f856bf0472709ed80f"
+dependencies = [
+ "csv",
+ "elide",
+ "serde",
+ "serde_json",
+ "zip",
 ]
 
 [[package]]
 name = "elide-fake"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "async-trait",
  "elide-core",
@@ -3009,7 +3024,7 @@ dependencies = [
 [[package]]
 name = "elide-governance"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide-runtime?branch=main#74922c6eaebc75f566c8ed878bc0394ccc1d3473"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#cf0758d50a9697c0cc1530f856bf0472709ed80f"
 dependencies = [
  "elide-core",
  "elide-operator",
@@ -3017,14 +3032,13 @@ dependencies = [
  "schemars 1.2.2",
  "semver",
  "serde",
- "strum 0.28.0",
  "uuid",
 ]
 
 [[package]]
 name = "elide-lingua"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "async-trait",
  "elide-core",
@@ -3035,17 +3049,16 @@ dependencies = [
 [[package]]
 name = "elide-llm"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "async-trait",
  "derive_builder",
  "elide-core",
  "hipstr",
- "minijinja",
  "reqwest-middleware",
  "reqwest-retry",
  "reqwest-tracing",
- "rig",
+ "rig 0.42.0",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -3057,7 +3070,7 @@ dependencies = [
 [[package]]
 name = "elide-ner"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "async-trait",
  "derive_builder",
@@ -3071,7 +3084,7 @@ dependencies = [
 [[package]]
 name = "elide-ocr"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "async-trait",
  "derive_builder",
@@ -3083,7 +3096,7 @@ dependencies = [
 [[package]]
 name = "elide-office"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "bytes",
  "hipstr",
@@ -3095,7 +3108,7 @@ dependencies = [
 [[package]]
 name = "elide-operator"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -3117,7 +3130,7 @@ dependencies = [
 [[package]]
 name = "elide-pattern"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "aho-corasick",
  "async-trait",
@@ -3137,7 +3150,7 @@ dependencies = [
 [[package]]
 name = "elide-pdf"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "bytes",
  "hipstr",
@@ -3149,40 +3162,64 @@ dependencies = [
 [[package]]
 name = "elide-pipeline"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide-runtime?branch=main#74922c6eaebc75f566c8ed878bc0394ccc1d3473"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#cf0758d50a9697c0cc1530f856bf0472709ed80f"
 dependencies = [
  "bytes",
- "csv",
+ "elide",
+ "elide-export",
+ "elide-governance",
+ "elide-provider",
+ "elide-review",
+ "elide-template",
+ "hipstr",
+ "jiff",
+ "schemars 1.2.2",
+ "serde",
+ "serde-value",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "elide-provider"
+version = "0.1.0"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#cf0758d50a9697c0cc1530f856bf0472709ed80f"
+dependencies = [
  "elide",
  "elide-bento",
  "elide-governance",
- "elide-template",
- "elide-wire",
  "hipstr",
  "schemars 1.2.2",
  "serde",
- "serde_json",
  "uuid",
 ]
 
 [[package]]
 name = "elide-redaction"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
- "async-trait",
  "elide-core",
  "hipstr",
+ "tracing",
+]
+
+[[package]]
+name = "elide-review"
+version = "0.1.0"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#cf0758d50a9697c0cc1530f856bf0472709ed80f"
+dependencies = [
+ "elide",
+ "elide-governance",
  "schemars 1.2.2",
  "serde",
- "tracing",
  "uuid",
 ]
 
 [[package]]
 name = "elide-stt"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide?branch=main#c96f0d605fe1972308b51c6fd9c6721cad8a0222"
+source = "git+https://github.com/nvisycom/elide?branch=main#39fedecf65d823128f13a46232efecc4321bfa05"
 dependencies = [
  "async-trait",
  "derive_builder",
@@ -3194,7 +3231,7 @@ dependencies = [
 [[package]]
 name = "elide-template"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide-runtime?branch=main#74922c6eaebc75f566c8ed878bc0394ccc1d3473"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#cf0758d50a9697c0cc1530f856bf0472709ed80f"
 dependencies = [
  "elide-core",
  "elide-governance",
@@ -3203,20 +3240,6 @@ dependencies = [
  "jiff",
  "schemars 1.2.2",
  "semver",
- "serde",
- "uuid",
-]
-
-[[package]]
-name = "elide-wire"
-version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide-runtime?branch=main#74922c6eaebc75f566c8ed878bc0394ccc1d3473"
-dependencies = [
- "bytes",
- "elide-core",
- "hipstr",
- "jiff",
- "schemars 1.2.2",
  "serde",
  "uuid",
 ]
@@ -3330,7 +3353,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4686,7 +4709,7 @@ dependencies = [
  "jiff",
  "nom 8.0.0",
  "num-traits",
- "ordered-float",
+ "ordered-float 5.3.0",
  "rand 0.9.5",
  "serde",
  "serde_json",
@@ -5697,12 +5720,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "memo-map"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38d1115007560874e373613744c6fba374c17688327a71c1476d1a5954cc857b"
-
-[[package]]
 name = "migrations_internals"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5737,16 +5754,6 @@ checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
 dependencies = [
  "mime",
  "unicase",
-]
-
-[[package]]
-name = "minijinja"
-version = "2.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86886cf6dbf4e614b19c9a1eec9775f021869d7eadde0fc73921a81b90c9b4c9"
-dependencies = [
- "memo-map",
- "serde",
 ]
 
 [[package]]
@@ -5978,7 +5985,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6134,7 +6141,7 @@ dependencies = [
  "async-stream",
  "derive_more",
  "futures",
- "rig",
+ "rig 0.41.0",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -6269,7 +6276,6 @@ dependencies = [
  "uuid",
  "validator",
  "woothee",
- "zip",
  "zxcvbn",
 ]
 
@@ -6439,6 +6445,15 @@ name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
+
+[[package]]
+name = "ordered-float"
+version = "2.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68f19d67e5a2795c94e73e0bb1cc1a7edeb2e28efd39e2e1c9b7a40c1108b11c"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "ordered-float"
@@ -6973,7 +6988,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
 dependencies = [
  "heck 0.4.1",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "log",
  "multimap",
  "petgraph",
@@ -6992,7 +7007,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -7135,7 +7150,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7684,13 +7699,24 @@ version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ce03971e6115d30ef53fb3244d06718a4e62bbde82c103065600c09459b989a"
 dependencies = [
- "rig-agent",
- "rig-core",
- "rig-derive",
+ "rig-agent 0.41.0",
+ "rig-core 0.41.0",
+ "rig-derive 0.41.0",
  "rig-fastembed",
  "rig-helixdb",
  "rig-lancedb",
  "rig-milvus",
+]
+
+[[package]]
+name = "rig"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b989f4060e5f3c1ea4b8b6999f6759949d820704286cc6976b7a688cc0133029"
+dependencies = [
+ "rig-agent 0.42.0",
+ "rig-core 0.42.0",
+ "rig-derive 0.42.0",
 ]
 
 [[package]]
@@ -7704,8 +7730,30 @@ dependencies = [
  "futures",
  "http",
  "indexmap 2.14.0",
- "rig-core",
- "rig-derive",
+ "rig-core 0.41.0",
+ "rig-derive 0.41.0",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-futures",
+]
+
+[[package]]
+name = "rig-agent"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b66477c0d0a786358d078e7e3541a73089dd9009100d6e2b3fe3b0d730e8550f"
+dependencies = [
+ "async-stream",
+ "fastrand",
+ "futures",
+ "http",
+ "indexmap 2.14.0",
+ "rig-core 0.42.0",
+ "rig-derive 0.42.0",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -7734,17 +7782,52 @@ dependencies = [
  "indexmap 2.14.0",
  "mime",
  "mime_guess",
- "ordered-float",
+ "ordered-float 5.3.0",
  "pin-project-lite",
  "reqwest 0.13.4",
- "reqwest-middleware",
- "rig-derive",
+ "rig-derive 0.41.0",
  "schemars 1.2.2",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.28.0",
+ "tracing",
+ "tracing-futures",
+ "url",
+]
+
+[[package]]
+name = "rig-core"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "432d83e0facf16749f91fe729cbffca84437e8062d2f4e92f4f12e903693922d"
+dependencies = [
+ "as-any",
+ "async-stream",
+ "base64 0.22.1",
+ "bytes",
+ "eventsource-stream",
+ "fastrand",
+ "futures",
+ "futures-timer",
+ "glob",
+ "http",
+ "indexmap 2.14.0",
+ "mime",
+ "mime_guess",
+ "ordered-float 5.3.0",
+ "pin-project-lite",
+ "reqwest 0.13.4",
+ "reqwest-middleware",
+ "rig-derive 0.42.0",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror",
+ "tokio",
+ "tokio-tungstenite 0.29.0",
  "tracing",
  "tracing-futures",
  "url",
@@ -7764,13 +7847,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "rig-derive"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de0a33f1bac45f16e50146c248bcbbfaa44518c7252d274e972c7f4ad71aaba7"
+dependencies = [
+ "convert_case 0.11.0",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "rig-fastembed"
 version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69ba93356242940918fac76a4b1cfe78b964f757e5cb65bb3feebd597635cfb0"
 dependencies = [
  "fastembed",
- "rig-core",
+ "rig-core 0.41.0",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -7784,7 +7880,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1d40ae8fa89af33793626b898ec527e246183ef8b4b5095afee5f6a65cbbb1a"
 dependencies = [
  "reqwest 0.13.4",
- "rig-core",
+ "rig-core 0.41.0",
  "serde",
  "serde_json",
  "thiserror",
@@ -7800,7 +7896,7 @@ dependencies = [
  "deranged",
  "futures",
  "lancedb",
- "rig-core",
+ "rig-core 0.41.0",
  "serde",
  "serde_json",
 ]
@@ -7812,7 +7908,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76662eb7f75de4e54b5f71e616430dc7f75d96d32f109d9435ad426b511eb565"
 dependencies = [
  "reqwest 0.13.4",
- "rig-core",
+ "rig-core 0.41.0",
  "serde",
  "serde_json",
  "uuid",
@@ -7922,7 +8018,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7981,7 +8077,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8148,6 +8244,16 @@ checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
  "serde_derive",
+]
+
+[[package]]
+name = "serde-value"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
+dependencies = [
+ "ordered-float 2.10.1",
+ "serde",
 ]
 
 [[package]]
@@ -8547,7 +8653,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8876,10 +8982,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9119,7 +9225,23 @@ dependencies = [
  "rustls-pki-types",
  "tokio",
  "tokio-rustls",
- "tungstenite",
+ "tungstenite 0.28.0",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "tokio-tungstenite"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
+dependencies = [
+ "futures-util",
+ "log",
+ "rustls",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls",
+ "tungstenite 0.29.0",
  "webpki-roots 0.26.11",
 ]
 
@@ -9440,12 +9562,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "tungstenite"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c01152af293afb9c7c2a57e4b559c5620b421f6d133261c60dd2d0cdb38e6b8"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "http",
+ "httparse",
+ "log",
+ "rand 0.9.5",
+ "rustls",
+ "rustls-pki-types",
+ "sha1",
+ "thiserror",
+]
+
+[[package]]
 name = "twox-hash"
 version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8464ec13c3691491391d9fce00f6416c9a48e46972f72d7865688be2080192c9"
 dependencies = [
- "rand 0.9.5",
+ "rand 0.10.2",
 ]
 
 [[package]]
@@ -9976,7 +10116,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

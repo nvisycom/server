@@ -36,10 +36,10 @@ async fn list_recognizers(
     State(engine): State<EngineService>,
     AuthState(_): AuthState,
 ) -> Json<RecognizerCatalog> {
-    let engine = engine.engine();
+    let components = engine.engine().components();
     Json(RecognizerCatalog {
-        ner: engine.ner_recognizers().collect(),
-        llm: engine.llm_recognizers().collect(),
+        ner: components.ner,
+        llm: components.llm,
     })
 }
 

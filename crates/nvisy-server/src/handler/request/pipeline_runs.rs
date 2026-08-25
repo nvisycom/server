@@ -1,6 +1,6 @@
 //! Pipeline run request types (detect).
 
-use elide_pipeline::plan::ScopeParams;
+use elide_pipeline::DocumentContext;
 use nvisy_postgres::types::{PipelineRunStatus, PipelineTriggerType, RunFilter};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -81,5 +81,5 @@ pub struct CreatePipelineRun {
     /// Overrides the pipeline's `defaultScope` when present; absent falls back to
     /// the pipeline default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scope: Option<ScopeParams>,
+    pub scope: Option<DocumentContext>,
 }

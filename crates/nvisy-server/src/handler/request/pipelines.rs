@@ -4,7 +4,7 @@
 //! creation, updates, and filtering. All request types support JSON serialization
 //! and validation.
 
-use elide_pipeline::plan::ScopeParams;
+use elide_pipeline::DocumentContext;
 use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
 use nvisy_postgres::types::{Handle, Json, PipelineMetadata, PipelineStatus, RetentionOverride};
 use schemars::JsonSchema;
@@ -37,7 +37,7 @@ pub struct PipelineDefinition {
     /// A document's own scope overrides this at detect time; absent here means
     /// the document must assert its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_scope: Option<ScopeParams>,
+    pub default_scope: Option<DocumentContext>,
     /// Slugs of workspace policies applied at redaction.
     ///
     /// Stored relationally in the `workspace_pipeline_policies` join table, not the JSON

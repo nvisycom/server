@@ -1,6 +1,6 @@
 //! Detection job and run-status event types.
 
-use elide_pipeline::plan::ScopeParams;
+use elide_pipeline::DocumentContext;
 use nvisy_postgres::types::PipelineRunStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,7 @@ pub struct DetectionJob {
     pub run_id: Uuid,
     /// Caller-supplied per-request scope override, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scope: Option<ScopeParams>,
+    pub scope: Option<DocumentContext>,
 }
 
 /// A run's status change, broadcast on the core-NATS subject [`run_subject`].
