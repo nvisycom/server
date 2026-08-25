@@ -5,8 +5,6 @@
 //! lifecycle itself (create, list, redact) lives in
 //! [`pipeline_runs`](super::pipeline_runs).
 
-use std::io::Write as _;
-
 use aide::axum::ApiRouter;
 use aide::axum::routing::get_with;
 use aide::transform::TransformOperation;
@@ -14,8 +12,8 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use elide_pipeline::Audit;
+use elide_pipeline::export::{ExportCsv, ExportJson};
 use nvisy_postgres::PgClient;
-use zip::write::SimpleFileOptions;
 
 use super::pipeline_runs::find_pipeline_run;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, WorkspaceContext};
@@ -23,7 +21,7 @@ use crate::handler::request::{ExportFormat, ExportQuery, PipelineRunPathParams};
 use crate::handler::response::ErrorResponse;
 use crate::handler::utility::{DownloadResponseExt, attachment_headers};
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{RunBlobStore, ServiceState};
+use crate::service::{EngineService, RunBlobStore, ServiceState};
 
 /// Tracing target for pipeline audit operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::audits";
@@ -43,6 +41,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::audits";
 async fn get_pipeline_run_analysis(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
+    State(engine): State<EngineService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelineRunPathParams>,
@@ -59,7 +58,7 @@ async fn get_pipeline_run_analysis(
         find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
 
     let analyzed = blob
-        .load_analyzed_document(&mut conn, workspace.id, &run)
+        .load_analyzed_document(&mut conn, &engine, workspace.id, &run)
         .await?;
 
     tracing::debug!(target: TRACING_TARGET, "Pipeline run analysis retrieved");
@@ -95,6 +94,7 @@ fn get_pipeline_run_analysis_docs(op: TransformOperation) -> TransformOperation 
 async fn download_pipeline_run_audit(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
+    State(engine): State<EngineService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<PipelineRunPathParams>,
@@ -110,13 +110,13 @@ async fn download_pipeline_run_audit(
     let (run, _pipeline) =
         find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
     let audit = blob
-        .load_analyzed_document(&mut conn, workspace.id, &run)
+        .load_analyzed_document(&mut conn, &engine, workspace.id, &run)
         .await?;
 
     let (content_type, filename, body) = match query.format {
         ExportFormat::Json => {
             let mut buffer = Vec::new();
-            audit.write_json(&mut buffer).map_err(|err| {
+            audit.write_json_pretty(&mut buffer).map_err(|err| {
                 ErrorKind::InternalServerError
                     .with_message("Failed to export audit as JSON")
                     .with_context(err.to_string())
@@ -159,37 +159,14 @@ fn download_pipeline_run_audit_docs(op: TransformOperation) -> TransformOperatio
         .response::<409, Json<ErrorResponse>>()
 }
 
-/// Bundles the audit's three CSV tables into an in-memory zip archive.
+/// Bundles the audit's CSV tables into an in-memory zip archive.
+///
+/// The engine's export writes one deflate-compressed CSV per table
+/// (`entities.csv`, `provenance.csv`, `reviews.csv`), all joining on `entity_id`.
 fn build_audit_csv_zip(audit: &Audit) -> Result<Vec<u8>> {
-    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    let options = SimpleFileOptions::default();
-
-    let mut table = Vec::new();
-    audit
-        .write_entities_csv(&mut table)
-        .map_err(archive_error)?;
-    writer
-        .start_file("entities.csv", options)
-        .map_err(archive_error)?;
-    writer.write_all(&table).map_err(archive_error)?;
-
-    table.clear();
-    audit
-        .write_provenance_csv(&mut table)
-        .map_err(archive_error)?;
-    writer
-        .start_file("provenance.csv", options)
-        .map_err(archive_error)?;
-    writer.write_all(&table).map_err(archive_error)?;
-
-    table.clear();
-    audit.write_reviews_csv(&mut table).map_err(archive_error)?;
-    writer
-        .start_file("reviews.csv", options)
-        .map_err(archive_error)?;
-    writer.write_all(&table).map_err(archive_error)?;
-
-    Ok(writer.finish().map_err(archive_error)?.into_inner())
+    let mut archive = std::io::Cursor::new(Vec::new());
+    audit.write_zip(&mut archive).map_err(archive_error)?;
+    Ok(archive.into_inner())
 }
 
 /// Maps an audit-archive build failure — CSV serialization, zip, or IO — to an

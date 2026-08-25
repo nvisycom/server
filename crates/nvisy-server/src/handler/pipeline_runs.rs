@@ -611,12 +611,17 @@ async fn redact_pipeline_run(
     // carries the scope (label catalog) analyze resolved, so redaction compiles
     // against the same vocabulary without re-deriving it.
     let mut analyzed = blob
-        .load_analyzed_document(&mut conn, workspace.id, &run)
+        .load_analyzed_document(&mut conn, &engine, workspace.id, &run)
         .await?;
     let policies = resolve_policies(&mut conn, &crypto, workspace.id, pipeline.id).await?;
     let document = blob.build_document(&file, run.id).await?;
 
-    let redacted = engine.anonymize(document, &policies, &mut analyzed).await?;
+    // No per-request key: the server does not yet drive keyed operators
+    // (HMAC/encrypt), whose `KeyConfig` would be supplied here. The codec params
+    // and document context are read back from the audit, recorded at detect time.
+    let redacted = engine
+        .anonymize(document, &policies, &mut analyzed, None)
+        .await?;
 
     // Store the redacted bytes as a new workspace file and link it to the run.
     let workspace_settings = workspace.settings.or_default().retention;

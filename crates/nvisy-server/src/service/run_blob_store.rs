@@ -11,7 +11,8 @@ use std::io::Cursor;
 use std::str::FromStr;
 
 use bytes::Bytes;
-use elide_pipeline::{Audit, Document};
+use elide_pipeline::file::Document;
+use elide_pipeline::{Audit, Engine};
 use nvisy_nats::object::{AuditBucket, AuditKey, FileKey, FilesBucket, ObjectBucket};
 use nvisy_postgres::PgConn;
 use nvisy_postgres::model::{
@@ -313,11 +314,17 @@ impl RunBlobStore {
 
     /// Fetches and decrypts a run's stored [`Audit`].
     ///
+    /// The `engine` reconstructs the audit's report from its serialized form: an
+    /// [`Audit`] serializes but does not `Deserialize`, since its report tags each
+    /// entity group by modality name and only the engine's registry can map those
+    /// back to concrete types.
+    ///
     /// Errors if the run was never analyzed (409) or its analysis has since been
     /// deleted (404).
     pub async fn load_analyzed_document(
         &self,
         conn: &mut PgConn,
+        engine: &Engine,
         workspace_id: Uuid,
         run: &WorkspacePipelineRun,
     ) -> Result<Audit> {
@@ -364,7 +371,13 @@ impl RunBlobStore {
                     .with_message("Failed to decrypt analysis")
                     .with_context(err.to_string())
             })?;
-        serde_json::from_slice(&plaintext).map_err(analysis_serde_error)
+        engine
+            .deserialize_audit(&mut serde_json::Deserializer::from_slice(&plaintext))
+            .map_err(|err| {
+                ErrorKind::InternalServerError
+                    .with_message("Failed to decode analysis")
+                    .with_context(err.to_string())
+            })
     }
 }
 

@@ -10,8 +10,9 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use derive_more::Deref;
-use elide_pipeline::plan::{AnalyzerParams, AnyAnnotations, ScopeParams};
-use elide_pipeline::{Engine, RasterMode};
+use elide_pipeline::{
+    CodecParams, DocumentContext, Engine, ProviderConfig, RasterMode, RequestContext,
+};
 
 use crate::Result;
 use crate::handler::request::PipelineDefinition;
@@ -19,7 +20,6 @@ use crate::handler::request::PipelineDefinition;
 mod config;
 mod error;
 
-use config::EngineFile;
 pub use error::UnknownFormatToken;
 
 /// Deployment configuration for the redaction engine.
@@ -55,17 +55,12 @@ impl EngineService {
     /// configured file when present; otherwise starts with empty lineups and no
     /// enrichment.
     pub async fn from_config(config: EngineConfig) -> Result<Self> {
-        let file = match config.config_path {
-            Some(path) => EngineFile::load(&path).await?,
-            None => EngineFile::default(),
+        let provider_config = match config.config_path {
+            Some(path) => config::load(&path).await?,
+            None => ProviderConfig::default(),
         };
 
-        let parts = file.into_parts();
-        let engine = Engine::new()
-            .with_ner(parts.ner)
-            .with_llm(parts.llm)
-            .with_ocr(parts.ocr)
-            .with_stt(parts.stt);
+        let engine = Engine::new(provider_config.build());
         Ok(Self { engine })
     }
 
@@ -74,29 +69,32 @@ impl EngineService {
         &self.engine
     }
 
-    /// Builds the [`AnalyzerParams`] for one detect run from a pipeline's intent.
+    /// Builds the [`RequestContext`] for one detect run from a pipeline's intent.
     ///
     /// Recognition is entirely engine-owned (the built-in pattern set plus the
-    /// deployment's NER/LLM lineups always run). Scope is the request's own,
-    /// falling back to the pipeline default. `raster_mode` is the workspace's
-    /// page-rasterisation policy (always render vs. auto). Deduplication and
+    /// deployment's NER/LLM lineups always run). The document context is the
+    /// request's own, falling back to the pipeline default. `raster_mode` is the
+    /// workspace's page-rasterisation policy (always render vs. auto), carried in
+    /// the codec params since it is server-derived, not caller-set. The engine
+    /// records the context and codec params on the audit so redaction re-decodes
+    /// and re-compiles against exactly what detection used. Deduplication and
     /// calibration are engine-owned defaults; the label catalog is derived from
     /// the run's policies at detect time.
-    pub fn analyzer_params(
+    ///
+    /// No key is set: the server does not yet drive keyed operators
+    /// (`HmacHash`/`Encrypt`), whose `KeyConfig` would be supplied here.
+    pub fn request_context(
         &self,
         definition: &PipelineDefinition,
-        request_scope: Option<ScopeParams>,
+        request_context: Option<DocumentContext>,
         raster_mode: RasterMode,
-    ) -> AnalyzerParams {
-        let scope = request_scope
+    ) -> RequestContext {
+        let context = request_context
             .or_else(|| definition.default_scope.clone())
             .unwrap_or_default();
-
-        AnalyzerParams {
-            scope,
-            raster_mode,
-            annotations: AnyAnnotations::default(),
-        }
+        RequestContext::new()
+            .with_context(context)
+            .with_codec(CodecParams::new().with_raster_mode(raster_mode))
     }
 
     /// Resolves file-extension filter tokens to the set of extensions to match.

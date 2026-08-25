@@ -266,9 +266,9 @@ impl DetectionWorker {
 
         // Parse the workspace settings once; both OCR mode and retention read it.
         let settings = workspace.settings.or_default();
-        let params =
+        let request =
             self.engine
-                .analyzer_params(&definition, job.scope.clone(), raster_mode_of(&settings));
+                .request_context(&definition, job.scope.clone(), raster_mode_of(&settings));
 
         let document = self.blob.build_document(&file, run.id).await?;
 
@@ -280,7 +280,7 @@ impl DetectionWorker {
                 .with_resource("pipeline"));
         }
 
-        let analyzed = self.engine.analyze(document, &policies, &params).await?;
+        let analyzed = self.engine.analyze(document, &policies, &request).await?;
 
         // Write the (non-transactional) audit object first, then commit its file
         // row together with the run's usage and status in one transaction below.

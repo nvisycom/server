@@ -38,6 +38,7 @@ elide-pipeline = { workspace = true, features = [
     "all-modalities",
     "audit-json",
     "audit-csv",
+    "audit-zip",
 ] }
 
 # Internal crates
