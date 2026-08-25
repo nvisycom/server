@@ -6276,7 +6276,6 @@ dependencies = [
  "uuid",
  "validator",
  "woothee",
- "zip",
  "zxcvbn",
 ]
 

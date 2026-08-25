@@ -119,9 +119,6 @@ ipnet = { workspace = true, features = [] }
 # Image processing
 image = { workspace = true }
 
-# Archive reading & writing
-zip = { workspace = true }
-
 # Cron parsing
 croner = { workspace = true, features = [] }
 chrono = { workspace = true, features = [] }
