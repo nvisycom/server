@@ -88,7 +88,12 @@ impl InferenceClient {
                         StreamedAssistantContent::Text(Text { text, .. }),
                     )) => yield Ok(text),
                     Ok(_) => {}
-                    Err(err) => yield Err(Error::Prompt(err.to_string())),
+                    // An error is terminal: yield it and stop, per TokenStream's
+                    // contract, rather than polling the rig stream again.
+                    Err(err) => {
+                        yield Err(Error::Prompt(err.to_string()));
+                        break;
+                    }
                 }
             }
         };
