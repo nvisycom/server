@@ -9,7 +9,6 @@
 //! inference that `ObjectStoreClient` plays for object storage: one runtime
 //! handle callers use regardless of which provider backs it.
 
-mod erased_agent;
 mod token_stream;
 mod turn;
 
@@ -17,29 +16,27 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use futures::StreamExt;
-use rig::agent::Agent;
+use rig::agent::{Agent, MultiTurnStreamItem};
 use rig::client::verify::{VerifyClient, VerifyError};
-use rig::completion::{CompletionModel, GetTokenUsage, Message};
+use rig::completion::message::Text;
+use rig::completion::{Chat, Message, Prompt};
+use rig::streaming::{StreamedAssistantContent, StreamingChat};
 
-use self::erased_agent::ErasedAgent;
 pub use self::token_stream::TokenStream;
 pub use self::turn::{ChatTurn, Role};
 use crate::error::Error;
 
 /// Cloneable handle to any inference backend (OpenAI, Anthropic, Ollama, ...).
 ///
-/// Wraps a provider's rig agent behind a provider-agnostic interface, so callers
-/// issue prompts without knowing which provider is configured.
+/// Wraps a rig [`Agent`] — which erases its provider's completion-model type
+/// internally — behind a provider-agnostic interface, so callers issue prompts
+/// without knowing which provider is configured.
 #[derive(Clone)]
-pub struct InferenceClient(Arc<dyn ErasedAgent>);
+pub struct InferenceClient(Arc<Agent>);
 
 impl InferenceClient {
-    /// Wrap a concrete rig [`Agent`].
-    pub(crate) fn new<M>(agent: Agent<M>) -> Self
-    where
-        M: CompletionModel + 'static,
-        M::StreamingResponse: GetTokenUsage,
-    {
+    /// Wrap a rig [`Agent`].
+    pub(crate) fn new(agent: Agent) -> Self {
         Self(Arc::new(agent))
     }
 
@@ -47,8 +44,7 @@ impl InferenceClient {
     /// text response.
     #[tracing::instrument(name = "inference.prompt", skip_all)]
     pub async fn prompt(&self, prompt: &str) -> Result<String, Error> {
-        self.0
-            .prompt(prompt.to_owned())
+        Prompt::prompt(&*self.0, prompt.to_owned())
             .await
             .map_err(|err| Error::Prompt(err.to_string()))
     }
@@ -59,8 +55,7 @@ impl InferenceClient {
     #[tracing::instrument(name = "inference.chat", skip_all, fields(history_len = history.len()))]
     pub async fn chat(&self, prompt: &str, history: Vec<ChatTurn>) -> Result<String, Error> {
         let mut history = to_messages(history);
-        self.0
-            .chat(prompt.to_owned(), &mut history)
+        Chat::chat(&*self.0, prompt.to_owned(), &mut history)
             .await
             .map_err(|err| Error::Prompt(err.to_string()))
     }
@@ -83,9 +78,23 @@ impl InferenceClient {
         let prompt = prompt.to_owned();
         let history = to_messages(history);
         let inner = stream! {
-            let mut deltas = agent.stream_chat(prompt, history).await;
-            while let Some(delta) = deltas.next().await {
-                yield delta;
+            let stream = StreamingChat::stream_chat(&*agent, prompt, history).await;
+            for await item in stream {
+                // Map rig's multi-turn stream down to bare text deltas: non-text
+                // items (tool calls, reasoning, the final-response marker) carry
+                // no user-visible text and are dropped.
+                match item {
+                    Ok(MultiTurnStreamItem::StreamAssistantItem(
+                        StreamedAssistantContent::Text(Text { text, .. }),
+                    )) => yield Ok(text),
+                    Ok(_) => {}
+                    // An error is terminal: yield it and stop, per TokenStream's
+                    // contract, rather than polling the rig stream again.
+                    Err(err) => {
+                        yield Err(Error::Prompt(err.to_string()));
+                        break;
+                    }
+                }
             }
         };
         TokenStream::new(inner.boxed())
