@@ -22,7 +22,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::job::DetectionJob;
 use super::service::DetectionQueue;
-use super::support::{FailDetection, extract_detection_usage, fail_detection, resolve_policies};
+use super::support::{
+    FailDetection, FailOutcome, extract_detection_usage, fail_detection, resolve_policies,
+};
 use crate::extract::SecurityContext;
 use crate::handler::request::PipelineDefinition;
 use crate::handler::{ErrorKind, Result};
@@ -212,7 +214,7 @@ impl DetectionWorker {
             .await
         {
             tracing::warn!(target: TRACING_TARGET, error = %err, "Detection failed");
-            fail_detection(
+            let outcome = fail_detection(
                 &mut conn,
                 &self.detection,
                 FailDetection {
@@ -226,6 +228,13 @@ impl DetectionWorker {
                 },
             )
             .await;
+            // If the failure state could not be persisted, the detection is left
+            // `Executing` with no queued job to reclaim its lease: redeliver so a
+            // later attempt drives it to a terminal state rather than ack'ing a
+            // detection that will hang.
+            if outcome == FailOutcome::PersistFailed {
+                return JobOutcome::Retry;
+            }
         }
         JobOutcome::Done
     }

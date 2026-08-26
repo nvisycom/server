@@ -359,7 +359,10 @@ async fn load_detection_durations(
         .inner_join(workspace_pipelines::table)
         .filter(pipelines::workspace_id.eq(workspace_id))
         .filter(pipelines::deleted_at.is_null())
-        .filter(detections::completed_at.is_not_null())
+        // Durations describe successful analysis only. `completed_at` is stamped
+        // on failure too, so filter on the terminal `Complete` status, not merely
+        // on the timestamp being present.
+        .filter(detections::status.eq(DetectionStatus::Complete))
         .select((avg_ms, p95_ms))
         .first(conn)
         .await
@@ -441,16 +444,19 @@ async fn load_detection_day_counts(
     // Conditional counts are `sum(CASE WHEN cond THEN 1 ELSE 0 END)` since Diesel's
     // aggregate FILTER is not available on `count(*)`. Columns are table-qualified
     // so the join to pipelines can never make them ambiguous.
+    // Durations describe successful analysis only, so filter the aggregates on the
+    // terminal `complete` status: `completed_at` is stamped on failure too, so a
+    // presence check alone would fold failed detections into avg/p95.
     let avg_ms = sql::<SqlNullable<BigInt>>(
         "round(avg(EXTRACT(EPOCH FROM (workspace_detections.completed_at \
          - workspace_detections.started_at))) \
-         FILTER (WHERE workspace_detections.completed_at IS NOT NULL) * 1000)::bigint",
+         FILTER (WHERE workspace_detections.status = 'complete') * 1000)::bigint",
     );
     let p95_ms = sql::<SqlNullable<BigInt>>(
         "round(percentile_cont(0.95) WITHIN GROUP \
          (ORDER BY EXTRACT(EPOCH FROM (workspace_detections.completed_at \
          - workspace_detections.started_at))) \
-         FILTER (WHERE workspace_detections.completed_at IS NOT NULL) * 1000)::bigint",
+         FILTER (WHERE workspace_detections.status = 'complete') * 1000)::bigint",
     );
 
     workspace_detections::table

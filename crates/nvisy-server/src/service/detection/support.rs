@@ -143,7 +143,7 @@ pub(crate) async fn fail_detection(
     conn: &mut nvisy_postgres::PgConn,
     detection: &DetectionQueue,
     params: FailDetection<'_>,
-) {
+) -> FailOutcome {
     let FailDetection {
         workspace_id,
         detection_id,
@@ -165,34 +165,30 @@ pub(crate) async fn fail_detection(
         ..Default::default()
     };
 
-    match claim {
+    let persisted = match claim {
         // Worker path: guard on the claim. A stale claim fails nothing and stays
         // silent — the new owner drives the detection to its own outcome.
-        Some(claimed_at) => match conn.fail_detection(detection_id, claimed_at, update).await {
-            Ok(true) => {}
-            Ok(false) => {
-                tracing::warn!(target: TRACING_TARGET, %detection_id, "Claim went stale before failure; another worker owns the detection");
-                return;
-            }
-            Err(err) => {
-                tracing::warn!(target: TRACING_TARGET, error = %err, %detection_id, "Failed to mark detection failed");
-                return;
-            }
-        },
+        Some(claimed_at) => conn.fail_detection(detection_id, claimed_at, update).await,
         // Handler path (enqueue failure): guard on `Pending` so this no-ops if a
         // worker already claimed the detection — enqueue can report an error even
         // when the job was delivered, and the worker then owns the outcome.
-        None => match conn.fail_pending_detection(detection_id, update).await {
-            Ok(true) => {}
-            Ok(false) => {
-                tracing::warn!(target: TRACING_TARGET, %detection_id, "Detection was already claimed before enqueue-failure handling; the worker owns it");
-                return;
-            }
-            Err(err) => {
-                tracing::warn!(target: TRACING_TARGET, error = %err, %detection_id, "Failed to mark detection failed");
-                return;
-            }
-        },
+        None => conn.fail_pending_detection(detection_id, update).await,
+    };
+    match persisted {
+        Ok(true) => {}
+        // The guard didn't match: another owner (or an already-terminal detection)
+        // drives the outcome. Nothing to persist, announce, or retry.
+        Ok(false) => {
+            tracing::warn!(target: TRACING_TARGET, %detection_id, "Detection no longer owned at failure; another owner drives it");
+            return FailOutcome::NotOwned;
+        }
+        // The terminal write itself failed: the detection is still `Executing`
+        // with no queued job to reclaim it, so the caller must retry (redeliver)
+        // rather than treat the failure as handled.
+        Err(err) => {
+            tracing::warn!(target: TRACING_TARGET, error = %err, %detection_id, "Failed to persist detection failure; will retry");
+            return FailOutcome::PersistFailed;
+        }
     }
 
     detection
@@ -220,6 +216,24 @@ pub(crate) async fn fail_detection(
     {
         tracing::warn!(target: TRACING_TARGET, error = %err, %detection_id, "Failed to record detection-failed event");
     }
+
+    // The state transition is persisted; a lost event is recoverable from the
+    // outbox and does not change the outcome.
+    FailOutcome::Failed
+}
+
+/// The result of attempting to fail a detection, so a caller driving a work
+/// queue can decide whether to redeliver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FailOutcome {
+    /// The detection was transitioned to `Failed` and its failure announced.
+    Failed,
+    /// The failure was not applied because the detection is no longer owned by
+    /// the caller (another owner, or an already-terminal detection). No retry.
+    NotOwned,
+    /// The terminal write failed to persist, leaving the detection mid-flight;
+    /// the caller should redeliver so the stale lease is reclaimed.
+    PersistFailed,
 }
 
 /// Resolves a pipeline's live policy references into decrypted engine policies.
