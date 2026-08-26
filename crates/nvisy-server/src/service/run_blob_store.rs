@@ -178,64 +178,6 @@ impl RunBlobStore {
         Ok(Document::new(bytes, file.file_extension.clone()).with_correlation_id(correlation_id))
     }
 
-    /// Stores redacted bytes as a new workspace file (the run's output).
-    ///
-    /// The redacted file is a first-class file — a sibling of the source — so it
-    /// is downloadable through the normal file endpoints.
-    pub async fn store_redacted_file(
-        &self,
-        conn: &mut PgConn,
-        source: &WorkspaceFile,
-        pipeline: &WorkspacePipeline,
-        workspace_settings: &RetentionSettings,
-        account_id: Uuid,
-        bytes: Bytes,
-    ) -> Result<WorkspaceFile> {
-        // Record the plaintext size and hash before encrypting; storage holds
-        // only the ciphertext.
-        let plaintext_size = bytes.len() as i64;
-        let plaintext_hash = Sha256::digest(&bytes).to_vec();
-        let ciphertext = self
-            .infra
-            .crypto
-            .encrypt(source.workspace_id, &bytes)
-            .map_err(|err| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to encrypt redacted file")
-                    .with_context(err.to_string())
-            })?;
-
-        let store = self.infra.nats.object_store::<FilesBucket>().await?;
-        let key = FileKey::generate(source.workspace_id);
-        store.put(&key, Cursor::new(ciphertext)).await?;
-
-        // Retention expiry for the redacted-documents scope (workspace baseline,
-        // pipeline override if set).
-        let over = pipeline.metadata.or_default().retention;
-        let expires_at = workspace_settings
-            .resolve(RetentionScope::RedactedDocuments, over.as_ref())
-            .expires_at(jiff::Timestamp::now());
-
-        let redacted_name = redacted_display_name(&source.display_name, &source.file_extension);
-        let new_file = NewWorkspaceFile {
-            workspace_id: source.workspace_id,
-            account_id,
-            parent_id: Some(source.id),
-            display_name: Some(redacted_name),
-            original_filename: Some(source.original_filename.clone()),
-            file_extension: Some(source.file_extension.clone()),
-            file_kind: Some(FileKind::Redacted),
-            file_size_bytes: plaintext_size,
-            file_hash_sha256: plaintext_hash,
-            storage_path: key.to_string(),
-            storage_bucket: store.bucket().to_owned(),
-            expires_at: expires_at.map(Into::into),
-            ..Default::default()
-        };
-
-        Ok(conn.create_workspace_file(new_file).await?)
-    }
-
     /// Encrypts the analysis, writes it to the audit bucket, and builds the
     /// `audit`-kind [`WorkspaceFile`] row that will point at it — but does not
     /// insert the row.
@@ -445,11 +387,12 @@ impl RunBlobStore {
     /// `redacted`-kind [`WorkspaceFile`] row that will point at them — without
     /// inserting the row.
     ///
-    /// The staged counterpart to
-    /// [`store_redacted_file`](Self::store_redacted_file): a redaction commits its
-    /// output row, review-audit row, and redaction row together in one
-    /// transaction, so the output file is staged rather than inserted here. The
-    /// redacted file is a first-class file (a sibling of the source), downloadable
+    /// A redaction commits its output row, review-audit row, and redaction row
+    /// together in one transaction, so the output file is staged (object written,
+    /// row returned for the caller to insert) rather than inserted here, and is
+    /// reclaimed on rollback via
+    /// [`discard_staged_object`](Self::discard_staged_object). The redacted file
+    /// is a first-class file (a sibling of the source), downloadable
     /// through the normal file endpoints.
     pub async fn stage_redacted_file(
         &self,

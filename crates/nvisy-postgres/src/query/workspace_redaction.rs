@@ -22,10 +22,14 @@ pub trait WorkspaceRedactionRepository {
         new_redaction: NewWorkspaceRedaction,
     ) -> impl Future<Output = PgResult<WorkspaceRedaction>> + Send;
 
-    /// Finds a redaction by its id, scoped to its owning detection.
-    fn find_redaction_by_id(
+    /// Finds a redaction by its id, scoped to a workspace.
+    ///
+    /// A [`RedactionId`](crate::types::RedactionId) is globally unique, so a
+    /// redaction is addressable by id alone; this resolves it only within the
+    /// given workspace by joining through its detection's pipeline.
+    fn find_redaction_in_workspace(
         &mut self,
-        detection_id: Uuid,
+        workspace_id: Uuid,
         redaction_id: Uuid,
     ) -> impl Future<Output = PgResult<Option<WorkspaceRedaction>>> + Send;
 
@@ -54,16 +58,22 @@ impl WorkspaceRedactionRepository for PgConnection {
         Ok(redaction)
     }
 
-    async fn find_redaction_by_id(
+    async fn find_redaction_in_workspace(
         &mut self,
-        detection_id: Uuid,
+        workspace_id: Uuid,
         redaction_id: Uuid,
     ) -> PgResult<Option<WorkspaceRedaction>> {
-        use schema::workspace_redactions::{self, dsl};
+        use schema::workspace_redactions::dsl as redactions;
+        use schema::{workspace_detections, workspace_pipelines, workspace_redactions};
 
+        // Redactions carry no workspace column; scope through the detection's
+        // pipeline so the id resolves only within its workspace, and only while
+        // that pipeline is live (a soft-deleted pipeline hides its redactions).
         let redaction = workspace_redactions::table
-            .filter(dsl::id.eq(redaction_id))
-            .filter(dsl::detection_id.eq(detection_id))
+            .inner_join(workspace_detections::table.inner_join(workspace_pipelines::table))
+            .filter(redactions::id.eq(redaction_id))
+            .filter(workspace_pipelines::workspace_id.eq(workspace_id))
+            .filter(workspace_pipelines::deleted_at.is_null())
             .select(WorkspaceRedaction::as_select())
             .first(self)
             .await

@@ -16,10 +16,8 @@ use uuid::Uuid;
 
 use super::detections::find_detection;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, WorkspaceContext};
-use crate::handler::request::{
-    CursorPagination, DetectionPathParams, DetectionRedactionPathParams,
-};
-use crate::handler::response::{ErrorResponse, Redaction, RedactionsPage};
+use crate::handler::request::{CursorPagination, DetectionPathParams, RedactionPathParams};
+use crate::handler::response::{ErrorResponse, RedactionResult, RedactionsPage};
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{ErrorKind, Result, ServiceState};
 use crate::service::{EngineService, RunBlobStore};
@@ -65,7 +63,7 @@ async fn list_detection_redactions(
     let mut items = Vec::with_capacity(page.items.len());
     for redaction in page.items {
         let requested_by = resolve_account_ref(&mut conn, redaction.account_id).await?;
-        items.push(Redaction::from_model(
+        items.push(RedactionResult::from_model(
             redaction,
             workspace.slug.clone(),
             requested_by,
@@ -96,7 +94,6 @@ fn list_detection_redactions_docs(op: TransformOperation) -> TransformOperation 
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        detection_id = %path_params.detection_id,
         redaction_id = %path_params.redaction_id,
     )
 )]
@@ -106,7 +103,7 @@ async fn get_redaction_review(
     State(engine): State<EngineService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
-    Path(path_params): Path<DetectionRedactionPathParams>,
+    Path(path_params): Path<RedactionPathParams>,
 ) -> Result<(StatusCode, Json<Audit>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting redaction review audit");
 
@@ -116,13 +113,8 @@ async fn get_redaction_review(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let redaction = find_redaction(
-        &mut conn,
-        workspace.id,
-        path_params.detection_id.as_uuid(),
-        path_params.redaction_id.as_uuid(),
-    )
-    .await?;
+    let redaction =
+        find_redaction(&mut conn, workspace.id, path_params.redaction_id.as_uuid()).await?;
 
     let review = blob
         .load_review_audit(&mut conn, &engine, workspace.id, redaction.review_file_id)
@@ -144,18 +136,17 @@ fn get_redaction_review_docs(op: TransformOperation) -> TransformOperation {
         .response::<409, Json<ErrorResponse>>()
 }
 
-/// Loads a redaction scoped to its detection and workspace, mapping a missing
-/// detection or redaction to a 404.
+/// Loads a redaction scoped to the workspace, mapping a missing one to a 404.
+///
+/// A [`RedactionId`](nvisy_postgres::types::RedactionId) is globally unique, so
+/// the redaction is addressed by id alone and resolved within the workspace via
+/// its detection's pipeline.
 async fn find_redaction(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    detection_id: Uuid,
     redaction_id: Uuid,
 ) -> Result<nvisy_postgres::model::WorkspaceRedaction> {
-    // Confirm the detection is in this workspace first, so a redaction id cannot
-    // be probed against detections in another workspace.
-    find_detection(conn, workspace_id, detection_id).await?;
-    conn.find_redaction_by_id(detection_id, redaction_id)
+    conn.find_redaction_in_workspace(workspace_id, redaction_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::NotFound
@@ -172,7 +163,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
             get_with(list_detection_redactions, list_detection_redactions_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/detections/{detectionId}/redactions/{redactionId}/review",
+            "/workspaces/{workspaceSlug}/redactions/{redactionId}/review",
             get_with(get_redaction_review, get_redaction_review_docs),
         )
         .with_path_items(|item| item.tag("Redactions"))

@@ -126,13 +126,6 @@ pub trait WorkspaceDetectionRepository {
         detection: &WorkspaceDetection,
     ) -> impl Future<Output = PgResult<DetectionFiles>> + Send;
 
-    /// Updates a workspace detection with new data.
-    fn update_workspace_detection(
-        &mut self,
-        detection_id: Uuid,
-        updates: UpdateWorkspaceDetection,
-    ) -> impl Future<Output = PgResult<WorkspaceDetection>> + Send;
-
     /// Transitions a detection to `Complete` only while the caller still holds
     /// its claim — the detection is still `Executing` and its `claimed_at` matches
     /// the value stamped when the caller claimed it. Returns `true` on success,
@@ -159,6 +152,19 @@ pub trait WorkspaceDetectionRepository {
         &mut self,
         detection_id: Uuid,
         claimed_at: jiff::Timestamp,
+        updates: UpdateWorkspaceDetection,
+    ) -> impl Future<Output = PgResult<bool>> + Send;
+
+    /// Transitions a detection to `Failed` only while it is still `Pending` — no
+    /// worker has claimed it. For the enqueue-failure path in the create handler:
+    /// if enqueue reported an error but the job was in fact delivered, a worker
+    /// may already have claimed the detection (moving it to `Executing`), and this
+    /// guard makes the handler's failure a no-op so it never clobbers the outcome
+    /// the worker will drive. Returns `true` if it failed the detection, `false`
+    /// if it was no longer `Pending`. Forces `status` and `completed_at`.
+    fn fail_pending_detection(
+        &mut self,
+        detection_id: Uuid,
         updates: UpdateWorkspaceDetection,
     ) -> impl Future<Output = PgResult<bool>> + Send;
 
@@ -532,24 +538,6 @@ impl WorkspaceDetectionRepository for PgConnection {
         Ok(DetectionFiles { input })
     }
 
-    async fn update_workspace_detection(
-        &mut self,
-        detection_id: Uuid,
-        updates: UpdateWorkspaceDetection,
-    ) -> PgResult<WorkspaceDetection> {
-        use schema::workspace_detections::{self, dsl};
-
-        let detection =
-            diesel::update(workspace_detections::table.filter(dsl::id.eq(detection_id)))
-                .set(&updates)
-                .returning(WorkspaceDetection::as_returning())
-                .get_result(self)
-                .await
-                .map_err(PgError::from)?;
-
-        Ok(detection)
-    }
-
     async fn finalize_detection(
         &mut self,
         detection_id: Uuid,
@@ -558,9 +546,11 @@ impl WorkspaceDetectionRepository for PgConnection {
     ) -> PgResult<bool> {
         use schema::workspace_detections::{self, dsl};
 
-        // Force the terminal transition here; the guard makes it a no-op unless we
-        // still own the claim.
+        // Force the terminal transition and stamp the terminal time here, so every
+        // terminal outcome records `completed_at` regardless of the caller; the
+        // guard makes it a no-op unless we still own the claim.
         updates.status = Some(DetectionStatus::Complete);
+        updates.completed_at = Some(Some(jiff::Timestamp::now().into()));
         let claimed_at = jiff_diesel::Timestamp::from(claimed_at);
 
         // Guard on the claim we hold: same detection, still `Executing`, and the
@@ -589,7 +579,10 @@ impl WorkspaceDetectionRepository for PgConnection {
     ) -> PgResult<bool> {
         use schema::workspace_detections::{self, dsl};
 
+        // Force the terminal transition and stamp the terminal time here, mirroring
+        // `finalize_detection`, so both terminal outcomes record `completed_at`.
         updates.status = Some(DetectionStatus::Failed);
+        updates.completed_at = Some(Some(jiff::Timestamp::now().into()));
         let claimed_at = jiff_diesel::Timestamp::from(claimed_at);
 
         // Same claim guard as the complete finalize: only our still-live claim
@@ -599,6 +592,33 @@ impl WorkspaceDetectionRepository for PgConnection {
                 .filter(dsl::id.eq(detection_id))
                 .filter(dsl::status.eq(DetectionStatus::Executing))
                 .filter(dsl::claimed_at.eq(claimed_at)),
+        )
+        .set(&updates)
+        .execute(self)
+        .await
+        .map_err(PgError::from)?;
+
+        Ok(updated == 1)
+    }
+
+    async fn fail_pending_detection(
+        &mut self,
+        detection_id: Uuid,
+        mut updates: UpdateWorkspaceDetection,
+    ) -> PgResult<bool> {
+        use schema::workspace_detections::{self, dsl};
+
+        // Force the terminal transition and stamp the terminal time, as the other
+        // finalize methods do.
+        updates.status = Some(DetectionStatus::Failed);
+        updates.completed_at = Some(Some(jiff::Timestamp::now().into()));
+
+        // Guard on `Pending`: once a worker claims the detection (moving it to
+        // `Executing`), this matches no row and the worker owns the outcome.
+        let updated = diesel::update(
+            workspace_detections::table
+                .filter(dsl::id.eq(detection_id))
+                .filter(dsl::status.eq(DetectionStatus::Pending)),
         )
         .set(&updates)
         .execute(self)

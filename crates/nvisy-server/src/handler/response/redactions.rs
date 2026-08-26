@@ -15,9 +15,13 @@ use super::{AccountRef, Page};
 /// of reviewer edits. It owns the redacted output document (downloadable through
 /// the normal file endpoints) and a review audit recording what was redacted and
 /// why (fetched from the redaction's `review` endpoint).
+///
+/// Named `RedactionResult` rather than `Redaction` because the engine's audit
+/// schema already carries a `Redaction` (an audit event), and the two must not
+/// collide in the generated OpenAPI.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Redaction {
+pub struct RedactionResult {
     /// Opaque identifier of the redaction.
     pub id: RedactionId,
     /// The detection this redaction was produced from.
@@ -35,9 +39,9 @@ pub struct Redaction {
 }
 
 /// Paginated response for redactions.
-pub type RedactionsPage = Page<Redaction>;
+pub type RedactionsPage = Page<RedactionResult>;
 
-impl Redaction {
+impl RedactionResult {
     /// Creates a redaction response from the database model, the owning
     /// workspace slug, and the requesting account.
     pub fn from_model(

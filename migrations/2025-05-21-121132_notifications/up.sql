@@ -1,18 +1,18 @@
 -- Notifications: per-account notification inbox for member, connection-sync,
--- and pipeline-run events. Account-scoped but a standalone feature; the client
--- renders copy from the event type and its typed params.
+-- detection, and redaction events. Account-scoped but a standalone feature; the
+-- client renders copy from the event type and its typed params.
 
 -- Type of a notification event: what happened that the account is told about.
 CREATE TYPE NOTIFICATION_EVENT AS ENUM (
-    'member.invited',            -- User was invited to a workspace
-    'member.joined',             -- A new member joined a workspace
+    'member.invited',              -- User was invited to a workspace
+    'member.joined',               -- A new member joined a workspace
 
-    'connection.sync.completed', -- A connection sync completed
-    'connection.sync.failed',    -- A connection sync failed
+    'connection.sync.completed',   -- A connection sync completed
+    'connection.sync.failed',      -- A connection sync failed
 
-    'pipeline.run.analyzed',     -- A run finished detection, awaiting review
-    'pipeline.run.completed',    -- A run completed (redaction produced)
-    'pipeline.run.failed'        -- A run failed
+    'pipeline.detection.completed', -- A detection finished analysis, ready to redact
+    'pipeline.redaction.created',   -- A redaction was created (redacted output produced)
+    'pipeline.detection.failed'     -- A detection failed
 );
 
 COMMENT ON TYPE NOTIFICATION_EVENT IS 'Type of a notification event delivered to an account.';

@@ -154,10 +154,11 @@ pub(crate) async fn fail_detection(
         error: Some(reason.to_owned()),
         ..Default::default()
     };
+    // `status` and `completed_at` are forced by `fail_detection` itself (the
+    // terminal transition owns the terminal timestamp), so only the failure
+    // reason is supplied here.
     let update = UpdateWorkspaceDetection {
-        status: Some(DetectionStatus::Failed),
         metadata: Some(Json::encode(&metadata)),
-        completed_at: Some(Some(jiff::Timestamp::now().into())),
         ..Default::default()
     };
 
@@ -175,12 +176,20 @@ pub(crate) async fn fail_detection(
                 return;
             }
         },
-        // Handler path: no claim to guard.
-        None => {
-            if let Err(err) = conn.update_workspace_detection(detection_id, update).await {
-                tracing::warn!(target: TRACING_TARGET, error = %err, %detection_id, "Failed to mark detection failed");
+        // Handler path (enqueue failure): guard on `Pending` so this no-ops if a
+        // worker already claimed the detection — enqueue can report an error even
+        // when the job was delivered, and the worker then owns the outcome.
+        None => match conn.fail_pending_detection(detection_id, update).await {
+            Ok(true) => {}
+            Ok(false) => {
+                tracing::warn!(target: TRACING_TARGET, %detection_id, "Detection was already claimed before enqueue-failure handling; the worker owns it");
+                return;
             }
-        }
+            Err(err) => {
+                tracing::warn!(target: TRACING_TARGET, error = %err, %detection_id, "Failed to mark detection failed");
+                return;
+            }
+        },
     }
 
     detection

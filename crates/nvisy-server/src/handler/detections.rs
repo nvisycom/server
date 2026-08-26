@@ -31,7 +31,7 @@ use crate::handler::request::{
     CreateDetection, CursorPagination, DetectionPathParams, PipelineDefinition,
     PipelineDetectionsQuery, PipelinePathParams, RedactDetection, WorkspaceDetectionsQuery,
 };
-use crate::handler::response::{Detection, DetectionsPage, ErrorResponse, Redaction};
+use crate::handler::response::{Detection, DetectionsPage, ErrorResponse, RedactionResult};
 use crate::handler::utility::{SseResponse, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
@@ -219,7 +219,7 @@ fn create_detection_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Start a detection")
         .description(
             "Starts analysis for a file and returns 202 with the detection in the \
-             `executing` state; the analysis runs in the background. Watch the \
+             `pending` state; the analysis runs in the background. Watch the \
              detection's status via the SSE stream at \
              `.../detections/{detectionId}/events` (or re-read the detection) and \
              fetch the findings from `.../detections/{detectionId}/analysis/` once \
@@ -579,7 +579,7 @@ async fn redact_detection(
     Path(path_params): Path<DetectionPathParams>,
     security: SecurityContext,
     Json(request): Json<RedactDetection>,
-) -> Result<(StatusCode, Json<Redaction>)> {
+) -> Result<(StatusCode, Json<RedactionResult>)> {
     tracing::debug!(target: TRACING_TARGET, "Redacting detection");
 
     let mut conn = pg_client.get_connection().await?;
@@ -710,7 +710,7 @@ async fn redact_detection(
 
     Ok((
         StatusCode::CREATED,
-        Json(Redaction::from_model(
+        Json(RedactionResult::from_model(
             redaction,
             workspace.slug,
             requested_by,
@@ -728,7 +728,7 @@ fn redact_detection_docs(op: TransformOperation) -> TransformOperation {
              than once. An edit targeting a detection not in the analysis, or a set that \
              contradicts itself, is rejected (400).",
         )
-        .response::<201, Json<Redaction>>()
+        .response::<201, Json<RedactionResult>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()

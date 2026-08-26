@@ -92,13 +92,14 @@ pub struct DetectionPathParams {
     pub detection_id: DetectionId,
 }
 
-/// Path parameters for a redaction nested under its detection.
+/// Path parameters for a redaction.
+///
+/// The redaction id is globally unique, so a redaction is addressed by id alone
+/// and resolved within the workspace by the query.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DetectionRedactionPathParams {
-    /// Opaque identifier of the detection.
-    pub detection_id: DetectionId,
+pub struct RedactionPathParams {
     /// Opaque identifier of the redaction.
     pub redaction_id: RedactionId,
 }

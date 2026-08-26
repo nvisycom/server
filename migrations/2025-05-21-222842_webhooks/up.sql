@@ -32,14 +32,14 @@ CREATE TYPE WEBHOOK_EVENT AS ENUM (
     'connection.sync.completed',
     'connection.sync.failed',
 
-    -- Pipeline events
+    -- Pipeline, detection, and redaction events
     'pipeline.created',
     'pipeline.updated',
     'pipeline.deleted',
-    'pipeline.run.started',
-    'pipeline.run.analyzed',
-    'pipeline.run.completed',
-    'pipeline.run.failed',
+    'pipeline.detection.started',
+    'pipeline.detection.completed',
+    'pipeline.detection.failed',
+    'pipeline.redaction.created',
 
     -- Policy events
     'policy.created',
