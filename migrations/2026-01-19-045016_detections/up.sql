@@ -1,20 +1,7 @@
--- Pipelines: redaction pipeline definitions, their detections, and the
--- redactions produced from each. A pipeline is a workspace-scoped
--- detection/redaction config; a detection is one analysis pass of a file
--- through that config, and each detection can produce many redactions (one per
--- reviewer-edited redact request). Policy references live in a join table
--- declared alongside policies, not embedded here.
+-- Detections: one analysis pass of a file through a pipeline, its per-model
+-- usage, and the transactional outbox that queues each analysis. A detection
+-- can produce many redactions (see the redactions migration).
 
--- Lifecycle status of a pipeline definition.
-CREATE TYPE PIPELINE_STATUS AS ENUM (
-    'draft',        -- Pipeline is being configured
-    'enabled',      -- Pipeline is ready to run
-    'disabled'      -- Pipeline is turned off
-);
-
-COMMENT ON TYPE PIPELINE_STATUS IS 'Lifecycle status of a pipeline definition: draft, enabled, or disabled.';
-
--- Execution status of a detection (analysis pass).
 CREATE TYPE DETECTION_STATUS AS ENUM (
     'pending',      -- Enqueued for detection; no worker has picked it up yet
     'executing',    -- A worker is actively analyzing the document
@@ -31,93 +18,6 @@ CREATE TYPE PIPELINE_TRIGGER_TYPE AS ENUM (
 );
 
 COMMENT ON TYPE PIPELINE_TRIGGER_TYPE IS 'How a detection was initiated: by a user or by the system.';
-
--- Pipeline definitions table: a workspace's detection/redaction configs.
-CREATE TABLE workspace_pipelines (
-    -- Primary identifier
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- References
-    workspace_id    UUID             NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    account_id      UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-
-    -- Composite key target for workspace-scoped foreign keys (join tables).
-    CONSTRAINT workspace_pipelines_workspace_id_id_key UNIQUE (workspace_id, id),
-
-    -- URL identity, unique within the workspace (among live pipelines; enforced
-    -- by a partial index below so a slug frees up after soft deletion): lowercase
-    -- alphanumeric with single internal dashes, 3-32 characters.
-    slug            TEXT             NOT NULL,
-    CONSTRAINT workspace_pipelines_slug_length CHECK (length(slug) BETWEEN 3 AND 32),
-    CONSTRAINT workspace_pipelines_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
-
-    -- Core attributes
-    display_name    TEXT             NOT NULL,
-    CONSTRAINT workspace_pipelines_display_name_length CHECK (length(trim(display_name)) BETWEEN 2 AND 128),
-    description     TEXT             DEFAULT NULL,
-    CONSTRAINT workspace_pipelines_description_length CHECK (description IS NULL OR length(description) <= 500),
-    status          PIPELINE_STATUS  NOT NULL DEFAULT 'draft',
-
-    -- Engine detection + redaction config (nvisy_schema plan as JSON):
-    -- recognizers, enrichers, deduplication, label catalog, default scope.
-    -- Policy references are relational (workspace_pipeline_policies, declared
-    -- alongside policies), not embedded here.
-    definition      JSONB            NOT NULL,
-    CONSTRAINT workspace_pipelines_definition_size CHECK (length(definition::TEXT) BETWEEN 2 AND 1048576),
-
-    -- Free-form metadata for filtering and display.
-    metadata        JSONB            NOT NULL DEFAULT '{}',
-    CONSTRAINT workspace_pipelines_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
-
-    -- Lifecycle timestamps
-    created_at      TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-    updated_at      TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-    deleted_at      TIMESTAMPTZ      DEFAULT NULL,
-    CONSTRAINT workspace_pipelines_updated_after_created CHECK (updated_at >= created_at),
-    CONSTRAINT workspace_pipelines_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
-);
-
--- Maintain updated_at on every row modification.
-SELECT setup_updated_at('workspace_pipelines');
-
--- One live pipeline per slug within a workspace (slug frees up after deletion).
-CREATE UNIQUE INDEX workspace_pipelines_slug_unique_idx
-    ON workspace_pipelines (workspace_id, slug)
-    WHERE deleted_at IS NULL;
-
--- Live pipelines of a workspace, newest first (the pipeline list).
-CREATE INDEX workspace_pipelines_workspace_idx
-    ON workspace_pipelines (workspace_id, created_at DESC)
-    WHERE deleted_at IS NULL;
-
--- Live pipelines created by an account, newest first.
-CREATE INDEX workspace_pipelines_account_idx
-    ON workspace_pipelines (account_id, created_at DESC)
-    WHERE deleted_at IS NULL;
-
--- Filter live pipelines by lifecycle status within a workspace.
-CREATE INDEX workspace_pipelines_status_idx
-    ON workspace_pipelines (status, workspace_id)
-    WHERE deleted_at IS NULL;
-
--- Trigram search over live pipeline display names.
-CREATE INDEX workspace_pipelines_display_name_trgm_idx
-    ON workspace_pipelines USING gin (display_name gin_trgm_ops)
-    WHERE deleted_at IS NULL;
-
-COMMENT ON TABLE workspace_pipelines IS 'Workspace-scoped redaction pipeline definitions.';
-COMMENT ON COLUMN workspace_pipelines.id IS 'Unique pipeline identifier';
-COMMENT ON COLUMN workspace_pipelines.workspace_id IS 'Workspace this pipeline belongs to';
-COMMENT ON COLUMN workspace_pipelines.account_id IS 'Account that created the pipeline';
-COMMENT ON COLUMN workspace_pipelines.slug IS 'URL identity, unique among live pipelines in the workspace';
-COMMENT ON COLUMN workspace_pipelines.display_name IS 'Pipeline display name (2-128 chars)';
-COMMENT ON COLUMN workspace_pipelines.description IS 'Pipeline description (up to 500 chars)';
-COMMENT ON COLUMN workspace_pipelines.status IS 'Pipeline lifecycle status';
-COMMENT ON COLUMN workspace_pipelines.definition IS 'Detection/redaction config (nvisy_schema plan as JSON)';
-COMMENT ON COLUMN workspace_pipelines.metadata IS 'Free-form metadata for filtering/display';
-COMMENT ON COLUMN workspace_pipelines.created_at IS 'Pipeline creation timestamp';
-COMMENT ON COLUMN workspace_pipelines.updated_at IS 'Last modification timestamp';
-COMMENT ON COLUMN workspace_pipelines.deleted_at IS 'Soft-deletion timestamp; NULL means live';
 
 -- Detections table: one analysis pass of a file through a pipeline.
 CREATE TABLE workspace_detections (
@@ -226,53 +126,6 @@ COMMENT ON COLUMN workspace_detections.claimed_at IS 'Detection lease: when a wo
 COMMENT ON COLUMN workspace_detections.started_at IS 'When the detection started';
 COMMENT ON COLUMN workspace_detections.completed_at IS 'When the detection completed; NULL while in flight';
 
--- Redactions table: one redact pass over a detection's analysis. A detection can
--- be redacted many times — each redact request may carry a different set of
--- reviewer edits — so each is its own row owning the edited audit it applied and
--- the redacted document it produced.
-CREATE TABLE workspace_redactions (
-    -- Primary identifier
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- The detection this redaction was produced from; redactions are deleted
-    -- with their detection.
-    detection_id        UUID                NOT NULL REFERENCES workspace_detections (id) ON DELETE CASCADE,
-
-    -- Account that requested the redaction.
-    account_id          UUID                NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-
-    -- The two files a redaction produces. A redaction always yields both, so the
-    -- app sets them at creation; they are nullable only because `ON DELETE SET
-    -- NULL` clears a reference if its file is ever hard-deleted (for the same
-    -- append-only-history reasons as a detection — a soft-deleted file resolves to
-    -- "gone" at read time, distinct from a NULL that means the file was purged).
-    --   review: the engine's Audit after the reviewer edits were applied and
-    --           redaction ran (`file_kind = review`); the record of exactly what
-    --           was redacted and why.
-    --   output: the redacted document this redaction produced.
-    review_file_id  UUID                    DEFAULT NULL REFERENCES workspace_files (id) ON DELETE SET NULL,
-    output_file_id  UUID                    DEFAULT NULL REFERENCES workspace_files (id) ON DELETE SET NULL,
-
-    -- Timing
-    created_at      TIMESTAMPTZ             NOT NULL DEFAULT current_timestamp
-);
-
--- A detection's redactions, newest first (the redaction list).
-CREATE INDEX workspace_redactions_detection_idx
-    ON workspace_redactions (detection_id, created_at DESC);
-
--- Redactions requested by an account, newest first.
-CREATE INDEX workspace_redactions_account_idx
-    ON workspace_redactions (account_id, created_at DESC);
-
-COMMENT ON TABLE workspace_redactions IS 'Redactions: one redact pass over a detection, with its own reviewer edits, edited audit, and output.';
-COMMENT ON COLUMN workspace_redactions.id IS 'Unique redaction identifier';
-COMMENT ON COLUMN workspace_redactions.detection_id IS 'Detection this redaction was produced from';
-COMMENT ON COLUMN workspace_redactions.account_id IS 'Account that requested the redaction';
-COMMENT ON COLUMN workspace_redactions.review_file_id IS 'Review audit (file_kind=review) recording the applied edits and redaction outcome';
-COMMENT ON COLUMN workspace_redactions.output_file_id IS 'Redacted document this redaction produced';
-COMMENT ON COLUMN workspace_redactions.created_at IS 'When the redaction was created';
-
 -- Per-model inference usage for a detection: one row per distinct model a
 -- detection's recognizers used. Token counts are aggregated across the
 -- recognizers that shared a model, letting usage analytics report tokens broken
@@ -330,3 +183,60 @@ COMMENT ON COLUMN workspace_detection_usage.input_tokens IS 'Input/prompt tokens
 COMMENT ON COLUMN workspace_detection_usage.output_tokens IS 'Output/completion tokens for this model; NULL if not reported';
 COMMENT ON COLUMN workspace_detection_usage.total_tokens IS 'Total tokens as reported (not necessarily input + output); NULL if not reported';
 COMMENT ON COLUMN workspace_detection_usage.duration_ms IS 'Wall-clock time this model spent, in milliseconds';
+
+-- Detection-job outbox: the transactional-outbox queue for detection analysis.
+-- Creating a detection inserts one row here in the same transaction as the
+-- detection, so the two commit or roll back together; a background drainer then
+-- publishes each pending row onto the detection NATS work-queue. This removes the
+-- dual-write between the detection row and the queue: an analysis is never lost
+-- to an enqueue that failed after the row committed, nor is a detection ever
+-- marked failed for an enqueue that in fact went through.
+CREATE TABLE workspace_detection_jobs (
+    -- Primary identifier
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- The detection this job analyzes; the row is deleted with its detection.
+    detection_id    UUID          NOT NULL REFERENCES workspace_detections (id) ON DELETE CASCADE,
+
+    -- The job. A serialized `DetectionJob`: the workspace, detection, and the
+    -- optional per-request scope the drainer publishes to the worker.
+    job             JSONB         NOT NULL,
+    CONSTRAINT workspace_detection_jobs_job_size CHECK (length(job::TEXT) BETWEEN 2 AND 16384),
+
+    -- Drainer bookkeeping: the row's processing state, how many publish attempts
+    -- it has taken, and the earliest time it may next be claimed (advanced by a
+    -- backoff on each failed attempt so a failing row does not spin at the head of
+    -- the queue).
+    status          OUTBOX_STATUS NOT NULL DEFAULT 'pending',
+    attempts        INTEGER       NOT NULL DEFAULT 0,
+    CONSTRAINT workspace_detection_jobs_attempts_non_negative CHECK (attempts >= 0),
+    next_attempt_at TIMESTAMPTZ   NOT NULL DEFAULT current_timestamp,
+
+    -- Lifecycle timestamps
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT current_timestamp,
+
+    -- When a terminal row (processed or failed) was resolved by an operator; NULL
+    -- until then. A manual affordance for inspecting the outbox after the fact.
+    resolved_at     TIMESTAMPTZ   DEFAULT NULL,
+    CONSTRAINT workspace_detection_jobs_resolved_only_when_terminal
+        CHECK (resolved_at IS NULL OR status IN ('processed', 'failed')),
+    CONSTRAINT workspace_detection_jobs_resolved_after_created
+        CHECK (resolved_at IS NULL OR resolved_at >= created_at)
+);
+
+-- The drainer's claim queue: pending rows ordered by due time then age, so a
+-- batch claims the oldest due rows. Partial so it stays small as processed and
+-- failed rows accumulate.
+CREATE INDEX workspace_detection_jobs_pending_idx
+    ON workspace_detection_jobs (next_attempt_at, created_at)
+    WHERE status = 'pending';
+
+COMMENT ON TABLE workspace_detection_jobs IS 'Transactional outbox of detection jobs, drained to the detection NATS work-queue.';
+COMMENT ON COLUMN workspace_detection_jobs.id IS 'Unique outbox row identifier';
+COMMENT ON COLUMN workspace_detection_jobs.detection_id IS 'Detection this job analyzes';
+COMMENT ON COLUMN workspace_detection_jobs.job IS 'Serialized DetectionJob published to the worker (JSON, 2B-16KB)';
+COMMENT ON COLUMN workspace_detection_jobs.status IS 'Processing state: pending, processed, or failed (dead-lettered)';
+COMMENT ON COLUMN workspace_detection_jobs.attempts IS 'Number of publish attempts the drainer has made';
+COMMENT ON COLUMN workspace_detection_jobs.next_attempt_at IS 'Earliest time the row may next be claimed; advanced by a backoff after each failed attempt';
+COMMENT ON COLUMN workspace_detection_jobs.created_at IS 'Timestamp when the job was queued';
+COMMENT ON COLUMN workspace_detection_jobs.resolved_at IS 'When a terminal (processed or failed) row was resolved by an operator; NULL until then. A manual affordance for inspecting the outbox after the fact';

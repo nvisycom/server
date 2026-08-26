@@ -33,10 +33,11 @@ pub use crate::service::chat::{ChatService, TurnLocation};
 pub use crate::service::connection_config::ConnectionConfig;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, Measurements};
+pub(crate) use crate::service::detection::resolve_policies;
 pub use crate::service::detection::{
-    DetectionJob, DetectionQueue, DetectionStatusEvent, DetectionWorker, detection_subject,
+    DetectionJob, DetectionOutboxDrainer, DetectionQueue, DetectionStatusEvent, DetectionWorker,
+    detection_subject,
 };
-pub(crate) use crate::service::detection::{FailDetection, fail_detection, resolve_policies};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::event::{
     ConnectionRef, DetectionRef, EventEmitter, EventOrigin, EventOutboxDrainer, FileRef, InviteRef,
@@ -173,6 +174,7 @@ impl ServiceState {
         ));
         workers.spawn(FileReaper::new(self.infra.clone()));
         workers.spawn(EventOutboxDrainer::new(self.infra.clone()));
+        workers.spawn(DetectionOutboxDrainer::new(self.infra.clone()));
         workers.spawn(DetectionWorker::new(
             self.infra.clone(),
             self.engine.clone(),

@@ -13,11 +13,13 @@ use axum::http::StatusCode;
 use axum::response::sse::Event;
 use futures::StreamExt;
 use nvisy_postgres::model::{
-    NewWorkspaceDetection, NewWorkspaceRedaction, WorkspaceDetection, WorkspacePipeline,
+    NewWorkspaceDetection, NewWorkspaceDetectionJob, NewWorkspaceRedaction, WorkspaceDetection,
+    WorkspacePipeline,
 };
 use nvisy_postgres::query::{
-    DetectionFiles, PipelineReferenceRepository, WorkspaceDetectionRepository,
-    WorkspaceFileRepository, WorkspacePipelineRepository, WorkspaceRedactionRepository,
+    DetectionFiles, DetectionJobOutboxRepository, PipelineReferenceRepository,
+    WorkspaceDetectionRepository, WorkspaceFileRepository, WorkspacePipelineRepository,
+    WorkspaceRedactionRepository,
 };
 use nvisy_postgres::types::DetectionStatus;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
@@ -36,8 +38,7 @@ use crate::handler::utility::{SseResponse, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
     CryptoService, DetectionJob, DetectionQueue, DetectionRef, DetectionStatusEvent, EngineService,
-    EventEmitter, EventOrigin, FailDetection, RunBlobStore, ServiceState, WorkspaceEvent,
-    fail_detection, resolve_policies,
+    EventEmitter, EventOrigin, RunBlobStore, ServiceState, WorkspaceEvent, resolve_policies,
 };
 
 /// Tracing target for detection operations.
@@ -132,10 +133,9 @@ async fn create_detection(
                 .with_context(err.to_string())
         })?;
 
-    // Create the detection (its id is the engine correlation id) and enqueue
-    // analysis for the worker. The response returns immediately; the client
-    // learns the findings are ready via the detection's status (SSE at
-    // `.../events` or a re-read).
+    // Create the detection (its id is the engine correlation id). The response
+    // returns immediately; the client learns the findings are ready via the
+    // detection's status (SSE at `.../events` or a re-read).
     let new_detection = NewWorkspaceDetection {
         pipeline_id: pipeline.id,
         input_file_id: file.id,
@@ -145,8 +145,13 @@ async fn create_detection(
         ..Default::default()
     };
 
-    // Create the detection and record its start event in one transaction, so the
-    // event is never lost, nor recorded for a detection that rolled back.
+    // Create the detection, record its start event, and queue its analysis in one
+    // transaction, so all three commit or roll back together. The job goes onto
+    // the outbox (not published inline) so the detection is never lost to a
+    // publish that failed after the row committed, nor marked failed for a publish
+    // that in fact went through: the drainer relays the outbox row to the
+    // work-queue, and the worker's claim dedups an at-least-once redelivery.
+    let scope = request.scope;
     let detection_row = conn
         .transaction(async |conn| {
             let detection_row = conn.create_workspace_detection(new_detection).await?;
@@ -162,40 +167,30 @@ async fn create_detection(
                 }),
             )
             .await?;
+            let job = DetectionJob {
+                workspace_id: workspace.id,
+                detection_id: detection_row.id,
+                scope,
+            };
+            conn.insert_detection_job(NewWorkspaceDetectionJob {
+                detection_id: detection_row.id,
+                job: serde_json::to_value(&job).map_err(|err| {
+                    ErrorKind::InternalServerError
+                        .with_message("Failed to encode detection job")
+                        .with_context(err.to_string())
+                })?,
+            })
+            .await?;
             Ok::<_, Error>(detection_row)
         })
         .await?;
 
-    let job = DetectionJob {
-        workspace_id: workspace.id,
-        detection_id: detection_row.id,
-        scope: request.scope,
-    };
-    if let Err(err) = detection.enqueue(job).await {
-        // Enqueue failed, so the worker will never pick this detection up: fail it
-        // now rather than leaving it stuck in `Pending`.
-        fail_detection(
-            &mut conn,
-            &detection,
-            FailDetection {
-                workspace_id: workspace.id,
-                detection_id: detection_row.id,
-                pipeline_slug: pipeline.slug.clone(),
-                triggered_by: auth_state.account_id,
-                reason: "Failed to enqueue detection",
-                metadata: detection_row.metadata.or_default(),
-                claim: None,
-            },
-        )
-        .await;
-        return Err(err);
-    }
-
+    // Best-effort UI hint; the detection row is authoritative.
     detection
         .broadcast_status(detection_row.id, DetectionStatus::Pending)
         .await;
 
-    tracing::info!(target: TRACING_TARGET, detection_id = %detection_row.id, "Detection enqueued");
+    tracing::info!(target: TRACING_TARGET, detection_id = %detection_row.id, "Detection queued");
 
     let trigger = resolve_account_ref(&mut conn, detection_row.account_id).await?;
 

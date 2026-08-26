@@ -249,6 +249,22 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+    use super::sql_types::OutboxStatus;
+
+    workspace_detection_jobs (id) {
+        id -> Uuid,
+        detection_id -> Uuid,
+        job -> Jsonb,
+        status -> OutboxStatus,
+        attempts -> Int4,
+        next_attempt_at -> Timestamptz,
+        created_at -> Timestamptz,
+        resolved_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
 
     workspace_detection_usage (id) {
         id -> Uuid,
@@ -477,6 +493,7 @@ diesel::joinable!(workspace_connection_syncs -> accounts (account_id));
 diesel::joinable!(workspace_connection_syncs -> workspace_connection_schedule (connection_id));
 diesel::joinable!(workspace_connections -> accounts (account_id));
 diesel::joinable!(workspace_connections -> workspaces (workspace_id));
+diesel::joinable!(workspace_detection_jobs -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detection_usage -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detections -> accounts (account_id));
 diesel::joinable!(workspace_detections -> workspace_pipelines (pipeline_id));
@@ -508,6 +525,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_connection_schedule,
     workspace_connection_syncs,
     workspace_connections,
+    workspace_detection_jobs,
     workspace_detection_usage,
     workspace_detections,
     workspace_file_imports,

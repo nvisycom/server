@@ -28,6 +28,7 @@ mod workspace_connection;
 mod workspace_connection_schedule;
 mod workspace_connection_sync;
 mod workspace_detection;
+mod workspace_detection_job;
 mod workspace_file;
 mod workspace_invite;
 mod workspace_member;
@@ -53,6 +54,7 @@ pub use workspace_connection::{ScheduledConnection, WorkspaceConnectionRepositor
 pub use workspace_connection_schedule::WorkspaceConnectionScheduleRepository;
 pub use workspace_connection_sync::WorkspaceConnectionSyncRepository;
 pub use workspace_detection::{DetectionFiles, DetectionListRow, WorkspaceDetectionRepository};
+pub use workspace_detection_job::DetectionJobOutboxRepository;
 pub use workspace_file::{ExpiredFileRef, ImportedFileRef, WorkspaceFileRepository};
 pub use workspace_invite::WorkspaceInviteRepository;
 pub use workspace_member::WorkspaceMemberRepository;

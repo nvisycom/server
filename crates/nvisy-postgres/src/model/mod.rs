@@ -16,6 +16,7 @@ mod workspace_connection;
 mod workspace_connection_schedule;
 mod workspace_connection_sync;
 mod workspace_detection;
+mod workspace_detection_job;
 mod workspace_detection_usage;
 mod workspace_file;
 mod workspace_file_imports;
@@ -53,6 +54,7 @@ pub use workspace_connection_sync::{
 pub use workspace_detection::{
     NewWorkspaceDetection, UpdateWorkspaceDetection, WorkspaceDetection,
 };
+pub use workspace_detection_job::{NewWorkspaceDetectionJob, WorkspaceDetectionJob};
 pub use workspace_detection_usage::{NewWorkspaceDetectionUsage, WorkspaceDetectionUsage};
 pub use workspace_file::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
 pub use workspace_file_imports::{NewWorkspaceFileImport, WorkspaceFileImport};
