@@ -137,8 +137,13 @@ prefixed_id! {
 }
 
 prefixed_id! {
-    /// Opaque identifier for a pipeline run (`run_<uuid>`).
-    RunId, "run"
+    /// Opaque identifier for a detection (`detection_<uuid>`).
+    DetectionId, "detection"
+}
+
+prefixed_id! {
+    /// Opaque identifier for a redaction (`redaction_<uuid>`).
+    RedactionId, "redaction"
 }
 
 #[cfg(test)]

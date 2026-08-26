@@ -21,11 +21,11 @@ use nvisy_postgres::model::{EventOutbox, NewWorkspaceActivity};
 use nvisy_postgres::query::{EventOutboxRepository, WorkspaceActivityRepository};
 use nvisy_postgres::types::{
     ActivityPayload, ConnectionActivityParams, ConnectionId, ConnectionSyncCompletedParams,
-    ConnectionSyncFailedParams, FileActivityParams, Handle, InviteActivityParams, Json,
-    MemberActivityParams, NotificationPayload, PipelineActivityParams, PipelineRunActivityParams,
-    PipelineRunAnalyzedParams, PipelineRunCompletedParams, PipelineRunFailedParams,
-    PolicyActivityParams, RunId, WebhookActivityParams, WebhookEvent, WebhookId,
-    WorkspaceActivityParams,
+    ConnectionSyncFailedParams, DetectionActivityParams, DetectionCompletedParams,
+    DetectionFailedParams, DetectionId, FileActivityParams, Handle, InviteActivityParams, Json,
+    MemberActivityParams, NotificationPayload, PipelineActivityParams, PolicyActivityParams,
+    RedactionActivityParams, RedactionCreatedParams, RedactionId, WebhookActivityParams,
+    WebhookEvent, WebhookId, WorkspaceActivityParams,
 };
 use nvisy_postgres::{AsyncConnection, PgConn};
 use serde_json::Value;
@@ -34,7 +34,7 @@ use uuid::Uuid;
 
 use crate::handler::{Error, Result};
 use crate::service::event::{
-    ConnectionRef, FileRef, InviteRef, MemberRef, PipelineRunRef, PolicyRef, WebhookRef,
+    ConnectionRef, DetectionRef, FileRef, InviteRef, MemberRef, PolicyRef, WebhookRef,
     WorkspaceEvent, WorkspaceRef,
 };
 use crate::service::{Infra, NotificationEmitter, WebhookEmitter, Worker};
@@ -326,9 +326,17 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
     let pipeline = |pipeline_slug: &Handle| PipelineActivityParams {
         pipeline_slug: pipeline_slug.clone(),
     };
-    let run = |run: &PipelineRunRef| PipelineRunActivityParams {
-        pipeline_slug: run.pipeline_slug.clone(),
-        run_id: RunId::from_uuid(run.run_id),
+    let detection = |detection: &DetectionRef| DetectionActivityParams {
+        pipeline_slug: detection.pipeline_slug.clone(),
+        detection_id: DetectionId::from_uuid(detection.detection_id),
+    };
+    // TODO(redaction-feature): once the redact handler persists a redaction row,
+    // `RedactionCreated` should carry a real `RedactionId`; until then the
+    // activity params reuse the detection id as a placeholder so the projection
+    // compiles. The parent reworks the redact emission path.
+    let redaction = |detection: &DetectionRef| RedactionActivityParams {
+        pipeline_slug: detection.pipeline_slug.clone(),
+        redaction_id: RedactionId::from_uuid(detection.detection_id),
     };
     let policy = |p: &PolicyRef| PolicyActivityParams {
         policy_id: p.policy_id,
@@ -374,10 +382,12 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
         E::PipelineCreated(p) => ActivityPayload::PipelineCreated(pipeline(&p.pipeline_slug)),
         E::PipelineUpdated(p) => ActivityPayload::PipelineUpdated(pipeline(&p.pipeline_slug)),
         E::PipelineDeleted(p) => ActivityPayload::PipelineDeleted(pipeline(&p.pipeline_slug)),
-        E::PipelineRunStarted(r) => ActivityPayload::PipelineRunStarted(run(r)),
-        E::PipelineRunAnalyzed { run: r, .. } => ActivityPayload::PipelineRunAnalyzed(run(r)),
-        E::PipelineRunCompleted { run: r, .. } => ActivityPayload::PipelineRunCompleted(run(r)),
-        E::PipelineRunFailed { run: r, .. } => ActivityPayload::PipelineRunFailed(run(r)),
+        E::DetectionStarted(d) => ActivityPayload::DetectionStarted(detection(d)),
+        E::DetectionCompleted { detection: d, .. } => {
+            ActivityPayload::DetectionCompleted(detection(d))
+        }
+        E::DetectionFailed { detection: d, .. } => ActivityPayload::DetectionFailed(detection(d)),
+        E::RedactionCreated { detection: d, .. } => ActivityPayload::RedactionCreated(redaction(d)),
         E::PolicyCreated(p) => ActivityPayload::PolicyCreated(policy(p)),
         E::PolicyUpdated(p) => ActivityPayload::PolicyUpdated(policy(p)),
         E::PolicyDeleted(p) => ActivityPayload::PolicyDeleted(policy(p)),
@@ -418,10 +428,10 @@ fn webhook_of(event: &WorkspaceEvent) -> Option<(WebhookEvent, Option<Value>)> {
         E::PipelineCreated(..) => (WebhookEvent::PipelineCreated, None),
         E::PipelineUpdated(..) => (WebhookEvent::PipelineUpdated, None),
         E::PipelineDeleted(..) => (WebhookEvent::PipelineDeleted, None),
-        E::PipelineRunStarted(..) => (WebhookEvent::PipelineRunStarted, None),
-        E::PipelineRunAnalyzed { .. } => (WebhookEvent::PipelineRunAnalyzed, None),
-        E::PipelineRunCompleted { .. } => (WebhookEvent::PipelineRunCompleted, None),
-        E::PipelineRunFailed { .. } => (WebhookEvent::PipelineRunFailed, None),
+        E::DetectionStarted(..) => (WebhookEvent::DetectionStarted, None),
+        E::DetectionCompleted { .. } => (WebhookEvent::DetectionCompleted, None),
+        E::DetectionFailed { .. } => (WebhookEvent::DetectionFailed, None),
+        E::RedactionCreated { .. } => (WebhookEvent::RedactionCreated, None),
         E::PolicyCreated(..) => (WebhookEvent::PolicyCreated, None),
         E::PolicyUpdated(..) => (WebhookEvent::PolicyUpdated, None),
         E::PolicyDeleted(..) => (WebhookEvent::PolicyDeleted, None),
@@ -474,40 +484,44 @@ fn notification_of(event: WorkspaceEvent) -> Option<(Uuid, NotificationPayload)>
                 }),
             )
         }),
-        E::PipelineRunAnalyzed {
-            run,
+        E::DetectionCompleted {
+            detection,
             input_file_name,
             notify,
         } => Some((
             notify,
-            NotificationPayload::PipelineRunAnalyzed(PipelineRunAnalyzedParams {
-                run_id: RunId::from_uuid(run.run_id),
-                pipeline_slug: run.pipeline_slug,
+            NotificationPayload::DetectionCompleted(DetectionCompletedParams {
+                detection_id: DetectionId::from_uuid(detection.detection_id),
+                pipeline_slug: detection.pipeline_slug,
                 input_file_name,
             }),
         )),
-        E::PipelineRunCompleted {
-            run,
+        // TODO(redaction-feature): `RedactionCreated` should carry a real
+        // `RedactionId`; until the redact handler persists a redaction row the
+        // detection id stands in as a placeholder so the projection compiles.
+        E::RedactionCreated {
+            detection,
             input_file_name,
             notify,
         } => Some((
             notify,
-            NotificationPayload::PipelineRunCompleted(PipelineRunCompletedParams {
-                run_id: RunId::from_uuid(run.run_id),
-                pipeline_slug: run.pipeline_slug,
+            NotificationPayload::RedactionCreated(RedactionCreatedParams {
+                redaction_id: RedactionId::from_uuid(detection.detection_id),
+                detection_id: DetectionId::from_uuid(detection.detection_id),
+                pipeline_slug: detection.pipeline_slug,
                 input_file_name,
             }),
         )),
-        E::PipelineRunFailed {
-            run,
+        E::DetectionFailed {
+            detection,
             input_file_name,
             error,
             notify,
         } => Some((
             notify,
-            NotificationPayload::PipelineRunFailed(PipelineRunFailedParams {
-                run_id: RunId::from_uuid(run.run_id),
-                pipeline_slug: run.pipeline_slug,
+            NotificationPayload::DetectionFailed(DetectionFailedParams {
+                detection_id: DetectionId::from_uuid(detection.detection_id),
+                pipeline_slug: detection.pipeline_slug,
                 input_file_name,
                 error,
             }),
@@ -537,7 +551,7 @@ fn notification_of(event: WorkspaceEvent) -> Option<(Uuid, NotificationPayload)>
         | E::PipelineCreated(_)
         | E::PipelineUpdated(_)
         | E::PipelineDeleted(_)
-        | E::PipelineRunStarted(_)
+        | E::DetectionStarted(_)
         | E::PolicyCreated(_)
         | E::PolicyUpdated(_)
         | E::PolicyDeleted(_) => None,
@@ -565,10 +579,10 @@ fn resource_id_of(event: &WorkspaceEvent) -> Uuid {
         E::FileCreated { file, .. } => file.file_id,
         E::FileUpdated(f) | E::FileDeleted(f) => f.file_id,
         E::PipelineCreated(p) | E::PipelineUpdated(p) | E::PipelineDeleted(p) => p.pipeline_id,
-        E::PipelineRunStarted(r) => r.run_id,
-        E::PipelineRunAnalyzed { run, .. }
-        | E::PipelineRunCompleted { run, .. }
-        | E::PipelineRunFailed { run, .. } => run.run_id,
+        E::DetectionStarted(d) => d.detection_id,
+        E::DetectionCompleted { detection, .. }
+        | E::DetectionFailed { detection, .. }
+        | E::RedactionCreated { detection, .. } => detection.detection_id,
         E::PolicyCreated(p) | E::PolicyUpdated(p) | E::PolicyDeleted(p) => p.policy_id,
     }
 }

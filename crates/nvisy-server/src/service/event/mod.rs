@@ -19,8 +19,8 @@ use crate::extract::SecurityContext;
 pub use crate::service::event::drainer::EventOutboxDrainer;
 pub use crate::service::event::emitter::{EventEmitter, event_outbox_row};
 pub use crate::service::event::workspace_event::{
-    ConnectionRef, FileRef, InviteRef, MemberRef, PipelineRef, PipelineRunRef, PolicyRef,
-    WebhookRef, WorkspaceEvent, WorkspaceRef,
+    ConnectionRef, DetectionRef, FileRef, InviteRef, MemberRef, PipelineRef, PolicyRef, WebhookRef,
+    WorkspaceEvent, WorkspaceRef,
 };
 
 /// Who raised an event and where.

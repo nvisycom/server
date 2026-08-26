@@ -10,7 +10,7 @@ use nvisy_postgres::query::WorkspaceAnalyticsRepository;
 
 use crate::extract::{AuthProvider, AuthState, Json, Permission, Query, WorkspaceContext};
 use crate::handler::request::DateWindow;
-use crate::handler::response::{ErrorResponse, RunTimeSeries, WorkspaceAnalytics};
+use crate::handler::response::{DetectionTimeSeries, ErrorResponse, WorkspaceAnalytics};
 use crate::handler::{Result, ServiceState};
 
 /// Tracing target for workspace analytics operations.
@@ -68,7 +68,7 @@ async fn get_run_timeseries(
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Query(window): Query<DateWindow>,
-) -> Result<(StatusCode, Json<RunTimeSeries>)> {
+) -> Result<(StatusCode, Json<DetectionTimeSeries>)> {
     tracing::debug!(target: TRACING_TARGET, "Computing run time series");
 
     let window = window.resolve()?;
@@ -86,7 +86,7 @@ async fn get_run_timeseries(
             window.to_timestamp()?,
         )
         .await?;
-    let series = RunTimeSeries::from_window(window.from, window.to, points);
+    let series = DetectionTimeSeries::from_window(window.from, window.to, points);
 
     Ok((StatusCode::OK, Json(series)))
 }
@@ -96,7 +96,7 @@ fn get_run_timeseries_docs(op: TransformOperation) -> TransformOperation {
         .description(
             "Returns a workspace's daily pipeline-run activity over a date window: runs per day, plus each day's error rate and durations. Every day in the window is present (quiet days report runs: 0), so the series plots as a continuous line or a contribution-style calendar. The window is `from`/`to` (inclusive, YYYY-MM-DD); it defaults to the last 30 days and is capped at 366 days.",
         )
-        .response::<200, Json<RunTimeSeries>>()
+        .response::<200, Json<DetectionTimeSeries>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()

@@ -1,9 +1,9 @@
-//! Pipeline-run audit handlers: read and export a run's analysis.
+//! Detection audit handlers: read and export a detection's analysis.
 //!
-//! Once a run is analyzed, its `Audit` (the decrypted map of detected findings)
-//! can be reviewed inline or downloaded as JSON or a zip of CSV tables. The run
-//! lifecycle itself (create, list, redact) lives in
-//! [`pipeline_runs`](super::pipeline_runs).
+//! Once a detection is complete, its `Audit` (the decrypted map of detected
+//! findings) can be reviewed inline or downloaded as JSON or a zip of CSV tables.
+//! The detection lifecycle itself (create, list, redact) lives in
+//! [`detections`](super::detections).
 
 use aide::axum::ApiRouter;
 use aide::axum::routing::get_with;
@@ -15,38 +15,38 @@ use elide_pipeline::Audit;
 use elide_pipeline::export::{ExportCsv, ExportJson};
 use nvisy_postgres::PgClient;
 
-use super::pipeline_runs::find_pipeline_run;
+use super::detections::find_detection;
 use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, WorkspaceContext};
-use crate::handler::request::{ExportFormat, ExportQuery, PipelineRunPathParams};
+use crate::handler::request::{DetectionPathParams, ExportFormat, ExportQuery};
 use crate::handler::response::ErrorResponse;
 use crate::handler::utility::{DownloadResponseExt, attachment_headers};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{EngineService, RunBlobStore, ServiceState};
 
-/// Tracing target for pipeline audit operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::audits";
+/// Tracing target for detection audit operations.
+const TRACING_TARGET: &str = "nvisy_server::handler::detection_audits";
 
-/// Returns the run's analysis (the detected findings) for review.
+/// Returns the detection's analysis (the detected findings) for review.
 ///
 /// Fetches and decrypts the engine's `Audit` from the audit bucket. Available
-/// once the run is analyzed. Requires `ViewPipelines`.
+/// once the detection is complete. Requires `ViewPipelines`.
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        run_id = %path_params.run_id,
+        detection_id = %path_params.detection_id,
     )
 )]
-async fn get_pipeline_run_analysis(
+async fn get_detection_analysis(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
-    Path(path_params): Path<PipelineRunPathParams>,
+    Path(path_params): Path<DetectionPathParams>,
 ) -> Result<(StatusCode, Json<Audit>)> {
-    tracing::debug!(target: TRACING_TARGET, "Getting pipeline run analysis");
+    tracing::debug!(target: TRACING_TARGET, "Getting detection analysis");
 
     let mut conn = pg_client.get_connection().await?;
 
@@ -54,21 +54,23 @@ async fn get_pipeline_run_analysis(
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let (run, _pipeline) =
-        find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
+    let (detection, _pipeline) =
+        find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
 
     let analyzed = blob
-        .load_analyzed_document(&mut conn, &engine, workspace.id, &run)
+        .load_analyzed_document(&mut conn, &engine, workspace.id, &detection)
         .await?;
 
-    tracing::debug!(target: TRACING_TARGET, "Pipeline run analysis retrieved");
+    tracing::debug!(target: TRACING_TARGET, "Detection analysis retrieved");
 
     Ok((StatusCode::OK, Json(analyzed)))
 }
 
-fn get_pipeline_run_analysis_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Get run detections")
-        .description("Returns the run's detected findings (the analyzed document) for review.")
+fn get_detection_analysis_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get detection findings")
+        .description(
+            "Returns the detection's detected findings (the analyzed document) for review.",
+        )
         .response::<200, Json<Audit>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -76,7 +78,7 @@ fn get_pipeline_run_analysis_docs(op: TransformOperation) -> TransformOperation 
         .response::<409, Json<ErrorResponse>>()
 }
 
-/// Downloads a run's audit as a file, in the requested `format`.
+/// Downloads a detection's audit as a file, in the requested `format`.
 ///
 /// `json` yields a pretty-printed JSON file with the full structure — body,
 /// parts, context, and each entity's provenance chain. `csv` (the default)
@@ -87,30 +89,30 @@ fn get_pipeline_run_analysis_docs(op: TransformOperation) -> TransformOperation 
     fields(
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
-        run_id = %path_params.run_id,
+        detection_id = %path_params.detection_id,
         format = ?query.format,
     )
 )]
-async fn download_pipeline_run_audit(
+async fn download_detection_audit(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
-    Path(path_params): Path<PipelineRunPathParams>,
+    Path(path_params): Path<DetectionPathParams>,
     Query(query): Query<ExportQuery>,
 ) -> Result<(StatusCode, HeaderMap, Body)> {
-    tracing::debug!(target: TRACING_TARGET, "Downloading pipeline run audit");
+    tracing::debug!(target: TRACING_TARGET, "Downloading detection audit");
 
     let mut conn = pg_client.get_connection().await?;
     auth_state
         .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
         .await?;
 
-    let (run, _pipeline) =
-        find_pipeline_run(&mut conn, workspace.id, path_params.run_id.as_uuid()).await?;
+    let (detection, _pipeline) =
+        find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
     let audit = blob
-        .load_analyzed_document(&mut conn, &engine, workspace.id, &run)
+        .load_analyzed_document(&mut conn, &engine, workspace.id, &detection)
         .await?;
 
     let (content_type, filename, body) = match query.format {
@@ -121,13 +123,17 @@ async fn download_pipeline_run_audit(
                     .with_message("Failed to export audit as JSON")
                     .with_context(err.to_string())
             })?;
-            ("application/json", format!("audit-{}.json", run.id), buffer)
+            (
+                "application/json",
+                format!("audit-{}.json", detection.id),
+                buffer,
+            )
         }
         ExportFormat::Csv => {
             let archive = build_audit_csv_zip(&audit)?;
             (
                 "application/zip",
-                format!("audit-{}.csv.zip", run.id),
+                format!("audit-{}.csv.zip", detection.id),
                 archive,
             )
         }
@@ -139,18 +145,18 @@ async fn download_pipeline_run_audit(
         body.len() as u64,
     );
 
-    tracing::debug!(target: TRACING_TARGET, "Pipeline run audit exported");
+    tracing::debug!(target: TRACING_TARGET, "Detection audit exported");
     Ok((StatusCode::OK, headers, Body::from(body)))
 }
 
-fn download_pipeline_run_audit_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Download run audit")
+fn download_detection_audit_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Download detection audit")
         .description(
-            "Downloads the run's audit as a file. `format` is `csv` (default) — a zip of \
+            "Downloads the detection's audit as a file. `format` is `csv` (default) — a zip of \
              entities.csv, provenance.csv, and reviews.csv — or `json`, a pretty-printed JSON file.",
         )
         .download_response(
-            "The run's exported audit.",
+            "The detection's exported audit.",
             &["application/zip", "application/json"],
         )
         .response::<401, Json<ErrorResponse>>()
@@ -177,19 +183,16 @@ fn archive_error(error: impl std::fmt::Display) -> Error<'static> {
         .with_context(error.to_string())
 }
 
-/// Builds the pipeline-run audit routes.
+/// Builds the detection audit routes.
 pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/runs/{runId}/detections/",
-            get_with(get_pipeline_run_analysis, get_pipeline_run_analysis_docs),
+            "/workspaces/{workspaceSlug}/detections/{detectionId}/analysis/",
+            get_with(get_detection_analysis, get_detection_analysis_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/runs/{runId}/audit",
-            get_with(
-                download_pipeline_run_audit,
-                download_pipeline_run_audit_docs,
-            ),
+            "/workspaces/{workspaceSlug}/detections/{detectionId}/audit/",
+            get_with(download_detection_audit, download_detection_audit_docs),
         )
-        .with_path_items(|item| item.tag("Pipeline Runs"))
+        .with_path_items(|item| item.tag("Detections"))
 }

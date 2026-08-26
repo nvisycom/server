@@ -14,6 +14,10 @@ pub mod sql_types {
     pub struct ChatRole;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "detection_status"))]
+    pub struct DetectionStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "file_kind"))]
     pub struct FileKind;
 
@@ -28,10 +32,6 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "outbox_status"))]
     pub struct OutboxStatus;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "pipeline_run_status"))]
-    pub struct PipelineRunStatus;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "pipeline_status"))]
@@ -250,6 +250,42 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
 
+    workspace_detection_usage (id) {
+        id -> Uuid,
+        detection_id -> Uuid,
+        model -> Text,
+        version -> Nullable<Text>,
+        input_tokens -> Nullable<Int8>,
+        output_tokens -> Nullable<Int8>,
+        total_tokens -> Nullable<Int8>,
+        duration_ms -> Int8,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::PipelineTriggerType;
+    use super::sql_types::DetectionStatus;
+
+    workspace_detections (id) {
+        id -> Uuid,
+        pipeline_id -> Uuid,
+        account_id -> Uuid,
+        input_file_id -> Uuid,
+        audit_file_id -> Nullable<Uuid>,
+        trigger_type -> PipelineTriggerType,
+        status -> DetectionStatus,
+        idempotency_key -> Nullable<Text>,
+        metadata -> Jsonb,
+        claimed_at -> Nullable<Timestamptz>,
+        started_at -> Timestamptz,
+        completed_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
     workspace_file_imports (file_id) {
         file_id -> Uuid,
         connection_id -> Uuid,
@@ -336,43 +372,6 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-
-    workspace_pipeline_run_usage (id) {
-        id -> Uuid,
-        run_id -> Uuid,
-        model -> Text,
-        version -> Nullable<Text>,
-        input_tokens -> Nullable<Int8>,
-        output_tokens -> Nullable<Int8>,
-        total_tokens -> Nullable<Int8>,
-        duration_ms -> Int8,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use super::sql_types::PipelineTriggerType;
-    use super::sql_types::PipelineRunStatus;
-
-    workspace_pipeline_runs (id) {
-        id -> Uuid,
-        pipeline_id -> Uuid,
-        account_id -> Uuid,
-        input_file_id -> Uuid,
-        audit_file_id -> Nullable<Uuid>,
-        output_file_id -> Nullable<Uuid>,
-        trigger_type -> PipelineTriggerType,
-        status -> PipelineRunStatus,
-        idempotency_key -> Nullable<Text>,
-        metadata -> Jsonb,
-        claimed_at -> Nullable<Timestamptz>,
-        started_at -> Timestamptz,
-        completed_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
     use super::sql_types::PipelineStatus;
 
     workspace_pipelines (id) {
@@ -406,6 +405,19 @@ diesel::table! {
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
+    workspace_redactions (id) {
+        id -> Uuid,
+        detection_id -> Uuid,
+        account_id -> Uuid,
+        review_file_id -> Nullable<Uuid>,
+        output_file_id -> Nullable<Uuid>,
+        created_at -> Timestamptz,
     }
 }
 
@@ -465,6 +477,9 @@ diesel::joinable!(workspace_connection_syncs -> accounts (account_id));
 diesel::joinable!(workspace_connection_syncs -> workspace_connection_schedule (connection_id));
 diesel::joinable!(workspace_connections -> accounts (account_id));
 diesel::joinable!(workspace_connections -> workspaces (workspace_id));
+diesel::joinable!(workspace_detection_usage -> workspace_detections (detection_id));
+diesel::joinable!(workspace_detections -> accounts (account_id));
+diesel::joinable!(workspace_detections -> workspace_pipelines (pipeline_id));
 diesel::joinable!(workspace_file_imports -> workspace_connections (connection_id));
 diesel::joinable!(workspace_file_imports -> workspace_files (file_id));
 diesel::joinable!(workspace_files -> accounts (account_id));
@@ -472,13 +487,12 @@ diesel::joinable!(workspace_files -> workspaces (workspace_id));
 diesel::joinable!(workspace_invites -> workspaces (workspace_id));
 diesel::joinable!(workspace_members -> workspaces (workspace_id));
 diesel::joinable!(workspace_pipeline_policies -> workspaces (workspace_id));
-diesel::joinable!(workspace_pipeline_run_usage -> workspace_pipeline_runs (run_id));
-diesel::joinable!(workspace_pipeline_runs -> accounts (account_id));
-diesel::joinable!(workspace_pipeline_runs -> workspace_pipelines (pipeline_id));
 diesel::joinable!(workspace_pipelines -> accounts (account_id));
 diesel::joinable!(workspace_pipelines -> workspaces (workspace_id));
 diesel::joinable!(workspace_policies -> accounts (account_id));
 diesel::joinable!(workspace_policies -> workspaces (workspace_id));
+diesel::joinable!(workspace_redactions -> accounts (account_id));
+diesel::joinable!(workspace_redactions -> workspace_detections (detection_id));
 diesel::joinable!(workspace_webhooks -> accounts (created_by));
 diesel::joinable!(workspace_webhooks -> workspaces (workspace_id));
 diesel::joinable!(workspaces -> accounts (created_by));
@@ -494,15 +508,16 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_connection_schedule,
     workspace_connection_syncs,
     workspace_connections,
+    workspace_detection_usage,
+    workspace_detections,
     workspace_file_imports,
     workspace_files,
     workspace_invites,
     workspace_members,
     workspace_pipeline_policies,
-    workspace_pipeline_run_usage,
-    workspace_pipeline_runs,
     workspace_pipelines,
     workspace_policies,
+    workspace_redactions,
     workspace_webhooks,
     workspaces,
 );

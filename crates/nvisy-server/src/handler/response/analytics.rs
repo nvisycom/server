@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use jiff::ToSpan;
 use jiff::civil::Date;
 use nvisy_postgres::query::{AnalyticsSnapshot, RunDayPoint};
-use nvisy_postgres::types::{FileKind, PipelineRunStatus};
+use nvisy_postgres::types::{DetectionStatus, FileKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
@@ -21,8 +21,8 @@ use strum::IntoEnumIterator;
 pub struct WorkspaceAnalytics {
     /// Stored-file totals and their per-kind breakdown.
     pub storage: StorageAnalytics,
-    /// Pipeline-run health: volume, status mix, and durations.
-    pub runs: RunAnalytics,
+    /// Detection health: volume, status mix, and durations.
+    pub detections: DetectionAnalytics,
     /// Inference token usage: workspace totals and a per-model breakdown.
     pub usage: UsageAnalytics,
 }
@@ -84,12 +84,12 @@ pub struct StorageKindEntry {
 /// Pipeline-run health for a workspace.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct RunAnalytics {
+pub struct DetectionAnalytics {
     /// Total number of runs.
     pub total: i64,
     /// Per-status breakdown, one entry per run status (zero-filled), in a stable
     /// order.
-    pub by_status: Vec<RunStatusEntry>,
+    pub by_status: Vec<DetectionStatusEntry>,
     /// Failed / (completed + failed). Omitted when no run has reached a terminal
     /// state (genuinely no signal, not zero).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -106,9 +106,9 @@ pub struct RunAnalytics {
 /// One status's share of a workspace's runs.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct RunStatusEntry {
+pub struct DetectionStatusEntry {
     /// The run status.
-    pub status: PipelineRunStatus,
+    pub status: DetectionStatus,
     /// Number of runs in this status.
     pub count: i64,
 }
@@ -136,8 +136,8 @@ impl WorkspaceAnalytics {
         let total_bytes = by_kind.iter().map(|e| e.total_bytes).sum();
         let file_count = by_kind.iter().map(|e| e.file_count).sum();
 
-        let by_status: Vec<RunStatusEntry> = PipelineRunStatus::iter()
-            .map(|status| RunStatusEntry {
+        let by_status: Vec<DetectionStatusEntry> = DetectionStatus::iter()
+            .map(|status| DetectionStatusEntry {
                 status,
                 count: runs
                     .iter()
@@ -147,8 +147,8 @@ impl WorkspaceAnalytics {
             .collect();
         let total = by_status.iter().map(|e| e.count).sum();
 
-        let completed = count_of(&by_status, PipelineRunStatus::Completed);
-        let failed = count_of(&by_status, PipelineRunStatus::Failed);
+        let completed = count_of(&by_status, DetectionStatus::Complete);
+        let failed = count_of(&by_status, DetectionStatus::Failed);
         let terminal = completed + failed;
         let error_rate = (terminal > 0).then(|| failed as f64 / terminal as f64);
 
@@ -174,7 +174,7 @@ impl WorkspaceAnalytics {
                 file_count,
                 by_kind,
             },
-            runs: RunAnalytics {
+            detections: DetectionAnalytics {
                 total,
                 by_status,
                 error_rate,
@@ -190,15 +190,15 @@ impl WorkspaceAnalytics {
 /// (quiet days included with `runs: 0`), ready to plot as a continuous series.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct RunTimeSeries {
+pub struct DetectionTimeSeries {
     /// One entry per day in the requested window, oldest first.
-    pub points: Vec<RunDayEntry>,
+    pub points: Vec<DetectionDayEntry>,
 }
 
 /// A single day of run activity.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct RunDayEntry {
+pub struct DetectionDayEntry {
     /// The day (`YYYY-MM-DD`, UTC).
     pub date: Date,
     /// Runs started this day (`0` on a quiet day).
@@ -224,7 +224,7 @@ pub struct RunDayEntry {
     pub total_tokens: Option<i64>,
 }
 
-impl RunTimeSeries {
+impl DetectionTimeSeries {
     /// Builds a dense daily series over `[from, to]` from the sparse per-day rows
     /// the query returns. Every day in the window is emitted in order; a day with
     /// no runs reports `runs: 0` and omits the rate/duration/token fields. The
@@ -242,7 +242,7 @@ impl RunTimeSeries {
         let mut date = from;
         while date <= to {
             days.push(match by_day.remove(&date) {
-                Some(p) => RunDayEntry {
+                Some(p) => DetectionDayEntry {
                     date,
                     runs: p.runs,
                     error_rate: (p.terminal > 0).then(|| p.failed as f64 / p.terminal as f64),
@@ -252,7 +252,7 @@ impl RunTimeSeries {
                     output_tokens: p.output_tokens,
                     total_tokens: p.total_tokens,
                 },
-                None => RunDayEntry {
+                None => DetectionDayEntry {
                     date,
                     runs: 0,
                     error_rate: None,
@@ -274,7 +274,7 @@ impl RunTimeSeries {
 }
 
 /// Looks up a status's count in the assembled breakdown.
-fn count_of(by_status: &[RunStatusEntry], status: PipelineRunStatus) -> i64 {
+fn count_of(by_status: &[DetectionStatusEntry], status: DetectionStatus) -> i64 {
     by_status
         .iter()
         .find(|e| e.status == status)
@@ -303,11 +303,11 @@ mod tests {
         ];
         let runs = vec![
             RunStatusCount {
-                status: PipelineRunStatus::Completed,
+                status: DetectionStatus::Complete,
                 count: 3,
             },
             RunStatusCount {
-                status: PipelineRunStatus::Failed,
+                status: DetectionStatus::Failed,
                 count: 1,
             },
         ];
@@ -337,10 +337,13 @@ mod tests {
             usage,
         });
 
-        // Every FileKind / PipelineRunStatus is present (zero-filled), so the
+        // Every FileKind / DetectionStatus is present (zero-filled), so the
         // breakdown lengths equal the enum sizes.
         assert_eq!(a.storage.by_kind.len(), FileKind::iter().count());
-        assert_eq!(a.runs.by_status.len(), PipelineRunStatus::iter().count());
+        assert_eq!(
+            a.detections.by_status.len(),
+            DetectionStatus::iter().count()
+        );
         // Absent audit kind is zero, not missing.
         let audit = a
             .storage
@@ -353,11 +356,11 @@ mod tests {
         // Totals sum the breakdown.
         assert_eq!(a.storage.total_bytes, 350);
         assert_eq!(a.storage.file_count, 3);
-        assert_eq!(a.runs.total, 4);
+        assert_eq!(a.detections.total, 4);
 
         // error_rate = failed / (completed + failed) = 1 / 4.
-        assert_eq!(a.runs.error_rate, Some(0.25));
-        assert_eq!(a.runs.avg_duration_ms, Some(30_000));
+        assert_eq!(a.detections.error_rate, Some(0.25));
+        assert_eq!(a.detections.avg_duration_ms, Some(30_000));
 
         // Usage: per-model entries preserved, workspace totals summed with
         // never-reported fields treated as 0 (not conflated across fields).
@@ -390,7 +393,8 @@ mod tests {
             total_tokens: None,
         }];
 
-        let series = RunTimeSeries::from_window(date("2026-01-05"), date("2026-01-07"), sparse);
+        let series =
+            DetectionTimeSeries::from_window(date("2026-01-05"), date("2026-01-07"), sparse);
 
         // Dense: every day in the window present, in order.
         assert_eq!(series.points.len(), 3);
@@ -417,7 +421,7 @@ mod tests {
     fn error_rate_is_none_with_no_terminal_runs() {
         // Only active runs, no files, no completed durations.
         let runs = vec![RunStatusCount {
-            status: PipelineRunStatus::Queued,
+            status: DetectionStatus::Pending,
             count: 5,
         }];
         let a = WorkspaceAnalytics::from_snapshot(AnalyticsSnapshot {
@@ -430,11 +434,11 @@ mod tests {
             usage: Vec::new(),
         });
 
-        assert_eq!(a.runs.error_rate, None);
-        assert_eq!(a.runs.avg_duration_ms, None);
+        assert_eq!(a.detections.error_rate, None);
+        assert_eq!(a.detections.avg_duration_ms, None);
         assert_eq!(a.storage.total_bytes, 0);
         // Still every kind/status present, all zero except queued.
         assert_eq!(a.storage.by_kind.len(), FileKind::iter().count());
-        assert_eq!(a.runs.total, 5);
+        assert_eq!(a.detections.total, 5);
     }
 }

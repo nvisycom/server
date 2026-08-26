@@ -171,29 +171,29 @@ pub enum ActivityType {
     #[strum(serialize = "pipeline.deleted")]
     PipelineDeleted,
 
-    /// Pipeline run was started
-    #[db_rename = "pipeline.run.started"]
-    #[serde(rename = "pipeline.run.started")]
-    #[strum(serialize = "pipeline.run.started")]
-    PipelineRunStarted,
+    /// Detection was started
+    #[db_rename = "pipeline.detection.started"]
+    #[serde(rename = "pipeline.detection.started")]
+    #[strum(serialize = "pipeline.detection.started")]
+    DetectionStarted,
 
-    /// Pipeline run finished detection
-    #[db_rename = "pipeline.run.analyzed"]
-    #[serde(rename = "pipeline.run.analyzed")]
-    #[strum(serialize = "pipeline.run.analyzed")]
-    PipelineRunAnalyzed,
+    /// Detection finished analysis
+    #[db_rename = "pipeline.detection.completed"]
+    #[serde(rename = "pipeline.detection.completed")]
+    #[strum(serialize = "pipeline.detection.completed")]
+    DetectionCompleted,
 
-    /// Pipeline run completed
-    #[db_rename = "pipeline.run.completed"]
-    #[serde(rename = "pipeline.run.completed")]
-    #[strum(serialize = "pipeline.run.completed")]
-    PipelineRunCompleted,
+    /// Detection failed
+    #[db_rename = "pipeline.detection.failed"]
+    #[serde(rename = "pipeline.detection.failed")]
+    #[strum(serialize = "pipeline.detection.failed")]
+    DetectionFailed,
 
-    /// Pipeline run failed
-    #[db_rename = "pipeline.run.failed"]
-    #[serde(rename = "pipeline.run.failed")]
-    #[strum(serialize = "pipeline.run.failed")]
-    PipelineRunFailed,
+    /// Redaction was created
+    #[db_rename = "pipeline.redaction.created"]
+    #[serde(rename = "pipeline.redaction.created")]
+    #[strum(serialize = "pipeline.redaction.created")]
+    RedactionCreated,
 
     // Policy activities
     /// Policy was created
@@ -217,15 +217,16 @@ pub enum ActivityType {
 
 impl ActivityType {
     /// The canonical dotted tag for this type, e.g. `file.created` or
-    /// `pipeline.run.completed` — the same string used on the wire and in the DB,
-    /// from the variant's `strum(serialize)`.
+    /// `pipeline.redaction.created` — the same string used on the wire and in the
+    /// DB, from the variant's `strum(serialize)`.
     pub fn as_tag(self) -> &'static str {
         self.into()
     }
 
     /// The object half of the tag: everything before the final segment, e.g.
-    /// `file` for `file.created`, `pipeline.run` for `pipeline.run.completed`,
-    /// `connection.sync` for `connection.sync.failed`.
+    /// `file` for `file.created`, `pipeline.redaction` for
+    /// `pipeline.redaction.created`, `connection.sync` for
+    /// `connection.sync.failed`.
     pub fn object_type(self) -> &'static str {
         let tag = self.as_tag();
         match tag.rsplit_once('.') {
@@ -235,7 +236,7 @@ impl ActivityType {
     }
 
     /// The action half of the tag: the final segment, e.g. `created` for
-    /// `file.created`, `completed` for `pipeline.run.completed`.
+    /// `file.created`, `created` for `pipeline.redaction.created`.
     pub fn action_type(self) -> &'static str {
         let tag = self.as_tag();
         match tag.rsplit_once('.') {
@@ -279,13 +280,10 @@ mod tests {
         assert_eq!(ActivityType::FileCreated.action_type(), "created");
         // Three-part tags: object is everything before the final segment.
         assert_eq!(
-            ActivityType::PipelineRunCompleted.object_type(),
-            "pipeline.run"
+            ActivityType::RedactionCreated.object_type(),
+            "pipeline.redaction"
         );
-        assert_eq!(
-            ActivityType::PipelineRunCompleted.action_type(),
-            "completed"
-        );
+        assert_eq!(ActivityType::RedactionCreated.action_type(), "created");
         assert_eq!(
             ActivityType::ConnectionSyncFailed.object_type(),
             "connection.sync"

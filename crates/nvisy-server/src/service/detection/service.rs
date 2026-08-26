@@ -1,19 +1,20 @@
 //! Detection enqueue service.
 //!
 //! The request-side counterpart to the [`DetectionWorker`](super::DetectionWorker):
-//! publishes a run's detection to the `DetectionStream` work-queue and broadcasts
-//! its status on the run's core-NATS subject. Injected into the create-run
-//! handler so the handler stays thin and the NATS wiring lives in one place.
+//! publishes a detection's analysis to the `DetectionStream` work-queue and
+//! broadcasts its status on the detection's core-NATS subject. Injected into the
+//! create-detection handler so the handler stays thin and the NATS wiring lives in
+//! one place.
 
 use nvisy_nats::stream::{BroadcastStream, DetectionStream};
-use nvisy_postgres::types::PipelineRunStatus;
+use nvisy_postgres::types::DetectionStatus;
 use uuid::Uuid;
 
-use super::job::{DetectionJob, RunStatusEvent, run_subject};
+use super::job::{DetectionJob, DetectionStatusEvent, detection_subject};
 use crate::handler::Result;
 use crate::service::Infra;
 
-/// Enqueues pipeline detection jobs and broadcasts run-status changes.
+/// Enqueues detection jobs and broadcasts detection-status changes.
 ///
 /// Cheaply cloneable (holds the shared [`Infra`] clients, all `Arc`-backed).
 #[derive(Clone)]
@@ -28,7 +29,8 @@ impl DetectionQueue {
         Self { infra }
     }
 
-    /// Enqueues a run's detection onto the work-queue for the worker to pick up.
+    /// Enqueues a detection's analysis onto the work-queue for the worker to pick
+    /// up.
     pub async fn enqueue(&self, job: DetectionJob) -> Result<()> {
         let publisher = self
             .infra
@@ -39,32 +41,40 @@ impl DetectionQueue {
         Ok(())
     }
 
-    /// Broadcasts a run's status change on its core-NATS subject (best-effort;
-    /// the run row is authoritative, so a dropped broadcast is recoverable).
-    pub async fn broadcast_status(&self, run_id: Uuid, status: PipelineRunStatus) {
-        let event = RunStatusEvent { run_id, status };
+    /// Broadcasts a detection's status change on its core-NATS subject
+    /// (best-effort; the detection row is authoritative, so a dropped broadcast is
+    /// recoverable).
+    pub async fn broadcast_status(&self, detection_id: Uuid, status: DetectionStatus) {
+        let event = DetectionStatusEvent {
+            detection_id,
+            status,
+        };
         if let Err(err) = self
             .infra
             .nats
-            .publish_broadcast(run_subject(run_id), &event)
+            .publish_broadcast(detection_subject(detection_id), &event)
             .await
         {
             tracing::debug!(
                 target: "nvisy_server::service::detection",
                 error = %err,
-                "Failed to broadcast run status",
+                "Failed to broadcast detection status",
             );
         }
     }
 
-    /// Subscribes to a run's status broadcasts, yielding each [`RunStatusEvent`].
+    /// Subscribes to a detection's status broadcasts, yielding each
+    /// [`DetectionStatusEvent`].
     ///
     /// Used by the SSE endpoint to forward status changes to a watching client.
-    pub async fn subscribe_status(&self, run_id: Uuid) -> Result<BroadcastStream<RunStatusEvent>> {
+    pub async fn subscribe_status(
+        &self,
+        detection_id: Uuid,
+    ) -> Result<BroadcastStream<DetectionStatusEvent>> {
         let stream = self
             .infra
             .nats
-            .subscribe_broadcast::<RunStatusEvent>(run_subject(run_id))
+            .subscribe_broadcast::<DetectionStatusEvent>(detection_subject(detection_id))
             .await?;
         Ok(stream)
     }

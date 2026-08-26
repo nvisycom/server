@@ -17,7 +17,7 @@ use diesel::sql_types::Timestamptz;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use crate::types::{FileKind, PipelineRunStatus};
+use crate::types::{DetectionStatus, FileKind};
 use crate::{PgConnection, PgError, PgResult, schema};
 
 /// Per-day run counts and durations, as loaded from the grouped run query.
@@ -124,12 +124,12 @@ pub struct StorageByKind {
     pub total_bytes: i64,
 }
 
-/// Run count for one `status` in a workspace.
+/// Detection count for one `status` in a workspace.
 #[derive(Debug, Clone, Queryable)]
 pub struct RunStatusCount {
-    /// The run status this row aggregates.
-    pub status: PipelineRunStatus,
-    /// Number of runs in this status.
+    /// The detection status this row aggregates.
+    pub status: DetectionStatus,
+    /// Number of detections in this status.
     pub count: i64,
 }
 
@@ -311,16 +311,16 @@ async fn load_runs_by_status(
     workspace_id: Uuid,
 ) -> PgResult<Vec<RunStatusCount>> {
     use diesel::dsl::count_star;
-    use schema::workspace_pipeline_runs::dsl as runs;
+    use schema::workspace_detections::dsl as detections;
     use schema::workspace_pipelines::dsl as pipelines;
-    use schema::{workspace_pipeline_runs, workspace_pipelines};
+    use schema::{workspace_detections, workspace_pipelines};
 
-    workspace_pipeline_runs::table
+    workspace_detections::table
         .inner_join(workspace_pipelines::table)
         .filter(pipelines::workspace_id.eq(workspace_id))
         .filter(pipelines::deleted_at.is_null())
-        .group_by(runs::status)
-        .select((runs::status, count_star()))
+        .group_by(detections::status)
+        .select((detections::status, count_star()))
         .load(conn)
         .await
         .map_err(PgError::from)
@@ -331,9 +331,9 @@ async fn load_runs_by_status(
 async fn load_run_durations(conn: &mut PgConnection, workspace_id: Uuid) -> PgResult<RunDurations> {
     use diesel::dsl::sql;
     use diesel::sql_types::{BigInt, Nullable};
-    use schema::workspace_pipeline_runs::dsl as runs;
+    use schema::workspace_detections::dsl as detections;
     use schema::workspace_pipelines::dsl as pipelines;
-    use schema::{workspace_pipeline_runs, workspace_pipelines};
+    use schema::{workspace_detections, workspace_pipelines};
 
     // Duration in milliseconds: the interval's epoch-seconds are scaled by 1000
     // and rounded to a bigint in SQL, so the value crosses the boundary already in
@@ -341,20 +341,20 @@ async fn load_run_durations(conn: &mut PgConnection, workspace_id: Uuid) -> PgRe
     // with no Diesel builtin) both return NULL over no rows. Columns are
     // table-qualified so the join can never make them ambiguous.
     let avg_ms = sql::<Nullable<BigInt>>(
-        "round(avg(EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
-         - workspace_pipeline_runs.started_at)) * 1000))::bigint",
+        "round(avg(EXTRACT(EPOCH FROM (workspace_detections.completed_at \
+         - workspace_detections.started_at)) * 1000))::bigint",
     );
     let p95_ms = sql::<Nullable<BigInt>>(
         "round(percentile_cont(0.95) WITHIN GROUP \
-         (ORDER BY EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
-         - workspace_pipeline_runs.started_at))) * 1000)::bigint",
+         (ORDER BY EXTRACT(EPOCH FROM (workspace_detections.completed_at \
+         - workspace_detections.started_at))) * 1000)::bigint",
     );
 
-    let (avg_ms, p95_ms): (Option<i64>, Option<i64>) = workspace_pipeline_runs::table
+    let (avg_ms, p95_ms): (Option<i64>, Option<i64>) = workspace_detections::table
         .inner_join(workspace_pipelines::table)
         .filter(pipelines::workspace_id.eq(workspace_id))
         .filter(pipelines::deleted_at.is_null())
-        .filter(runs::completed_at.is_not_null())
+        .filter(detections::completed_at.is_not_null())
         .select((avg_ms, p95_ms))
         .first(conn)
         .await
@@ -372,14 +372,14 @@ async fn load_usage_by_model(
 ) -> PgResult<Vec<UsageByModel>> {
     use bigdecimal::ToPrimitive;
     use diesel::dsl::sum;
-    use schema::workspace_pipeline_run_usage::dsl as usage;
-    use schema::workspace_pipeline_runs::dsl as runs;
+    use schema::workspace_detection_usage::dsl as usage;
+    use schema::workspace_detections::dsl as detections;
     use schema::workspace_pipelines::dsl as pipelines;
-    use schema::{workspace_pipeline_run_usage, workspace_pipeline_runs, workspace_pipelines};
+    use schema::{workspace_detection_usage, workspace_detections, workspace_pipelines};
 
-    let rows: Vec<UsageByModelRow> = workspace_pipeline_run_usage::table
-        .inner_join(workspace_pipeline_runs::table.on(runs::id.eq(usage::run_id)))
-        .inner_join(workspace_pipelines::table.on(pipelines::id.eq(runs::pipeline_id)))
+    let rows: Vec<UsageByModelRow> = workspace_detection_usage::table
+        .inner_join(workspace_detections::table.on(detections::id.eq(usage::detection_id)))
+        .inner_join(workspace_pipelines::table.on(pipelines::id.eq(detections::pipeline_id)))
         .filter(pipelines::workspace_id.eq(workspace_id))
         .filter(pipelines::deleted_at.is_null())
         .group_by(usage::model)
@@ -411,7 +411,7 @@ async fn load_usage_by_model(
 /// pipelines can never make it ambiguous. Returns a fresh fragment per call, as
 /// the builder consumes it in both `group_by` and `select`.
 fn run_day() -> diesel::expression::SqlLiteral<Timestamptz> {
-    diesel::dsl::sql::<Timestamptz>("date_trunc('day', workspace_pipeline_runs.started_at)")
+    diesel::dsl::sql::<Timestamptz>("date_trunc('day', workspace_detections.started_at)")
 }
 
 /// Per-day run counts and durations over `[from, to)`, scoped through the live
@@ -425,9 +425,9 @@ async fn load_run_day_counts(
 ) -> PgResult<Vec<RunDayCounts>> {
     use diesel::dsl::{case_when, count_star, sql, sum};
     use diesel::sql_types::{BigInt, Nullable as SqlNullable};
-    use schema::workspace_pipeline_runs::dsl as runs;
+    use schema::workspace_detections::dsl as detections;
     use schema::workspace_pipelines::dsl as pipelines;
-    use schema::{workspace_pipeline_runs, workspace_pipelines};
+    use schema::{workspace_detections, workspace_pipelines};
 
     // Durations in milliseconds (epoch-seconds scaled by 1000, rounded to bigint),
     // so the value crosses the boundary already in the API unit and type. The
@@ -437,33 +437,34 @@ async fn load_run_day_counts(
     // aggregate FILTER is not available on `count(*)`. Columns are table-qualified
     // so the join to pipelines can never make them ambiguous.
     let avg_ms = sql::<SqlNullable<BigInt>>(
-        "round(avg(EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
-         - workspace_pipeline_runs.started_at))) \
-         FILTER (WHERE workspace_pipeline_runs.completed_at IS NOT NULL) * 1000)::bigint",
+        "round(avg(EXTRACT(EPOCH FROM (workspace_detections.completed_at \
+         - workspace_detections.started_at))) \
+         FILTER (WHERE workspace_detections.completed_at IS NOT NULL) * 1000)::bigint",
     );
     let p95_ms = sql::<SqlNullable<BigInt>>(
         "round(percentile_cont(0.95) WITHIN GROUP \
-         (ORDER BY EXTRACT(EPOCH FROM (workspace_pipeline_runs.completed_at \
-         - workspace_pipeline_runs.started_at))) \
-         FILTER (WHERE workspace_pipeline_runs.completed_at IS NOT NULL) * 1000)::bigint",
+         (ORDER BY EXTRACT(EPOCH FROM (workspace_detections.completed_at \
+         - workspace_detections.started_at))) \
+         FILTER (WHERE workspace_detections.completed_at IS NOT NULL) * 1000)::bigint",
     );
 
-    workspace_pipeline_runs::table
+    workspace_detections::table
         .inner_join(workspace_pipelines::table)
         .filter(pipelines::workspace_id.eq(workspace_id))
         .filter(pipelines::deleted_at.is_null())
-        .filter(runs::started_at.ge(from))
-        .filter(runs::started_at.lt(to))
+        .filter(detections::started_at.ge(from))
+        .filter(detections::started_at.lt(to))
         .group_by(run_day())
         .select((
             run_day(),
             count_star(),
+            sum(case_when::<_, _, BigInt>(
+                detections::status.eq_any(DetectionStatus::OUTCOMES),
+                1i64,
+            )
+            .otherwise(0i64)),
             sum(
-                case_when::<_, _, BigInt>(runs::status.eq_any(PipelineRunStatus::OUTCOMES), 1i64)
-                    .otherwise(0i64),
-            ),
-            sum(
-                case_when::<_, _, BigInt>(runs::status.eq(PipelineRunStatus::Failed), 1i64)
+                case_when::<_, _, BigInt>(detections::status.eq(DetectionStatus::Failed), 1i64)
                     .otherwise(0i64),
             ),
             avg_ms,
@@ -486,30 +487,30 @@ async fn load_run_day_tokens(
     to: jiff_diesel::Timestamp,
 ) -> PgResult<Vec<RunDayTokens>> {
     use diesel::dsl::sum;
-    use schema::workspace_pipeline_run_usage::dsl as usage;
-    use schema::workspace_pipeline_runs::dsl as runs;
+    use schema::workspace_detection_usage::dsl as usage;
+    use schema::workspace_detections::dsl as detections;
     use schema::workspace_pipelines::dsl as pipelines;
-    use schema::{workspace_pipeline_run_usage, workspace_pipeline_runs, workspace_pipelines};
+    use schema::{workspace_detection_usage, workspace_detections, workspace_pipelines};
 
-    let per_run_input = workspace_pipeline_run_usage::table
-        .filter(usage::run_id.eq(runs::id))
+    let per_run_input = workspace_detection_usage::table
+        .filter(usage::detection_id.eq(detections::id))
         .select(sum(usage::input_tokens))
         .single_value();
-    let per_run_output = workspace_pipeline_run_usage::table
-        .filter(usage::run_id.eq(runs::id))
+    let per_run_output = workspace_detection_usage::table
+        .filter(usage::detection_id.eq(detections::id))
         .select(sum(usage::output_tokens))
         .single_value();
-    let per_run_total = workspace_pipeline_run_usage::table
-        .filter(usage::run_id.eq(runs::id))
+    let per_run_total = workspace_detection_usage::table
+        .filter(usage::detection_id.eq(detections::id))
         .select(sum(usage::total_tokens))
         .single_value();
 
-    workspace_pipeline_runs::table
+    workspace_detections::table
         .inner_join(workspace_pipelines::table)
         .filter(pipelines::workspace_id.eq(workspace_id))
         .filter(pipelines::deleted_at.is_null())
-        .filter(runs::started_at.ge(from))
-        .filter(runs::started_at.lt(to))
+        .filter(detections::started_at.ge(from))
+        .filter(detections::started_at.lt(to))
         .group_by(run_day())
         .select((
             run_day(),

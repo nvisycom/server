@@ -26,10 +26,16 @@ pub enum FileKind {
     #[serde(rename = "redacted")]
     Redacted,
 
-    /// Engine analysis blob, not shown in file lists.
+    /// Engine detection-analysis blob, not shown in file lists.
     #[db_rename = "audit"]
     #[serde(rename = "audit")]
     Audit,
+
+    /// Engine analysis after reviewer edits and redaction (a redaction's review
+    /// audit), not shown in file lists.
+    #[db_rename = "review"]
+    #[serde(rename = "review")]
+    Review,
 }
 
 impl FileKind {

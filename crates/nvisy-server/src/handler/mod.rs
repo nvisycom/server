@@ -12,16 +12,17 @@ mod catalog;
 mod chat;
 mod connection_syncs;
 mod connections;
+mod detection_audits;
+mod detections;
 mod error;
 mod files;
 mod invites;
 mod members;
 mod monitors;
 mod notifications;
-mod pipeline_audits;
-mod pipeline_runs;
 mod pipelines;
 mod policies;
+mod redactions;
 pub mod request;
 pub mod response;
 mod tokens;
@@ -89,8 +90,9 @@ fn private_routes(
         .merge(connection_syncs::routes())
         .merge(files::routes())
         .merge(pipelines::routes())
-        .merge(pipeline_runs::routes())
-        .merge(pipeline_audits::routes())
+        .merge(detections::routes())
+        .merge(detection_audits::routes())
+        .merge(redactions::routes())
         .merge(policies::routes())
         .merge(catalog::routes());
 

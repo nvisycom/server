@@ -9,7 +9,9 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::types::{ActivityType, ConnectionId, Handle, RunId, WebhookEvent, WebhookId};
+use crate::types::{
+    ActivityType, ConnectionId, DetectionId, Handle, RedactionId, WebhookEvent, WebhookId,
+};
 
 /// Params of a workspace-scoped activity (`workspace.*`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,15 +86,26 @@ pub struct PipelineActivityParams {
     pub pipeline_slug: Handle,
 }
 
-/// Params of a pipeline-run activity (`pipeline.run.*`).
+/// Params of a detection activity (`pipeline.detection.*`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct PipelineRunActivityParams {
+pub struct DetectionActivityParams {
     /// Slug of the owning pipeline.
     pub pipeline_slug: Handle,
-    /// Id of the run.
-    pub run_id: RunId,
+    /// Id of the detection.
+    pub detection_id: DetectionId,
+}
+
+/// Params of a redaction activity (`pipeline.redaction.*`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct RedactionActivityParams {
+    /// Slug of the owning pipeline.
+    pub pipeline_slug: Handle,
+    /// Id of the redaction.
+    pub redaction_id: RedactionId,
 }
 
 /// Params of a policy activity (`policy.*`).
@@ -198,18 +211,18 @@ pub enum ActivityPayload {
     /// A pipeline was deleted.
     #[serde(rename = "pipeline.deleted")]
     PipelineDeleted(PipelineActivityParams),
-    /// A pipeline run was started.
-    #[serde(rename = "pipeline.run.started")]
-    PipelineRunStarted(PipelineRunActivityParams),
-    /// A pipeline run finished detection.
-    #[serde(rename = "pipeline.run.analyzed")]
-    PipelineRunAnalyzed(PipelineRunActivityParams),
-    /// A pipeline run completed.
-    #[serde(rename = "pipeline.run.completed")]
-    PipelineRunCompleted(PipelineRunActivityParams),
-    /// A pipeline run failed.
-    #[serde(rename = "pipeline.run.failed")]
-    PipelineRunFailed(PipelineRunActivityParams),
+    /// A detection was started.
+    #[serde(rename = "pipeline.detection.started")]
+    DetectionStarted(DetectionActivityParams),
+    /// A detection finished analysis.
+    #[serde(rename = "pipeline.detection.completed")]
+    DetectionCompleted(DetectionActivityParams),
+    /// A detection failed.
+    #[serde(rename = "pipeline.detection.failed")]
+    DetectionFailed(DetectionActivityParams),
+    /// A redaction was created.
+    #[serde(rename = "pipeline.redaction.created")]
+    RedactionCreated(RedactionActivityParams),
 
     /// A policy was created.
     #[serde(rename = "policy.created")]
@@ -252,10 +265,10 @@ impl ActivityPayload {
             ActivityPayload::PipelineCreated(_) => ActivityType::PipelineCreated,
             ActivityPayload::PipelineUpdated(_) => ActivityType::PipelineUpdated,
             ActivityPayload::PipelineDeleted(_) => ActivityType::PipelineDeleted,
-            ActivityPayload::PipelineRunStarted(_) => ActivityType::PipelineRunStarted,
-            ActivityPayload::PipelineRunAnalyzed(_) => ActivityType::PipelineRunAnalyzed,
-            ActivityPayload::PipelineRunCompleted(_) => ActivityType::PipelineRunCompleted,
-            ActivityPayload::PipelineRunFailed(_) => ActivityType::PipelineRunFailed,
+            ActivityPayload::DetectionStarted(_) => ActivityType::DetectionStarted,
+            ActivityPayload::DetectionCompleted(_) => ActivityType::DetectionCompleted,
+            ActivityPayload::DetectionFailed(_) => ActivityType::DetectionFailed,
+            ActivityPayload::RedactionCreated(_) => ActivityType::RedactionCreated,
             ActivityPayload::PolicyCreated(_) => ActivityType::PolicyCreated,
             ActivityPayload::PolicyUpdated(_) => ActivityType::PolicyUpdated,
             ActivityPayload::PolicyDeleted(_) => ActivityType::PolicyDeleted,
@@ -294,10 +307,10 @@ impl ActivityPayload {
             ActivityPayload::PipelineCreated(_) => W::PipelineCreated,
             ActivityPayload::PipelineUpdated(_) => W::PipelineUpdated,
             ActivityPayload::PipelineDeleted(_) => W::PipelineDeleted,
-            ActivityPayload::PipelineRunStarted(_) => W::PipelineRunStarted,
-            ActivityPayload::PipelineRunAnalyzed(_) => W::PipelineRunAnalyzed,
-            ActivityPayload::PipelineRunCompleted(_) => W::PipelineRunCompleted,
-            ActivityPayload::PipelineRunFailed(_) => W::PipelineRunFailed,
+            ActivityPayload::DetectionStarted(_) => W::DetectionStarted,
+            ActivityPayload::DetectionCompleted(_) => W::DetectionCompleted,
+            ActivityPayload::DetectionFailed(_) => W::DetectionFailed,
+            ActivityPayload::RedactionCreated(_) => W::RedactionCreated,
             ActivityPayload::PolicyCreated(_) => W::PolicyCreated,
             ActivityPayload::PolicyUpdated(_) => W::PolicyUpdated,
             ActivityPayload::PolicyDeleted(_) => W::PolicyDeleted,
@@ -333,10 +346,11 @@ impl ActivityPayload {
             | ActivityPayload::FileUpdated(p)
             | ActivityPayload::FileDeleted(p) => Some(p.file_id.to_string()),
 
-            ActivityPayload::PipelineRunStarted(p)
-            | ActivityPayload::PipelineRunAnalyzed(p)
-            | ActivityPayload::PipelineRunCompleted(p)
-            | ActivityPayload::PipelineRunFailed(p) => Some(p.run_id.to_string()),
+            ActivityPayload::DetectionStarted(p)
+            | ActivityPayload::DetectionCompleted(p)
+            | ActivityPayload::DetectionFailed(p) => Some(p.detection_id.to_string()),
+
+            ActivityPayload::RedactionCreated(p) => Some(p.redaction_id.to_string()),
 
             ActivityPayload::PolicyCreated(p)
             | ActivityPayload::PolicyUpdated(p)
@@ -380,10 +394,11 @@ impl ActivityPayload {
             | ActivityPayload::PipelineUpdated(p)
             | ActivityPayload::PipelineDeleted(p) => Some(p.pipeline_slug.to_string()),
 
-            ActivityPayload::PipelineRunStarted(p)
-            | ActivityPayload::PipelineRunAnalyzed(p)
-            | ActivityPayload::PipelineRunCompleted(p)
-            | ActivityPayload::PipelineRunFailed(p) => Some(p.pipeline_slug.to_string()),
+            ActivityPayload::DetectionStarted(p)
+            | ActivityPayload::DetectionCompleted(p)
+            | ActivityPayload::DetectionFailed(p) => Some(p.pipeline_slug.to_string()),
+
+            ActivityPayload::RedactionCreated(p) => Some(p.pipeline_slug.to_string()),
 
             ActivityPayload::ConnectionCreated(p)
             | ActivityPayload::ConnectionUpdated(p)

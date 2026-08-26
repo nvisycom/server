@@ -281,8 +281,13 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             ..Default::default()
         })
         .tag(Tag {
-            name: "Pipeline Runs".into(),
-            description: Some("Pipeline run execution and review".into()),
+            name: "Detections".into(),
+            description: Some("Detection analysis and redaction".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Redactions".into(),
+            description: Some("Redactions produced from a detection, with reviewer edits".into()),
             ..Default::default()
         })
         .tag(Tag {

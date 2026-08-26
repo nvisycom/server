@@ -107,29 +107,29 @@ pub enum WebhookEvent {
     #[strum(serialize = "pipeline.deleted")]
     PipelineDeleted,
 
-    /// A pipeline run started
-    #[db_rename = "pipeline.run.started"]
-    #[serde(rename = "pipeline.run.started")]
-    #[strum(serialize = "pipeline.run.started")]
-    PipelineRunStarted,
+    /// A detection started
+    #[db_rename = "pipeline.detection.started"]
+    #[serde(rename = "pipeline.detection.started")]
+    #[strum(serialize = "pipeline.detection.started")]
+    DetectionStarted,
 
-    /// A pipeline run's detection finished (findings ready for review)
-    #[db_rename = "pipeline.run.analyzed"]
-    #[serde(rename = "pipeline.run.analyzed")]
-    #[strum(serialize = "pipeline.run.analyzed")]
-    PipelineRunAnalyzed,
+    /// A detection's analysis finished (findings ready to redact)
+    #[db_rename = "pipeline.detection.completed"]
+    #[serde(rename = "pipeline.detection.completed")]
+    #[strum(serialize = "pipeline.detection.completed")]
+    DetectionCompleted,
 
-    /// A pipeline run finished successfully
-    #[db_rename = "pipeline.run.completed"]
-    #[serde(rename = "pipeline.run.completed")]
-    #[strum(serialize = "pipeline.run.completed")]
-    PipelineRunCompleted,
+    /// A detection failed
+    #[db_rename = "pipeline.detection.failed"]
+    #[serde(rename = "pipeline.detection.failed")]
+    #[strum(serialize = "pipeline.detection.failed")]
+    DetectionFailed,
 
-    /// A pipeline run failed
-    #[db_rename = "pipeline.run.failed"]
-    #[serde(rename = "pipeline.run.failed")]
-    #[strum(serialize = "pipeline.run.failed")]
-    PipelineRunFailed,
+    /// A redaction was created
+    #[db_rename = "pipeline.redaction.created"]
+    #[serde(rename = "pipeline.redaction.created")]
+    #[strum(serialize = "pipeline.redaction.created")]
+    RedactionCreated,
 
     // Policy events
     /// A policy was created
@@ -170,10 +170,10 @@ impl WebhookEvent {
             WebhookEvent::PipelineCreated
             | WebhookEvent::PipelineUpdated
             | WebhookEvent::PipelineDeleted
-            | WebhookEvent::PipelineRunStarted
-            | WebhookEvent::PipelineRunAnalyzed
-            | WebhookEvent::PipelineRunCompleted
-            | WebhookEvent::PipelineRunFailed => "pipeline",
+            | WebhookEvent::DetectionStarted
+            | WebhookEvent::DetectionCompleted
+            | WebhookEvent::DetectionFailed
+            | WebhookEvent::RedactionCreated => "pipeline",
             WebhookEvent::PolicyCreated
             | WebhookEvent::PolicyUpdated
             | WebhookEvent::PolicyDeleted => "policy",
@@ -183,7 +183,7 @@ impl WebhookEvent {
     /// Returns the event as a subject string for NATS routing.
     ///
     /// The event name is already a dotted, NATS-legal subject (e.g.
-    /// `file.created`, `pipeline.run.completed`), so this is the event's own
+    /// `file.created`, `pipeline.redaction.created`), so this is the event's own
     /// string representation (from its `strum(serialize)`).
     pub fn as_subject(&self) -> &'static str {
         self.into()

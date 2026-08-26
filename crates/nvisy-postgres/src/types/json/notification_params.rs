@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::Json;
-use crate::types::{ConnectionId, Handle, NotificationEvent, RunId};
+use crate::types::{ConnectionId, DetectionId, Handle, NotificationEvent, RedactionId};
 
 /// Params of a `member.invited` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,13 +61,13 @@ pub struct ConnectionSyncFailedParams {
     pub error: Option<String>,
 }
 
-/// Params of a `pipeline.run.analyzed` notification.
+/// Params of a `pipeline.detection.completed` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct PipelineRunAnalyzedParams {
-    /// Id of the run.
-    pub run_id: RunId,
+pub struct DetectionCompletedParams {
+    /// Id of the detection.
+    pub detection_id: DetectionId,
     /// Slug of the owning pipeline.
     pub pipeline_slug: Handle,
     /// Display name of the analyzed file, if known.
@@ -75,27 +75,29 @@ pub struct PipelineRunAnalyzedParams {
     pub input_file_name: Option<String>,
 }
 
-/// Params of a `pipeline.run.completed` notification.
+/// Params of a `pipeline.redaction.created` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct PipelineRunCompletedParams {
-    /// Id of the run.
-    pub run_id: RunId,
+pub struct RedactionCreatedParams {
+    /// Id of the redaction.
+    pub redaction_id: RedactionId,
+    /// Id of the detection the redaction was produced from.
+    pub detection_id: DetectionId,
     /// Slug of the owning pipeline.
     pub pipeline_slug: Handle,
-    /// Display name of the analyzed file, if known.
+    /// Display name of the redacted file, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_file_name: Option<String>,
 }
 
-/// Params of a `pipeline.run.failed` notification.
+/// Params of a `pipeline.detection.failed` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct PipelineRunFailedParams {
-    /// Id of the run.
-    pub run_id: RunId,
+pub struct DetectionFailedParams {
+    /// Id of the detection.
+    pub detection_id: DetectionId,
     /// Slug of the owning pipeline.
     pub pipeline_slug: Handle,
     /// Display name of the analyzed file, if known.
@@ -132,17 +134,17 @@ pub enum NotificationPayload {
     #[serde(rename = "connection.sync.failed")]
     ConnectionSyncFailed(ConnectionSyncFailedParams),
 
-    /// A pipeline run finished detection and is awaiting review.
-    #[serde(rename = "pipeline.run.analyzed")]
-    PipelineRunAnalyzed(PipelineRunAnalyzedParams),
+    /// A detection finished analysis and is ready to redact.
+    #[serde(rename = "pipeline.detection.completed")]
+    DetectionCompleted(DetectionCompletedParams),
 
-    /// A pipeline run completed (redaction produced).
-    #[serde(rename = "pipeline.run.completed")]
-    PipelineRunCompleted(PipelineRunCompletedParams),
+    /// A redaction was created (redacted output produced).
+    #[serde(rename = "pipeline.redaction.created")]
+    RedactionCreated(RedactionCreatedParams),
 
-    /// A pipeline run failed.
-    #[serde(rename = "pipeline.run.failed")]
-    PipelineRunFailed(PipelineRunFailedParams),
+    /// A detection failed.
+    #[serde(rename = "pipeline.detection.failed")]
+    DetectionFailed(DetectionFailedParams),
 }
 
 impl NotificationPayload {
@@ -155,9 +157,9 @@ impl NotificationPayload {
                 NotificationEvent::ConnectionSyncCompleted
             }
             NotificationPayload::ConnectionSyncFailed(_) => NotificationEvent::ConnectionSyncFailed,
-            NotificationPayload::PipelineRunAnalyzed(_) => NotificationEvent::PipelineRunAnalyzed,
-            NotificationPayload::PipelineRunCompleted(_) => NotificationEvent::PipelineRunCompleted,
-            NotificationPayload::PipelineRunFailed(_) => NotificationEvent::PipelineRunFailed,
+            NotificationPayload::DetectionCompleted(_) => NotificationEvent::DetectionCompleted,
+            NotificationPayload::RedactionCreated(_) => NotificationEvent::RedactionCreated,
+            NotificationPayload::DetectionFailed(_) => NotificationEvent::DetectionFailed,
         }
     }
 
@@ -178,13 +180,13 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::types::RunId;
+    use crate::types::DetectionId;
 
     #[test]
     fn serializes_as_a_type_data_envelope_and_round_trips() {
-        let run_id = RunId::from_uuid(Uuid::now_v7());
-        let payload = NotificationPayload::PipelineRunAnalyzed(PipelineRunAnalyzedParams {
-            run_id,
+        let detection_id = DetectionId::from_uuid(Uuid::now_v7());
+        let payload = NotificationPayload::DetectionCompleted(DetectionCompletedParams {
+            detection_id,
             pipeline_slug: Handle::from_str("redact-invoices").unwrap(),
             input_file_name: Some("invoice.pdf".to_owned()),
         });
@@ -192,15 +194,15 @@ mod tests {
         let value = serde_json::to_value(&payload).unwrap();
         // The durable wire shape: a `type` tag and a nested `data` object, matching
         // the activity payload and outbox event. Stored rows depend on it.
-        assert_eq!(value["type"], "pipeline.run.analyzed");
-        assert_eq!(value["data"]["runId"], run_id.to_string());
+        assert_eq!(value["type"], "pipeline.detection.completed");
+        assert_eq!(value["data"]["detectionId"], detection_id.to_string());
         assert_eq!(value["data"]["pipelineSlug"], "redact-invoices");
         assert!(
-            value.get("runId").is_none(),
+            value.get("detectionId").is_none(),
             "params must nest under `data`"
         );
 
         let decoded: NotificationPayload = serde_json::from_value(value).unwrap();
-        assert_eq!(decoded.event(), NotificationEvent::PipelineRunAnalyzed);
+        assert_eq!(decoded.event(), NotificationEvent::DetectionCompleted);
     }
 }
