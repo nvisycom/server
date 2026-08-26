@@ -5,9 +5,9 @@
 //! settings / retention value types.
 
 mod activity_params;
+mod detection_metadata;
 mod notification_params;
 mod pipeline_metadata;
-mod pipeline_run_metadata;
 mod retention;
 mod typed_json;
 mod webhook_headers;
@@ -15,17 +15,17 @@ mod workspace_metadata;
 mod workspace_settings;
 
 pub use activity_params::{
-    ActivityPayload, ConnectionActivityParams, FileActivityParams, InviteActivityParams,
-    MemberActivityParams, PipelineActivityParams, PipelineRunActivityParams, PolicyActivityParams,
-    WebhookActivityParams, WorkspaceActivityParams,
+    ActivityPayload, ConnectionActivityParams, DetectionActivityParams, FileActivityParams,
+    InviteActivityParams, MemberActivityParams, PipelineActivityParams, PolicyActivityParams,
+    RedactionActivityParams, WebhookActivityParams, WorkspaceActivityParams,
 };
+pub use detection_metadata::DetectionMetadata;
 pub use notification_params::{
-    ConnectionSyncCompletedParams, ConnectionSyncFailedParams, MemberInvitedParams,
-    MemberJoinedParams, NotificationPayload, PipelineRunAnalyzedParams, PipelineRunCompletedParams,
-    PipelineRunFailedParams,
+    ConnectionSyncCompletedParams, ConnectionSyncFailedParams, DetectionCompletedParams,
+    DetectionFailedParams, MemberInvitedParams, MemberJoinedParams, NotificationPayload,
+    RedactionCreatedParams,
 };
 pub use pipeline_metadata::{PipelineMetadata, RetentionOverride};
-pub use pipeline_run_metadata::RunMetadata;
 pub use retention::{Retention, RetentionScope, RetentionSettings};
 pub use typed_json::Json;
 pub use webhook_headers::{InvalidHeader, WebhookHeaders};

@@ -99,29 +99,34 @@ pub enum WorkspaceEvent {
     #[serde(rename = "pipeline.deleted")]
     PipelineDeleted(PipelineRef),
 
-    // Pipeline runs
-    #[serde(rename = "pipeline.run.started")]
-    PipelineRunStarted(PipelineRunRef),
-    #[serde(rename = "pipeline.run.analyzed")]
-    PipelineRunAnalyzed {
+    // Detections
+    #[serde(rename = "pipeline.detection.started")]
+    DetectionStarted(DetectionRef),
+    #[serde(rename = "pipeline.detection.completed")]
+    DetectionCompleted {
         #[serde(flatten)]
-        run: PipelineRunRef,
+        detection: DetectionRef,
         input_file_name: Option<String>,
         notify: Uuid,
     },
-    #[serde(rename = "pipeline.run.completed")]
-    PipelineRunCompleted {
+    #[serde(rename = "pipeline.detection.failed")]
+    DetectionFailed {
         #[serde(flatten)]
-        run: PipelineRunRef,
-        input_file_name: Option<String>,
-        notify: Uuid,
-    },
-    #[serde(rename = "pipeline.run.failed")]
-    PipelineRunFailed {
-        #[serde(flatten)]
-        run: PipelineRunRef,
+        detection: DetectionRef,
         input_file_name: Option<String>,
         error: Option<String>,
+        notify: Uuid,
+    },
+
+    // Redactions
+    #[serde(rename = "pipeline.redaction.created")]
+    RedactionCreated {
+        #[serde(flatten)]
+        detection: DetectionRef,
+        /// The redaction that was produced (its own id, distinct from the
+        /// detection's — a detection can produce many redactions).
+        redaction_id: Uuid,
+        input_file_name: Option<String>,
         notify: Uuid,
     },
 
@@ -186,10 +191,10 @@ pub struct PipelineRef {
     pub pipeline_slug: Handle,
 }
 
-/// A pipeline run and its pipeline's slug.
+/// A detection and its pipeline's slug.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PipelineRunRef {
-    pub run_id: Uuid,
+pub struct DetectionRef {
+    pub detection_id: Uuid,
     pub pipeline_slug: Handle,
 }
 

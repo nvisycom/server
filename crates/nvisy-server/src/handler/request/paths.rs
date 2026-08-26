@@ -1,6 +1,6 @@
 //! Path parameter types for HTTP handlers.
 
-use nvisy_postgres::types::{Handle, RunId, WebhookId};
+use nvisy_postgres::types::{DetectionId, Handle, RedactionId, WebhookId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -83,13 +83,25 @@ pub struct PipelinePathParams {
     pub pipeline_slug: String,
 }
 
-/// Path parameters for pipeline run operations.
+/// Path parameters for detection operations.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct PipelineRunPathParams {
-    /// Opaque identifier of the run.
-    pub run_id: RunId,
+pub struct DetectionPathParams {
+    /// Opaque identifier of the detection.
+    pub detection_id: DetectionId,
+}
+
+/// Path parameters for a redaction.
+///
+/// The redaction id is globally unique, so a redaction is addressed by id alone
+/// and resolved within the workspace by the query.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RedactionPathParams {
+    /// Opaque identifier of the redaction.
+    pub redaction_id: RedactionId,
 }
 
 /// Path parameters for notification operations.

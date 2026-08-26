@@ -29,7 +29,7 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::WorkspaceWebhook(c) => c.into(),
             ConstraintViolation::WorkspaceFile(c) => c.into(),
             ConstraintViolation::WorkspacePipeline(c) => c.into(),
-            ConstraintViolation::WorkspacePipelineRun(c) => c.into(),
+            ConstraintViolation::WorkspaceDetection(c) => c.into(),
             ConstraintViolation::WorkspacePipelineReference(c) => c.into(),
             ConstraintViolation::WorkspaceConnection(c) => c.into(),
             ConstraintViolation::WorkspaceConnectionSync(c) => c.into(),

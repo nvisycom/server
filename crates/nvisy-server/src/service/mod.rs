@@ -33,15 +33,15 @@ pub use crate::service::chat::{ChatService, TurnLocation};
 pub use crate::service::connection_config::ConnectionConfig;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, Measurements};
+pub(crate) use crate::service::detection::resolve_policies;
 pub use crate::service::detection::{
-    DetectionJob, DetectionQueue, DetectionWorker, RunStatusEvent, run_subject,
+    DetectionJob, DetectionOutboxDrainer, DetectionQueue, DetectionStatusEvent, DetectionWorker,
+    detection_subject,
 };
-pub(crate) use crate::service::detection::{FailRun, fail_run, resolve_policies};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::event::{
-    ConnectionRef, EventEmitter, EventOrigin, EventOutboxDrainer, FileRef, InviteRef, MemberRef,
-    PipelineRef, PipelineRunRef, PolicyRef, WebhookRef, WorkspaceEvent, WorkspaceRef,
-    event_outbox_row,
+    ConnectionRef, DetectionRef, EventEmitter, EventOrigin, EventOutboxDrainer, FileRef, InviteRef,
+    MemberRef, PipelineRef, PolicyRef, WebhookRef, WorkspaceEvent, WorkspaceRef, event_outbox_row,
 };
 pub use crate::service::external_object_store::ExternalObjectStore;
 pub use crate::service::file_reaper::FileReaper;
@@ -174,6 +174,7 @@ impl ServiceState {
         ));
         workers.spawn(FileReaper::new(self.infra.clone()));
         workers.spawn(EventOutboxDrainer::new(self.infra.clone()));
+        workers.spawn(DetectionOutboxDrainer::new(self.infra.clone()));
         workers.spawn(DetectionWorker::new(
             self.infra.clone(),
             self.engine.clone(),

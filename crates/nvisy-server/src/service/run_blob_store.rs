@@ -16,7 +16,7 @@ use elide_pipeline::{Audit, Engine};
 use nvisy_nats::object::{AuditBucket, AuditKey, FileKey, FilesBucket, ObjectBucket};
 use nvisy_postgres::PgConn;
 use nvisy_postgres::model::{
-    NewWorkspaceFile, WorkspaceFile, WorkspacePipeline, WorkspacePipelineRun,
+    NewWorkspaceFile, WorkspaceDetection, WorkspaceFile, WorkspacePipeline,
 };
 use nvisy_postgres::query::WorkspaceFileRepository;
 use nvisy_postgres::types::{FileKind, RetentionScope, RetentionSettings};
@@ -178,64 +178,6 @@ impl RunBlobStore {
         Ok(Document::new(bytes, file.file_extension.clone()).with_correlation_id(correlation_id))
     }
 
-    /// Stores redacted bytes as a new workspace file (the run's output).
-    ///
-    /// The redacted file is a first-class file — a sibling of the source — so it
-    /// is downloadable through the normal file endpoints.
-    pub async fn store_redacted_file(
-        &self,
-        conn: &mut PgConn,
-        source: &WorkspaceFile,
-        pipeline: &WorkspacePipeline,
-        workspace_settings: &RetentionSettings,
-        account_id: Uuid,
-        bytes: Bytes,
-    ) -> Result<WorkspaceFile> {
-        // Record the plaintext size and hash before encrypting; storage holds
-        // only the ciphertext.
-        let plaintext_size = bytes.len() as i64;
-        let plaintext_hash = Sha256::digest(&bytes).to_vec();
-        let ciphertext = self
-            .infra
-            .crypto
-            .encrypt(source.workspace_id, &bytes)
-            .map_err(|err| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to encrypt redacted file")
-                    .with_context(err.to_string())
-            })?;
-
-        let store = self.infra.nats.object_store::<FilesBucket>().await?;
-        let key = FileKey::generate(source.workspace_id);
-        store.put(&key, Cursor::new(ciphertext)).await?;
-
-        // Retention expiry for the redacted-documents scope (workspace baseline,
-        // pipeline override if set).
-        let over = pipeline.metadata.or_default().retention;
-        let expires_at = workspace_settings
-            .resolve(RetentionScope::RedactedDocuments, over.as_ref())
-            .expires_at(jiff::Timestamp::now());
-
-        let redacted_name = format!("{}.redacted", source.display_name);
-        let new_file = NewWorkspaceFile {
-            workspace_id: source.workspace_id,
-            account_id,
-            parent_id: Some(source.id),
-            display_name: Some(redacted_name),
-            original_filename: Some(source.original_filename.clone()),
-            file_extension: Some(source.file_extension.clone()),
-            file_kind: Some(FileKind::Redacted),
-            file_size_bytes: plaintext_size,
-            file_hash_sha256: plaintext_hash,
-            storage_path: key.to_string(),
-            storage_bucket: store.bucket().to_owned(),
-            expires_at: expires_at.map(Into::into),
-            ..Default::default()
-        };
-
-        Ok(conn.create_workspace_file(new_file).await?)
-    }
-
     /// Encrypts the analysis, writes it to the audit bucket, and builds the
     /// `audit`-kind [`WorkspaceFile`] row that will point at it — but does not
     /// insert the row.
@@ -250,7 +192,7 @@ impl RunBlobStore {
     /// inserted (with the run's other writes) atomically. A rollback therefore
     /// leaves at worst an orphan object in the bucket, never a file row that points
     /// at bytes that were never written; the caller reclaims that orphan via
-    /// [`discard_staged_audit`](Self::discard_staged_audit).
+    /// [`discard_staged_object`](Self::discard_staged_object).
     pub async fn stage_analyzed_document(
         &self,
         pipeline: &WorkspacePipeline,
@@ -299,15 +241,17 @@ impl RunBlobStore {
         })
     }
 
-    /// Deletes a staged audit object whose file row was never committed.
+    /// Deletes a staged object whose file row was never committed.
     ///
-    /// [`stage_analyzed_document`](Self::stage_analyzed_document) writes the object
-    /// before its `workspace_files` row; if the committing transaction rolls back,
-    /// the object has no row and the row-driven reaper can never find it. The
-    /// caller invokes this on that path so the orphan is removed immediately
-    /// instead of accumulating. Best effort: a failure here only leaves the object
-    /// for a later manual sweep, so callers log rather than propagate.
-    pub async fn discard_staged_audit(&self, staged: &NewWorkspaceFile) -> Result<()> {
+    /// The `stage_*` methods write an object before its `workspace_files` row; if
+    /// the committing transaction rolls back, the object has no row and the
+    /// row-driven reaper can never find it. The caller invokes this on that path
+    /// so the orphan is removed immediately instead of accumulating. It deletes
+    /// from whichever bucket the staged row names, so it reclaims a staged audit,
+    /// review audit, or redacted document alike. Best effort: a failure here only
+    /// leaves the object for a later manual sweep, so callers log rather than
+    /// propagate.
+    pub async fn discard_staged_object(&self, staged: &NewWorkspaceFile) -> Result<()> {
         self.delete_object(&staged.storage_bucket, &staged.storage_path)
             .await
     }
@@ -319,30 +263,30 @@ impl RunBlobStore {
     /// entity group by modality name and only the engine's registry can map those
     /// back to concrete types.
     ///
-    /// Errors if the run was never analyzed (409) or its analysis has since been
-    /// deleted (404).
+    /// Errors if the detection never analyzed (409) or its analysis has since
+    /// been deleted (404).
     pub async fn load_analyzed_document(
         &self,
         conn: &mut PgConn,
         engine: &Engine,
         workspace_id: Uuid,
-        run: &WorkspacePipelineRun,
+        detection: &WorkspaceDetection,
     ) -> Result<Audit> {
-        // A NULL reference means the run never produced an analysis; a reference
-        // to a now-deleted file means it did, but the analysis has been removed.
-        // These are distinct states, so they map to distinct responses.
-        let audit_file_id = run.audit_file_id.ok_or_else(|| {
+        // A NULL reference means the detection never produced an analysis; a
+        // reference to a now-deleted file means it did, but the analysis has been
+        // removed. These are distinct states, so they map to distinct responses.
+        let audit_file_id = detection.audit_file_id.ok_or_else(|| {
             ErrorKind::Conflict
-                .with_message("Run has no analysis yet")
-                .with_resource("pipeline_run")
+                .with_message("Detection has no analysis yet")
+                .with_resource("detection")
         })?;
         let audit_file = conn
             .find_file_in_workspace(workspace_id, audit_file_id)
             .await?
             .ok_or_else(|| {
                 ErrorKind::NotFound
-                    .with_message("The analysis for this run has been deleted")
-                    .with_resource("pipeline_run")
+                    .with_message("The analysis for this detection has been deleted")
+                    .with_resource("detection")
             })?;
         let key = AuditKey::from_str(&audit_file.storage_path).map_err(|err| {
             ErrorKind::InternalServerError
@@ -379,6 +323,185 @@ impl RunBlobStore {
                     .with_context(err.to_string())
             })
     }
+
+    /// Encrypts a redaction's review audit, writes it to the audit bucket, and
+    /// builds the `review`-kind [`WorkspaceFile`] row that will point at it —
+    /// without inserting the row.
+    ///
+    /// The review audit is the post-redaction [`Audit`]: the detection's analysis
+    /// with the reviewer's edits applied and the redaction outcome recorded per
+    /// entity. It is the redaction's counterpart to
+    /// [`stage_analyzed_document`](Self::stage_analyzed_document) — same staged
+    /// object-then-row protocol, reclaimed on rollback via
+    /// [`discard_staged_object`](Self::discard_staged_object) — but a distinct
+    /// file kind so it is never confused with the immutable detection audit.
+    pub async fn stage_review_audit(
+        &self,
+        pipeline: &WorkspacePipeline,
+        workspace_settings: &RetentionSettings,
+        account_id: Uuid,
+        reviewed: &Audit,
+    ) -> Result<NewWorkspaceFile> {
+        let workspace_id = pipeline.workspace_id;
+        let plaintext = serde_json::to_vec(reviewed).map_err(analysis_serde_error)?;
+        let hash = Sha256::digest(&plaintext).to_vec();
+        let size = plaintext.len() as i64;
+        let ciphertext = self
+            .infra
+            .crypto
+            .encrypt(workspace_id, &plaintext)
+            .map_err(|err| {
+                ErrorKind::InternalServerError
+                    .with_message("Failed to encrypt review audit")
+                    .with_context(err.to_string())
+            })?;
+
+        let store = self.infra.nats.object_store::<AuditBucket>().await?;
+        let key = AuditKey::generate(workspace_id);
+        store.put(&key, Cursor::new(ciphertext)).await?;
+
+        // A review audit shares the audit-logs retention scope with the detection
+        // audit (workspace baseline, pipeline override if set).
+        let over = pipeline.metadata.or_default().retention;
+        let expires_at = workspace_settings
+            .resolve(RetentionScope::AuditLogs, over.as_ref())
+            .expires_at(jiff::Timestamp::now());
+
+        Ok(NewWorkspaceFile {
+            workspace_id,
+            account_id,
+            display_name: Some("review.audit".to_owned()),
+            original_filename: Some("review.audit".to_owned()),
+            file_extension: Some("json".to_owned()),
+            file_kind: Some(FileKind::Review),
+            file_size_bytes: size,
+            file_hash_sha256: hash,
+            storage_path: key.to_string(),
+            storage_bucket: store.bucket().to_owned(),
+            expires_at: expires_at.map(Into::into),
+            ..Default::default()
+        })
+    }
+
+    /// Encrypts redacted bytes, writes them to the files bucket, and builds the
+    /// `redacted`-kind [`WorkspaceFile`] row that will point at them — without
+    /// inserting the row.
+    ///
+    /// A redaction commits its output row, review-audit row, and redaction row
+    /// together in one transaction, so the output file is staged (object written,
+    /// row returned for the caller to insert) rather than inserted here, and is
+    /// reclaimed on rollback via
+    /// [`discard_staged_object`](Self::discard_staged_object). The redacted file
+    /// is a first-class file (a sibling of the source), downloadable
+    /// through the normal file endpoints.
+    pub async fn stage_redacted_file(
+        &self,
+        source: &WorkspaceFile,
+        pipeline: &WorkspacePipeline,
+        workspace_settings: &RetentionSettings,
+        account_id: Uuid,
+        bytes: Bytes,
+    ) -> Result<NewWorkspaceFile> {
+        let plaintext_size = bytes.len() as i64;
+        let plaintext_hash = Sha256::digest(&bytes).to_vec();
+        let ciphertext = self
+            .infra
+            .crypto
+            .encrypt(source.workspace_id, &bytes)
+            .map_err(|err| {
+                ErrorKind::InternalServerError
+                    .with_message("Failed to encrypt redacted file")
+                    .with_context(err.to_string())
+            })?;
+
+        let store = self.infra.nats.object_store::<FilesBucket>().await?;
+        let key = FileKey::generate(source.workspace_id);
+        store.put(&key, Cursor::new(ciphertext)).await?;
+
+        let over = pipeline.metadata.or_default().retention;
+        let expires_at = workspace_settings
+            .resolve(RetentionScope::RedactedDocuments, over.as_ref())
+            .expires_at(jiff::Timestamp::now());
+
+        let redacted_name = redacted_display_name(&source.display_name, &source.file_extension);
+        Ok(NewWorkspaceFile {
+            workspace_id: source.workspace_id,
+            account_id,
+            parent_id: Some(source.id),
+            display_name: Some(redacted_name),
+            original_filename: Some(source.original_filename.clone()),
+            file_extension: Some(source.file_extension.clone()),
+            file_kind: Some(FileKind::Redacted),
+            file_size_bytes: plaintext_size,
+            file_hash_sha256: plaintext_hash,
+            storage_path: key.to_string(),
+            storage_bucket: store.bucket().to_owned(),
+            expires_at: expires_at.map(Into::into),
+            ..Default::default()
+        })
+    }
+
+    /// Fetches and decrypts a redaction's stored review [`Audit`] by its file id.
+    ///
+    /// The review counterpart to
+    /// [`load_analyzed_document`](Self::load_analyzed_document); the `engine`
+    /// rebuilds the report from its serialized form. Errors if the redaction has
+    /// no review audit (409) or it has since been deleted (404).
+    pub async fn load_review_audit(
+        &self,
+        conn: &mut PgConn,
+        engine: &Engine,
+        workspace_id: Uuid,
+        review_file_id: Option<Uuid>,
+    ) -> Result<Audit> {
+        let review_file_id = review_file_id.ok_or_else(|| {
+            ErrorKind::Conflict
+                .with_message("Redaction has no review audit")
+                .with_resource("redaction")
+        })?;
+        let review_file = conn
+            .find_file_in_workspace(workspace_id, review_file_id)
+            .await?
+            .ok_or_else(|| {
+                ErrorKind::NotFound
+                    .with_message("The review audit for this redaction has been deleted")
+                    .with_resource("redaction")
+            })?;
+        let key = AuditKey::from_str(&review_file.storage_path).map_err(|err| {
+            ErrorKind::InternalServerError
+                .with_message("Invalid review audit storage key")
+                .with_context(err.to_string())
+        })?;
+
+        let store = self.infra.nats.object_store::<AuditBucket>().await?;
+        let data = store.get(&key).await?.ok_or_else(|| {
+            ErrorKind::InternalServerError.with_message("Review audit is missing from storage")
+        })?;
+        let mut reader = data.into_reader();
+        let mut ciphertext = Vec::new();
+        reader.read_to_end(&mut ciphertext).await.map_err(|err| {
+            ErrorKind::InternalServerError
+                .with_message("Failed to read review audit")
+                .with_context(err.to_string())
+        })?;
+
+        let plaintext = self
+            .infra
+            .crypto
+            .decrypt(workspace_id, &ciphertext)
+            .map_err(|err| {
+                ErrorKind::InternalServerError
+                    .with_message("Failed to decrypt review audit")
+                    .with_context(err.to_string())
+            })?;
+        engine
+            .deserialize_audit(&mut serde_json::Deserializer::from_slice(&plaintext))
+            .map_err(|err| {
+                ErrorKind::InternalServerError
+                    .with_message("Failed to decode review audit")
+                    .with_context(err.to_string())
+            })
+    }
 }
 
 /// Maps an analysis (de)serialization failure to an internal error.
@@ -386,4 +509,80 @@ fn analysis_serde_error(error: serde_json::Error) -> Error<'static> {
     ErrorKind::InternalServerError
         .with_message("Failed to process analysis")
         .with_context(error.to_string())
+}
+
+/// Builds the redacted file's display name by inserting a `redacted` marker
+/// before the extension: `report.pdf` becomes `report.redacted.pdf`.
+///
+/// The stem is taken by stripping a trailing `.{extension}` (case-insensitive)
+/// from the display name; a name that does not end in its own extension (or has
+/// none) simply gains a `.redacted` suffix.
+fn redacted_display_name(display_name: &str, extension: &str) -> String {
+    // Split off a trailing `.{extension}`, matched case-insensitively on both
+    // sides so an upper- or mixed-case extension (`Report.PDF`) still has the
+    // marker inserted before it, not appended after.
+    let suffix = format!(".{extension}");
+    let stem = display_name
+        .len()
+        .checked_sub(suffix.len())
+        .filter(|_| !extension.is_empty())
+        .filter(|&at| display_name.is_char_boundary(at))
+        .map(|at| display_name.split_at(at))
+        .filter(|(_, tail)| tail.eq_ignore_ascii_case(&suffix))
+        .map(|(stem, _)| stem);
+    match stem {
+        Some(stem) => format!("{stem}.redacted.{extension}"),
+        None => format!("{display_name}.redacted"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redacted_display_name;
+
+    #[test]
+    fn inserts_marker_before_the_extension() {
+        assert_eq!(
+            redacted_display_name("report.pdf", "pdf"),
+            "report.redacted.pdf"
+        );
+    }
+
+    #[test]
+    fn matches_the_extension_case_insensitively() {
+        // The name's extension case differs from the passed extension...
+        assert_eq!(
+            redacted_display_name("Report.PDF", "pdf"),
+            "Report.redacted.pdf"
+        );
+        // ...and the passed extension itself may be upper- or mixed-case; the
+        // marker still lands before it, and the original extension text is kept.
+        assert_eq!(
+            redacted_display_name("Report.PDF", "PDF"),
+            "Report.redacted.PDF"
+        );
+        assert_eq!(
+            redacted_display_name("report.pdf", "PDF"),
+            "report.redacted.PDF"
+        );
+    }
+
+    #[test]
+    fn preserves_a_multi_dot_stem() {
+        assert_eq!(
+            redacted_display_name("2026.q1.report.pdf", "pdf"),
+            "2026.q1.report.redacted.pdf"
+        );
+    }
+
+    #[test]
+    fn appends_when_the_name_lacks_its_extension() {
+        // A display name that does not end in `.{extension}` just gains the
+        // marker, so no extension is fabricated.
+        assert_eq!(redacted_display_name("report", "pdf"), "report.redacted");
+        assert_eq!(
+            redacted_display_name("report.txt", "pdf"),
+            "report.txt.redacted"
+        );
+    }
 }

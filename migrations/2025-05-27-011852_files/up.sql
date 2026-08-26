@@ -5,11 +5,12 @@
 -- Role of a file: drives data-retention scope and whether it is user-facing.
 CREATE TYPE FILE_KIND AS ENUM (
     'original',     -- Source document (uploaded or imported)
-    'redacted',     -- Redacted output produced by a pipeline
-    'audit'         -- Engine analysis blob (not shown in file lists)
+    'redacted',     -- Redacted output produced by a redaction
+    'audit',        -- Engine detection analysis blob (not shown in file lists)
+    'review'        -- Engine analysis after reviewer edits + redaction (not shown in file lists)
 );
 
-COMMENT ON TYPE FILE_KIND IS 'The role of a file: original document, redacted output, or audit blob.';
+COMMENT ON TYPE FILE_KIND IS 'The role of a file: original document, redacted output, detection audit, or review (redaction) audit.';
 
 -- Workspace files table: one stored document, with version tracking and dedup.
 CREATE TABLE workspace_files (

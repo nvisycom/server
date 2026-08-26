@@ -7,7 +7,8 @@ use strum::{Display, EnumIter, EnumString};
 /// Defines the type of notification event sent to a user.
 ///
 /// This enumeration corresponds to the `NOTIFICATION_EVENT` PostgreSQL enum and
-/// is used for member, connection-sync, pipeline-run, and system notifications.
+/// is used for member, connection-sync, detection, redaction, and system
+/// notifications.
 /// The values mirror the [`WebhookEvent`](super::WebhookEvent) naming for the
 /// events the two channels share.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
@@ -37,19 +38,19 @@ pub enum NotificationEvent {
     #[serde(rename = "connection.sync.failed")]
     ConnectionSyncFailed,
 
-    // Pipeline run events
-    /// A pipeline run finished detection and is awaiting review
-    #[db_rename = "pipeline.run.analyzed"]
-    #[serde(rename = "pipeline.run.analyzed")]
-    PipelineRunAnalyzed,
+    // Detection / redaction events
+    /// A detection finished analysis and is ready to redact
+    #[db_rename = "pipeline.detection.completed"]
+    #[serde(rename = "pipeline.detection.completed")]
+    DetectionCompleted,
 
-    /// A pipeline run completed (redaction produced)
-    #[db_rename = "pipeline.run.completed"]
-    #[serde(rename = "pipeline.run.completed")]
-    PipelineRunCompleted,
+    /// A redaction was created (redacted output produced)
+    #[db_rename = "pipeline.redaction.created"]
+    #[serde(rename = "pipeline.redaction.created")]
+    RedactionCreated,
 
-    /// A pipeline run failed
-    #[db_rename = "pipeline.run.failed"]
-    #[serde(rename = "pipeline.run.failed")]
-    PipelineRunFailed,
+    /// A detection failed
+    #[db_rename = "pipeline.detection.failed"]
+    #[serde(rename = "pipeline.detection.failed")]
+    DetectionFailed,
 }

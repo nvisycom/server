@@ -1,32 +1,35 @@
 //! Pipeline detection worker.
 //!
 //! Consumes [`DetectionJob`]s from the `DetectionStream` work-queue and runs a
-//! run's detection (analyze) in the background: builds the document, analyzes it
-//! with the pipeline's policies, stores the encrypted audit, and marks the run
-//! `Analyzed` (or `Failed`). Each terminal transition is broadcast on the run's
-//! core-NATS status subject (for SSE watchers) and emitted as a webhook event.
+//! detection's analysis in the background: builds the document, analyzes it with
+//! the pipeline's policies, stores the encrypted audit, and marks the detection
+//! `Complete` (or `Failed`). Each terminal transition is broadcast on the
+//! detection's core-NATS status subject (for SSE watchers) and emitted as a
+//! webhook event.
 
 use std::time::Duration;
 
 use elide_pipeline::RasterMode;
 use nvisy_nats::stream::DetectionStream;
-use nvisy_postgres::model::{UpdateWorkspacePipelineRun, WorkspacePipeline, WorkspacePipelineRun};
+use nvisy_postgres::model::{UpdateWorkspaceDetection, WorkspaceDetection, WorkspacePipeline};
 use nvisy_postgres::query::{
-    EventOutboxRepository, WorkspaceFileRepository, WorkspacePipelineRunRepository,
+    EventOutboxRepository, WorkspaceDetectionRepository, WorkspaceFileRepository,
     WorkspaceRepository,
 };
-use nvisy_postgres::types::{Json, OcrPolicy, PipelineRunStatus, WorkspaceSettings};
+use nvisy_postgres::types::{DetectionStatus, Json, OcrPolicy, WorkspaceSettings};
 use nvisy_postgres::{AsyncConnection, DieselError, PgConn, PgError};
 use tokio_util::sync::CancellationToken;
 
 use super::job::DetectionJob;
 use super::service::DetectionQueue;
-use super::support::{FailRun, extract_run_usage, fail_run, resolve_policies};
+use super::support::{
+    FailDetection, FailOutcome, extract_detection_usage, fail_detection, resolve_policies,
+};
 use crate::extract::SecurityContext;
 use crate::handler::request::PipelineDefinition;
 use crate::handler::{ErrorKind, Result};
 use crate::service::{
-    EngineService, EventOrigin, Infra, PipelineRunRef, RunBlobStore, Worker, WorkspaceEvent,
+    DetectionRef, EngineService, EventOrigin, Infra, RunBlobStore, Worker, WorkspaceEvent,
     event_outbox_row,
 };
 
@@ -34,9 +37,10 @@ use crate::service::{
 const TRACING_TARGET: &str = "nvisy_server::worker::detection";
 
 /// How long a detection claim stays valid before another delivery may re-claim
-/// the run. Set above `DetectionStream::ACK_WAIT` (15 min) so a slow-but-healthy
-/// worker whose job is redelivered keeps its claim; only a run whose worker died
-/// (no progress past the lease) is re-claimed and re-analyzed.
+/// the detection. Set above `DetectionStream::ACK_WAIT` (15 min) so a
+/// slow-but-healthy worker whose job is redelivered keeps its claim; only a
+/// detection whose worker died (no progress past the lease) is re-claimed and
+/// re-analyzed.
 const DETECTION_LEASE: Duration = Duration::from_secs(30 * 60);
 
 /// Background worker that runs pipeline detection off the request thread.
@@ -90,11 +94,11 @@ impl DetectionWorker {
     /// Consumes detection jobs until cancelled.
     ///
     /// At-least-once with an explicit claim: a job is acked once it reaches a
-    /// terminal outcome (analyzed, or marked failed), and nacked for redelivery
-    /// on a transient error (a DB/pool blip before the run could even be
-    /// claimed), so a run is never silently stranded in a non-terminal state.
-    /// The claim (`claim_run_for_detection`) makes redelivery idempotent: a run
-    /// already being analyzed under a fresh lease is skipped.
+    /// terminal outcome (complete, or marked failed), and nacked for redelivery
+    /// on a transient error (a DB/pool blip before the detection could even be
+    /// claimed), so a detection is never silently stranded in a non-terminal
+    /// state. The claim (`claim_detection`) makes redelivery idempotent: a
+    /// detection already being analyzed under a fresh lease is skipped.
     async fn run_inner(&self, cancel: CancellationToken) -> Result<()> {
         let subscriber = self
             .infra
@@ -136,72 +140,73 @@ impl DetectionWorker {
         Ok(())
     }
 
-    /// Runs one detection job: claims the run, analyzes, and records the result.
+    /// Runs one detection job: claims the detection, analyzes, and records the
+    /// result.
     ///
     /// Returns [`JobOutcome::Retry`] when the job should be redelivered (a
-    /// transient error before the run was claimed), and [`JobOutcome::Done`]
-    /// when it reached a terminal outcome or is safe to drop (missing run,
+    /// transient error before the detection was claimed), and [`JobOutcome::Done`]
+    /// when it reached a terminal outcome or is safe to drop (missing detection,
     /// already claimed, already settled).
-    #[tracing::instrument(skip_all, fields(run_id = %job.run_id, workspace_id = %job.workspace_id))]
+    #[tracing::instrument(skip_all, fields(detection_id = %job.detection_id, workspace_id = %job.workspace_id))]
     async fn run_job(&self, job: DetectionJob) -> JobOutcome {
         let mut conn = match self.infra.postgres.get_connection().await {
             Ok(conn) => conn,
             Err(err) => {
-                // No connection: the run is still queued. Redeliver so it is not
-                // stranded in a non-terminal state.
+                // No connection: the detection is still pending. Redeliver so it
+                // is not stranded in a non-terminal state.
                 tracing::error!(target: TRACING_TARGET, error = %err, "Failed to get connection for detection job");
                 return JobOutcome::Retry;
             }
         };
 
-        let (run, pipeline) = match conn
-            .find_workspace_run_by_id(job.workspace_id, job.run_id)
+        let (detection, pipeline) = match conn
+            .find_workspace_detection_by_id(job.workspace_id, job.detection_id)
             .await
         {
             Ok(Some(pair)) => pair,
             Ok(None) => {
-                tracing::warn!(target: TRACING_TARGET, "Detection job for a missing run; dropping");
+                tracing::warn!(target: TRACING_TARGET, "Detection job for a missing detection; dropping");
                 return JobOutcome::Done;
             }
             Err(err) => {
-                // Transient load error: redeliver rather than strand the run.
-                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to load run for detection job");
+                // Transient load error: redeliver rather than strand the detection.
+                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to load detection for detection job");
                 return JobOutcome::Retry;
             }
         };
 
-        // Nothing to do for a run already past the queued/analyzing phase.
-        if !run.status.is_detecting() {
-            tracing::debug!(target: TRACING_TARGET, status = %run.status, "Run is not detecting; dropping");
+        // Nothing to do for a detection already past the pending/executing phase.
+        if !detection.status.is_detecting() {
+            tracing::debug!(target: TRACING_TARGET, status = %detection.status, "Detection is not detecting; dropping");
             return JobOutcome::Done;
         }
 
-        // Atomically claim the run (queued -> analyzing). A redelivery whose
-        // claim is still fresh matches no row and is skipped, so a slow job is
-        // never analyzed twice; only a run whose worker died (stale lease) is
-        // re-claimed.
+        // Atomically claim the detection (pending -> executing). A redelivery
+        // whose claim is still fresh matches no row and is skipped, so a slow job
+        // is never analyzed twice; only a detection whose worker died (stale
+        // lease) is re-claimed.
         let stale_before = jiff::Timestamp::now() - DETECTION_LEASE;
-        let claimed = match conn.claim_run_for_detection(run.id, stale_before).await {
+        let claimed = match conn.claim_detection(detection.id, stale_before).await {
             Ok(Some(claimed)) => claimed,
             Ok(None) => {
-                tracing::debug!(target: TRACING_TARGET, "Run already claimed by another worker; skipping");
+                tracing::debug!(target: TRACING_TARGET, "Detection already claimed by another worker; skipping");
                 return JobOutcome::Done;
             }
             Err(err) => {
-                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to claim run for detection");
+                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to claim detection");
                 return JobOutcome::Retry;
             }
         };
         // The claim stamped `claimed_at`; it fences the finalize (and a failure)
         // against a concurrent re-claim if this analysis outlives the lease.
         let Some(claim_token) = claimed.claimed_at else {
-            tracing::error!(target: TRACING_TARGET, "Claimed run has no claim timestamp; skipping");
+            tracing::error!(target: TRACING_TARGET, "Claimed detection has no claim timestamp; skipping");
             return JobOutcome::Done;
         };
         let claim_token: jiff::Timestamp = claim_token.into();
 
         self.detection
-            .broadcast_status(run.id, PipelineRunStatus::Analyzing)
+            .broadcast_status(detection.id, DetectionStatus::Executing)
             .await;
 
         if let Err(err) = self
@@ -209,19 +214,27 @@ impl DetectionWorker {
             .await
         {
             tracing::warn!(target: TRACING_TARGET, error = %err, "Detection failed");
-            fail_run(
+            let outcome = fail_detection(
                 &mut conn,
                 &self.detection,
-                FailRun {
+                FailDetection {
                     workspace_id: job.workspace_id,
-                    run_id: run.id,
+                    detection_id: detection.id,
                     pipeline_slug: pipeline.slug.clone(),
-                    triggered_by: run.account_id,
+                    triggered_by: detection.account_id,
                     reason: &err.to_string(),
+                    metadata: detection.metadata.or_default(),
                     claim: Some(claim_token),
                 },
             )
             .await;
+            // If the failure state could not be persisted, the detection is left
+            // `Executing` with no queued job to reclaim its lease: redeliver so a
+            // later attempt drives it to a terminal state rather than ack'ing a
+            // detection that will hang.
+            if outcome == FailOutcome::PersistFailed {
+                return JobOutcome::Retry;
+            }
         }
         JobOutcome::Done
     }
@@ -229,7 +242,7 @@ impl DetectionWorker {
     /// Best-effort reclaim of a staged audit object whose file row did not
     /// commit. A failure only defers cleanup, so it is logged, never propagated.
     async fn discard_staged_audit(&self, staged: &nvisy_postgres::model::NewWorkspaceFile) {
-        if let Err(err) = self.blob.discard_staged_audit(staged).await {
+        if let Err(err) = self.blob.discard_staged_object(staged).await {
             tracing::warn!(
                 target: TRACING_TARGET,
                 error = %err,
@@ -239,12 +252,12 @@ impl DetectionWorker {
         }
     }
 
-    /// Performs the analysis and records the run as `Analyzed`.
+    /// Performs the analysis and records the detection as `Complete`.
     async fn detect(
         &self,
         conn: &mut PgConn,
         job: &DetectionJob,
-        run: &WorkspacePipelineRun,
+        detection: &WorkspaceDetection,
         pipeline: &WorkspacePipeline,
         claim_token: jiff::Timestamp,
     ) -> Result<()> {
@@ -253,7 +266,7 @@ impl DetectionWorker {
             .await?
             .ok_or_else(|| ErrorKind::NotFound.with_message("Workspace not found"))?;
         let file = conn
-            .find_file_in_workspace(job.workspace_id, run.input_file_id)
+            .find_file_in_workspace(job.workspace_id, detection.input_file_id)
             .await?
             .ok_or_else(|| ErrorKind::NotFound.with_message("Input file not found"))?;
 
@@ -270,7 +283,7 @@ impl DetectionWorker {
             self.engine
                 .request_context(&definition, job.scope.clone(), raster_mode_of(&settings));
 
-        let document = self.blob.build_document(&file, run.id).await?;
+        let document = self.blob.build_document(&file, detection.id).await?;
 
         let policies =
             resolve_policies(conn, &self.infra.crypto, job.workspace_id, pipeline.id).await?;
@@ -283,51 +296,58 @@ impl DetectionWorker {
         let analyzed = self.engine.analyze(document, &policies, &request).await?;
 
         // Write the (non-transactional) audit object first, then commit its file
-        // row together with the run's usage and status in one transaction below.
+        // row together with the detection's usage and status in one transaction
+        // below.
         let audit_file = self
             .blob
-            .stage_analyzed_document(pipeline, &settings.retention, run.account_id, &analyzed)
+            .stage_analyzed_document(
+                pipeline,
+                &settings.retention,
+                detection.account_id,
+                &analyzed,
+            )
             .await?;
 
         // Record inference usage: per-model token rows into the usage table (the
         // usage aggregation surface) and the full per-recognizer report into
-        // metadata for drill-down. Absent for a purely deterministic run. The
-        // report is layered onto the run's existing metadata so tags and any
-        // recorded error survive the write.
-        let usage = extract_run_usage(run.id, &analyzed);
+        // metadata for drill-down. Absent for a purely deterministic detection.
+        // The report is layered onto the detection's existing metadata so tags and
+        // any recorded error survive the write.
+        let usage = extract_detection_usage(detection.id, &analyzed);
         let metadata = usage.as_ref().map(|u| {
-            let mut current = run.metadata.or_default();
+            let mut current = detection.metadata.or_default();
             current.usage = Some(u.report.clone());
             Json::encode(&current)
         });
 
-        // Persist the audit file row, per-model usage, and the run's transition to
-        // `Analyzed` atomically: a partial failure would otherwise strand usage
-        // rows or an audit pointer on a run still marked `Analyzing`. The finalize
-        // is fenced on our claim; if it went stale (another worker re-claimed the
-        // run past the lease), the whole transaction rolls back so we do not stamp
-        // over the new owner's work or leak usage/audit rows for a run we lost.
-        // Kept to reclaim the just-staged object if the transaction does not
-        // commit: on rollback its `workspace_files` row never lands, so the
-        // row-driven reaper could never find the object otherwise.
-        // Build the outbox row here so the finalize transaction is `PgError`-typed
-        // for its rollback sentinel, and insert it alongside the finalize so the
-        // `Analyzed` event commits atomically with the run.
-        let analyzed_event = WorkspaceEvent::PipelineRunAnalyzed {
-            run: PipelineRunRef {
-                run_id: run.id,
+        // Persist the audit file row, per-model usage, and the detection's
+        // transition to `Complete` atomically: a partial failure would otherwise
+        // strand usage rows or an audit pointer on a detection still marked
+        // `Executing`. The finalize is fenced on our claim; if it went stale
+        // (another worker re-claimed the detection past the lease), the whole
+        // transaction rolls back so we do not stamp over the new owner's work or
+        // leak usage/audit rows for a detection we lost. Kept to reclaim the
+        // just-staged object if the transaction does not commit: on rollback its
+        // `workspace_files` row never lands, so the row-driven reaper could never
+        // find the object otherwise. Build the outbox row here so the finalize
+        // transaction is `PgError`-typed for its rollback sentinel, and insert it
+        // alongside the finalize so the `Complete` event commits atomically with
+        // the detection.
+        let completed_event = WorkspaceEvent::DetectionCompleted {
+            detection: DetectionRef {
+                detection_id: detection.id,
                 pipeline_slug: pipeline.slug.clone(),
             },
             input_file_name: Some(file.display_name.clone()),
-            notify: run.account_id,
+            notify: detection.account_id,
         };
         let outbox_row = event_outbox_row(
             EventOrigin {
                 workspace_id: job.workspace_id,
-                account_id: run.account_id,
+                account_id: detection.account_id,
                 security: &SecurityContext::default(),
             },
-            &analyzed_event,
+            &completed_event,
         )?;
 
         let staged_audit = audit_file.clone();
@@ -335,13 +355,13 @@ impl DetectionWorker {
             .transaction(async |conn| {
                 let audit_file_id = conn.create_workspace_file(audit_file).await?.id;
                 if let Some(usage) = &usage {
-                    conn.record_run_usage(&usage.per_model).await?;
+                    conn.record_detection_usage(&usage.per_model).await?;
                 }
                 let finalized = conn
-                    .finalize_analyzed_run(
-                        run.id,
+                    .finalize_detection(
+                        detection.id,
                         claim_token,
-                        UpdateWorkspacePipelineRun {
+                        UpdateWorkspaceDetection {
                             audit_file_id: Some(Some(audit_file_id)),
                             metadata,
                             ..Default::default()
@@ -349,9 +369,9 @@ impl DetectionWorker {
                     )
                     .await?;
                 if !finalized {
-                    // Abort the audit-file and usage inserts: the run is no longer
-                    // ours to finalize. `RollbackTransaction` unwinds the writes
-                    // without being a real error; it is matched below.
+                    // Abort the audit-file and usage inserts: the detection is no
+                    // longer ours to finalize. `RollbackTransaction` unwinds the
+                    // writes without being a real error; it is matched below.
                     return Err(PgError::Query(DieselError::RollbackTransaction));
                 }
                 conn.insert_event_outbox(outbox_row).await?;
@@ -363,7 +383,7 @@ impl DetectionWorker {
             Ok(()) => {}
             Err(PgError::Query(DieselError::RollbackTransaction)) => {
                 self.discard_staged_audit(&staged_audit).await;
-                tracing::warn!(target: TRACING_TARGET, run_id = %run.id, "Claim went stale before finalize; another worker owns the run");
+                tracing::warn!(target: TRACING_TARGET, detection_id = %detection.id, "Claim went stale before finalize; another worker owns the detection");
                 return Ok(());
             }
             Err(err) => {
@@ -374,9 +394,9 @@ impl DetectionWorker {
             }
         }
 
-        tracing::info!(target: TRACING_TARGET, run_id = %run.id, "Run analyzed");
+        tracing::info!(target: TRACING_TARGET, detection_id = %detection.id, "Detection complete");
         self.detection
-            .broadcast_status(run.id, PipelineRunStatus::Analyzed)
+            .broadcast_status(detection.id, DetectionStatus::Complete)
             .await;
 
         Ok(())
@@ -388,12 +408,12 @@ impl DetectionWorker {
 enum JobOutcome {
     /// Reached a terminal outcome or is safe to drop; ack the message.
     Done,
-    /// Transient error before the run was claimed; nack for redelivery.
+    /// Transient error before the detection was claimed; nack for redelivery.
     Retry,
 }
 
-/// Maps a workspace's OCR policy to the engine's per-run page-rasterisation
-/// mode.
+/// Maps a workspace's OCR policy to the engine's per-detection
+/// page-rasterisation mode.
 fn raster_mode_of(settings: &WorkspaceSettings) -> RasterMode {
     match settings.ocr {
         OcrPolicy::Auto => RasterMode::Auto,

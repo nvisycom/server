@@ -1,19 +1,19 @@
-//! Per-model inference usage for a pipeline run.
+//! Per-model inference usage for a detection.
 
 use diesel::prelude::*;
 use uuid::Uuid;
 
-use crate::schema::workspace_pipeline_run_usage;
+use crate::schema::workspace_detection_usage;
 
-/// One model's token usage within a run, as the provider reported it.
+/// One model's token usage within a detection, as the provider reported it.
 #[derive(Debug, Clone, Queryable, Selectable)]
-#[diesel(table_name = workspace_pipeline_run_usage)]
+#[diesel(table_name = workspace_detection_usage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct WorkspacePipelineRunUsage {
+pub struct WorkspaceDetectionUsage {
     /// Unique usage row identifier.
     pub id: Uuid,
-    /// The run this usage belongs to.
-    pub run_id: Uuid,
+    /// The detection this usage belongs to.
+    pub detection_id: Uuid,
     /// The model the recognizers used.
     pub model: String,
     /// The model version, if the provider reported one.
@@ -29,13 +29,13 @@ pub struct WorkspacePipelineRunUsage {
     pub duration_ms: i64,
 }
 
-/// Data for recording one model's usage on a run.
+/// Data for recording one model's usage on a detection.
 #[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = workspace_pipeline_run_usage)]
+#[diesel(table_name = workspace_detection_usage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewWorkspacePipelineRunUsage {
-    /// The run this usage belongs to.
-    pub run_id: Uuid,
+pub struct NewWorkspaceDetectionUsage {
+    /// The detection this usage belongs to.
+    pub detection_id: Uuid,
     /// The model the recognizers used.
     pub model: String,
     /// The model version, if any.

@@ -11,8 +11,8 @@ use uuid::Uuid;
 use crate::model::{NewWorkspaceFile, NewWorkspaceFileImport, UpdateWorkspaceFile, WorkspaceFile};
 use crate::query::search::ilike_contains;
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, FileFilter, FileKind, FileSortBy, FileSortField,
-    OffsetPagination, PipelineRunStatus, SortOrder, WithAccountRef,
+    AccountRefRow, CursorPage, CursorPagination, DetectionStatus, FileFilter, FileKind, FileSortBy,
+    FileSortField, OffsetPagination, SortOrder, WithAccountRef,
 };
 use crate::{PgConnection, PgError, PgResult, schema};
 
@@ -135,8 +135,8 @@ pub trait WorkspaceFileRepository {
     ) -> impl Future<Output = PgResult<usize>> + Send;
 
     /// Recomputes `expires_at` for live files of `kind` produced by a specific
-    /// pipeline's runs (redacted outputs via `output_file_id`, audit blobs via
-    /// `audit_file_id`), returning the number updated. Used to backfill when a
+    /// pipeline's detections and redactions (detection audits, redaction outputs,
+    /// and review audits), returning the number updated. Used to backfill when a
     /// pipeline's own retention override changes, without touching other
     /// pipelines' files. `None` clears the expiry.
     fn backfill_pipeline_files_expiry(
@@ -362,28 +362,26 @@ impl WorkspaceFileRepository for PgConnection {
 
     async fn files_due_for_expiry(&mut self, limit: i64) -> PgResult<Vec<ExpiredFileRef>> {
         use diesel::dsl::{exists, not, now};
-        use schema::workspace_pipeline_runs::dsl as runs;
-        use schema::{workspace_files, workspace_pipeline_runs};
+        use schema::workspace_detections::dsl as detections;
+        use schema::{workspace_detections, workspace_files};
 
-        // A run that has not finished (running or awaiting redaction) still needs
-        // its input document and audit blob, so those files are held back from
-        // expiry until the run reaches a terminal state. Otherwise an in-flight
-        // detect/redact could lose its source or analysis mid-flight and get
-        // stuck. Produced outputs are not protected — they only exist once a run
-        // has completed.
-        let active_run_holds_file = exists(
-            workspace_pipeline_runs::table.filter(
-                runs::status
-                    .eq_any([
-                        PipelineRunStatus::Queued,
-                        PipelineRunStatus::Analyzing,
-                        PipelineRunStatus::Analyzed,
-                    ])
-                    .and(
-                        runs::input_file_id
-                            .eq(workspace_files::id)
-                            .or(runs::audit_file_id.eq(workspace_files::id.nullable())),
-                    ),
+        // A detection that is still analyzing (pending or executing) needs its
+        // input document and audit blob, so those files are held back from expiry
+        // until analysis reaches a terminal state — otherwise an in-flight detect
+        // could lose its source or analysis mid-flight and get stuck. A `Complete`
+        // detection is NOT held: it is terminal (redaction never changes its
+        // status), so holding it would pin the input and audit forever and defeat
+        // retention. Re-redaction of a complete detection is bounded by those
+        // files' own `expires_at` — retention itself decides how long they remain
+        // redactable. Redaction outputs are not protected here — they belong to
+        // redactions, not the detection.
+        let active_detection_holds_file = exists(
+            workspace_detections::table.filter(
+                detections::status.eq_any(DetectionStatus::IN_PROGRESS).and(
+                    detections::input_file_id
+                        .eq(workspace_files::id)
+                        .or(detections::audit_file_id.eq(workspace_files::id.nullable())),
+                ),
             ),
         );
 
@@ -391,7 +389,7 @@ impl WorkspaceFileRepository for PgConnection {
             .filter(workspace_files::expires_at.is_not_null())
             .filter(workspace_files::expires_at.lt(now))
             .filter(workspace_files::deleted_at.is_null())
-            .filter(not(active_run_holds_file))
+            .filter(not(active_detection_holds_file))
             .select((
                 workspace_files::id,
                 workspace_files::storage_path,
@@ -466,26 +464,38 @@ impl WorkspaceFileRepository for PgConnection {
         kind: FileKind,
         expires_at: Option<jiff::Timestamp>,
     ) -> PgResult<usize> {
-        use schema::workspace_pipeline_runs::dsl as runs;
-        use schema::{workspace_files, workspace_pipeline_runs};
+        use schema::workspace_detections::dsl as detections;
+        use schema::workspace_redactions::dsl as redactions;
+        use schema::{workspace_detections, workspace_files, workspace_redactions};
 
         let expires_at = expires_at.map(jiff_diesel::Timestamp::from);
 
-        // Collect the ids of files this pipeline's runs produced for `kind`:
-        // redacted files are the runs' outputs, audit files their audit blobs.
-        // Any other kind is not pipeline-produced, so there is nothing to do.
+        // Collect the ids of files this pipeline produced for `kind`. Audit blobs
+        // belong to the pipeline's detections; redacted outputs and review blobs
+        // belong to the redactions of those detections (joined back to the
+        // pipeline through the detection). Any other kind is not pipeline-produced,
+        // so there is nothing to do.
         let file_ids: Vec<Uuid> = match kind {
-            FileKind::Redacted => workspace_pipeline_runs::table
-                .filter(runs::pipeline_id.eq(pipeline_id))
-                .filter(runs::output_file_id.is_not_null())
-                .select(runs::output_file_id.assume_not_null())
+            FileKind::Audit => workspace_detections::table
+                .filter(detections::pipeline_id.eq(pipeline_id))
+                .filter(detections::audit_file_id.is_not_null())
+                .select(detections::audit_file_id.assume_not_null())
                 .load(self)
                 .await
                 .map_err(PgError::from)?,
-            FileKind::Audit => workspace_pipeline_runs::table
-                .filter(runs::pipeline_id.eq(pipeline_id))
-                .filter(runs::audit_file_id.is_not_null())
-                .select(runs::audit_file_id.assume_not_null())
+            FileKind::Redacted => workspace_redactions::table
+                .inner_join(workspace_detections::table)
+                .filter(detections::pipeline_id.eq(pipeline_id))
+                .filter(redactions::output_file_id.is_not_null())
+                .select(redactions::output_file_id.assume_not_null())
+                .load(self)
+                .await
+                .map_err(PgError::from)?,
+            FileKind::Review => workspace_redactions::table
+                .inner_join(workspace_detections::table)
+                .filter(detections::pipeline_id.eq(pipeline_id))
+                .filter(redactions::review_file_id.is_not_null())
+                .select(redactions::review_file_id.assume_not_null())
                 .load(self)
                 .await
                 .map_err(PgError::from)?,

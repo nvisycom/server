@@ -261,6 +261,9 @@ async fn update_pipeline(
     let backfill = retention_override.map(|over| {
         let workspace_retention = workspace.settings.or_default().retention;
         let now = jiff::Timestamp::now();
+        let audit_logs_expiry = workspace_retention
+            .resolve(RetentionScope::AuditLogs, Some(&over))
+            .expires_at(now);
         [
             (
                 FileKind::Redacted,
@@ -268,12 +271,9 @@ async fn update_pipeline(
                     .resolve(RetentionScope::RedactedDocuments, Some(&over))
                     .expires_at(now),
             ),
-            (
-                FileKind::Audit,
-                workspace_retention
-                    .resolve(RetentionScope::AuditLogs, Some(&over))
-                    .expires_at(now),
-            ),
+            (FileKind::Audit, audit_logs_expiry),
+            // Review audits share the audit-logs scope with detection audits.
+            (FileKind::Review, audit_logs_expiry),
         ]
     });
 

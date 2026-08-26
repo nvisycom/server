@@ -38,14 +38,14 @@ CREATE TYPE ACTIVITY_TYPE AS ENUM (
     'file.updated',
     'file.deleted',
 
-    -- Pipeline activities
+    -- Pipeline, detection, and redaction activities
     'pipeline.created',
     'pipeline.updated',
     'pipeline.deleted',
-    'pipeline.run.started',
-    'pipeline.run.analyzed',
-    'pipeline.run.completed',
-    'pipeline.run.failed',
+    'pipeline.detection.started',
+    'pipeline.detection.completed',
+    'pipeline.detection.failed',
+    'pipeline.redaction.created',
 
     -- Policy activities
     'policy.created',

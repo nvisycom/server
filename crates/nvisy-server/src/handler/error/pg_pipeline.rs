@@ -2,8 +2,8 @@
 
 use nvisy_postgres::types::{
     WorkspaceConnectionConstraints, WorkspaceConnectionSyncConstraints,
-    WorkspacePipelineConstraints, WorkspacePipelineReferenceConstraints,
-    WorkspacePipelineRunConstraints, WorkspacePolicyConstraints,
+    WorkspaceDetectionConstraints, WorkspacePipelineConstraints,
+    WorkspacePipelineReferenceConstraints, WorkspacePolicyConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -36,19 +36,19 @@ impl From<WorkspacePipelineConstraints> for Error<'static> {
     }
 }
 
-impl From<WorkspacePipelineRunConstraints> for Error<'static> {
-    fn from(c: WorkspacePipelineRunConstraints) -> Self {
+impl From<WorkspaceDetectionConstraints> for Error<'static> {
+    fn from(c: WorkspaceDetectionConstraints) -> Self {
         let error =
             match c {
-                WorkspacePipelineRunConstraints::MetadataSize => ErrorKind::BadRequest
-                    .with_message("Pipeline run metadata size exceeds maximum limit"),
-                WorkspacePipelineRunConstraints::IdempotencyKeyLength => ErrorKind::BadRequest
+                WorkspaceDetectionConstraints::MetadataSize => ErrorKind::BadRequest
+                    .with_message("Detection metadata size exceeds maximum limit"),
+                WorkspaceDetectionConstraints::IdempotencyKeyLength => ErrorKind::BadRequest
                     .with_message("Idempotency key must be 1 to 255 characters"),
-                WorkspacePipelineRunConstraints::IdempotencyUnique => ErrorKind::Conflict
-                    .with_message("A run with this idempotency key already exists"),
+                WorkspaceDetectionConstraints::IdempotencyUnique => ErrorKind::Conflict
+                    .with_message("A detection with this idempotency key already exists"),
             };
 
-        error.with_resource("pipeline_run")
+        error.with_resource("detection")
     }
 }
 

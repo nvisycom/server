@@ -1,45 +1,47 @@
-//! Shared detection helpers used by both the create-run handler and the worker.
+//! Shared detection helpers used by both the create-detection handler and the
+//! worker.
 
 use elide_pipeline::policy::PolicyDefinition;
-use nvisy_postgres::model::{NewWorkspacePipelineRunUsage, UpdateWorkspacePipelineRun};
+use nvisy_postgres::model::{NewWorkspaceDetectionUsage, UpdateWorkspaceDetection};
 use nvisy_postgres::query::{
-    PipelineReferenceRepository, WorkspacePipelineRunRepository, WorkspacePolicyRepository,
+    PipelineReferenceRepository, WorkspaceDetectionRepository, WorkspacePolicyRepository,
 };
-use nvisy_postgres::types::{Handle, Json, PipelineRunStatus, RunMetadata};
+use nvisy_postgres::types::{DetectionMetadata, DetectionStatus, Handle, Json};
 use uuid::Uuid;
 
 use super::service::DetectionQueue;
 use crate::extract::SecurityContext;
 use crate::handler::Result;
-use crate::service::{CryptoService, EventEmitter, EventOrigin, PipelineRunRef, WorkspaceEvent};
+use crate::service::{CryptoService, DetectionRef, EventEmitter, EventOrigin, WorkspaceEvent};
 
 /// Tracing target for shared detection operations.
 const TRACING_TARGET: &str = "nvisy_server::service::detection";
 
-/// A run's inference usage, extracted from the engine's [`Audit`]: the per-model
-/// token rows for the usage table and the full report as JSON for the metadata
-/// blob. Absent when the run used no model-based recognizers.
+/// A detection's inference usage, extracted from the engine's [`Audit`]: the
+/// per-model token rows for the usage table and the full report as JSON for the
+/// metadata blob. Absent when the detection used no model-based recognizers.
 ///
 /// [`Audit`]: elide_pipeline::Audit
-pub(crate) struct RunUsage {
+pub(crate) struct DetectionUsage {
     /// One row per distinct model, tokens summed across the recognizers that
     /// shared it. Empty when no recognizer used a model.
-    pub per_model: Vec<NewWorkspacePipelineRunUsage>,
-    /// The full per-recognizer usage report, serialized for `RunMetadata.usage`.
+    pub per_model: Vec<NewWorkspaceDetectionUsage>,
+    /// The full per-recognizer usage report, serialized for
+    /// `DetectionMetadata.usage`.
     pub report: serde_json::Value,
 }
 
-/// Extracts a run's inference usage from the analysis, or `None` when the report
-/// is empty (a purely deterministic run spends no tokens).
+/// Extracts a detection's inference usage from the analysis, or `None` when the
+/// report is empty (a purely deterministic detection spends no tokens).
 ///
 /// Recognizers are grouped by `(model, version)` and their token counts summed —
 /// `input`, `output`, and `total` independently, since a provider may report a
 /// `total` that is not `input + output` (cached/reasoning tokens). Durations are
 /// summed into milliseconds. The whole report is also kept as JSON for drill-down.
-pub(crate) fn extract_run_usage(
-    run_id: Uuid,
+pub(crate) fn extract_detection_usage(
+    detection_id: Uuid,
     analyzed: &elide_pipeline::Audit,
-) -> Option<RunUsage> {
+) -> Option<DetectionUsage> {
     use std::collections::BTreeMap;
 
     let usage = &analyzed.usage;
@@ -80,8 +82,8 @@ pub(crate) fn extract_run_usage(
 
     let per_model = by_model
         .into_iter()
-        .map(|((model, version), acc)| NewWorkspacePipelineRunUsage {
-            run_id,
+        .map(|((model, version), acc)| NewWorkspaceDetectionUsage {
+            detection_id,
             model,
             version,
             input_tokens: acc.input.map(to_i64),
@@ -93,7 +95,7 @@ pub(crate) fn extract_run_usage(
 
     let report = serde_json::to_value(usage).unwrap_or(serde_json::Value::Null);
 
-    Some(RunUsage { per_model, report })
+    Some(DetectionUsage { per_model, report })
 }
 
 /// Clamps an upstream `u64` token count into the `i64` column; token counts are
@@ -102,86 +104,95 @@ fn to_i64(value: u64) -> i64 {
     value.try_into().unwrap_or(i64::MAX)
 }
 
-/// Identifies the run to fail and how, so [`fail_run`] takes one bundle rather
-/// than a long positional list.
-pub(crate) struct FailRun<'a> {
-    /// The workspace the run belongs to.
+/// Identifies the detection to fail and how, so [`fail_detection`] takes one
+/// bundle rather than a long positional list.
+pub(crate) struct FailDetection<'a> {
+    /// The workspace the detection belongs to.
     pub workspace_id: Uuid,
-    /// The run to fail.
-    pub run_id: Uuid,
-    /// Slug of the run's pipeline, for the emitted event.
+    /// The detection to fail.
+    pub detection_id: Uuid,
+    /// Slug of the detection's pipeline, for the emitted event.
     pub pipeline_slug: Handle,
-    /// The account that triggered the run (the failure's actor and notify target).
+    /// The account that triggered the detection (the failure's actor and notify
+    /// target).
     pub triggered_by: Uuid,
-    /// Human-readable failure reason, stored in the run's metadata.
+    /// Human-readable failure reason, stored in the detection's metadata.
     pub reason: &'a str,
+    /// The detection's current metadata, so the failure reason is layered onto it
+    /// rather than replacing recorded fields such as tags.
+    pub metadata: DetectionMetadata,
     /// The worker's claim timestamp, guarding the transition; `None` on the
     /// handler path, which has no claim to fence.
     pub claim: Option<jiff::Timestamp>,
 }
 
-/// Marks a run `Failed` (best effort), recording the reason in its metadata,
-/// broadcasting the terminal status for SSE watchers, and emitting the
-/// `PipelineRunFailed` event (activity log, webhook, and owner notification).
+/// Marks a detection `Failed` (best effort), recording the reason in its
+/// metadata, broadcasting the terminal status for SSE watchers, and emitting the
+/// `DetectionFailed` event (activity log, webhook, and owner notification).
 ///
-/// Shared by the create-run handler (enqueue failed) and the worker (analysis
-/// failed) so a failure takes the same steps on every path.
+/// Shared by the create-detection handler (enqueue failed) and the worker
+/// (analysis failed) so a failure takes the same steps on every path.
 ///
-/// `params.claim` fences the worker path: when `Some(claimed_at)`, the run is
-/// failed only while that claim still holds (still `Analyzing`, `claimed_at`
+/// `params.claim` fences the worker path: when `Some(claimed_at)`, the detection
+/// is failed only while that claim still holds (still `Executing`, `claimed_at`
 /// unchanged), and the broadcast/event fire only if it did — so a worker whose
-/// lease expired mid-analysis cannot fail, or announce the failure of, a run
-/// another worker now owns. The handler passes `None`: it fails the run it just
-/// created, with no claim to guard.
-pub(crate) async fn fail_run(
+/// lease expired mid-analysis cannot fail, or announce the failure of, a
+/// detection another worker now owns. The handler passes `None`: it fails the
+/// detection it just created, with no claim to guard.
+pub(crate) async fn fail_detection(
     conn: &mut nvisy_postgres::PgConn,
     detection: &DetectionQueue,
-    params: FailRun<'_>,
-) {
-    let FailRun {
+    params: FailDetection<'_>,
+) -> FailOutcome {
+    let FailDetection {
         workspace_id,
-        run_id,
+        detection_id,
         pipeline_slug,
         triggered_by,
         reason,
+        mut metadata,
         claim,
     } = params;
 
-    let metadata = RunMetadata {
-        error: Some(reason.to_owned()),
-        ..Default::default()
-    };
-    let update = UpdateWorkspacePipelineRun {
-        status: Some(PipelineRunStatus::Failed),
+    // Layer the failure reason onto the detection's existing metadata so recorded
+    // fields (e.g. reviewer tags) survive the failure write.
+    metadata.error = Some(reason.to_owned());
+    // `status` and `completed_at` are forced by the finalize methods themselves
+    // (the terminal transition owns the terminal timestamp), so only the metadata
+    // is supplied here.
+    let update = UpdateWorkspaceDetection {
         metadata: Some(Json::encode(&metadata)),
-        completed_at: Some(Some(jiff::Timestamp::now().into())),
         ..Default::default()
     };
 
-    match claim {
+    let persisted = match claim {
         // Worker path: guard on the claim. A stale claim fails nothing and stays
-        // silent — the new owner drives the run to its own outcome.
-        Some(claimed_at) => match conn.finalize_failed_run(run_id, claimed_at, update).await {
-            Ok(true) => {}
-            Ok(false) => {
-                tracing::warn!(target: TRACING_TARGET, %run_id, "Claim went stale before failure; another worker owns the run");
-                return;
-            }
-            Err(err) => {
-                tracing::warn!(target: TRACING_TARGET, error = %err, %run_id, "Failed to mark run failed");
-                return;
-            }
-        },
-        // Handler path: no claim to guard.
-        None => {
-            if let Err(err) = conn.update_workspace_pipeline_run(run_id, update).await {
-                tracing::warn!(target: TRACING_TARGET, error = %err, %run_id, "Failed to mark run failed");
-            }
+        // silent — the new owner drives the detection to its own outcome.
+        Some(claimed_at) => conn.fail_detection(detection_id, claimed_at, update).await,
+        // Handler path (enqueue failure): guard on `Pending` so this no-ops if a
+        // worker already claimed the detection — enqueue can report an error even
+        // when the job was delivered, and the worker then owns the outcome.
+        None => conn.fail_pending_detection(detection_id, update).await,
+    };
+    match persisted {
+        Ok(true) => {}
+        // The guard didn't match: another owner (or an already-terminal detection)
+        // drives the outcome. Nothing to persist, announce, or retry.
+        Ok(false) => {
+            tracing::warn!(target: TRACING_TARGET, %detection_id, "Detection no longer owned at failure; another owner drives it");
+            return FailOutcome::NotOwned;
+        }
+        // The terminal write itself failed: the detection is still `Executing`
+        // with no queued job to reclaim it, so the caller must retry (redeliver)
+        // rather than treat the failure as handled.
+        Err(err) => {
+            tracing::warn!(target: TRACING_TARGET, error = %err, %detection_id, "Failed to persist detection failure; will retry");
+            return FailOutcome::PersistFailed;
         }
     }
 
     detection
-        .broadcast_status(run_id, PipelineRunStatus::Failed)
+        .broadcast_status(detection_id, DetectionStatus::Failed)
         .await;
 
     if let Err(err) = conn
@@ -191,9 +202,9 @@ pub(crate) async fn fail_run(
                 account_id: triggered_by,
                 security: &SecurityContext::default(),
             },
-            WorkspaceEvent::PipelineRunFailed {
-                run: PipelineRunRef {
-                    run_id,
+            WorkspaceEvent::DetectionFailed {
+                detection: DetectionRef {
+                    detection_id,
                     pipeline_slug,
                 },
                 input_file_name: None,
@@ -203,8 +214,26 @@ pub(crate) async fn fail_run(
         )
         .await
     {
-        tracing::warn!(target: TRACING_TARGET, error = %err, %run_id, "Failed to record run-failed event");
+        tracing::warn!(target: TRACING_TARGET, error = %err, %detection_id, "Failed to record detection-failed event");
     }
+
+    // The state transition is persisted; a lost event is recoverable from the
+    // outbox and does not change the outcome.
+    FailOutcome::Failed
+}
+
+/// The result of attempting to fail a detection, so a caller driving a work
+/// queue can decide whether to redeliver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FailOutcome {
+    /// The detection was transitioned to `Failed` and its failure announced.
+    Failed,
+    /// The failure was not applied because the detection is no longer owned by
+    /// the caller (another owner, or an already-terminal detection). No retry.
+    NotOwned,
+    /// The terminal write failed to persist, leaving the detection mid-flight;
+    /// the caller should redeliver so the stale lease is reclaimed.
+    PersistFailed,
 }
 
 /// Resolves a pipeline's live policy references into decrypted engine policies.

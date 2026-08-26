@@ -1,11 +1,11 @@
-//! Filtering options for pipeline run queries.
+//! Filtering options for detection queries.
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::types::{PipelineRunStatus, PipelineTriggerType};
+use crate::types::{DetectionStatus, PipelineTriggerType};
 
-/// Filter options for pipeline runs.
+/// Filter options for detections.
 ///
 /// Each field narrows the result when set; unset fields impose no constraint.
 /// The owning pipeline (single-pipeline listing) and workspace scope are applied
@@ -13,40 +13,40 @@ use crate::types::{PipelineRunStatus, PipelineTriggerType};
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct RunFilter {
-    /// Filter by run status.
+pub struct DetectionFilter {
+    /// Filter by detection status.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<PipelineRunStatus>,
-    /// Filter by the source file the run analyzes.
+    pub status: Option<DetectionStatus>,
+    /// Filter by the source file the detection analyzes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_file_id: Option<Uuid>,
     /// Filter by the owning pipeline. Ignored by the single-pipeline listing
     /// (already scoped to one pipeline); used by the workspace-wide listing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pipeline_id: Option<Uuid>,
-    /// Filter by the account that triggered the run.
+    /// Filter by the account that triggered the detection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_id: Option<Uuid>,
-    /// Filter by how the run was initiated (user vs system).
+    /// Filter by how the detection was initiated (user vs system).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trigger_type: Option<PipelineTriggerType>,
 }
 
-impl RunFilter {
+impl DetectionFilter {
     /// Creates a new empty filter.
     #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Filters by run status.
+    /// Filters by detection status.
     #[inline]
-    pub fn with_status(mut self, status: PipelineRunStatus) -> Self {
+    pub fn with_status(mut self, status: DetectionStatus) -> Self {
         self.status = Some(status);
         self
     }
 
-    /// Filters by the source file the run analyzes.
+    /// Filters by the source file the detection analyzes.
     #[inline]
     pub fn with_input_file_id(mut self, input_file_id: Uuid) -> Self {
         self.input_file_id = Some(input_file_id);
@@ -60,14 +60,14 @@ impl RunFilter {
         self
     }
 
-    /// Filters by the account that triggered the run.
+    /// Filters by the account that triggered the detection.
     #[inline]
     pub fn with_account_id(mut self, account_id: Uuid) -> Self {
         self.account_id = Some(account_id);
         self
     }
 
-    /// Filters by how the run was initiated.
+    /// Filters by how the detection was initiated.
     #[inline]
     pub fn with_trigger_type(mut self, trigger_type: PipelineTriggerType) -> Self {
         self.trigger_type = Some(trigger_type);

@@ -29,19 +29,19 @@ pub mod workspace_role;
 // File-related enumerations
 pub mod file_kind;
 
-// Pipeline-related enumerations
-pub mod pipeline_run_status;
+// Detection / pipeline-related enumerations
+pub mod detection_status;
 pub mod pipeline_status;
 pub mod pipeline_trigger_type;
 
 pub use activity_type::ActivityType;
 pub use api_token_type::ApiTokenType;
 pub use chat_role::ChatRole;
+pub use detection_status::DetectionStatus;
 pub use file_kind::FileKind;
 pub use invite_status::InviteStatus;
 pub use notification_event::NotificationEvent;
 pub use outbox_status::OutboxStatus;
-pub use pipeline_run_status::PipelineRunStatus;
 pub use pipeline_status::PipelineStatus;
 pub use pipeline_trigger_type::PipelineTriggerType;
 pub use provider_type::ProviderType;

@@ -22,9 +22,9 @@ mod workspaces;
 // File-related constraint modules
 mod files;
 
-// Pipeline-related constraint modules
+// Detection / pipeline-related constraint modules
+mod detections;
 mod pipeline_references;
-mod pipeline_runs;
 mod pipelines;
 
 mod workspace_connection_syncs;
@@ -36,9 +36,9 @@ pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
 pub use self::chat_messages::ChatMessageConstraints;
 pub use self::chat_sessions::ChatSessionConstraints;
+pub use self::detections::WorkspaceDetectionConstraints;
 pub use self::files::WorkspaceFileConstraints;
 pub use self::pipeline_references::WorkspacePipelineReferenceConstraints;
-pub use self::pipeline_runs::WorkspacePipelineRunConstraints;
 pub use self::pipelines::WorkspacePipelineConstraints;
 pub use self::workspace_activities::WorkspaceActivitiesConstraints;
 pub use self::workspace_connection_syncs::WorkspaceConnectionSyncConstraints;
@@ -75,9 +75,9 @@ pub enum ConstraintViolation {
     // File-related constraints
     WorkspaceFile(WorkspaceFileConstraints),
 
-    // Pipeline-related constraints
+    // Detection / pipeline-related constraints
     WorkspacePipeline(WorkspacePipelineConstraints),
-    WorkspacePipelineRun(WorkspacePipelineRunConstraints),
+    WorkspaceDetection(WorkspaceDetectionConstraints),
     WorkspacePipelineReference(WorkspacePipelineReferenceConstraints),
     WorkspaceConnection(WorkspaceConnectionConstraints),
     WorkspaceConnectionSync(WorkspaceConnectionSyncConstraints),
@@ -132,7 +132,7 @@ impl ConstraintViolation {
             WorkspaceWebhook,
             WorkspaceFile,
             WorkspacePipeline,
-            WorkspacePipelineRun,
+            WorkspaceDetection,
             WorkspacePipelineReference,
             WorkspaceConnection,
             WorkspaceConnectionSync,
