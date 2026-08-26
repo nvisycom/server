@@ -9,8 +9,9 @@
 use std::time::Duration;
 
 use nvisy_postgres::AsyncConnection;
-use nvisy_postgres::model::WorkspaceDetectionJob;
-use nvisy_postgres::query::DetectionJobOutboxRepository;
+use nvisy_postgres::model::{UpdateWorkspaceDetection, WorkspaceDetectionJob};
+use nvisy_postgres::query::{DetectionJobOutboxRepository, WorkspaceDetectionRepository};
+use nvisy_postgres::types::{DetectionMetadata, DetectionStatus, Json};
 use tokio_util::sync::CancellationToken;
 
 use super::job::DetectionJob;
@@ -41,6 +42,15 @@ const RETRY_BACKOFF_MAX_SECS: i64 = 60 * 60;
 /// job that can never publish (e.g. an undecodable payload) stops consuming drain
 /// cycles instead of retrying forever.
 const MAX_ATTEMPTS: i32 = 10;
+
+/// The failure reason recorded on a detection whose job the drainer gave up
+/// publishing, so the detection's terminal state explains why it never analyzed.
+const DEAD_LETTER_REASON: &str = "Detection could not be queued for analysis";
+
+/// Cap on a single publish, so a slow or unavailable NATS server cannot hold the
+/// batch transaction's row locks open indefinitely. A publish that exceeds this is
+/// treated as a failed attempt (deferred with a backoff), releasing the locks.
+const PUBLISH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Drains the detection-job outbox, publishing each pending job to the work-queue.
 pub struct DetectionOutboxDrainer {
@@ -138,7 +148,7 @@ impl DetectionOutboxDrainer {
     async fn drain_batch(&self) -> Result<DrainPass> {
         let mut conn = self.infra.postgres.get_connection().await?;
 
-        let pass = conn
+        let outcome = conn
             .transaction(async |conn| {
                 let batch = conn.claim_detection_job_batch(DRAIN_BATCH).await?;
                 let mut pass = DrainPass {
@@ -147,6 +157,9 @@ impl DetectionOutboxDrainer {
                     deferred: 0,
                     dead_lettered: 0,
                 };
+                // Detections failed by a dead-lettered job, so their `Failed`
+                // status can be broadcast after the transaction commits.
+                let mut dead_lettered = Vec::new();
 
                 for row in batch {
                     match self.publish(&row).await {
@@ -156,10 +169,28 @@ impl DetectionOutboxDrainer {
                         }
                         // `attempts` counts prior failures; this attempt makes it
                         // `attempts + 1`. Once that reaches the cap, dead-letter the
-                        // row instead of deferring it forever.
+                        // row instead of deferring it forever. The job never
+                        // published, so the worker will never drive its detection to
+                        // a terminal state: fail the detection here too (same
+                        // transaction) so it does not hang `Pending` forever. The
+                        // guard on `Pending` makes it a no-op in the unlikely case a
+                        // worker already claimed the detection.
                         Err(()) if row.attempts + 1 >= MAX_ATTEMPTS => {
-                            tracing::error!(target: TRACING_TARGET, id = %row.id, attempts = row.attempts + 1, "Dead-lettering detection job after too many failed attempts");
+                            tracing::error!(target: TRACING_TARGET, id = %row.id, detection_id = %row.detection_id, attempts = row.attempts + 1, "Dead-lettering detection job after too many failed attempts; failing the detection");
                             conn.mark_detection_job_failed(row.id).await?;
+                            let metadata = DetectionMetadata {
+                                error: Some(DEAD_LETTER_REASON.to_owned()),
+                                ..Default::default()
+                            };
+                            conn.fail_pending_detection(
+                                row.detection_id,
+                                UpdateWorkspaceDetection {
+                                    metadata: Some(Json::encode(&metadata)),
+                                    ..Default::default()
+                                },
+                            )
+                            .await?;
+                            dead_lettered.push(row.detection_id);
                             pass.dead_lettered += 1;
                         }
                         Err(()) => {
@@ -170,9 +201,19 @@ impl DetectionOutboxDrainer {
                     }
                 }
 
-                Ok::<_, Error>(pass)
+                Ok::<_, Error>((pass, dead_lettered))
             })
             .await?;
+
+        // Announce each failed detection's terminal status to any SSE watcher,
+        // after the transaction that committed it. Best-effort: the detection row
+        // is authoritative, so a dropped broadcast is recoverable by a re-read.
+        let (pass, dead_lettered) = outcome;
+        for detection_id in dead_lettered {
+            self.queue
+                .broadcast_status(detection_id, DetectionStatus::Failed)
+                .await;
+        }
 
         Ok(pass)
     }
@@ -184,9 +225,19 @@ impl DetectionOutboxDrainer {
         let job = serde_json::from_value::<DetectionJob>(row.job.clone()).map_err(|err| {
             tracing::error!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to decode detection job");
         })?;
-        self.queue.enqueue(job).await.map_err(|err| {
-            tracing::warn!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to publish detection job; deferring");
-        })
+        // Bound the publish so a hung NATS cannot hold the batch transaction's
+        // locks open; a timeout is a failed attempt like any other.
+        match tokio::time::timeout(PUBLISH_TIMEOUT, self.queue.enqueue(job)).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) => {
+                tracing::warn!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to publish detection job; deferring");
+                Err(())
+            }
+            Err(_elapsed) => {
+                tracing::warn!(target: TRACING_TARGET, id = %row.id, "Detection-job publish timed out; deferring");
+                Err(())
+            }
+        }
     }
 }
 

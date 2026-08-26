@@ -231,6 +231,12 @@ CREATE INDEX workspace_detection_jobs_pending_idx
     ON workspace_detection_jobs (next_attempt_at, created_at)
     WHERE status = 'pending';
 
+-- Back the detection foreign key so a detection delete cascades without scanning
+-- the whole outbox (Postgres does not index a referencing column automatically,
+-- and the partial claim index above does not cover it).
+CREATE INDEX workspace_detection_jobs_detection_idx
+    ON workspace_detection_jobs (detection_id);
+
 COMMENT ON TABLE workspace_detection_jobs IS 'Transactional outbox of detection jobs, drained to the detection NATS work-queue.';
 COMMENT ON COLUMN workspace_detection_jobs.id IS 'Unique outbox row identifier';
 COMMENT ON COLUMN workspace_detection_jobs.detection_id IS 'Detection this job analyzes';
