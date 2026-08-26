@@ -182,15 +182,23 @@ impl DetectionOutboxDrainer {
                                 error: Some(DEAD_LETTER_REASON.to_owned()),
                                 ..Default::default()
                             };
-                            conn.fail_pending_detection(
-                                row.detection_id,
-                                UpdateWorkspaceDetection {
-                                    metadata: Some(Json::encode(&metadata)),
-                                    ..Default::default()
-                                },
-                            )
-                            .await?;
-                            dead_lettered.push(row.detection_id);
+                            // Only broadcast `Failed` if this actually transitioned
+                            // the detection. A publish timeout does not prove the job
+                            // never reached a worker, so a worker may already own the
+                            // detection (no longer `Pending`); the guard then no-ops
+                            // and we must not announce a false terminal status.
+                            let failed = conn
+                                .fail_pending_detection(
+                                    row.detection_id,
+                                    UpdateWorkspaceDetection {
+                                        metadata: Some(Json::encode(&metadata)),
+                                        ..Default::default()
+                                    },
+                                )
+                                .await?;
+                            if failed {
+                                dead_lettered.push(row.detection_id);
+                            }
                             pass.dead_lettered += 1;
                         }
                         Err(()) => {
@@ -205,9 +213,10 @@ impl DetectionOutboxDrainer {
             })
             .await?;
 
-        // Announce each failed detection's terminal status to any SSE watcher,
-        // after the transaction that committed it. Best-effort: the detection row
-        // is authoritative, so a dropped broadcast is recoverable by a re-read.
+        // Announce the terminal status of each detection this pass actually failed
+        // (only those the guarded transition committed as `Failed` are collected),
+        // after its transaction commits. Best-effort: the detection row is
+        // authoritative, so a dropped broadcast is recoverable by a re-read.
         let (pass, dead_lettered) = outcome;
         for detection_id in dead_lettered {
             self.queue
