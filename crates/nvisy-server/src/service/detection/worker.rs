@@ -221,6 +221,7 @@ impl DetectionWorker {
                     pipeline_slug: pipeline.slug.clone(),
                     triggered_by: detection.account_id,
                     reason: &err.to_string(),
+                    metadata: detection.metadata.or_default(),
                     claim: Some(claim_token),
                 },
             )

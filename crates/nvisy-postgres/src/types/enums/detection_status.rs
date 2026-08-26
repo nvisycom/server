@@ -39,10 +39,15 @@ pub enum DetectionStatus {
 }
 
 impl DetectionStatus {
-    /// Statuses that carry a success/failure outcome: a detection reached one of
-    /// these iff it either finished analysis or failed. This is the correct basis
-    /// for an error rate (`failed / (complete + failed)`).
-    pub const OUTCOMES: [DetectionStatus; 2] = [DetectionStatus::Complete, DetectionStatus::Failed];
+    /// In-progress statuses: a detection is still analyzing — enqueued or
+    /// running — so its input and audit files must not expire yet. `Complete` is
+    /// excluded (it is terminal), so holding it would pin those files forever.
+    pub const IN_PROGRESS: [DetectionStatus; 2] =
+        [DetectionStatus::Pending, DetectionStatus::Executing];
+    /// Terminal statuses: a detection reached one of these iff it either finished
+    /// analysis or failed, and its status will not change again. This is the
+    /// correct basis for an error rate (`failed / (complete + failed)`).
+    pub const TERMINAL: [DetectionStatus; 2] = [DetectionStatus::Complete, DetectionStatus::Failed];
 
     /// Returns whether analysis is done and the detection is ready to redact.
     #[inline]

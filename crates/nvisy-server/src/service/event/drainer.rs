@@ -330,13 +330,9 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
         pipeline_slug: detection.pipeline_slug.clone(),
         detection_id: DetectionId::from_uuid(detection.detection_id),
     };
-    // TODO(redaction-feature): once the redact handler persists a redaction row,
-    // `RedactionCreated` should carry a real `RedactionId`; until then the
-    // activity params reuse the detection id as a placeholder so the projection
-    // compiles. The parent reworks the redact emission path.
-    let redaction = |detection: &DetectionRef| RedactionActivityParams {
+    let redaction = |detection: &DetectionRef, redaction_id: Uuid| RedactionActivityParams {
         pipeline_slug: detection.pipeline_slug.clone(),
-        redaction_id: RedactionId::from_uuid(detection.detection_id),
+        redaction_id: RedactionId::from_uuid(redaction_id),
     };
     let policy = |p: &PolicyRef| PolicyActivityParams {
         policy_id: p.policy_id,
@@ -387,7 +383,11 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
             ActivityPayload::DetectionCompleted(detection(d))
         }
         E::DetectionFailed { detection: d, .. } => ActivityPayload::DetectionFailed(detection(d)),
-        E::RedactionCreated { detection: d, .. } => ActivityPayload::RedactionCreated(redaction(d)),
+        E::RedactionCreated {
+            detection: d,
+            redaction_id,
+            ..
+        } => ActivityPayload::RedactionCreated(redaction(d, *redaction_id)),
         E::PolicyCreated(p) => ActivityPayload::PolicyCreated(policy(p)),
         E::PolicyUpdated(p) => ActivityPayload::PolicyUpdated(policy(p)),
         E::PolicyDeleted(p) => ActivityPayload::PolicyDeleted(policy(p)),
@@ -496,17 +496,15 @@ fn notification_of(event: WorkspaceEvent) -> Option<(Uuid, NotificationPayload)>
                 input_file_name,
             }),
         )),
-        // TODO(redaction-feature): `RedactionCreated` should carry a real
-        // `RedactionId`; until the redact handler persists a redaction row the
-        // detection id stands in as a placeholder so the projection compiles.
         E::RedactionCreated {
             detection,
+            redaction_id,
             input_file_name,
             notify,
         } => Some((
             notify,
             NotificationPayload::RedactionCreated(RedactionCreatedParams {
-                redaction_id: RedactionId::from_uuid(detection.detection_id),
+                redaction_id: RedactionId::from_uuid(redaction_id),
                 detection_id: DetectionId::from_uuid(detection.detection_id),
                 pipeline_slug: detection.pipeline_slug,
                 input_file_name,

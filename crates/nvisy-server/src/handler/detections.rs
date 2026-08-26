@@ -183,6 +183,7 @@ async fn create_detection(
                 pipeline_slug: pipeline.slug.clone(),
                 triggered_by: auth_state.account_id,
                 reason: "Failed to enqueue detection",
+                metadata: detection_row.metadata.or_default(),
                 claim: None,
             },
         )
@@ -652,9 +653,18 @@ async fn redact_detection(
             redacted.bytes,
         )
         .await?;
-    let staged_review = blob
+    // Staging the review audit after the output means a failure here would strand
+    // the already-written output object (no row to reclaim it); discard it first.
+    let staged_review = match blob
         .stage_review_audit(&pipeline, &retention, auth_state.account_id, &reviewed)
-        .await?;
+        .await
+    {
+        Ok(staged) => staged,
+        Err(err) => {
+            blob.discard_staged_object(&staged_output).await.ok();
+            return Err(err);
+        }
+    };
 
     let redaction = conn
         .transaction(async |conn| {
@@ -679,6 +689,7 @@ async fn redact_detection(
                         detection_id: detection.id,
                         pipeline_slug: pipeline.slug.clone(),
                     },
+                    redaction_id: redaction.id,
                     input_file_name: Some(file.display_name.clone()),
                     notify: detection.account_id,
                 },

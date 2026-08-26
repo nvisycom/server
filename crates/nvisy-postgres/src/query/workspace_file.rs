@@ -135,8 +135,8 @@ pub trait WorkspaceFileRepository {
     ) -> impl Future<Output = PgResult<usize>> + Send;
 
     /// Recomputes `expires_at` for live files of `kind` produced by a specific
-    /// pipeline's runs (redacted outputs via `output_file_id`, audit blobs via
-    /// `audit_file_id`), returning the number updated. Used to backfill when a
+    /// pipeline's detections and redactions (detection audits, redaction outputs,
+    /// and review audits), returning the number updated. Used to backfill when a
     /// pipeline's own retention override changes, without touching other
     /// pipelines' files. `None` clears the expiry.
     fn backfill_pipeline_files_expiry(
@@ -365,26 +365,23 @@ impl WorkspaceFileRepository for PgConnection {
         use schema::workspace_detections::dsl as detections;
         use schema::{workspace_detections, workspace_files};
 
-        // A detection that is still pending, executing, or complete needs its
-        // input document and audit blob: pending/executing may still analyze
-        // them, and a complete detection can still be redacted (redaction reads
-        // the audit and input). So those files are held back from expiry until the
-        // detection fails. Otherwise an in-flight detect/redact could lose its
-        // source or analysis mid-flight and get stuck. Redaction outputs are not
-        // protected here — they belong to redactions, not the detection.
+        // A detection that is still analyzing (pending or executing) needs its
+        // input document and audit blob, so those files are held back from expiry
+        // until analysis reaches a terminal state — otherwise an in-flight detect
+        // could lose its source or analysis mid-flight and get stuck. A `Complete`
+        // detection is NOT held: it is terminal (redaction never changes its
+        // status), so holding it would pin the input and audit forever and defeat
+        // retention. Re-redaction of a complete detection is bounded by those
+        // files' own `expires_at` — retention itself decides how long they remain
+        // redactable. Redaction outputs are not protected here — they belong to
+        // redactions, not the detection.
         let active_detection_holds_file = exists(
             workspace_detections::table.filter(
-                detections::status
-                    .eq_any([
-                        DetectionStatus::Pending,
-                        DetectionStatus::Executing,
-                        DetectionStatus::Complete,
-                    ])
-                    .and(
-                        detections::input_file_id
-                            .eq(workspace_files::id)
-                            .or(detections::audit_file_id.eq(workspace_files::id.nullable())),
-                    ),
+                detections::status.eq_any(DetectionStatus::IN_PROGRESS).and(
+                    detections::input_file_id
+                        .eq(workspace_files::id)
+                        .or(detections::audit_file_id.eq(workspace_files::id.nullable())),
+                ),
             ),
         );
 

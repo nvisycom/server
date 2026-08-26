@@ -192,6 +192,14 @@ CREATE INDEX workspace_detections_status_idx
 CREATE INDEX workspace_detections_input_file_idx
     ON workspace_detections (input_file_id, started_at DESC);
 
+-- The file-expiry sweep's hold check matches a candidate file against a
+-- detection's input OR audit file; the input side is covered above, this covers
+-- the audit side. Partial, since most detections eventually carry an audit but
+-- the column is NULL until analysis writes it.
+CREATE INDEX workspace_detections_audit_file_idx
+    ON workspace_detections (audit_file_id)
+    WHERE audit_file_id IS NOT NULL;
+
 -- Idempotent detect: at most one detection per (pipeline, idempotency key).
 CREATE UNIQUE INDEX workspace_detections_idempotency_idx
     ON workspace_detections (pipeline_id, idempotency_key)
@@ -233,9 +241,11 @@ CREATE TABLE workspace_redactions (
     -- Account that requested the redaction.
     account_id          UUID                NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
-    -- The two files a redaction produces. Both are set at creation (a redaction
-    -- always yields a review audit and a redacted document), and both use
-    -- ON DELETE SET NULL for the same append-only-history reasons as a detection.
+    -- The two files a redaction produces. A redaction always yields both, so the
+    -- app sets them at creation; they are nullable only because `ON DELETE SET
+    -- NULL` clears a reference if its file is ever hard-deleted (for the same
+    -- append-only-history reasons as a detection — a soft-deleted file resolves to
+    -- "gone" at read time, distinct from a NULL that means the file was purged).
     --   review: the engine's Audit after the reviewer edits were applied and
     --           redaction ran (`file_kind = review`); the record of exactly what
     --           was redacted and why.

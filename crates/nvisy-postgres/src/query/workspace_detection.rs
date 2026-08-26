@@ -251,28 +251,37 @@ impl WorkspaceDetectionRepository for PgConnection {
         use schema::workspace_detections::dsl;
         use schema::{accounts, workspace_detections, workspace_files, workspace_pipelines};
 
-        // Build base query with filters. The listing is already scoped to one
-        // pipeline, so `filter.pipeline_id` is not applied here.
-        let mut base_query = workspace_detections::table
-            .filter(dsl::pipeline_id.eq(pipeline_id))
-            .into_boxed();
-
-        if let Some(status) = filter.status {
-            base_query = base_query.filter(dsl::status.eq(status));
-        }
-        if let Some(file_id) = filter.input_file_id {
-            base_query = base_query.filter(dsl::input_file_id.eq(file_id));
-        }
-        if let Some(account_id) = filter.account_id {
-            base_query = base_query.filter(dsl::account_id.eq(account_id));
-        }
-        if let Some(trigger_type) = filter.trigger_type {
-            base_query = base_query.filter(dsl::trigger_type.eq(trigger_type));
-        }
+        // One scoped builder for both the count and the page, so a future filter
+        // cannot be added to one and forgotten on the other. The listing is
+        // already scoped to one pipeline, so `filter.pipeline_id` is not applied.
+        // Join the owning pipeline (for its slug) and the input file (to name the
+        // detection's analyzed document) so a row is self-contained; the file is
+        // LEFT-joined so one removed by retention yields a null name.
+        let scoped = || {
+            let mut query = workspace_detections::table
+                .inner_join(accounts::table)
+                .inner_join(workspace_pipelines::table)
+                .left_join(workspace_files::table.on(dsl::input_file_id.eq(workspace_files::id)))
+                .filter(dsl::pipeline_id.eq(pipeline_id))
+                .into_boxed();
+            if let Some(status) = filter.status {
+                query = query.filter(dsl::status.eq(status));
+            }
+            if let Some(file_id) = filter.input_file_id {
+                query = query.filter(dsl::input_file_id.eq(file_id));
+            }
+            if let Some(account_id) = filter.account_id {
+                query = query.filter(dsl::account_id.eq(account_id));
+            }
+            if let Some(trigger_type) = filter.trigger_type {
+                query = query.filter(dsl::trigger_type.eq(trigger_type));
+            }
+            query
+        };
 
         let total = if pagination.include_count {
             Some(
-                base_query
+                scoped()
                     .count()
                     .get_result::<i64>(self)
                     .await
@@ -282,30 +291,7 @@ impl WorkspaceDetectionRepository for PgConnection {
             None
         };
 
-        // Rebuild query for fetching items. Join the owning pipeline (for its
-        // slug) and the input file (to name the detection's analyzed document) so
-        // a row is self-contained; a LEFT JOIN on the file tolerates one removed
-        // by retention, yielding a null name.
-        let mut query = workspace_detections::table
-            .inner_join(accounts::table)
-            .inner_join(workspace_pipelines::table)
-            .left_join(workspace_files::table.on(dsl::input_file_id.eq(workspace_files::id)))
-            .filter(dsl::pipeline_id.eq(pipeline_id))
-            .into_boxed();
-
-        if let Some(status) = filter.status {
-            query = query.filter(dsl::status.eq(status));
-        }
-        if let Some(file_id) = filter.input_file_id {
-            query = query.filter(dsl::input_file_id.eq(file_id));
-        }
-        if let Some(account_id) = filter.account_id {
-            query = query.filter(dsl::account_id.eq(account_id));
-        }
-        if let Some(trigger_type) = filter.trigger_type {
-            query = query.filter(dsl::trigger_type.eq(trigger_type));
-        }
-
+        let query = scoped();
         let limit = pagination.fetch_limit();
         let selection = (
             WorkspaceDetection::as_select(),

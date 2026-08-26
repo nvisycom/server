@@ -118,6 +118,9 @@ pub(crate) struct FailDetection<'a> {
     pub triggered_by: Uuid,
     /// Human-readable failure reason, stored in the detection's metadata.
     pub reason: &'a str,
+    /// The detection's current metadata, so the failure reason is layered onto it
+    /// rather than replacing recorded fields such as tags.
+    pub metadata: DetectionMetadata,
     /// The worker's claim timestamp, guarding the transition; `None` on the
     /// handler path, which has no claim to fence.
     pub claim: Option<jiff::Timestamp>,
@@ -147,16 +150,16 @@ pub(crate) async fn fail_detection(
         pipeline_slug,
         triggered_by,
         reason,
+        mut metadata,
         claim,
     } = params;
 
-    let metadata = DetectionMetadata {
-        error: Some(reason.to_owned()),
-        ..Default::default()
-    };
-    // `status` and `completed_at` are forced by `fail_detection` itself (the
-    // terminal transition owns the terminal timestamp), so only the failure
-    // reason is supplied here.
+    // Layer the failure reason onto the detection's existing metadata so recorded
+    // fields (e.g. reviewer tags) survive the failure write.
+    metadata.error = Some(reason.to_owned());
+    // `status` and `completed_at` are forced by the finalize methods themselves
+    // (the terminal transition owns the terminal timestamp), so only the metadata
+    // is supplied here.
     let update = UpdateWorkspaceDetection {
         metadata: Some(Json::encode(&metadata)),
         ..Default::default()

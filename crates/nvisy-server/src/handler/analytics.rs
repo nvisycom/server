@@ -1,5 +1,5 @@
 //! Workspace analytics handler: aggregate metrics over a workspace's files and
-//! pipeline runs, for a dashboard.
+//! detections, for a dashboard.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
@@ -47,7 +47,7 @@ async fn get_analytics(
 fn get_analytics_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Workspace analytics")
         .description(
-            "Returns aggregate analytics for a workspace: stored-file totals with a per-kind breakdown, pipeline-run health (status mix, error rate, and durations), and inference token usage (workspace totals plus a per-model breakdown). Breakdowns list every kind/status, zero-filled, in a stable order.",
+            "Returns aggregate analytics for a workspace: stored-file totals with a per-kind breakdown, detection health (status mix, error rate, and durations), and inference token usage (workspace totals plus a per-model breakdown). Breakdowns list every kind/status, zero-filled, in a stable order.",
         )
         .response::<200, Json<WorkspaceAnalytics>>()
         .response::<401, Json<ErrorResponse>>()
@@ -55,7 +55,7 @@ fn get_analytics_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Returns a workspace's daily run activity over a date window.
+/// Returns a workspace's daily detection activity over a date window.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -63,13 +63,13 @@ fn get_analytics_docs(op: TransformOperation) -> TransformOperation {
         workspace_id = %workspace.id,
     )
 )]
-async fn get_run_timeseries(
+async fn get_detection_timeseries(
     State(pg_client): State<PgClient>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Query(window): Query<DateWindow>,
 ) -> Result<(StatusCode, Json<DetectionTimeSeries>)> {
-    tracing::debug!(target: TRACING_TARGET, "Computing run time series");
+    tracing::debug!(target: TRACING_TARGET, "Computing detection time series");
 
     let window = window.resolve()?;
 
@@ -80,7 +80,7 @@ async fn get_run_timeseries(
         .await?;
 
     let points = conn
-        .runs_by_day(
+        .detections_by_day(
             workspace.id,
             window.from_timestamp()?,
             window.to_timestamp()?,
@@ -91,10 +91,10 @@ async fn get_run_timeseries(
     Ok((StatusCode::OK, Json(series)))
 }
 
-fn get_run_timeseries_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Workspace run time series")
+fn get_detection_timeseries_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Workspace detection time series")
         .description(
-            "Returns a workspace's daily pipeline-run activity over a date window: runs per day, plus each day's error rate and durations. Every day in the window is present (quiet days report runs: 0), so the series plots as a continuous line or a contribution-style calendar. The window is `from`/`to` (inclusive, YYYY-MM-DD); it defaults to the last 30 days and is capped at 366 days.",
+            "Returns a workspace's daily detection activity over a date window: detections per day, plus each day's error rate and durations. Every day in the window is present (quiet days report detections: 0), so the series plots as a continuous line or a contribution-style calendar. The window is `from`/`to` (inclusive, YYYY-MM-DD); it defaults to the last 30 days and is capped at 366 days.",
         )
         .response::<200, Json<DetectionTimeSeries>>()
         .response::<400, Json<ErrorResponse>>()
@@ -113,8 +113,8 @@ pub fn routes() -> ApiRouter<ServiceState> {
             get_with(get_analytics, get_analytics_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/analytics/runs/timeseries/",
-            get_with(get_run_timeseries, get_run_timeseries_docs),
+            "/workspaces/{workspaceSlug}/analytics/detections/timeseries/",
+            get_with(get_detection_timeseries, get_detection_timeseries_docs),
         )
         .with_path_items(|item| item.tag("Analytics"))
 }

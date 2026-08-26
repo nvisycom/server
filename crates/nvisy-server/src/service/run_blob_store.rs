@@ -518,13 +518,20 @@ fn analysis_serde_error(error: serde_json::Error) -> Error<'static> {
 /// from the display name; a name that does not end in its own extension (or has
 /// none) simply gains a `.redacted` suffix.
 fn redacted_display_name(display_name: &str, extension: &str) -> String {
+    // Split off a trailing `.{extension}`, matched case-insensitively on both
+    // sides so an upper- or mixed-case extension (`Report.PDF`) still has the
+    // marker inserted before it, not appended after.
     let suffix = format!(".{extension}");
-    match display_name
+    let stem = display_name
         .len()
         .checked_sub(suffix.len())
-        .filter(|_| !extension.is_empty() && display_name.to_lowercase().ends_with(&suffix))
-    {
-        Some(stem_len) => format!("{}.redacted.{extension}", &display_name[..stem_len]),
+        .filter(|_| !extension.is_empty())
+        .filter(|&at| display_name.is_char_boundary(at))
+        .map(|at| display_name.split_at(at))
+        .filter(|(_, tail)| tail.eq_ignore_ascii_case(&suffix))
+        .map(|(stem, _)| stem);
+    match stem {
+        Some(stem) => format!("{stem}.redacted.{extension}"),
         None => format!("{display_name}.redacted"),
     }
 }
@@ -543,9 +550,20 @@ mod tests {
 
     #[test]
     fn matches_the_extension_case_insensitively() {
+        // The name's extension case differs from the passed extension...
         assert_eq!(
             redacted_display_name("Report.PDF", "pdf"),
             "Report.redacted.pdf"
+        );
+        // ...and the passed extension itself may be upper- or mixed-case; the
+        // marker still lands before it, and the original extension text is kept.
+        assert_eq!(
+            redacted_display_name("Report.PDF", "PDF"),
+            "Report.redacted.PDF"
+        );
+        assert_eq!(
+            redacted_display_name("report.pdf", "PDF"),
+            "report.redacted.PDF"
         );
     }
 

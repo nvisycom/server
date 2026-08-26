@@ -8,13 +8,13 @@ use std::collections::BTreeMap;
 
 use jiff::ToSpan;
 use jiff::civil::Date;
-use nvisy_postgres::query::{AnalyticsSnapshot, RunDayPoint};
+use nvisy_postgres::query::{AnalyticsSnapshot, DetectionDayPoint};
 use nvisy_postgres::types::{DetectionStatus, FileKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 
-/// Aggregate analytics for a workspace: what it stores, how its runs fare, and
+/// Aggregate analytics for a workspace: what it stores, how its detections fare, and
 /// the inference tokens they spent.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -27,7 +27,7 @@ pub struct WorkspaceAnalytics {
     pub usage: UsageAnalytics,
 }
 
-/// Inference token usage across a workspace's runs.
+/// Inference token usage across a workspace's detections.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageAnalytics {
@@ -42,7 +42,7 @@ pub struct UsageAnalytics {
     pub by_model: Vec<ModelUsageEntry>,
 }
 
-/// One model's token usage across a workspace's runs.
+/// One model's token usage across a workspace's detections.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelUsageEntry {
@@ -81,35 +81,36 @@ pub struct StorageKindEntry {
     pub total_bytes: i64,
 }
 
-/// Pipeline-run health for a workspace.
+/// Detection health for a workspace.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectionAnalytics {
-    /// Total number of runs.
+    /// Total number of detections.
     pub total: i64,
-    /// Per-status breakdown, one entry per run status (zero-filled), in a stable
-    /// order.
+    /// Per-status breakdown, one entry per detection status (zero-filled), in a
+    /// stable order.
     pub by_status: Vec<DetectionStatusEntry>,
-    /// Failed / (completed + failed). Omitted when no run has reached a terminal
-    /// state (genuinely no signal, not zero).
+    /// Failed / (completed + failed). Omitted when no detection has reached a
+    /// terminal state (genuinely no signal, not zero).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_rate: Option<f64>,
-    /// Mean completed-run duration in milliseconds; omitted until a run completes.
+    /// Mean completed-detection duration in milliseconds; omitted until a
+    /// detection completes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avg_duration_ms: Option<i64>,
-    /// 95th-percentile completed-run duration in milliseconds; omitted until a run
-    /// completes.
+    /// 95th-percentile completed-detection duration in milliseconds; omitted until
+    /// a detection completes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub p95_duration_ms: Option<i64>,
 }
 
-/// One status's share of a workspace's runs.
+/// One status's share of a workspace's detections.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectionStatusEntry {
-    /// The run status.
+    /// The detection status.
     pub status: DetectionStatus,
-    /// Number of runs in this status.
+    /// Number of detections in this status.
     pub count: i64,
 }
 
@@ -119,7 +120,7 @@ impl WorkspaceAnalytics {
     pub fn from_snapshot(snapshot: AnalyticsSnapshot) -> Self {
         let AnalyticsSnapshot {
             storage,
-            runs,
+            detections,
             durations,
             usage,
         } = snapshot;
@@ -139,7 +140,7 @@ impl WorkspaceAnalytics {
         let by_status: Vec<DetectionStatusEntry> = DetectionStatus::iter()
             .map(|status| DetectionStatusEntry {
                 status,
-                count: runs
+                count: detections
                     .iter()
                     .find(|r| r.status == status)
                     .map_or(0, |r| r.count),
@@ -186,8 +187,9 @@ impl WorkspaceAnalytics {
     }
 }
 
-/// A workspace's daily run activity over a window: one point per day, dense
-/// (quiet days included with `runs: 0`), ready to plot as a continuous series.
+/// A workspace's daily detection activity over a window: one point per day, dense
+/// (quiet days included with `detections: 0`), ready to plot as a continuous
+/// series.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectionTimeSeries {
@@ -195,25 +197,25 @@ pub struct DetectionTimeSeries {
     pub points: Vec<DetectionDayEntry>,
 }
 
-/// A single day of run activity.
+/// A single day of detection activity.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectionDayEntry {
     /// The day (`YYYY-MM-DD`, UTC).
     pub date: Date,
-    /// Runs started this day (`0` on a quiet day).
-    pub runs: i64,
-    /// Failed / (completed + failed) for this day; omitted when no run reached a
-    /// terminal state that day.
+    /// Detections started this day (`0` on a quiet day).
+    pub detections: i64,
+    /// Failed / (completed + failed) for this day; omitted when no detection
+    /// reached a terminal state that day.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_rate: Option<f64>,
-    /// Mean completed-run duration (milliseconds) this day; omitted if none completed.
+    /// Mean completed-detection duration (milliseconds) this day; omitted if none completed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avg_duration_ms: Option<i64>,
-    /// 95th-percentile completed-run duration (milliseconds) this day; omitted if none.
+    /// 95th-percentile completed-detection duration (milliseconds) this day; omitted if none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub p95_duration_ms: Option<i64>,
-    /// Input/prompt tokens spent by this day's runs; omitted when none used a model.
+    /// Input/prompt tokens spent by this day's detections; omitted when none used a model.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<i64>,
     /// Output/completion tokens spent this day; omitted when none used a model.
@@ -227,12 +229,13 @@ pub struct DetectionDayEntry {
 impl DetectionTimeSeries {
     /// Builds a dense daily series over `[from, to]` from the sparse per-day rows
     /// the query returns. Every day in the window is emitted in order; a day with
-    /// no runs reports `runs: 0` and omits the rate/duration/token fields. The
-    /// query only produces days that had a run, so gap-filling happens here.
-    pub fn from_window(from: Date, to: Date, points: Vec<RunDayPoint>) -> Self {
+    /// no detections reports `detections: 0` and omits the rate/duration/token
+    /// fields. The query only produces days that had a detection, so gap-filling
+    /// happens here.
+    pub fn from_window(from: Date, to: Date, points: Vec<DetectionDayPoint>) -> Self {
         // Index the sparse rows by their UTC day for O(1) lookup while walking the
         // window.
-        let mut by_day: BTreeMap<Date, RunDayPoint> = BTreeMap::new();
+        let mut by_day: BTreeMap<Date, DetectionDayPoint> = BTreeMap::new();
         for p in points {
             let date = p.day.to_zoned(jiff::tz::TimeZone::UTC).date();
             by_day.insert(date, p);
@@ -244,7 +247,7 @@ impl DetectionTimeSeries {
             days.push(match by_day.remove(&date) {
                 Some(p) => DetectionDayEntry {
                     date,
-                    runs: p.runs,
+                    detections: p.detections,
                     error_rate: (p.terminal > 0).then(|| p.failed as f64 / p.terminal as f64),
                     avg_duration_ms: p.avg_ms,
                     p95_duration_ms: p.p95_ms,
@@ -254,7 +257,7 @@ impl DetectionTimeSeries {
                 },
                 None => DetectionDayEntry {
                     date,
-                    runs: 0,
+                    detections: 0,
                     error_rate: None,
                     avg_duration_ms: None,
                     p95_duration_ms: None,
@@ -283,7 +286,9 @@ fn count_of(by_status: &[DetectionStatusEntry], status: DetectionStatus) -> i64 
 
 #[cfg(test)]
 mod tests {
-    use nvisy_postgres::query::{RunDurations, RunStatusCount, StorageByKind, UsageByModel};
+    use nvisy_postgres::query::{
+        DetectionDurations, DetectionStatusCount, StorageByKind, UsageByModel,
+    };
 
     use super::*;
 
@@ -301,17 +306,17 @@ mod tests {
                 total_bytes: 50,
             },
         ];
-        let runs = vec![
-            RunStatusCount {
+        let detections = vec![
+            DetectionStatusCount {
                 status: DetectionStatus::Complete,
                 count: 3,
             },
-            RunStatusCount {
+            DetectionStatusCount {
                 status: DetectionStatus::Failed,
                 count: 1,
             },
         ];
-        let durations = RunDurations {
+        let durations = DetectionDurations {
             avg_ms: Some(30_000),
             p95_ms: Some(56_000),
         };
@@ -332,7 +337,7 @@ mod tests {
         ];
         let a = WorkspaceAnalytics::from_snapshot(AnalyticsSnapshot {
             storage,
-            runs,
+            detections,
             durations,
             usage,
         });
@@ -380,10 +385,10 @@ mod tests {
                 .timestamp()
         };
         // Only the active day is returned by the query (sparse); Jan 6 and 7 have
-        // no runs and must be gap-filled by from_window over the Jan 5..7 window.
-        let sparse = vec![RunDayPoint {
+        // no detections and must be gap-filled by from_window over the Jan 5..7 window.
+        let sparse = vec![DetectionDayPoint {
             day: day_ts("2026-01-05"),
-            runs: 3,
+            detections: 3,
             terminal: 3,
             failed: 1,
             avg_ms: Some(20_000),
@@ -403,31 +408,31 @@ mod tests {
 
         // Active day: derived error rate + tokens carried through.
         let d5 = &series.points[0];
-        assert_eq!(d5.runs, 3);
+        assert_eq!(d5.detections, 3);
         assert_eq!(d5.error_rate, Some(1.0 / 3.0));
         assert_eq!(d5.avg_duration_ms, Some(20_000));
         assert_eq!(d5.input_tokens, Some(1000));
         assert_eq!(d5.total_tokens, None);
 
-        // Gap-filled days: runs 0, everything else omitted.
+        // Gap-filled days: detections 0, everything else omitted.
         let d6 = &series.points[1];
-        assert_eq!(d6.runs, 0);
+        assert_eq!(d6.detections, 0);
         assert_eq!(d6.error_rate, None);
         assert_eq!(d6.avg_duration_ms, None);
         assert_eq!(d6.input_tokens, None);
     }
 
     #[test]
-    fn error_rate_is_none_with_no_terminal_runs() {
-        // Only active runs, no files, no completed durations.
-        let runs = vec![RunStatusCount {
+    fn error_rate_is_none_with_no_terminal_detections() {
+        // Only in-progress detections, no files, no completed durations.
+        let detections = vec![DetectionStatusCount {
             status: DetectionStatus::Pending,
             count: 5,
         }];
         let a = WorkspaceAnalytics::from_snapshot(AnalyticsSnapshot {
             storage: vec![],
-            runs,
-            durations: RunDurations {
+            detections,
+            durations: DetectionDurations {
                 avg_ms: None,
                 p95_ms: None,
             },

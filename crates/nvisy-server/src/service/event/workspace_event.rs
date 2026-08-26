@@ -123,6 +123,9 @@ pub enum WorkspaceEvent {
     RedactionCreated {
         #[serde(flatten)]
         detection: DetectionRef,
+        /// The redaction that was produced (its own id, distinct from the
+        /// detection's — a detection can produce many redactions).
+        redaction_id: Uuid,
         input_file_name: Option<String>,
         notify: Uuid,
     },
