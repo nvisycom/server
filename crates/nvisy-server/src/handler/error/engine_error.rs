@@ -1,10 +1,12 @@
 //! Redaction-engine error to HTTP error conversion.
 //!
-//! Maps `elide_pipeline::Error` onto an HTTP error by its kind: a
-//! `MalformedInput` is a bad document the caller supplied (a client error),
-//! while every other kind — including `CapabilityUnavailable` (a codec/renderer
-//! the build does not ship) — is a server-side processing fault. The engine's
-//! own message travels along as context.
+//! Maps `elide_pipeline::Error` onto an HTTP error by its kind. Two kinds are
+//! caller errors: `MalformedInput` is a bad document the caller supplied, and
+//! `Configuration` is an incoherent request or policy set (e.g. policies that can
+//! detect but never redact, or a reviewer override naming an off-pipeline
+//! policy). Every other kind — including `CapabilityUnavailable` (a codec or
+//! renderer the build does not ship) — is a server-side processing fault. The
+//! engine's own message travels along as context.
 
 use elide_pipeline::ErrorKind as EngineErrorKind;
 use elide_pipeline::entity::EditError;
@@ -16,6 +18,9 @@ impl<'a> From<elide_pipeline::Error> for HttpError<'a> {
         match error.kind() {
             EngineErrorKind::MalformedInput => ErrorKind::BadRequest
                 .with_message("Document could not be processed")
+                .with_context(error.to_string()),
+            EngineErrorKind::Configuration => ErrorKind::BadRequest
+                .with_message("The pipeline's policies cannot process this request")
                 .with_context(error.to_string()),
             _ => ErrorKind::InternalServerError
                 .with_message("Redaction engine failed")
