@@ -27,7 +27,12 @@ pub trait RouterSecurityExt<S> {
     ///
     /// This middleware stack applies CORS rules, security headers including
     /// HSTS and CSP, response compression, and request body size limits.
-    fn with_security(self, cors: &CorsConfig, headers: &SecurityHeadersConfig) -> Self;
+    fn with_security(
+        self,
+        cors: &CorsConfig,
+        upload: &UploadConfig,
+        headers: &SecurityHeadersConfig,
+    ) -> Self;
 
     /// Layers security middlewares with default configurations.
     ///
@@ -41,7 +46,12 @@ impl<S> RouterSecurityExt<S> for Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
-    fn with_security(self, cors: &CorsConfig, headers: &SecurityHeadersConfig) -> Self {
+    fn with_security(
+        self,
+        cors: &CorsConfig,
+        upload: &UploadConfig,
+        headers: &SecurityHeadersConfig,
+    ) -> Self {
         let cors_layer = CorsLayer::new()
             .allow_origin(cors.to_header_values())
             .allow_methods([
@@ -57,8 +67,8 @@ where
             .max_age(cors.max_age);
 
         let mut router = self
-            .layer(DefaultBodyLimit::max(DEFAULT_MAX_BODY_SIZE))
-            .layer(RequestBodyLimitLayer::new(DEFAULT_MAX_FILE_BODY_SIZE))
+            .layer(DefaultBodyLimit::max(upload.max_body_bytes))
+            .layer(RequestBodyLimitLayer::new(upload.max_file_body_bytes))
             .layer(CompressionLayer::new())
             .layer(cors_layer)
             .layer(SetResponseHeaderLayer::overriding(
@@ -89,7 +99,11 @@ where
     }
 
     fn with_default_security(self) -> Self {
-        self.with_security(&CorsConfig::default(), &SecurityHeadersConfig::default())
+        self.with_security(
+            &CorsConfig::default(),
+            &UploadConfig::default(),
+            &SecurityHeadersConfig::default(),
+        )
     }
 }
 
@@ -152,6 +166,49 @@ impl CorsConfig {
                 .filter_map(|origin| origin.parse().ok())
                 .collect()
         }
+    }
+}
+
+/// Request body size limits.
+///
+/// Bounds how large an incoming request body may be before it is rejected,
+/// guarding against denial-of-service via oversized payloads. Two limits: a
+/// tighter default for ordinary JSON requests, and a larger one for file
+/// uploads (which stream to object storage rather than buffer in memory).
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "cli", derive(clap::Args))]
+#[must_use = "config does nothing unless you use it"]
+pub struct UploadConfig {
+    /// Maximum size in bytes for an ordinary request body (non-upload routes).
+    #[cfg_attr(
+        feature = "cli",
+        arg(long, env = "MAX_BODY_BYTES", default_value_t = DEFAULT_MAX_BODY_SIZE)
+    )]
+    pub max_body_bytes: usize,
+
+    /// Maximum size in bytes for a file upload request body.
+    #[cfg_attr(
+        feature = "cli",
+        arg(long, env = "MAX_FILE_BODY_BYTES", default_value_t = DEFAULT_MAX_FILE_BODY_SIZE)
+    )]
+    pub max_file_body_bytes: usize,
+}
+
+impl Default for UploadConfig {
+    fn default() -> Self {
+        Self {
+            max_body_bytes: DEFAULT_MAX_BODY_SIZE,
+            max_file_body_bytes: DEFAULT_MAX_FILE_BODY_SIZE,
+        }
+    }
+}
+
+impl UploadConfig {
+    /// The server-wide hard file-upload limit in bytes, as a `u64` for comparison
+    /// against measured upload sizes and workspace caps.
+    #[must_use]
+    pub fn max_file_bytes(&self) -> u64 {
+        self.max_file_body_bytes as u64
     }
 }
 

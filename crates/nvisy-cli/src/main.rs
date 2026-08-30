@@ -63,12 +63,13 @@ async fn run() -> anyhow::Result<()> {
 
 /// Creates the router with all middleware layers applied.
 fn create_router(state: ServiceState, middleware: &MiddlewareConfig) -> Router {
-    let api_routes = routes(CustomRoutes::new(), state.clone()).with_state(state);
+    let api_routes =
+        routes(CustomRoutes::new(), state.clone(), &middleware.upload).with_state(state);
 
     api_routes
         .with_open_api(&middleware.openapi)
         .with_metrics()
-        .with_security(&middleware.cors, &Default::default())
+        .with_security(&middleware.cors, &middleware.upload, &Default::default())
         .with_observability()
         .with_recovery(&middleware.recovery)
 }

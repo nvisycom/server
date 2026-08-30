@@ -4,6 +4,7 @@
 //! including upload, download, metadata management, and file operations. All
 //! operations are secured with workspace-level authorization.
 
+use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use aide::axum::ApiRouter;
@@ -26,14 +27,15 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Multipart, Path, Permission, Query, SecurityContext,
     ValidateJson, WorkspaceContext,
 };
-use crate::handler::request::{CursorPagination, ListFiles, UpdateFile, WorkspaceFilePathParams};
+use crate::handler::request::{
+    CursorPagination, DeleteFiles, ListFiles, UpdateFile, WorkspaceFilePathParams,
+};
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::utility::{DownloadResponseExt, attachment_headers, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
-use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
 use crate::service::{
-    CryptoService, EngineService, EventEmitter, EventOrigin, FileRef, HashingReader, RunBlobStore,
-    ServiceState, WorkspaceEvent,
+    CryptoService, EngineService, EventEmitter, EventOrigin, FileRef, HashingReader, LimitedReader,
+    RunBlobStore, ServiceState, WorkspaceEvent,
 };
 
 /// Tracing target for workspace file operations.
@@ -127,6 +129,11 @@ struct FileUploadContext {
     engine: EngineService,
     /// Retention expiry for uploaded originals (`None` = keep indefinitely).
     expires_at: Option<jiff::Timestamp>,
+    /// The workspace's soft per-file upload cap in bytes, if set. A file that
+    /// streams past it is rejected before its excess reaches storage. `None`
+    /// leaves only the server-wide hard limit (enforced by the request body
+    /// layer) in force.
+    max_upload_bytes: Option<u64>,
 }
 
 /// Streams one multipart file to storage and builds its unsaved row.
@@ -169,13 +176,30 @@ async fn process_single_file(
         "Streaming file to storage"
     );
 
-    // Step 1: Encrypt the plaintext as it streams to NATS. The measured reader
-    // captures the plaintext size and hash (NATS only sees ciphertext).
+    // Step 1: Encrypt the plaintext as it streams to NATS. The limited reader
+    // aborts an oversized upload before its excess is encrypted and stored; with
+    // no workspace soft cap it is set to an unreachable budget, leaving the
+    // server-wide hard limit (enforced upstream by the request body layer) as the
+    // only bound. The measured reader captures the plaintext size and hash (NATS
+    // only sees ciphertext).
+    let cap = ctx.max_upload_bytes.unwrap_or(u64::MAX);
     let source = StreamReader::new(field.map(|result| result.map_err(std::io::Error::other)));
-    let (measured, measurements) = HashingReader::new(source);
+    let (limited, limit_state) = LimitedReader::new(source, cap);
+    let (measured, measurements) = HashingReader::new(limited);
     let encrypted = ctx.crypto.encrypt_reader(ctx.workspace_id, measured);
 
-    ctx.file_store.put(&file_key, Box::pin(encrypted)).await?;
+    if let Err(err) = ctx.file_store.put(&file_key, Box::pin(encrypted)).await {
+        // The limited reader aborts the stream, which fails the `put`. When that
+        // is why it failed, report the size limit (413) rather than a storage
+        // error; the reader's error is stringified in transit, so consult the
+        // shared state instead of inspecting the error.
+        if limit_state.is_exceeded() {
+            return Err(ErrorKind::PayloadTooLarge.with_message(format!(
+                "File exceeds the {cap}-byte upload limit for this workspace"
+            )));
+        }
+        return Err(err.into());
+    }
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -234,11 +258,10 @@ async fn upload_file(
     // The uploader is the caller; resolve their identity once for every file below.
     let uploaded_by = resolve_account_ref(&mut conn, auth_claims.account_id).await?;
 
-    // Precompute the retention expiry for uploaded originals from workspace
-    // settings, so every file in this batch carries the same expiry.
-    let expires_at = workspace
-        .settings
-        .or_default()
+    // Read workspace settings once for the whole batch: the retention expiry for
+    // uploaded originals, and the soft per-file upload cap.
+    let settings = workspace.settings.or_default();
+    let expires_at = settings
         .retention
         .original_documents
         .expires_at(jiff::Timestamp::now());
@@ -250,6 +273,7 @@ async fn upload_file(
         crypto,
         engine,
         expires_at,
+        max_upload_bytes: settings.max_upload_bytes,
     };
 
     let mut uploaded_files = Vec::new();
@@ -654,10 +678,110 @@ fn delete_file_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
+/// Deletes several files in one call (soft delete).
+///
+/// Idempotent: each requested id that resolves to a live file in the workspace
+/// is deleted; ids that are unknown, already deleted, or in another workspace are
+/// reported as skipped rather than failing the request.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_claims.account_id,
+        workspace_id = %workspace.id,
+        requested = request.file_ids.len(),
+    )
+)]
+async fn bulk_delete_files(
+    State(pg_client): State<PgClient>,
+    State(blob): State<RunBlobStore>,
+    WorkspaceContext(workspace): WorkspaceContext,
+    AuthState(auth_claims): AuthState,
+    security: SecurityContext,
+    ValidateJson(request): ValidateJson<DeleteFiles>,
+) -> Result<(StatusCode, Json<response::DeletedFiles>)> {
+    tracing::debug!(target: TRACING_TARGET, "Bulk-deleting files");
+
+    let mut conn = pg_client.get_connection().await?;
+
+    auth_claims
+        .authorize_workspace(&mut conn, workspace.id, Permission::DeleteFiles)
+        .await?;
+
+    // De-duplicate the requested ids, then resolve the live files among them that
+    // belong to this workspace. Whatever does not come back is skipped: unknown,
+    // already deleted, or another workspace's — the delete is idempotent.
+    let requested: BTreeSet<Uuid> = request.file_ids.into_iter().collect();
+    let requested: Vec<Uuid> = requested.into_iter().collect();
+    let files = conn
+        .find_files_in_workspace(workspace.id, &requested)
+        .await?;
+
+    let found: BTreeSet<Uuid> = files.iter().map(|file| file.id).collect();
+    let skipped: Vec<Uuid> = requested
+        .into_iter()
+        .filter(|id| !found.contains(id))
+        .collect();
+
+    // Soft-delete every resolved file and record its deletion event in one
+    // transaction, so no event is lost, nor recorded for a delete that rolled
+    // back. Either the whole batch's rows and events commit, or none do.
+    conn.transaction(async |conn| {
+        for file in &files {
+            conn.delete_workspace_file(file.id).await?;
+            conn.emit_event(
+                EventOrigin {
+                    workspace_id: workspace.id,
+                    account_id: auth_claims.account_id,
+                    security: &security,
+                },
+                WorkspaceEvent::FileDeleted(FileRef {
+                    file_id: file.id,
+                    file_name: file.display_name.clone(),
+                }),
+            )
+            .await?;
+        }
+        Ok::<_, Error>(())
+    })
+    .await?;
+
+    // Purge each object, reclaiming storage the same way retention expiry does.
+    // The soft-deletes already committed above; `purge_file` re-runs each
+    // idempotently, then removes the object. A pending purge is the reaper's to
+    // retry, so its outcome is not surfaced to the caller.
+    for file in &files {
+        let _ = blob
+            .purge_file(&mut conn, file.id, &file.storage_path, &file.storage_bucket)
+            .await?;
+    }
+
+    let deleted: Vec<Uuid> = files.iter().map(|file| file.id).collect();
+    tracing::info!(
+        target: TRACING_TARGET,
+        deleted = deleted.len(),
+        skipped = skipped.len(),
+        "Files bulk-deleted",
+    );
+
+    Ok((
+        StatusCode::OK,
+        Json(response::DeletedFiles { deleted, skipped }),
+    ))
+}
+
+fn bulk_delete_files_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Delete files")
+        .description("Deletes several files in one call. Idempotent: ids that resolve to live files in the workspace are removed and returned in `deleted`; ids that are unknown, already deleted, or in another workspace are returned in `skipped`. Deletion is permanent — the files' content cannot be recovered.")
+        .response::<200, Json<response::DeletedFiles>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+}
+
 /// Returns a [`Router`] with all related routes.
 ///
 /// [`Router`]: axum::routing::Router
-pub fn routes() -> ApiRouter<ServiceState> {
+pub fn routes(max_file_body_bytes: usize) -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
@@ -665,8 +789,15 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/workspaces/{workspaceSlug}/files/",
             post_with(upload_file, upload_file_docs)
-                .layer(DefaultBodyLimit::max(DEFAULT_MAX_FILE_BODY_SIZE))
+                // Raise this route's default body limit to the upload ceiling; the
+                // global `RequestBodyLimitLayer` still caps every route at the same
+                // hard limit.
+                .layer(DefaultBodyLimit::max(max_file_body_bytes))
                 .get_with(list_files, list_files_docs),
+        )
+        .api_route(
+            "/workspaces/{workspaceSlug}/files/delete/",
+            post_with(bulk_delete_files, bulk_delete_files_docs),
         )
         .api_route(
             "/workspaces/{workspaceSlug}/files/{fileId}/",

@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{Handle, NotificationEvent, WorkspaceRole, WorkspaceSettings};
+use nvisy_postgres::types::{Handle, Json, NotificationEvent, WorkspaceRole, WorkspaceSettings};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +23,11 @@ pub struct Workspace {
     /// Serve path of the workspace's avatar (logo), when set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,
-    /// Workspace settings (approval requirement, data-retention rules).
+    /// Workspace settings (raster policy, data-retention rules, upload cap).
+    ///
+    /// `maxUploadBytes` is resolved to the effective per-file limit — the smaller
+    /// of the workspace's own cap and the server-wide hard limit — so a client
+    /// always reads a concrete number to enforce.
     pub settings: WorkspaceSettings,
     /// Account that created this workspace.
     pub created_by: AccountRef,
@@ -37,14 +41,17 @@ pub struct Workspace {
 
 impl Workspace {
     /// Creates a new instance of [`Workspace`] as an owner.
-    pub fn from_model(workspace: model::Workspace, created_by: AccountRef) -> Self {
-        let settings = workspace.settings.or_default();
+    pub fn from_model(
+        workspace: model::Workspace,
+        created_by: AccountRef,
+        hard_max_upload_bytes: u64,
+    ) -> Self {
         Self {
             slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
             avatar_url: workspace.avatar_url,
-            settings,
+            settings: resolve_settings(&workspace.settings, hard_max_upload_bytes),
             created_by,
             member_role: WorkspaceRole::Owner,
             created_at: workspace.created_at.into(),
@@ -57,20 +64,38 @@ impl Workspace {
         workspace: model::Workspace,
         member: model::WorkspaceMember,
         created_by: AccountRef,
+        hard_max_upload_bytes: u64,
     ) -> Self {
-        let settings = workspace.settings.or_default();
         Self {
             slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
             avatar_url: workspace.avatar_url,
-            settings,
+            settings: resolve_settings(&workspace.settings, hard_max_upload_bytes),
             created_by,
             member_role: member.member_role,
             created_at: workspace.created_at.into(),
             updated_at: workspace.updated_at.into(),
         }
     }
+}
+
+/// Resolves the stored settings for the response, replacing the raw soft cap with
+/// the effective per-file upload limit: the smaller of the workspace's own cap
+/// (the hard limit when it set none) and the server-wide hard limit. The result
+/// is always a concrete number a client can enforce.
+fn resolve_settings(
+    settings: &Json<WorkspaceSettings>,
+    hard_max_upload_bytes: u64,
+) -> WorkspaceSettings {
+    let mut settings = settings.or_default();
+    let effective = settings
+        .max_upload_bytes
+        .map_or(hard_max_upload_bytes, |soft| {
+            soft.min(hard_max_upload_bytes)
+        });
+    settings.max_upload_bytes = Some(effective);
+    settings
 }
 
 /// Paginated list of workspaces.

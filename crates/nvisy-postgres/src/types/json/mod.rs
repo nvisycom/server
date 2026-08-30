@@ -30,4 +30,4 @@ pub use retention::{Retention, RetentionScope, RetentionSettings};
 pub use typed_json::Json;
 pub use webhook_headers::{InvalidHeader, WebhookHeaders};
 pub use workspace_metadata::WorkspaceMetadata;
-pub use workspace_settings::{OcrPolicy, WorkspaceSettings};
+pub use workspace_settings::{RasterPolicy, WorkspaceSettings};

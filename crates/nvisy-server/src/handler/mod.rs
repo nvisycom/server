@@ -40,7 +40,7 @@ pub use error::{Error, ErrorKind, Result};
 pub use invites::{CreatedInvite, InviteOutcome, create_invite};
 pub use utility::{BuiltinModule, CustomRoutes, RouterMapFn};
 
-use crate::middleware::{require_authentication, validate_token_middleware};
+use crate::middleware::{UploadConfig, require_authentication, validate_token_middleware};
 use crate::service::ServiceState;
 
 /// Tracing target for unmatched-route fallbacks.
@@ -70,6 +70,7 @@ fn private_routes(
     additional_routes: Option<ApiRouter<ServiceState>>,
     excluded: &HashSet<BuiltinModule>,
     service_state: ServiceState,
+    upload: &UploadConfig,
 ) -> ApiRouter<ServiceState> {
     let mut router = ApiRouter::new();
 
@@ -88,7 +89,7 @@ fn private_routes(
         .merge(connections::routes())
         .merge(chat::routes())
         .merge(connection_syncs::routes())
-        .merge(files::routes())
+        .merge(files::routes(upload.max_file_body_bytes))
         .merge(pipelines::routes())
         .merge(detections::routes())
         .merge(detection_audits::routes())
@@ -144,14 +145,23 @@ fn public_routes(
 }
 
 /// Returns an [`ApiRouter`] with all routes.
-pub fn routes(mut routes: CustomRoutes, state: ServiceState) -> ApiRouter<ServiceState> {
+pub fn routes(
+    mut routes: CustomRoutes,
+    state: ServiceState,
+    upload: &UploadConfig,
+) -> ApiRouter<ServiceState> {
     let require_authentication = from_fn_with_state(state.clone(), require_authentication);
     let validate_token_middleware = from_fn_with_state(state.clone(), validate_token_middleware);
 
     let excluded = std::mem::take(&mut routes.excluded_modules);
 
     // Private routes.
-    let mut private_router = private_routes(routes.private_routes.take(), &excluded, state.clone());
+    let mut private_router = private_routes(
+        routes.private_routes.take(),
+        &excluded,
+        state.clone(),
+        upload,
+    );
     private_router = routes.map_private_before_middleware(private_router);
     private_router = private_router
         .route_layer(require_authentication)
@@ -184,6 +194,7 @@ mod test {
     use nvisy_webhook::reqwest::ReqwestClient;
 
     use crate::handler::{CustomRoutes, routes};
+    use crate::middleware::UploadConfig;
     use crate::service::{
         CryptoConfig, EngineConfig, HealthConfig, ServiceState, SessionKeysConfig, SyncConfig,
     };
@@ -228,6 +239,7 @@ mod test {
             HealthConfig::default(),
             SyncConfig::default(),
             webhook_service,
+            UploadConfig::default(),
         )
         .await?;
         let router = router(state.clone());
@@ -246,7 +258,10 @@ mod test {
 
     /// Returns a new [`TestServer`] with the default router and state.
     pub async fn create_test_server() -> anyhow::Result<TestServer> {
-        create_test_server_with_router(|state| routes(CustomRoutes::new(), state)).await
+        create_test_server_with_router(|state| {
+            routes(CustomRoutes::new(), state, &UploadConfig::default())
+        })
+        .await
     }
 
     #[tokio::test]
@@ -283,6 +298,7 @@ mod test {
                     .exclude(BuiltinModule::Invites)
                     .add_private_routes(custom.clone()),
                 state,
+                &UploadConfig::default(),
             )
         })
         .await?;

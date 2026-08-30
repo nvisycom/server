@@ -60,6 +60,21 @@ impl File {
     }
 }
 
+/// Result of a bulk file deletion.
+///
+/// The deletion is idempotent: `deleted` holds the ids that resolved to live
+/// files in the workspace and were removed, and `skipped` holds the requested
+/// ids that did not (unknown, already deleted, or in another workspace).
+#[must_use]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletedFiles {
+    /// Ids that were deleted.
+    pub deleted: Vec<Uuid>,
+    /// Requested ids that did not resolve to a live file and were skipped.
+    pub skipped: Vec<Uuid>,
+}
+
 /// Response for file uploads (simple list without pagination).
 pub type Files = Vec<File>;
 

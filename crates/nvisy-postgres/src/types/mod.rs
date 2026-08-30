@@ -34,10 +34,10 @@ pub use json::{
     ConnectionSyncFailedParams, DetectionActivityParams, DetectionCompletedParams,
     DetectionFailedParams, DetectionMetadata, FileActivityParams, InvalidHeader,
     InviteActivityParams, Json, MemberActivityParams, MemberInvitedParams, MemberJoinedParams,
-    NotificationPayload, OcrPolicy, PipelineActivityParams, PipelineMetadata, PolicyActivityParams,
-    RedactionActivityParams, RedactionCreatedParams, Retention, RetentionOverride, RetentionScope,
-    RetentionSettings, WebhookActivityParams, WebhookHeaders, WorkspaceActivityParams,
-    WorkspaceMetadata, WorkspaceSettings,
+    NotificationPayload, PipelineActivityParams, PipelineMetadata, PolicyActivityParams,
+    RasterPolicy, RedactionActivityParams, RedactionCreatedParams, Retention, RetentionOverride,
+    RetentionScope, RetentionSettings, WebhookActivityParams, WebhookHeaders,
+    WorkspaceActivityParams, WorkspaceMetadata, WorkspaceSettings,
 };
 pub use pagination::{Cursor, CursorPage, CursorPagination, OffsetPage, OffsetPagination};
 pub use prefixed_id::{ConnectionId, DetectionId, PrefixedIdError, RedactionId, WebhookId};

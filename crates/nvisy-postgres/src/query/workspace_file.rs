@@ -164,15 +164,6 @@ pub trait WorkspaceFileRepository {
     fn delete_workspace_file(&mut self, file_id: Uuid)
     -> impl Future<Output = PgResult<()>> + Send;
 
-    /// Soft deletes multiple workspace files by setting deletion timestamps.
-    ///
-    /// Returns the number of files deleted.
-    fn delete_workspace_files(
-        &mut self,
-        workspace_id: Uuid,
-        file_ids: &[Uuid],
-    ) -> impl Future<Output = PgResult<usize>> + Send;
-
     /// Lists all files in a workspace with sorting and filtering options.
     ///
     /// Supports filtering by file format and sorting by name, date, or size.
@@ -206,9 +197,14 @@ pub trait WorkspaceFileRepository {
         account_id: Uuid,
     ) -> impl Future<Output = PgResult<BigDecimal>> + Send;
 
-    /// Finds multiple workspace files by their IDs.
-    fn find_workspace_files_by_ids(
+    /// Finds the live files among `file_ids` that belong to `workspace_id`.
+    ///
+    /// Workspace-scoped so a caller can only resolve files in the workspace it
+    /// addressed; ids that are unknown, soft-deleted, or in another workspace are
+    /// simply absent from the result rather than an error.
+    fn find_files_in_workspace(
         &mut self,
+        workspace_id: Uuid,
         file_ids: &[Uuid],
     ) -> impl Future<Output = PgResult<Vec<WorkspaceFile>>> + Send;
 
@@ -619,41 +615,6 @@ impl WorkspaceFileRepository for PgConnection {
         .await
     }
 
-    async fn delete_workspace_files(
-        &mut self,
-        workspace_id: Uuid,
-        file_ids: &[Uuid],
-    ) -> PgResult<usize> {
-        use diesel_async::AsyncConnection;
-        use schema::{workspace_file_imports, workspace_files};
-
-        let ids = file_ids.to_vec();
-        self.transaction(async |conn| {
-            let count = diesel::update(
-                workspace_files::table
-                    .filter(workspace_files::id.eq_any(&ids))
-                    .filter(workspace_files::workspace_id.eq(workspace_id))
-                    .filter(workspace_files::deleted_at.is_null()),
-            )
-            .set(workspace_files::deleted_at.eq(diesel::dsl::now))
-            .execute(conn)
-            .await
-            .map_err(PgError::from)?;
-
-            // Drop import-origin rows so re-import is never blocked (see
-            // `delete_workspace_file`).
-            diesel::delete(
-                workspace_file_imports::table.filter(workspace_file_imports::file_id.eq_any(&ids)),
-            )
-            .execute(conn)
-            .await
-            .map_err(PgError::from)?;
-
-            Ok::<_, PgError>(count)
-        })
-        .await
-    }
-
     async fn offset_list_workspace_files(
         &mut self,
         workspace_id: Uuid,
@@ -864,14 +825,16 @@ impl WorkspaceFileRepository for PgConnection {
         Ok(usage.unwrap_or_else(|| BigDecimal::from(0)))
     }
 
-    async fn find_workspace_files_by_ids(
+    async fn find_files_in_workspace(
         &mut self,
+        workspace_id: Uuid,
         file_ids: &[Uuid],
     ) -> PgResult<Vec<WorkspaceFile>> {
         use schema::workspace_files::{self, dsl};
 
         let files = workspace_files::table
             .filter(dsl::id.eq_any(file_ids))
+            .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceFile::as_select())
             .load(self)

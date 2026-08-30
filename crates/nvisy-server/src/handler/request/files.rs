@@ -9,6 +9,7 @@ use nvisy_postgres::model::UpdateWorkspaceFile as UpdateFileModel;
 use nvisy_postgres::types::FileFilter;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use validator::Validate;
 
 use crate::service::{EngineService, UnknownFormatToken};
@@ -33,6 +34,20 @@ impl UpdateFile {
             ..Default::default()
         }
     }
+}
+
+/// Request to delete several files in one call.
+///
+/// The `100`-id cap bounds the work one call fans out into: the resolve query,
+/// the delete transaction, and one best-effort object purge per file.
+#[must_use]
+#[derive(Debug, Default, Serialize, Deserialize, Validate, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteFiles {
+    /// Ids of the files to delete. Ids that are unknown, already deleted, or in
+    /// another workspace are skipped rather than failing the request.
+    #[validate(length(min = 1, max = 100))]
+    pub file_ids: Vec<Uuid>,
 }
 
 /// Defines a transparent string newtype whose OpenAPI schema enumerates the

@@ -28,6 +28,7 @@ use crate::handler::response::{
 };
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
+use crate::middleware::UploadConfig;
 use crate::service::{
     AvatarService, EventEmitter, EventOrigin, MAX_AVATAR_UPLOAD_BYTES, ServiceState,
     WorkspaceEvent, WorkspaceRef,
@@ -69,6 +70,7 @@ async fn backfill_retention(
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn create_workspace(
     State(pg_client): State<PgClient>,
+    State(upload): State<UploadConfig>,
     AuthState(auth_state): AuthState,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateWorkspace>,
@@ -105,7 +107,12 @@ async fn create_workspace(
 
     // The creator is the authenticated caller; resolve their identity directly.
     let creator = resolve_account_ref(&mut conn, creator_id).await?;
-    let response = Workspace::from_model_with_membership(workspace, membership, creator);
+    let response = Workspace::from_model_with_membership(
+        workspace,
+        membership,
+        creator,
+        upload.max_file_bytes(),
+    );
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -131,6 +138,7 @@ fn create_workspace_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn list_workspaces(
     State(pg_client): State<PgClient>,
+    State(upload): State<UploadConfig>,
     AuthState(auth_state): AuthState,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<WorkspacesPage>)> {
@@ -139,8 +147,14 @@ async fn list_workspaces(
         .cursor_list_account_workspaces_with_details(auth_state.account_id, pagination.into())
         .await?;
 
+    let hard_max_upload_bytes = upload.max_file_bytes();
     let response = Page::from_cursor_page(page, |(workspace, member, creator)| {
-        Workspace::from_model_with_membership(workspace, member, creator.into())
+        Workspace::from_model_with_membership(
+            workspace,
+            member,
+            creator.into(),
+            hard_max_upload_bytes,
+        )
     });
 
     tracing::debug!(
@@ -171,6 +185,7 @@ fn list_workspaces_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn read_workspace(
     State(pg_client): State<PgClient>,
+    State(upload): State<UploadConfig>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
 ) -> Result<(StatusCode, Json<Workspace>)> {
@@ -183,9 +198,10 @@ async fn read_workspace(
 
     tracing::info!(target: TRACING_TARGET, "Workspace read");
 
+    let hard = upload.max_file_bytes();
     let response = match member {
-        Some(member) => Workspace::from_model_with_membership(workspace, member, creator),
-        None => Workspace::from_model(workspace, creator),
+        Some(member) => Workspace::from_model_with_membership(workspace, member, creator, hard),
+        None => Workspace::from_model(workspace, creator, hard),
     };
     Ok((StatusCode::OK, Json(response)))
 }
@@ -211,6 +227,7 @@ fn read_workspace_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_workspace(
     State(pg_client): State<PgClient>,
+    State(upload): State<UploadConfig>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     security: SecurityContext,
@@ -260,9 +277,10 @@ async fn update_workspace(
 
     tracing::info!(target: TRACING_TARGET, "Workspace updated");
 
+    let hard = upload.max_file_bytes();
     let response = match member {
-        Some(member) => Workspace::from_model_with_membership(updated, member, creator),
-        None => Workspace::from_model(updated, creator),
+        Some(member) => Workspace::from_model_with_membership(updated, member, creator, hard),
+        None => Workspace::from_model(updated, creator, hard),
     };
 
     Ok((StatusCode::OK, Json(response)))
