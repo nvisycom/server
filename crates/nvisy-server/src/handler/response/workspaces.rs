@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{Handle, Json, NotificationEvent, WorkspaceRole, WorkspaceSettings};
+use nvisy_postgres::types::{Handle, NotificationEvent, WorkspaceRole, WorkspaceSettings};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -51,7 +51,10 @@ impl Workspace {
             display_name: workspace.display_name,
             description: workspace.description,
             avatar_url: workspace.avatar_url,
-            settings: resolve_settings(&workspace.settings, hard_max_upload_bytes),
+            settings: workspace
+                .settings
+                .or_default()
+                .resolved(hard_max_upload_bytes),
             created_by,
             member_role: WorkspaceRole::Owner,
             created_at: workspace.created_at.into(),
@@ -71,31 +74,16 @@ impl Workspace {
             display_name: workspace.display_name,
             description: workspace.description,
             avatar_url: workspace.avatar_url,
-            settings: resolve_settings(&workspace.settings, hard_max_upload_bytes),
+            settings: workspace
+                .settings
+                .or_default()
+                .resolved(hard_max_upload_bytes),
             created_by,
             member_role: member.member_role,
             created_at: workspace.created_at.into(),
             updated_at: workspace.updated_at.into(),
         }
     }
-}
-
-/// Resolves the stored settings for the response, replacing the raw soft cap with
-/// the effective per-file upload limit: the smaller of the workspace's own cap
-/// (the hard limit when it set none) and the server-wide hard limit. The result
-/// is always a concrete number a client can enforce.
-fn resolve_settings(
-    settings: &Json<WorkspaceSettings>,
-    hard_max_upload_bytes: u64,
-) -> WorkspaceSettings {
-    let mut settings = settings.or_default();
-    let effective = settings
-        .max_upload_bytes
-        .map_or(hard_max_upload_bytes, |soft| {
-            soft.min(hard_max_upload_bytes)
-        });
-    settings.max_upload_bytes = Some(effective);
-    settings
 }
 
 /// Paginated list of workspaces.

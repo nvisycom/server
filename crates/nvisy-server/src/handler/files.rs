@@ -33,6 +33,7 @@ use crate::handler::request::{
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::utility::{DownloadResponseExt, attachment_headers, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
+use crate::middleware::UploadConfig;
 use crate::service::{
     CryptoService, EngineService, EventEmitter, EventOrigin, FileRef, HashingReader, LimitedReader,
     RunBlobStore, ServiceState, WorkspaceEvent,
@@ -129,11 +130,11 @@ struct FileUploadContext {
     engine: EngineService,
     /// Retention expiry for uploaded originals (`None` = keep indefinitely).
     expires_at: Option<jiff::Timestamp>,
-    /// The workspace's soft per-file upload cap in bytes, if set. A file that
-    /// streams past it is rejected before its excess reaches storage. `None`
-    /// leaves only the server-wide hard limit (enforced by the request body
-    /// layer) in force.
-    max_upload_bytes: Option<u64>,
+    /// The effective per-file upload cap in bytes — the smaller of the workspace's
+    /// soft cap and the server-wide hard limit. A file streaming past it is
+    /// rejected before its excess reaches storage. This is a true per-file bound,
+    /// unlike the request-body layer, which limits the whole multipart request.
+    max_upload_bytes: u64,
 }
 
 /// Streams one multipart file to storage and builds its unsaved row.
@@ -177,12 +178,11 @@ async fn process_single_file(
     );
 
     // Step 1: Encrypt the plaintext as it streams to NATS. The limited reader
-    // aborts an oversized upload before its excess is encrypted and stored; with
-    // no workspace soft cap it is set to an unreachable budget, leaving the
-    // server-wide hard limit (enforced upstream by the request body layer) as the
-    // only bound. The measured reader captures the plaintext size and hash (NATS
-    // only sees ciphertext).
-    let cap = ctx.max_upload_bytes.unwrap_or(u64::MAX);
+    // aborts an oversized upload before its excess is encrypted and stored,
+    // enforcing the effective per-file cap directly (the request-body layer only
+    // bounds the whole multipart request). The measured reader captures the
+    // plaintext size and hash (NATS only sees ciphertext).
+    let cap = ctx.max_upload_bytes;
     let source = StreamReader::new(field.map(|result| result.map_err(std::io::Error::other)));
     let (limited, limit_state) = LimitedReader::new(source, cap);
     let (measured, measurements) = HashingReader::new(limited);
@@ -194,9 +194,8 @@ async fn process_single_file(
         // error; the reader's error is stringified in transit, so consult the
         // shared state instead of inspecting the error.
         if limit_state.is_exceeded() {
-            return Err(ErrorKind::PayloadTooLarge.with_message(format!(
-                "File exceeds the {cap}-byte upload limit for this workspace"
-            )));
+            return Err(ErrorKind::PayloadTooLarge
+                .with_message(format!("File exceeds the {cap}-byte upload limit")));
         }
         return Err(err.into());
     }
@@ -240,6 +239,7 @@ async fn upload_file(
     State(nats_client): State<NatsClient>,
     State(crypto): State<CryptoService>,
     State(engine): State<EngineService>,
+    State(upload): State<UploadConfig>,
     WorkspaceContext(workspace): WorkspaceContext,
     AuthState(auth_claims): AuthState,
     security: SecurityContext,
@@ -259,12 +259,14 @@ async fn upload_file(
     let uploaded_by = resolve_account_ref(&mut conn, auth_claims.account_id).await?;
 
     // Read workspace settings once for the whole batch: the retention expiry for
-    // uploaded originals, and the soft per-file upload cap.
+    // uploaded originals, and the effective per-file upload cap (the workspace's
+    // soft cap clamped to the server-wide hard limit).
     let settings = workspace.settings.or_default();
     let expires_at = settings
         .retention
         .original_documents
         .expires_at(jiff::Timestamp::now());
+    let max_upload_bytes = settings.effective_max_upload_bytes(upload.max_file_bytes());
 
     let ctx = FileUploadContext {
         workspace_id: workspace.id,
@@ -273,7 +275,7 @@ async fn upload_file(
         crypto,
         engine,
         expires_at,
-        max_upload_bytes: settings.max_upload_bytes,
+        max_upload_bytes,
     };
 
     let mut uploaded_files = Vec::new();
@@ -363,6 +365,7 @@ fn upload_file_docs(op: TransformOperation) -> TransformOperation {
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
+        .response::<413, Json<ErrorResponse>>()
 }
 
 /// Gets file metadata without downloading the content.
@@ -707,55 +710,68 @@ async fn bulk_delete_files(
         .authorize_workspace(&mut conn, workspace.id, Permission::DeleteFiles)
         .await?;
 
-    // De-duplicate the requested ids, then resolve the live files among them that
-    // belong to this workspace. Whatever does not come back is skipped: unknown,
-    // already deleted, or another workspace's — the delete is idempotent.
+    // De-duplicate the requested ids.
     let requested: BTreeSet<Uuid> = request.file_ids.into_iter().collect();
     let requested: Vec<Uuid> = requested.into_iter().collect();
+
+    // Atomically soft-delete the live files among them and record a deletion event
+    // for each in one transaction: the delete resolves and transitions the rows in
+    // a single guarded statement (so a row a concurrent request already deleted is
+    // never double-reported), and the events commit with it — none lost, none
+    // recorded for a delete that rolled back. `files` holds exactly the rows this
+    // request deleted.
     let files = conn
-        .find_files_in_workspace(workspace.id, &requested)
+        .transaction(async |conn| {
+            let files = conn
+                .delete_files_in_workspace(workspace.id, &requested)
+                .await?;
+            for file in &files {
+                conn.emit_event(
+                    EventOrigin {
+                        workspace_id: workspace.id,
+                        account_id: auth_claims.account_id,
+                        security: &security,
+                    },
+                    WorkspaceEvent::FileDeleted(FileRef {
+                        file_id: file.id,
+                        file_name: file.display_name.clone(),
+                    }),
+                )
+                .await?;
+            }
+            Ok::<_, Error>(files)
+        })
         .await?;
 
-    let found: BTreeSet<Uuid> = files.iter().map(|file| file.id).collect();
+    // Whatever was not deleted is skipped: unknown, already deleted, or another
+    // workspace's — the delete is idempotent.
+    let deleted_ids: BTreeSet<Uuid> = files.iter().map(|file| file.id).collect();
     let skipped: Vec<Uuid> = requested
         .into_iter()
-        .filter(|id| !found.contains(id))
+        .filter(|id| !deleted_ids.contains(id))
         .collect();
-
-    // Soft-delete every resolved file and record its deletion event in one
-    // transaction, so no event is lost, nor recorded for a delete that rolled
-    // back. Either the whole batch's rows and events commit, or none do.
-    conn.transaction(async |conn| {
-        for file in &files {
-            conn.delete_workspace_file(file.id).await?;
-            conn.emit_event(
-                EventOrigin {
-                    workspace_id: workspace.id,
-                    account_id: auth_claims.account_id,
-                    security: &security,
-                },
-                WorkspaceEvent::FileDeleted(FileRef {
-                    file_id: file.id,
-                    file_name: file.display_name.clone(),
-                }),
-            )
-            .await?;
-        }
-        Ok::<_, Error>(())
-    })
-    .await?;
 
     // Purge each object, reclaiming storage the same way retention expiry does.
     // The soft-deletes already committed above; `purge_file` re-runs each
-    // idempotently, then removes the object. A pending purge is the reaper's to
-    // retry, so its outcome is not surfaced to the caller.
+    // idempotently, then removes the object. The deletion is the committed result,
+    // so a purge failure must not fail the response (that would make a retry see
+    // these ids as already-gone `skipped`): log it and leave the object for the
+    // reaper to reclaim.
     for file in &files {
-        let _ = blob
+        if let Err(err) = blob
             .purge_file(&mut conn, file.id, &file.storage_path, &file.storage_bucket)
-            .await?;
+            .await
+        {
+            tracing::error!(
+                target: TRACING_TARGET,
+                file_id = %file.id,
+                error = %err,
+                "Failed to purge a bulk-deleted file's object; left for the reaper to retry",
+            );
+        }
     }
 
-    let deleted: Vec<Uuid> = files.iter().map(|file| file.id).collect();
+    let deleted: Vec<Uuid> = deleted_ids.into_iter().collect();
     tracing::info!(
         target: TRACING_TARGET,
         deleted = deleted.len(),
