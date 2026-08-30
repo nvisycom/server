@@ -837,11 +837,29 @@ impl WorkspaceFileRepository for PgConnection {
         workspace_id: Uuid,
         file_ids: &[Uuid],
     ) -> PgResult<Vec<WorkspaceFile>> {
-        use schema::{workspace_file_imports, workspace_files};
+        use diesel::dsl::{exists, not};
+        use schema::workspace_detections::dsl as detections;
+        use schema::{workspace_detections, workspace_file_imports, workspace_files};
 
-        // Transition and return only the live rows in this workspace, in one
-        // atomic statement. The `deleted_at IS NULL` guard means a row a concurrent
-        // request already deleted is not returned here, so it is never
+        // A detection still analyzing (pending or executing) needs its input
+        // document and audit blob, so a file either references is held back from
+        // deletion — otherwise purging it would strand the in-flight detection with
+        // no source or analysis. This mirrors the expiry sweep's hold
+        // (`files_due_for_expiry`); a held file is simply not transitioned, so it
+        // is absent from the result and the caller reports it as skipped.
+        let active_detection_holds_file = exists(
+            workspace_detections::table.filter(
+                detections::status.eq_any(DetectionStatus::IN_PROGRESS).and(
+                    detections::input_file_id
+                        .eq(workspace_files::id)
+                        .or(detections::audit_file_id.eq(workspace_files::id.nullable())),
+                ),
+            ),
+        );
+
+        // Transition and return only the live, non-held rows in this workspace, in
+        // one atomic statement. The `deleted_at IS NULL` guard means a row a
+        // concurrent request already deleted is not returned here, so it is never
         // double-counted or double-emitted. This runs on the caller's connection
         // (not its own transaction) so the caller can commit the deletion together
         // with the events it emits for the returned rows.
@@ -849,7 +867,8 @@ impl WorkspaceFileRepository for PgConnection {
             workspace_files::table
                 .filter(workspace_files::id.eq_any(file_ids))
                 .filter(workspace_files::workspace_id.eq(workspace_id))
-                .filter(workspace_files::deleted_at.is_null()),
+                .filter(workspace_files::deleted_at.is_null())
+                .filter(not(active_detection_holds_file)),
         )
         .set(workspace_files::deleted_at.eq(diesel::dsl::now))
         .returning(WorkspaceFile::as_returning())

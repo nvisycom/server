@@ -64,14 +64,16 @@ impl File {
 ///
 /// The deletion is idempotent: `deleted` holds the ids that resolved to live
 /// files in the workspace and were removed, and `skipped` holds the requested
-/// ids that did not (unknown, already deleted, or in another workspace).
+/// ids that did not — unknown, already deleted, in another workspace, or held by
+/// an in-progress detection that still needs the file.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DeletedFiles {
     /// Ids that were deleted.
     pub deleted: Vec<Uuid>,
-    /// Requested ids that did not resolve to a live file and were skipped.
+    /// Requested ids that were skipped: unknown, already deleted, in another
+    /// workspace, or held by an in-progress detection.
     pub skipped: Vec<Uuid>,
 }
 

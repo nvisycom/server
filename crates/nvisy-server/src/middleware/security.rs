@@ -68,7 +68,11 @@ where
 
         let mut router = self
             .layer(DefaultBodyLimit::max(upload.max_body_bytes))
-            .layer(RequestBodyLimitLayer::new(upload.max_file_body_bytes))
+            // The router-wide hard ceiling must not sit below any per-route
+            // default, or an ordinary request within `max_body_bytes` would be
+            // rejected here first; use the larger of the two limits regardless of
+            // how they are configured relative to each other.
+            .layer(RequestBodyLimitLayer::new(upload.request_body_ceiling()))
             .layer(CompressionLayer::new())
             .layer(cors_layer)
             .layer(SetResponseHeaderLayer::overriding(
@@ -210,6 +214,18 @@ impl UploadConfig {
     pub fn max_file_bytes(&self) -> u64 {
         self.max_file_body_bytes as u64
     }
+
+    /// The router-wide request-body ceiling: the larger of the two limits.
+    ///
+    /// This backs the single `RequestBodyLimitLayer` wrapping every route, so it
+    /// must never sit below the per-route default (`max_body_bytes`) — otherwise
+    /// an ordinary request the default would allow gets rejected by the ceiling
+    /// first. The per-route `DefaultBodyLimit`s enforce the finer limits beneath
+    /// it.
+    #[must_use]
+    pub fn request_body_ceiling(&self) -> usize {
+        self.max_body_bytes.max(self.max_file_body_bytes)
+    }
 }
 
 /// Security headers configuration for the application.
@@ -306,5 +322,29 @@ impl ReferrerPolicy {
             Self::Origin => "origin",
             Self::StrictOriginWhenCrossOrigin => "strict-origin-when-cross-origin",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UploadConfig;
+
+    #[test]
+    fn request_body_ceiling_is_never_below_the_default_body_limit() {
+        // A misconfiguration where the ordinary-request default exceeds the file
+        // limit must still admit ordinary requests: the router-wide ceiling is the
+        // larger of the two, so it never rejects a request the default allows.
+        let config = UploadConfig {
+            max_body_bytes: 8 * 1024 * 1024,
+            max_file_body_bytes: 4 * 1024 * 1024,
+        };
+        assert_eq!(config.request_body_ceiling(), 8 * 1024 * 1024);
+
+        // In the usual configuration (file limit larger), the file limit governs.
+        let config = UploadConfig {
+            max_body_bytes: 4 * 1024 * 1024,
+            max_file_body_bytes: 12 * 1024 * 1024,
+        };
+        assert_eq!(config.request_body_ceiling(), 12 * 1024 * 1024);
     }
 }

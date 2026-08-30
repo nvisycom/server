@@ -789,8 +789,8 @@ async fn bulk_delete_files(
         })
         .await?;
 
-    // Whatever was not deleted is skipped: unknown, already deleted, or another
-    // workspace's — the delete is idempotent.
+    // Whatever was not deleted is skipped: unknown, already deleted, another
+    // workspace's, or held by an in-progress detection — the delete is idempotent.
     let deleted_ids: BTreeSet<Uuid> = files.iter().map(|file| file.id).collect();
     let skipped: Vec<Uuid> = requested
         .into_iter()
