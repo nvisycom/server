@@ -1,47 +1,98 @@
+<div align="center">
+
+<img src=".github/assets/logo.png" alt="Nvisy Server" width="104" height="104" />
+
 # Nvisy Server
 
-[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
+**Detect and redact sensitive data across documents, images, and audio.**
 
-Open-source multimodal redaction API. Detect and redact PII and sensitive data
-across documents, images, and audio.
+The open-source multimodal redaction API: an LLM-powered engine and HTTP service
+that finds PII and applies your redaction policies, wrapped in a multi-tenant,
+self-hostable Rust server.
+
+[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/actions/workflow/status/nvisycom/server/release.yml?branch=main&label=release&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/release.yml)
+[![Security](https://img.shields.io/github/actions/workflow/status/nvisycom/server/security.yml?branch=main&label=security&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/security.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE.txt)
+
+[**nvisy.com**](https://nvisy.com) · [**docs.nvisy.com**](https://docs.nvisy.com) · [**app.nvisy.com**](https://app.nvisy.com)
+
+</div>
+
+A document flows through two phases: **detection** analyzes it for sensitive
+entities and stores a reviewable report; **redaction** applies the pipeline's
+policies (with optional reviewer edits) to produce a redacted file. Detection
+runs asynchronously off a transactional work queue; redaction is synchronous and
+repeatable. Everything is scoped to isolated workspaces with per-workspace
+credential encryption.
 
 > [!WARNING]
-> **Active development: API not stable.** This project is under active
-> development. Public APIs, configuration shapes, on-disk formats, and
-> wire protocols may change without notice between releases. Pin a
-> specific commit if you depend on this in production.
+> **Active development. API not stable.** Public APIs, configuration shapes,
+> on-disk formats, and wire protocols may change without notice between releases.
+> Pin a specific commit if you depend on this in production.
 
 ## Features
 
-- **Multimodal Redaction:** Detect and remove sensitive data across PDFs, images, and audio
-- **AI-Powered Detection:** LLM-driven PII and entity recognition with configurable redaction policies
-- **Workspace Isolation:** Multi-tenant workspaces with HKDF-derived credential encryption
-- **Real-Time Collaboration:** WebSocket and NATS pub/sub for live document editing
-- **Interactive Docs:** Auto-generated OpenAPI with Scalar UI
+- **Multimodal redaction** — detect and remove sensitive data across PDFs, office documents, images, and audio.
+- **AI-powered detection** — LLM- and pattern-driven PII/entity recognition, governed by configurable redaction policies.
+- **Reviewer edits** — suppress a false positive, retag a detection, or add one the analysis missed, then re-redact — as many times as needed.
+- **Workspace isolation** — multi-tenant workspaces with HKDF-derived, per-workspace credential encryption.
+- **Real-time collaboration** — WebSocket and NATS pub/sub for live status and document editing.
+- **Interactive docs** — auto-generated OpenAPI served through a Scalar UI.
 
-## Quick Start
+## Requirements
 
-The fastest way to get started is with [Nvisy Cloud](https://nvisy.com).
+- **Rust + Cargo** — 1.95+, Edition 2024
+- **PostgreSQL** 18+ and **NATS** 2.10+ (JetStream) — the dev compose file provides both
 
-For self-hosted deployments, refer to [`docker/`](docker/) for compose files and
-infrastructure requirements, and [`.env.example`](.env.example) for configuration.
+## Quick start
+
+The fastest way to get started is with [Nvisy Cloud](https://nvisy.com). To run a
+server locally:
+
+```bash
+make install-all       # Install tools and make scripts executable
+make generate-all      # Generate .env, auth keys, and apply migrations
+
+docker compose -f docker/docker-compose.dev.yml up -d   # Start Postgres + NATS
+make run                                                # Run the server
+```
+
+The API then serves interactive OpenAPI docs (Scalar UI) at the running server's
+docs path. For self-hosted deployments, see [`docker/`](docker/) for compose
+files and infrastructure requirements, and [`.env.example`](.env.example) for
+configuration.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `make run` | Run the server (starts Postgres and NATS first) |
+| `make ci` | Run all CI checks locally (check, fmt, clippy, test, docs) |
+| `make fmt` | Fix code formatting (nightly rustfmt) |
+| `make security` | Run security checks (`cargo deny`) |
+| `make generate-migrations` | Apply migrations and regenerate `schema.rs` |
+| `make reset-docker` | Reset the dev containers (`down -v`, then `up -d`) |
 
 ## Documentation
 
-See [`docs/`](docs/) for architecture, intelligence capabilities, provider
-design, and security documentation.
+See [`docs/`](docs/) for the details:
 
-## Changelog
+- [Architecture](docs/ARCHITECTURE.md) — the crates, the detect/redact pipeline, and how they fit together.
+- [Intelligence](docs/INTELLIGENCE.md) — detection capabilities and the redaction engine.
+- [Providers](docs/PROVIDERS.md) — inference and object-store provider design.
+- [Security](docs/SECURITY.md) — the encryption, authentication, and isolation model.
 
-See [CHANGELOG.md](CHANGELOG.md) for release notes and version history.
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines, and
+[CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## License
 
-Apache 2.0 License, see [LICENSE.txt](LICENSE.txt)
+Apache 2.0 License, see [LICENSE.txt](LICENSE.txt).
 
 ## Support
 
-- **Documentation:** [docs.nvisy.com](https://docs.nvisy.com)
-- **Issues:** [GitHub Issues](https://github.com/nvisycom/server/issues)
-- **Email:** [support@nvisy.com](mailto:support@nvisy.com)
-- **API Status:** [nvisy.openstatus.dev](https://nvisy.openstatus.dev)
+- **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
+- **Email**: [support@nvisy.com](mailto:support@nvisy.com)
