@@ -11,7 +11,7 @@ use axum::http::StatusCode;
 use nvisy_core::health::HealthStatus;
 
 use super::response::Health;
-use crate::extract::{AuthState, Json, Version};
+use crate::extract::{Json, OptionalAuth, Version};
 use crate::handler::Result;
 use crate::service::{HealthCache, ServiceState};
 
@@ -43,7 +43,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
 )]
 async fn health_status(
     State(health_service): State<HealthCache>,
-    auth_state: Option<AuthState>,
+    OptionalAuth(auth_state): OptionalAuth,
     version: Version,
 ) -> Result<(StatusCode, Json<Health>)> {
     let is_authenticated = auth_state.is_some();
