@@ -137,15 +137,17 @@ struct FileUploadContext {
     max_upload_bytes: u64,
 }
 
-/// Streams one multipart file to storage and builds its unsaved row.
+/// A file streamed to object storage whose row has not yet been inserted.
 ///
-/// Returns the object's storage key alongside the row (rather than inserting it),
-/// so the caller can persist the row and record its creation event in one
-/// transaction, and reclaim the already-stored object if that transaction fails.
-async fn process_single_file(
-    ctx: &FileUploadContext,
-    field: Field<'_>,
-) -> Result<(FileKey, NewWorkspaceFile)> {
+/// Pairs the object's storage key with its unsaved row so the batch can persist
+/// every row together, and reclaim every staged object if that fails.
+struct StagedFile {
+    key: FileKey,
+    record: NewWorkspaceFile,
+}
+
+/// Streams one multipart file to storage and builds its unsaved row.
+async fn stage_file(ctx: &FileUploadContext, field: Field<'_>) -> Result<StagedFile> {
     let filename = field
         .file_name()
         .map(ToString::to_string)
@@ -207,8 +209,9 @@ async fn process_single_file(
         "File encrypted and streamed to storage"
     );
 
-    // Step 2: Create DB record with all storage info (Postgres generates its own id)
-    let file_record = NewWorkspaceFile {
+    // Step 2: Build the unsaved row from the storage location and the measured
+    // plaintext (Postgres generates the row's own id on insert).
+    let record = NewWorkspaceFile {
         workspace_id: ctx.workspace_id,
         account_id: ctx.account_id,
         display_name: Some(filename.clone()),
@@ -223,7 +226,69 @@ async fn process_single_file(
         ..Default::default()
     };
 
-    Ok((file_key, file_record))
+    Ok(StagedFile {
+        key: file_key,
+        record,
+    })
+}
+
+impl FileUploadContext {
+    /// Streams every file field in the multipart body to storage, returning the
+    /// staged files (object key + unsaved row). Non-file fields are skipped.
+    ///
+    /// On any error, the objects staged so far are removed before returning, so a
+    /// failed batch never leaves an object behind with no row to reclaim it.
+    async fn stage_all(&self, multipart: &mut Multipart) -> Result<Vec<StagedFile>> {
+        let mut staged: Vec<StagedFile> = Vec::new();
+        loop {
+            let field = match multipart.next_field().await {
+                Ok(Some(field)) => field,
+                Ok(None) => break,
+                Err(err) => {
+                    self.discard_staged(&staged).await;
+                    tracing::error!(target: TRACING_TARGET, error = %err, "Failed to read multipart field");
+                    return Err(ErrorKind::BadRequest
+                        .with_message("Invalid multipart data")
+                        .with_context(format!("Failed to parse multipart form: {err}")));
+                }
+            };
+
+            if field.file_name().is_none() {
+                tracing::debug!(
+                    target: TRACING_TARGET,
+                    name = ?field.name(),
+                    "Skipping non-file multipart field"
+                );
+                continue;
+            }
+
+            match stage_file(self, field).await {
+                Ok(file) => staged.push(file),
+                Err(err) => {
+                    self.discard_staged(&staged).await;
+                    return Err(err);
+                }
+            }
+        }
+        Ok(staged)
+    }
+
+    /// Removes staged objects best-effort, for when the batch does not commit.
+    /// Each object was written before any row exists, so nothing else can reclaim
+    /// it; a failed removal is logged and left for no one — an acceptable leak in
+    /// the rare storage-error case, not worth failing the response over.
+    async fn discard_staged(&self, staged: &[StagedFile]) {
+        for file in staged {
+            if let Err(err) = self.file_store.delete(&file.key).await {
+                tracing::warn!(
+                    target: TRACING_TARGET,
+                    error = %err,
+                    object_id = %file.key.object_id,
+                    "Failed to remove staged object after an aborted upload",
+                );
+            }
+        }
+    }
 }
 
 /// Uploads input files to a workspace for processing.
@@ -243,7 +308,7 @@ async fn upload_file(
     WorkspaceContext(workspace): WorkspaceContext,
     AuthState(auth_claims): AuthState,
     security: SecurityContext,
-    Multipart(mut multipart): Multipart,
+    mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Files>)> {
     tracing::info!(target: TRACING_TARGET, "Uploading files");
 
@@ -278,76 +343,57 @@ async fn upload_file(
         max_upload_bytes,
     };
 
-    let mut uploaded_files = Vec::new();
-    while let Some(field) = multipart.next_field().await.map_err(|err| {
-        tracing::error!(target: TRACING_TARGET, error = %err, "Failed to read multipart field");
-        ErrorKind::BadRequest
-            .with_message("Invalid multipart data")
-            .with_context(format!("Failed to parse multipart form: {}", err))
-    })? {
-        if field.file_name().is_none() {
-            tracing::debug!(
-                target: TRACING_TARGET,
-                name = ?field.name(),
-                "Skipping non-file multipart field"
-            );
-            continue;
-        }
+    // Stream every file to storage first, then persist all their rows and events
+    // in one transaction. The upload is atomic: it either records every file or,
+    // on any failure, records none and reclaims every staged object — never a
+    // partial batch, and never an object left behind with no row.
+    let staged = ctx.stage_all(&mut multipart).await?;
 
-        let (file_key, file_record) = process_single_file(&ctx, field).await?;
+    if staged.is_empty() {
+        return Err(ErrorKind::BadRequest.with_message("No files provided in multipart request"));
+    }
 
-        // Persist the row and record its creation event in one transaction, so
-        // the event is never lost, nor recorded for a row that rolled back.
-        let created_file = match conn
-            .transaction(async |conn| {
-                let created_file = conn.create_workspace_file(file_record).await?;
+    let origin = EventOrigin {
+        workspace_id: workspace.id,
+        account_id: auth_claims.account_id,
+        security: &security,
+    };
+    let created = match conn
+        .transaction(async |conn| {
+            let mut created = Vec::with_capacity(staged.len());
+            for file in &staged {
+                let record = conn.create_workspace_file(file.record.clone()).await?;
                 conn.emit_event(
-                    EventOrigin {
-                        workspace_id: workspace.id,
-                        account_id: auth_claims.account_id,
-                        security: &security,
-                    },
+                    origin,
                     WorkspaceEvent::FileCreated {
                         file: FileRef {
-                            file_id: created_file.id,
-                            file_name: created_file.display_name.clone(),
+                            file_id: record.id,
+                            file_name: record.display_name.clone(),
                         },
-                        file_size_bytes: created_file.file_size_bytes,
+                        file_size_bytes: record.file_size_bytes,
                     },
                 )
                 .await?;
-                Ok::<_, Error>(created_file)
-            })
-            .await
-        {
-            Ok(created_file) => created_file,
-            Err(err) => {
-                // The object was streamed to storage before this transaction, so a
-                // rollback leaves it with no row and nothing can reclaim it later
-                // (the reaper works from file rows). Remove it best-effort before
-                // surfacing the error.
-                if let Err(cleanup) = ctx.file_store.delete(&file_key).await {
-                    tracing::warn!(
-                        target: TRACING_TARGET,
-                        error = %cleanup,
-                        object_id = %file_key.object_id,
-                        "Failed to remove orphaned object after rolled-back file insert",
-                    );
-                }
-                return Err(err);
+                created.push(record);
             }
-        };
+            Ok::<_, Error>(created)
+        })
+        .await
+    {
+        Ok(created) => created,
+        Err(err) => {
+            // The objects were streamed before this transaction, so a rollback
+            // leaves them with no rows and nothing to reclaim them later (the
+            // reaper works from file rows). Remove them best-effort first.
+            ctx.discard_staged(&staged).await;
+            return Err(err);
+        }
+    };
 
-        uploaded_files.push(response::File::from_model(
-            created_file,
-            workspace.slug.clone(),
-            uploaded_by.clone(),
-        ));
-    }
-
-    if uploaded_files.is_empty() {
-        return Err(ErrorKind::BadRequest.with_message("No files provided in multipart request"));
-    }
+    let uploaded_files: Files = created
+        .into_iter()
+        .map(|file| response::File::from_model(file, workspace.slug.clone(), uploaded_by.clone()))
+        .collect();
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -360,7 +406,7 @@ async fn upload_file(
 
 fn upload_file_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Upload files")
-        .description("Uploads one or more files to a workspace. Each file is encrypted, streamed to storage, and recorded.")
+        .description("Uploads one or more files to a workspace. Each file is encrypted and streamed to storage. The batch is atomic: either every file is recorded, or on any failure none are and the request fails.")
         .response::<201, Json<Files>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
