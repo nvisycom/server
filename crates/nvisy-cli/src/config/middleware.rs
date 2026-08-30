@@ -14,7 +14,7 @@
 //! ```
 
 use clap::Args;
-use nvisy_server::middleware::{CorsConfig, OpenApiConfig, RecoveryConfig};
+use nvisy_server::middleware::{CorsConfig, OpenApiConfig, RecoveryConfig, UploadConfig};
 
 use super::TRACING_TARGET_CONFIG;
 
@@ -27,6 +27,10 @@ pub struct MiddlewareConfig {
     /// CORS (Cross-Origin Resource Sharing) configuration.
     #[clap(flatten)]
     pub cors: CorsConfig,
+
+    /// Request body size limits.
+    #[clap(flatten)]
+    pub upload: UploadConfig,
 
     /// OpenAPI documentation configuration.
     #[clap(flatten)]
@@ -45,6 +49,13 @@ impl MiddlewareConfig {
             origins = ?self.cors.allowed_origins,
             credentials = self.cors.allow_credentials,
             "CORS configuration"
+        );
+
+        tracing::info!(
+            target: TRACING_TARGET_CONFIG,
+            max_body_bytes = self.upload.max_body_bytes,
+            max_file_body_bytes = self.upload.max_file_body_bytes,
+            "Upload configuration"
         );
 
         tracing::info!(

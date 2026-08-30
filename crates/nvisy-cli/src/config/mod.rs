@@ -172,6 +172,7 @@ impl Cli {
             service.health,
             service.sync,
             webhook,
+            self.middleware.upload.clone(),
         )
         .await?)
     }

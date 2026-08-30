@@ -64,6 +64,7 @@ pub use recovery::{RecoveryConfig, RouterRecoveryExt};
 pub use route_category::RouteCategory;
 pub use security::{
     CorsConfig, FrameOptions, ReferrerPolicy, RouterSecurityExt, SecurityHeadersConfig,
+    UploadConfig,
 };
 pub use specification::{OpenApiConfig, RouterOpenApiExt};
 pub use sunset::{SunsetConfig, sunset_headers};

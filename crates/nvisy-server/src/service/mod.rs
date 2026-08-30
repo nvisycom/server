@@ -28,11 +28,12 @@ use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use nvisy_webhook::WebhookService;
 use tokio_util::sync::CancellationToken;
 
+use crate::middleware::UploadConfig;
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::chat::{ChatService, TurnLocation};
 pub use crate::service::connection_config::ConnectionConfig;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
-pub(crate) use crate::service::crypto::{CryptoError, HashingReader, Measurements};
+pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
 pub(crate) use crate::service::detection::resolve_policies;
 pub use crate::service::detection::{
     DetectionJob, DetectionOutboxDrainer, DetectionQueue, DetectionStatusEvent, DetectionWorker,
@@ -99,6 +100,9 @@ pub struct ServiceState {
     pub password: PasswordService,
     pub session_keys: SessionKeys,
     pub user_agent_parser: UserAgentParser,
+
+    // Request body size limits (server-wide hard caps):
+    pub upload: UploadConfig,
 }
 
 impl ServiceState {
@@ -114,6 +118,7 @@ impl ServiceState {
         health_config: HealthConfig,
         sync_config: SyncConfig,
         webhook_service: WebhookService,
+        upload_config: UploadConfig,
     ) -> Result<Self> {
         let postgres_client = connect_postgres(postgres_config).await?;
         let nats_client = connect_nats(nats_config).await?;
@@ -145,6 +150,7 @@ impl ServiceState {
             password: PasswordService::new(),
             session_keys,
             user_agent_parser: UserAgentParser::new(),
+            upload: upload_config,
         };
 
         Ok(service_state)
@@ -265,6 +271,7 @@ impl_di_field!(
     password: PasswordService,
     session_keys: SessionKeys,
     user_agent_parser: UserAgentParser,
+    upload: UploadConfig,
 );
 
 // Stateless services, composed from `Infra` on extraction:

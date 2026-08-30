@@ -4,6 +4,7 @@
 //! including upload, download, metadata management, and file operations. All
 //! operations are secured with workspace-level authorization.
 
+use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use aide::axum::ApiRouter;
@@ -26,14 +27,16 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Multipart, Path, Permission, Query, SecurityContext,
     ValidateJson, WorkspaceContext,
 };
-use crate::handler::request::{CursorPagination, ListFiles, UpdateFile, WorkspaceFilePathParams};
+use crate::handler::request::{
+    CursorPagination, DeleteFiles, ListFiles, UpdateFile, WorkspaceFilePathParams,
+};
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::utility::{DownloadResponseExt, attachment_headers, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
-use crate::middleware::DEFAULT_MAX_FILE_BODY_SIZE;
+use crate::middleware::UploadConfig;
 use crate::service::{
-    CryptoService, EngineService, EventEmitter, EventOrigin, FileRef, HashingReader, RunBlobStore,
-    ServiceState, WorkspaceEvent,
+    CryptoService, EngineService, EventEmitter, EventOrigin, FileRef, HashingReader, LimitedReader,
+    RunBlobStore, ServiceState, WorkspaceEvent,
 };
 
 /// Tracing target for workspace file operations.
@@ -127,17 +130,24 @@ struct FileUploadContext {
     engine: EngineService,
     /// Retention expiry for uploaded originals (`None` = keep indefinitely).
     expires_at: Option<jiff::Timestamp>,
+    /// The effective per-file upload cap in bytes — the smaller of the workspace's
+    /// soft cap and the server-wide hard limit. A file streaming past it is
+    /// rejected before its excess reaches storage. This is a true per-file bound,
+    /// unlike the request-body layer, which limits the whole multipart request.
+    max_upload_bytes: u64,
+}
+
+/// A file streamed to object storage whose row has not yet been inserted.
+///
+/// Pairs the object's storage key with its unsaved row so the batch can persist
+/// every row together, and reclaim every staged object if that fails.
+struct StagedFile {
+    key: FileKey,
+    record: NewWorkspaceFile,
 }
 
 /// Streams one multipart file to storage and builds its unsaved row.
-///
-/// Returns the object's storage key alongside the row (rather than inserting it),
-/// so the caller can persist the row and record its creation event in one
-/// transaction, and reclaim the already-stored object if that transaction fails.
-async fn process_single_file(
-    ctx: &FileUploadContext,
-    field: Field<'_>,
-) -> Result<(FileKey, NewWorkspaceFile)> {
+async fn stage_file(ctx: &FileUploadContext, field: Field<'_>) -> Result<StagedFile> {
     let filename = field
         .file_name()
         .map(ToString::to_string)
@@ -169,13 +179,28 @@ async fn process_single_file(
         "Streaming file to storage"
     );
 
-    // Step 1: Encrypt the plaintext as it streams to NATS. The measured reader
-    // captures the plaintext size and hash (NATS only sees ciphertext).
+    // Step 1: Encrypt the plaintext as it streams to NATS. The limited reader
+    // aborts an oversized upload before its excess is encrypted and stored,
+    // enforcing the effective per-file cap directly (the request-body layer only
+    // bounds the whole multipart request). The measured reader captures the
+    // plaintext size and hash (NATS only sees ciphertext).
+    let cap = ctx.max_upload_bytes;
     let source = StreamReader::new(field.map(|result| result.map_err(std::io::Error::other)));
-    let (measured, measurements) = HashingReader::new(source);
+    let (limited, limit_state) = LimitedReader::new(source, cap);
+    let (measured, measurements) = HashingReader::new(limited);
     let encrypted = ctx.crypto.encrypt_reader(ctx.workspace_id, measured);
 
-    ctx.file_store.put(&file_key, Box::pin(encrypted)).await?;
+    if let Err(err) = ctx.file_store.put(&file_key, Box::pin(encrypted)).await {
+        // The limited reader aborts the stream, which fails the `put`. When that
+        // is why it failed, report the size limit (413) rather than a storage
+        // error; the reader's error is stringified in transit, so consult the
+        // shared state instead of inspecting the error.
+        if limit_state.is_exceeded() {
+            return Err(ErrorKind::PayloadTooLarge
+                .with_message(format!("File exceeds the {cap}-byte upload limit")));
+        }
+        return Err(err.into());
+    }
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -184,8 +209,9 @@ async fn process_single_file(
         "File encrypted and streamed to storage"
     );
 
-    // Step 2: Create DB record with all storage info (Postgres generates its own id)
-    let file_record = NewWorkspaceFile {
+    // Step 2: Build the unsaved row from the storage location and the measured
+    // plaintext (Postgres generates the row's own id on insert).
+    let record = NewWorkspaceFile {
         workspace_id: ctx.workspace_id,
         account_id: ctx.account_id,
         display_name: Some(filename.clone()),
@@ -200,7 +226,69 @@ async fn process_single_file(
         ..Default::default()
     };
 
-    Ok((file_key, file_record))
+    Ok(StagedFile {
+        key: file_key,
+        record,
+    })
+}
+
+impl FileUploadContext {
+    /// Streams every file field in the multipart body to storage, returning the
+    /// staged files (object key + unsaved row). Non-file fields are skipped.
+    ///
+    /// On any error, the objects staged so far are removed before returning, so a
+    /// failed batch never leaves an object behind with no row to reclaim it.
+    async fn stage_all(&self, multipart: &mut Multipart) -> Result<Vec<StagedFile>> {
+        let mut staged: Vec<StagedFile> = Vec::new();
+        loop {
+            let field = match multipart.next_field().await {
+                Ok(Some(field)) => field,
+                Ok(None) => break,
+                Err(err) => {
+                    self.discard_staged(&staged).await;
+                    tracing::error!(target: TRACING_TARGET, error = %err, "Failed to read multipart field");
+                    return Err(ErrorKind::BadRequest
+                        .with_message("Invalid multipart data")
+                        .with_context(format!("Failed to parse multipart form: {err}")));
+                }
+            };
+
+            if field.file_name().is_none() {
+                tracing::debug!(
+                    target: TRACING_TARGET,
+                    name = ?field.name(),
+                    "Skipping non-file multipart field"
+                );
+                continue;
+            }
+
+            match stage_file(self, field).await {
+                Ok(file) => staged.push(file),
+                Err(err) => {
+                    self.discard_staged(&staged).await;
+                    return Err(err);
+                }
+            }
+        }
+        Ok(staged)
+    }
+
+    /// Removes staged objects best-effort, for when the batch does not commit.
+    /// Each object was written before any row exists, so nothing else can reclaim
+    /// it; a failed removal is logged and left for no one — an acceptable leak in
+    /// the rare storage-error case, not worth failing the response over.
+    async fn discard_staged(&self, staged: &[StagedFile]) {
+        for file in staged {
+            if let Err(err) = self.file_store.delete(&file.key).await {
+                tracing::warn!(
+                    target: TRACING_TARGET,
+                    error = %err,
+                    object_id = %file.key.object_id,
+                    "Failed to remove staged object after an aborted upload",
+                );
+            }
+        }
+    }
 }
 
 /// Uploads input files to a workspace for processing.
@@ -216,10 +304,11 @@ async fn upload_file(
     State(nats_client): State<NatsClient>,
     State(crypto): State<CryptoService>,
     State(engine): State<EngineService>,
+    State(upload): State<UploadConfig>,
     WorkspaceContext(workspace): WorkspaceContext,
     AuthState(auth_claims): AuthState,
     security: SecurityContext,
-    Multipart(mut multipart): Multipart,
+    mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Files>)> {
     tracing::info!(target: TRACING_TARGET, "Uploading files");
 
@@ -234,14 +323,15 @@ async fn upload_file(
     // The uploader is the caller; resolve their identity once for every file below.
     let uploaded_by = resolve_account_ref(&mut conn, auth_claims.account_id).await?;
 
-    // Precompute the retention expiry for uploaded originals from workspace
-    // settings, so every file in this batch carries the same expiry.
-    let expires_at = workspace
-        .settings
-        .or_default()
+    // Read workspace settings once for the whole batch: the retention expiry for
+    // uploaded originals, and the effective per-file upload cap (the workspace's
+    // soft cap clamped to the server-wide hard limit).
+    let settings = workspace.settings.or_default();
+    let expires_at = settings
         .retention
         .original_documents
         .expires_at(jiff::Timestamp::now());
+    let max_upload_bytes = settings.effective_max_upload_bytes(upload.max_file_bytes());
 
     let ctx = FileUploadContext {
         workspace_id: workspace.id,
@@ -250,78 +340,60 @@ async fn upload_file(
         crypto,
         engine,
         expires_at,
+        max_upload_bytes,
     };
 
-    let mut uploaded_files = Vec::new();
-    while let Some(field) = multipart.next_field().await.map_err(|err| {
-        tracing::error!(target: TRACING_TARGET, error = %err, "Failed to read multipart field");
-        ErrorKind::BadRequest
-            .with_message("Invalid multipart data")
-            .with_context(format!("Failed to parse multipart form: {}", err))
-    })? {
-        if field.file_name().is_none() {
-            tracing::debug!(
-                target: TRACING_TARGET,
-                name = ?field.name(),
-                "Skipping non-file multipart field"
-            );
-            continue;
-        }
+    // Stream every file to storage first, then persist all their rows and events
+    // in one transaction. The upload is atomic: it either records every file or,
+    // on any failure, records none and reclaims every staged object — never a
+    // partial batch, and never an object left behind with no row.
+    let staged = ctx.stage_all(&mut multipart).await?;
 
-        let (file_key, file_record) = process_single_file(&ctx, field).await?;
+    if staged.is_empty() {
+        return Err(ErrorKind::BadRequest.with_message("No files provided in multipart request"));
+    }
 
-        // Persist the row and record its creation event in one transaction, so
-        // the event is never lost, nor recorded for a row that rolled back.
-        let created_file = match conn
-            .transaction(async |conn| {
-                let created_file = conn.create_workspace_file(file_record).await?;
+    let origin = EventOrigin {
+        workspace_id: workspace.id,
+        account_id: auth_claims.account_id,
+        security: &security,
+    };
+    let created = match conn
+        .transaction(async |conn| {
+            let mut created = Vec::with_capacity(staged.len());
+            for file in &staged {
+                let record = conn.create_workspace_file(file.record.clone()).await?;
                 conn.emit_event(
-                    EventOrigin {
-                        workspace_id: workspace.id,
-                        account_id: auth_claims.account_id,
-                        security: &security,
-                    },
+                    origin,
                     WorkspaceEvent::FileCreated {
                         file: FileRef {
-                            file_id: created_file.id,
-                            file_name: created_file.display_name.clone(),
+                            file_id: record.id,
+                            file_name: record.display_name.clone(),
                         },
-                        file_size_bytes: created_file.file_size_bytes,
+                        file_size_bytes: record.file_size_bytes,
                     },
                 )
                 .await?;
-                Ok::<_, Error>(created_file)
-            })
-            .await
-        {
-            Ok(created_file) => created_file,
-            Err(err) => {
-                // The object was streamed to storage before this transaction, so a
-                // rollback leaves it with no row and nothing can reclaim it later
-                // (the reaper works from file rows). Remove it best-effort before
-                // surfacing the error.
-                if let Err(cleanup) = ctx.file_store.delete(&file_key).await {
-                    tracing::warn!(
-                        target: TRACING_TARGET,
-                        error = %cleanup,
-                        object_id = %file_key.object_id,
-                        "Failed to remove orphaned object after rolled-back file insert",
-                    );
-                }
-                return Err(err);
+                created.push(record);
             }
-        };
+            Ok::<_, Error>(created)
+        })
+        .await
+    {
+        Ok(created) => created,
+        Err(err) => {
+            // The objects were streamed before this transaction, so a rollback
+            // leaves them with no rows and nothing to reclaim them later (the
+            // reaper works from file rows). Remove them best-effort first.
+            ctx.discard_staged(&staged).await;
+            return Err(err);
+        }
+    };
 
-        uploaded_files.push(response::File::from_model(
-            created_file,
-            workspace.slug.clone(),
-            uploaded_by.clone(),
-        ));
-    }
-
-    if uploaded_files.is_empty() {
-        return Err(ErrorKind::BadRequest.with_message("No files provided in multipart request"));
-    }
+    let uploaded_files: Files = created
+        .into_iter()
+        .map(|file| response::File::from_model(file, workspace.slug.clone(), uploaded_by.clone()))
+        .collect();
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -334,11 +406,12 @@ async fn upload_file(
 
 fn upload_file_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Upload files")
-        .description("Uploads one or more files to a workspace. Each file is encrypted, streamed to storage, and recorded.")
+        .description("Uploads one or more files to a workspace. Each file is encrypted and streamed to storage. The batch is atomic: either every file is recorded, or on any failure none are and the request fails.")
         .response::<201, Json<Files>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
+        .response::<413, Json<ErrorResponse>>()
 }
 
 /// Gets file metadata without downloading the content.
@@ -654,10 +727,123 @@ fn delete_file_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
+/// Deletes several files in one call (soft delete).
+///
+/// Idempotent: each requested id that resolves to a live file in the workspace
+/// is deleted; ids that are unknown, already deleted, or in another workspace are
+/// reported as skipped rather than failing the request.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_claims.account_id,
+        workspace_id = %workspace.id,
+        requested = request.file_ids.len(),
+    )
+)]
+async fn bulk_delete_files(
+    State(pg_client): State<PgClient>,
+    State(blob): State<RunBlobStore>,
+    WorkspaceContext(workspace): WorkspaceContext,
+    AuthState(auth_claims): AuthState,
+    security: SecurityContext,
+    ValidateJson(request): ValidateJson<DeleteFiles>,
+) -> Result<(StatusCode, Json<response::DeletedFiles>)> {
+    tracing::debug!(target: TRACING_TARGET, "Bulk-deleting files");
+
+    let mut conn = pg_client.get_connection().await?;
+
+    auth_claims
+        .authorize_workspace(&mut conn, workspace.id, Permission::DeleteFiles)
+        .await?;
+
+    // De-duplicate the requested ids.
+    let requested: BTreeSet<Uuid> = request.file_ids.into_iter().collect();
+    let requested: Vec<Uuid> = requested.into_iter().collect();
+
+    // Atomically soft-delete the live files among them and record a deletion event
+    // for each in one transaction: the delete resolves and transitions the rows in
+    // a single guarded statement (so a row a concurrent request already deleted is
+    // never double-reported), and the events commit with it — none lost, none
+    // recorded for a delete that rolled back. `files` holds exactly the rows this
+    // request deleted.
+    let files = conn
+        .transaction(async |conn| {
+            let files = conn
+                .delete_files_in_workspace(workspace.id, &requested)
+                .await?;
+            for file in &files {
+                conn.emit_event(
+                    EventOrigin {
+                        workspace_id: workspace.id,
+                        account_id: auth_claims.account_id,
+                        security: &security,
+                    },
+                    WorkspaceEvent::FileDeleted(FileRef {
+                        file_id: file.id,
+                        file_name: file.display_name.clone(),
+                    }),
+                )
+                .await?;
+            }
+            Ok::<_, Error>(files)
+        })
+        .await?;
+
+    // Whatever was not deleted is skipped: unknown, already deleted, another
+    // workspace's, or held by an in-progress detection — the delete is idempotent.
+    let deleted_ids: BTreeSet<Uuid> = files.iter().map(|file| file.id).collect();
+    let skipped: Vec<Uuid> = requested
+        .into_iter()
+        .filter(|id| !deleted_ids.contains(id))
+        .collect();
+
+    // Purge each object, reclaiming storage the same way retention expiry does.
+    // The soft-deletes already committed above; `purge_file` re-runs each
+    // idempotently, then removes the object. The deletion is the committed result,
+    // so a purge failure must not fail the response (that would make a retry see
+    // these ids as already-gone `skipped`): log it and leave the object for the
+    // reaper to reclaim.
+    for file in &files {
+        if let Err(err) = blob
+            .purge_file(&mut conn, file.id, &file.storage_path, &file.storage_bucket)
+            .await
+        {
+            tracing::error!(
+                target: TRACING_TARGET,
+                file_id = %file.id,
+                error = %err,
+                "Failed to purge a bulk-deleted file's object; left for the reaper to retry",
+            );
+        }
+    }
+
+    let deleted: Vec<Uuid> = deleted_ids.into_iter().collect();
+    tracing::info!(
+        target: TRACING_TARGET,
+        deleted = deleted.len(),
+        skipped = skipped.len(),
+        "Files bulk-deleted",
+    );
+
+    Ok((
+        StatusCode::OK,
+        Json(response::DeletedFiles { deleted, skipped }),
+    ))
+}
+
+fn bulk_delete_files_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Delete files")
+        .description("Deletes several files in one call. Idempotent: ids that resolve to live files in the workspace are removed and returned in `deleted`; ids that are unknown, already deleted, or in another workspace are returned in `skipped`. Deletion is permanent — the files' content cannot be recovered.")
+        .response::<200, Json<response::DeletedFiles>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+}
+
 /// Returns a [`Router`] with all related routes.
 ///
 /// [`Router`]: axum::routing::Router
-pub fn routes() -> ApiRouter<ServiceState> {
+pub fn routes(max_file_body_bytes: usize) -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
@@ -665,8 +851,15 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/workspaces/{workspaceSlug}/files/",
             post_with(upload_file, upload_file_docs)
-                .layer(DefaultBodyLimit::max(DEFAULT_MAX_FILE_BODY_SIZE))
+                // Raise this route's default body limit to the upload ceiling; the
+                // global `RequestBodyLimitLayer` still caps every route at the same
+                // hard limit.
+                .layer(DefaultBodyLimit::max(max_file_body_bytes))
                 .get_with(list_files, list_files_docs),
+        )
+        .api_route(
+            "/workspaces/{workspaceSlug}/files/delete/",
+            post_with(bulk_delete_files, bulk_delete_files_docs),
         )
         .api_route(
             "/workspaces/{workspaceSlug}/files/{fileId}/",

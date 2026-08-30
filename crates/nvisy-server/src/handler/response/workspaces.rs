@@ -23,7 +23,11 @@ pub struct Workspace {
     /// Serve path of the workspace's avatar (logo), when set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,
-    /// Workspace settings (approval requirement, data-retention rules).
+    /// Workspace settings (raster policy, data-retention rules, upload cap).
+    ///
+    /// `maxUploadBytes` is resolved to the effective per-file limit — the smaller
+    /// of the workspace's own cap and the server-wide hard limit — so a client
+    /// always reads a concrete number to enforce.
     pub settings: WorkspaceSettings,
     /// Account that created this workspace.
     pub created_by: AccountRef,
@@ -37,14 +41,20 @@ pub struct Workspace {
 
 impl Workspace {
     /// Creates a new instance of [`Workspace`] as an owner.
-    pub fn from_model(workspace: model::Workspace, created_by: AccountRef) -> Self {
-        let settings = workspace.settings.or_default();
+    pub fn from_model(
+        workspace: model::Workspace,
+        created_by: AccountRef,
+        hard_max_upload_bytes: u64,
+    ) -> Self {
         Self {
             slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
             avatar_url: workspace.avatar_url,
-            settings,
+            settings: workspace
+                .settings
+                .or_default()
+                .resolved(hard_max_upload_bytes),
             created_by,
             member_role: WorkspaceRole::Owner,
             created_at: workspace.created_at.into(),
@@ -57,14 +67,17 @@ impl Workspace {
         workspace: model::Workspace,
         member: model::WorkspaceMember,
         created_by: AccountRef,
+        hard_max_upload_bytes: u64,
     ) -> Self {
-        let settings = workspace.settings.or_default();
         Self {
             slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
             avatar_url: workspace.avatar_url,
-            settings,
+            settings: workspace
+                .settings
+                .or_default()
+                .resolved(hard_max_upload_bytes),
             created_by,
             member_role: member.member_role,
             created_at: workspace.created_at.into(),

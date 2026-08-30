@@ -268,6 +268,8 @@ pub enum ErrorKind {
     NotFound,
     /// 409 Conflict - Conflicting resource state
     Conflict,
+    /// 413 Payload Too Large - Request body exceeds the allowed size
+    PayloadTooLarge,
     /// 429 Too Many Requests - Rate limit exceeded
     TooManyRequests,
 
@@ -336,6 +338,7 @@ impl ErrorKind {
             Self::Forbidden => ErrorResponse::FORBIDDEN,
             Self::NotFound => ErrorResponse::NOT_FOUND,
             Self::Conflict => ErrorResponse::CONFLICT,
+            Self::PayloadTooLarge => ErrorResponse::PAYLOAD_TOO_LARGE,
             Self::TooManyRequests => ErrorResponse::TOO_MANY_REQUESTS,
             Self::InternalServerError => ErrorResponse::INTERNAL_SERVER_ERROR,
             Self::NotImplemented => ErrorResponse::NOT_IMPLEMENTED,

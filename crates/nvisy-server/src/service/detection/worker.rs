@@ -16,7 +16,7 @@ use nvisy_postgres::query::{
     EventOutboxRepository, WorkspaceDetectionRepository, WorkspaceFileRepository,
     WorkspaceRepository,
 };
-use nvisy_postgres::types::{DetectionStatus, Json, OcrPolicy, WorkspaceSettings};
+use nvisy_postgres::types::{DetectionStatus, Json, RasterPolicy, WorkspaceSettings};
 use nvisy_postgres::{AsyncConnection, DieselError, PgConn, PgError};
 use tokio_util::sync::CancellationToken;
 
@@ -277,7 +277,7 @@ impl DetectionWorker {
                     .with_context(err.to_string())
             })?;
 
-        // Parse the workspace settings once; both OCR mode and retention read it.
+        // Parse the workspace settings once; both raster mode and retention read it.
         let settings = workspace.settings.or_default();
         let request =
             self.engine
@@ -412,12 +412,12 @@ enum JobOutcome {
     Retry,
 }
 
-/// Maps a workspace's OCR policy to the engine's per-detection
+/// Maps a workspace's raster policy to the engine's per-detection
 /// page-rasterisation mode.
 fn raster_mode_of(settings: &WorkspaceSettings) -> RasterMode {
-    match settings.ocr {
-        OcrPolicy::Auto => RasterMode::Auto,
-        OcrPolicy::Force => RasterMode::always(),
-        OcrPolicy::Never => RasterMode::Never,
+    match settings.raster {
+        RasterPolicy::Auto => RasterMode::Auto,
+        RasterPolicy::Always => RasterMode::always(),
+        RasterPolicy::Never => RasterMode::Never,
     }
 }
