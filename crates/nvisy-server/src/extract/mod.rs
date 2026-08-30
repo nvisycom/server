@@ -17,7 +17,7 @@ mod version;
 mod workspace_context;
 
 pub use crate::extract::auth::{
-    AuthClaims, AuthHeader, AuthProvider, AuthResult, AuthState, Permission,
+    AuthClaims, AuthHeader, AuthProvider, AuthResult, AuthState, OptionalAuth, Permission,
 };
 pub use crate::extract::avatar::Avatar;
 pub use crate::extract::connection_info::{AppConnectInfo, ClientIp};

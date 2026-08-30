@@ -397,7 +397,8 @@ where
     T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
     fn operation_input(_ctx: &mut GenContext, operation: &mut Operation) {
-        // Add security requirement for Bearer token
+        // The Bearer token is required: the only way to satisfy the operation is
+        // to present it.
         operation.security = vec![[("BearerAuth".to_string(), vec![])].into()];
     }
 }
