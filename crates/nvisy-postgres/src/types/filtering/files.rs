@@ -14,6 +14,10 @@ pub struct FileFilter {
     /// only these extensions — including `Some(empty)`, which matches nothing
     /// (an active facet resolved to an empty set).
     extensions: Option<Vec<String>>,
+    /// Exact SHA-256 content hash (32 raw bytes). `None` imposes no constraint;
+    /// `Some(hash)` matches only files with this exact content. Lets a client
+    /// check whether identical content already exists before uploading it.
+    hash: Option<Vec<u8>>,
 }
 
 impl FileFilter {
@@ -62,5 +66,18 @@ impl FileFilter {
     #[inline]
     pub fn extensions(&self) -> Option<&[String]> {
         self.extensions.as_deref()
+    }
+
+    /// Constrains to files whose content hash is exactly `hash` (32 raw bytes).
+    #[inline]
+    pub fn with_hash(mut self, hash: Vec<u8>) -> Self {
+        self.hash = Some(hash);
+        self
+    }
+
+    /// Returns the content-hash constraint, if one is set.
+    #[inline]
+    pub fn hash(&self) -> Option<&[u8]> {
+        self.hash.as_deref()
     }
 }

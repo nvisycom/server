@@ -112,9 +112,10 @@ async fn list_files(
 fn list_files_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List files")
         .description(
-            "Lists files in a workspace with cursor-based pagination. Use the `after` parameter with the `nextCursor` value from the response to fetch subsequent pages.",
+            "Lists files in a workspace with cursor-based pagination. Use the `after` parameter with the `nextCursor` value from the response to fetch subsequent pages. Pass `hash` (a hex SHA-256) to find files with identical content — a non-empty result means the file already exists, so an upload can be skipped.",
         )
         .response::<200, Json<FilesPage>>()
+        .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
 }
@@ -312,26 +313,31 @@ async fn upload_file(
 ) -> Result<(StatusCode, Json<Files>)> {
     tracing::info!(target: TRACING_TARGET, "Uploading files");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    auth_claims
-        .authorize_workspace(&mut conn, workspace.id, Permission::UploadFiles)
-        .await?;
-
     let file_store = nats_client.object_store::<FilesBucket>().await?;
 
-    // The uploader is the caller; resolve their identity once for every file below.
-    let uploaded_by = resolve_account_ref(&mut conn, auth_claims.account_id).await?;
+    // Do the quick pre-flight DB work under a connection, then release it: auth,
+    // resolve the uploader's identity, and read the workspace's upload settings.
+    // Holding a pooled connection across the streaming below would pin it for the
+    // whole upload and starve the pool under load, so this scope drops it before
+    // streaming begins.
+    let (uploaded_by, expires_at, max_upload_bytes) = {
+        let mut conn = pg_client.get_connection().await?;
 
-    // Read workspace settings once for the whole batch: the retention expiry for
-    // uploaded originals, and the effective per-file upload cap (the workspace's
-    // soft cap clamped to the server-wide hard limit).
-    let settings = workspace.settings.or_default();
-    let expires_at = settings
-        .retention
-        .original_documents
-        .expires_at(jiff::Timestamp::now());
-    let max_upload_bytes = settings.effective_max_upload_bytes(upload.max_file_bytes());
+        auth_claims
+            .authorize_workspace(&mut conn, workspace.id, Permission::UploadFiles)
+            .await?;
+
+        let uploaded_by = resolve_account_ref(&mut conn, auth_claims.account_id).await?;
+
+        let settings = workspace.settings.or_default();
+        let expires_at = settings
+            .retention
+            .original_documents
+            .expires_at(jiff::Timestamp::now());
+        let max_upload_bytes = settings.effective_max_upload_bytes(upload.max_file_bytes());
+
+        (uploaded_by, expires_at, max_upload_bytes)
+    };
 
     let ctx = FileUploadContext {
         workspace_id: workspace.id,
@@ -343,16 +349,20 @@ async fn upload_file(
         max_upload_bytes,
     };
 
-    // Stream every file to storage first, then persist all their rows and events
-    // in one transaction. The upload is atomic: it either records every file or,
-    // on any failure, records none and reclaims every staged object — never a
-    // partial batch, and never an object left behind with no row.
+    // Stream every file to storage first (no DB connection held), then persist all
+    // their rows and events in one transaction. The upload is atomic: it either
+    // records every file or, on any failure, records none and reclaims every
+    // staged object — never a partial batch, and never an object left behind with
+    // no row.
     let staged = ctx.stage_all(&mut multipart).await?;
 
     if staged.is_empty() {
         return Err(ErrorKind::BadRequest.with_message("No files provided in multipart request"));
     }
 
+    // Re-acquire a connection only for the final commit, so the pool is free
+    // during the streaming above.
+    let mut conn = pg_client.get_connection().await?;
     let origin = EventOrigin {
         workspace_id: workspace.id,
         account_id: auth_claims.account_id,
