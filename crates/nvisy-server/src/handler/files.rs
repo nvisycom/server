@@ -807,6 +807,11 @@ async fn bulk_delete_files(
         .filter(|id| !deleted_ids.contains(id))
         .collect();
 
+    // Release the batch connection before purging: each purge does a NATS delete
+    // and re-acquires a short-lived connection of its own, so one connection is
+    // never pinned across the whole (potentially long) sequence of object deletes.
+    drop(conn);
+
     // Purge each object, reclaiming storage the same way retention expiry does.
     // The soft-deletes already committed above; `purge_file` re-runs each
     // idempotently, then removes the object. The deletion is the committed result,
@@ -814,6 +819,18 @@ async fn bulk_delete_files(
     // these ids as already-gone `skipped`): log it and leave the object for the
     // reaper to reclaim.
     for file in &files {
+        let mut conn = match pg_client.get_connection().await {
+            Ok(conn) => conn,
+            Err(err) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    file_id = %file.id,
+                    error = %err,
+                    "Failed to get connection to purge a bulk-deleted file's object; left for the reaper",
+                );
+                continue;
+            }
+        };
         if let Err(err) = blob
             .purge_file(&mut conn, file.id, &file.storage_path, &file.storage_bucket)
             .await
