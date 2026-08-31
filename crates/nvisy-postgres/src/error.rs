@@ -5,7 +5,7 @@
 
 use std::borrow::Cow;
 
-use deadpool::managed::TimeoutType;
+pub use deadpool::managed::TimeoutType;
 use diesel::result::{ConnectionError, Error};
 use diesel_async::pooled_connection::PoolError as DieselPoolError;
 use diesel_async::pooled_connection::deadpool::PoolError as DeadpoolError;

@@ -17,7 +17,7 @@ use nvisy_postgres::query::{
     WorkspaceRepository,
 };
 use nvisy_postgres::types::{DetectionStatus, Json, RasterPolicy, WorkspaceSettings};
-use nvisy_postgres::{AsyncConnection, DieselError, PgConn, PgError};
+use nvisy_postgres::{AsyncConnection, DieselError, PgError};
 use tokio_util::sync::CancellationToken;
 
 use super::job::DetectionJob;
@@ -209,11 +209,24 @@ impl DetectionWorker {
             .broadcast_status(detection.id, DetectionStatus::Executing)
             .await;
 
-        if let Err(err) = self
-            .detect(&mut conn, &job, &claimed, &pipeline, claim_token)
-            .await
-        {
+        // Release the connection before analysis: `detect` manages its own
+        // connections across its phases, so holding this one across the (slow)
+        // inference would pin a pooled connection per in-flight job and starve the
+        // pool. It is re-acquired below only if the detection fails.
+        drop(conn);
+
+        if let Err(err) = self.detect(&job, &claimed, &pipeline, claim_token).await {
             tracing::warn!(target: TRACING_TARGET, error = %err, "Detection failed");
+            let mut conn = match self.infra.postgres.get_connection().await {
+                Ok(conn) => conn,
+                Err(err) => {
+                    // No connection to persist the failure: the detection stays
+                    // `Executing` with no queued job, so redeliver to drive it to a
+                    // terminal state on a later attempt.
+                    tracing::error!(target: TRACING_TARGET, error = %err, "Failed to get connection to fail detection");
+                    return JobOutcome::Retry;
+                }
+            };
             let outcome = fail_detection(
                 &mut conn,
                 &self.detection,
@@ -253,46 +266,65 @@ impl DetectionWorker {
     }
 
     /// Performs the analysis and records the detection as `Complete`.
+    ///
+    /// Manages its own connection lifecycle in three phases so a pooled
+    /// connection is never held across the analysis inference: phase 1 reads the
+    /// inputs under a connection and releases it, phase 2 runs the (slow) document
+    /// build, analysis, and audit staging with no connection held, and phase 3
+    /// re-acquires a connection only for the finalize transaction.
     async fn detect(
         &self,
-        conn: &mut PgConn,
         job: &DetectionJob,
         detection: &WorkspaceDetection,
         pipeline: &WorkspacePipeline,
         claim_token: jiff::Timestamp,
     ) -> Result<()> {
-        let workspace = conn
-            .find_workspace_by_id(job.workspace_id)
-            .await?
-            .ok_or_else(|| ErrorKind::NotFound.with_message("Workspace not found"))?;
-        let file = conn
-            .find_file_in_workspace(job.workspace_id, detection.input_file_id)
-            .await?
-            .ok_or_else(|| ErrorKind::NotFound.with_message("Input file not found"))?;
+        // Phase 1: read the inputs under a connection, then drop it.
+        let (file, request, policies, settings) = {
+            let mut conn = self.infra.postgres.get_connection().await?;
 
-        let definition = PipelineDefinition::from_parts(pipeline.definition.clone(), Vec::new())
-            .map_err(|err| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to decode pipeline definition")
-                    .with_context(err.to_string())
-            })?;
+            let workspace = conn
+                .find_workspace_by_id(job.workspace_id)
+                .await?
+                .ok_or_else(|| ErrorKind::NotFound.with_message("Workspace not found"))?;
+            let file = conn
+                .find_file_in_workspace(job.workspace_id, detection.input_file_id)
+                .await?
+                .ok_or_else(|| ErrorKind::NotFound.with_message("Input file not found"))?;
 
-        // Parse the workspace settings once; both raster mode and retention read it.
-        let settings = workspace.settings.or_default();
-        let request =
-            self.engine
-                .request_context(&definition, job.scope.clone(), raster_mode_of(&settings));
+            let definition =
+                PipelineDefinition::from_parts(pipeline.definition.clone(), Vec::new()).map_err(
+                    |err| {
+                        ErrorKind::InternalServerError
+                            .with_message("Failed to decode pipeline definition")
+                            .with_context(err.to_string())
+                    },
+                )?;
 
+            // Parse the workspace settings once; both raster mode and retention
+            // read it.
+            let settings = workspace.settings.or_default();
+            let request = self.engine.request_context(
+                &definition,
+                job.scope.clone(),
+                raster_mode_of(&settings),
+            );
+
+            let policies =
+                resolve_policies(&mut conn, &self.infra.crypto, job.workspace_id, pipeline.id)
+                    .await?;
+            if policies.is_empty() {
+                return Err(ErrorKind::BadRequest
+                    .with_message("Pipeline has no policies")
+                    .with_resource("pipeline"));
+            }
+
+            (file, request, policies, settings)
+        };
+
+        // Phase 2: the slow work — document build, analysis inference, and audit
+        // staging — runs with no DB connection held.
         let document = self.blob.build_document(&file, detection.id).await?;
-
-        let policies =
-            resolve_policies(conn, &self.infra.crypto, job.workspace_id, pipeline.id).await?;
-        if policies.is_empty() {
-            return Err(ErrorKind::BadRequest
-                .with_message("Pipeline has no policies")
-                .with_resource("pipeline"));
-        }
-
         let analyzed = self.engine.analyze(document, &policies, &request).await?;
 
         // Write the (non-transactional) audit object first, then commit its file
@@ -350,6 +382,9 @@ impl DetectionWorker {
             &completed_event,
         )?;
 
+        // Phase 3: re-acquire a connection only for the fenced finalize
+        // transaction, so the pool was free during the analysis above.
+        let mut conn = self.infra.postgres.get_connection().await?;
         let staged_audit = audit_file.clone();
         let finalized = conn
             .transaction(async |conn| {

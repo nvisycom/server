@@ -6,8 +6,8 @@
 //!
 //! All conversions are implemented via the `From` trait for ergonomic usage.
 
-use nvisy_postgres::PgError;
 use nvisy_postgres::types::ConstraintViolation;
+use nvisy_postgres::{PgError, TimeoutType};
 
 use crate::handler::{Error, ErrorKind};
 
@@ -55,7 +55,16 @@ impl From<PgError> for Error<'static> {
                     timeout = ?timeout,
                     "database timeout",
                 );
-                ErrorKind::InternalServerError.into_error()
+                // A wait timeout means the pool was saturated — the service is
+                // momentarily overloaded, not broken — so surface a retryable 503
+                // rather than a 500. A create/recycle timeout is a backend fault.
+                match timeout {
+                    TimeoutType::Wait => ErrorKind::ServiceUnavailable
+                        .with_message("The server is busy; retry shortly"),
+                    TimeoutType::Create | TimeoutType::Recycle => {
+                        ErrorKind::InternalServerError.into_error()
+                    }
+                }
             }
             PgError::Connection(connection_error) => {
                 tracing::error!(

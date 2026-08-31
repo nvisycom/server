@@ -250,11 +250,18 @@ async fn upload_account_avatar(
 ) -> Result<(StatusCode, Json<Account>)> {
     tracing::debug!(target: TRACING_TARGET, "Uploading account avatar");
 
-    let mut conn = pg_client.get_connection().await?;
-    let account = find_account(&mut conn, auth_claims.account_id).await?;
-    authorize_self(&account, &path_params.username)?;
+    // Authorize under a scoped connection, then release it: `set_account_avatar`
+    // does image processing and a NATS put (and acquires its own connection for
+    // the DB update), so holding this one across it would pin two pooled
+    // connections for the whole upload.
+    let account_id = {
+        let mut conn = pg_client.get_connection().await?;
+        let account = find_account(&mut conn, auth_claims.account_id).await?;
+        authorize_self(&account, &path_params.username)?;
+        account.id
+    };
 
-    let updated = avatar.set_account_avatar(account.id, bytes).await?;
+    let updated = avatar.set_account_avatar(account_id, bytes).await?;
 
     tracing::info!(target: TRACING_TARGET, "Account avatar set");
     Ok((StatusCode::OK, Json(Account::from_model(updated))))
