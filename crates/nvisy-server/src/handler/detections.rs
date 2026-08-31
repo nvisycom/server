@@ -578,48 +578,63 @@ async fn redact_detection(
 ) -> Result<(StatusCode, Json<RedactionResult>)> {
     tracing::debug!(target: TRACING_TARGET, "Redacting detection");
 
-    let mut conn = pg_client.get_connection().await?;
+    // Phase 1: the pre-flight DB work under one connection, then release it.
+    // Holding a pooled connection across the audit load, redaction inference, and
+    // object I/O below would pin it for many seconds and starve the pool under
+    // load, so this scope drops the connection before that slow work begins. Only
+    // the audit file row is resolved here; its bytes are loaded in phase 2.
+    let (detection, pipeline, file, audit_file, policies) = {
+        let mut conn = pg_client.get_connection().await?;
 
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::RunPipelines)
-        .await?;
+        auth_state
+            .authorize_workspace(&mut conn, workspace.id, Permission::RunPipelines)
+            .await?;
 
-    let (detection, pipeline) =
-        find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
+        let (detection, pipeline) =
+            find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
 
-    // A detection can only be redacted once its analysis is complete.
-    if !detection.is_complete() {
-        return Err(ErrorKind::Conflict
-            .with_message("Detection is not ready to redact")
-            .with_resource("detection"));
-    }
+        // A detection can only be redacted once its analysis is complete.
+        if !detection.is_complete() {
+            return Err(ErrorKind::Conflict
+                .with_message("Detection is not ready to redact")
+                .with_resource("detection"));
+        }
 
-    // The source document is normally held back from retention while the
-    // detection is unfinished (see files_due_for_expiry), so this is reachable
-    // only if the input was explicitly deleted; surface a message that names the
-    // cause.
-    let file = conn
-        .find_file_in_workspace(workspace.id, detection.input_file_id)
-        .await?
-        .ok_or_else(|| {
-            ErrorKind::Conflict
-                .with_message("The detection's source document is no longer available")
-                .with_resource("detection")
-        })?;
+        // The source document is normally held back from retention while the
+        // detection is unfinished (see files_due_for_expiry), so this is reachable
+        // only if the input was explicitly deleted; surface a message that names
+        // the cause.
+        let file = conn
+            .find_file_in_workspace(workspace.id, detection.input_file_id)
+            .await?
+            .ok_or_else(|| {
+                ErrorKind::Conflict
+                    .with_message("The detection's source document is no longer available")
+                    .with_resource("detection")
+            })?;
+
+        let audit_file = blob
+            .resolve_audit_file(&mut conn, workspace.id, &detection)
+            .await?;
+        let policies = resolve_policies(&mut conn, &crypto, workspace.id, pipeline.id).await?;
+
+        (detection, pipeline, file, audit_file, policies)
+    };
+
+    // Phase 2: the slow work — loading the analysis, applying reviewer edits, the
+    // redaction inference, and staging the produced objects — runs with no DB
+    // connection held.
 
     // The stored detection analysis is loaded into a working audit and never
     // mutated on disk: reviewer edits and the redaction outcome land on this
     // clone, which is persisted as the redaction's own review audit, leaving the
     // detection analysis immutable and re-redactable.
-    let mut reviewed = blob
-        .load_analyzed_document(&mut conn, &engine, workspace.id, &detection)
-        .await?;
-    let policies = resolve_policies(&mut conn, &crypto, workspace.id, pipeline.id).await?;
+    let mut reviewed = blob.load_audit(&engine, workspace.id, &audit_file).await?;
 
-    // Layer the reviewer's edits onto the working audit's report before
-    // redaction. Validation is report-relative (an unknown target or a
-    // self-contradiction → 400, via `EditError`'s `From` impl) so a reviewer is
-    // never told a decision took effect when the document says otherwise.
+    // Layer the reviewer's edits onto the working audit's report before redaction.
+    // Validation is report-relative (an unknown target or a self-contradiction →
+    // 400, via `EditError`'s `From` impl) so a reviewer is never told a decision
+    // took effect when the document says otherwise.
     if let Some(edits) = &request.edits {
         edits.validate(&reviewed.report)?;
         edits.apply(&mut reviewed.report);
@@ -661,6 +676,9 @@ async fn redact_detection(
         }
     };
 
+    // Phase 3: re-acquire a connection only for the final commit, so the pool was
+    // free during the inference and staging above.
+    let mut conn = pg_client.get_connection().await?;
     let redaction = conn
         .transaction(async |conn| {
             let output_file = conn.create_workspace_file(staged_output.clone()).await?;

@@ -42,12 +42,18 @@ pub struct PgConfig {
     )]
     pub postgres_max_connections: u32,
 
-    /// Connection timeout (optional).
+    /// Maximum time to wait for a connection from the pool before failing.
+    ///
+    /// A finite bound is important: with no timeout a request blocks until a
+    /// connection frees, so under pool exhaustion requests pile up until the
+    /// request timeout kills them with a 500. A bound below the request timeout
+    /// turns exhaustion into a prompt, retryable failure instead.
     #[cfg_attr(
         feature = "cli",
         arg(
             long = "postgres-connection-timeout",
             env = "POSTGRES_CONNECTION_TIMEOUT",
+            default_value = "10s",
             value_parser = humantime::parse_duration,
         )
     )]
@@ -89,7 +95,7 @@ impl PgConfig {
         let this = Self {
             postgres_url: database_url.into(),
             postgres_max_connections: 10,
-            postgres_connection_timeout: None,
+            postgres_connection_timeout: Some(Duration::from_secs(10)),
             postgres_idle_timeout: None,
         };
 
@@ -293,7 +299,12 @@ mod tests {
         let config = PgConfig::new("postgresql://user:pass@localhost/db");
         assert_eq!(config.postgres_url, "postgresql://user:pass@localhost/db");
         assert_eq!(config.postgres_max_connections, 10);
-        assert_eq!(config.postgres_connection_timeout, None);
+        // A finite acquire timeout is the default so pool exhaustion fails fast
+        // (a retryable 503) instead of hanging until the request timeout.
+        assert_eq!(
+            config.postgres_connection_timeout,
+            Some(Duration::from_secs(10))
+        );
     }
 
     #[test]
@@ -312,9 +323,13 @@ mod tests {
     }
 
     #[test]
-    fn test_no_timeout() {
+    fn test_default_timeouts() {
         let config = PgConfig::new("postgresql://localhost/db");
-        assert_eq!(config.postgres_connection_timeout, None);
+        // Finite acquire timeout by default; no idle timeout (connections are kept).
+        assert_eq!(
+            config.postgres_connection_timeout,
+            Some(Duration::from_secs(10))
+        );
         assert_eq!(config.postgres_idle_timeout, None);
     }
 

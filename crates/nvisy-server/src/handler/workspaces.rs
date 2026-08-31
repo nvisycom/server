@@ -469,10 +469,16 @@ async fn upload_workspace_avatar(
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Uploading workspace avatar");
 
-    let mut conn = pg_client.get_connection().await?;
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::UpdateWorkspace)
-        .await?;
+    // Authorize under a scoped connection, then release it: `set_workspace_avatar`
+    // does image processing and a NATS put (and acquires its own connection for
+    // the DB update), so holding this one across it would pin two pooled
+    // connections for the whole upload.
+    {
+        let mut conn = pg_client.get_connection().await?;
+        auth_state
+            .authorize_workspace(&mut conn, workspace.id, Permission::UpdateWorkspace)
+            .await?;
+    }
 
     avatar.set_workspace_avatar(workspace.id, bytes).await?;
 

@@ -256,22 +256,18 @@ impl RunBlobStore {
             .await
     }
 
-    /// Fetches and decrypts a run's stored [`Audit`].
+    /// Resolves the `workspace_files` row holding a detection's analysis blob.
     ///
-    /// The `engine` reconstructs the audit's report from its serialized form: an
-    /// [`Audit`] serializes but does not `Deserialize`, since its report tags each
-    /// entity group by modality name and only the engine's registry can map those
-    /// back to concrete types.
-    ///
-    /// Errors if the detection never analyzed (409) or its analysis has since
-    /// been deleted (404).
-    pub async fn load_analyzed_document(
+    /// This is the only connection-bound step of loading an analysis, so a caller
+    /// can resolve the row under a connection, release it, and then load the
+    /// object with [`load_audit`](Self::load_audit) — keeping the pooled
+    /// connection off the object-store round-trip.
+    pub async fn resolve_audit_file(
         &self,
         conn: &mut PgConn,
-        engine: &Engine,
         workspace_id: Uuid,
         detection: &WorkspaceDetection,
-    ) -> Result<Audit> {
+    ) -> Result<WorkspaceFile> {
         // A NULL reference means the detection never produced an analysis; a
         // reference to a now-deleted file means it did, but the analysis has been
         // removed. These are distinct states, so they map to distinct responses.
@@ -280,29 +276,44 @@ impl RunBlobStore {
                 .with_message("Detection has no analysis yet")
                 .with_resource("detection")
         })?;
-        let audit_file = conn
-            .find_file_in_workspace(workspace_id, audit_file_id)
+        conn.find_file_in_workspace(workspace_id, audit_file_id)
             .await?
             .ok_or_else(|| {
                 ErrorKind::NotFound
                     .with_message("The analysis for this detection has been deleted")
                     .with_resource("detection")
-            })?;
+            })
+    }
+
+    /// Loads and decodes a detection's analysis blob from its already-resolved
+    /// audit file row. Holds no database connection: only object-store I/O and
+    /// decryption, so a caller can run it after releasing its connection.
+    ///
+    /// The `engine` reconstructs the audit's report from its serialized form: an
+    /// [`Audit`] serializes but does not `Deserialize`, since its report tags each
+    /// entity group by modality name and only the engine's registry can map those
+    /// back to concrete types.
+    pub async fn load_audit(
+        &self,
+        engine: &Engine,
+        workspace_id: Uuid,
+        audit_file: &WorkspaceFile,
+    ) -> Result<Audit> {
         let key = AuditKey::from_str(&audit_file.storage_path).map_err(|err| {
             ErrorKind::InternalServerError
-                .with_message("Invalid analysis storage key")
+                .with_message("Invalid audit storage key")
                 .with_context(err.to_string())
         })?;
 
         let store = self.infra.nats.object_store::<AuditBucket>().await?;
         let data = store.get(&key).await?.ok_or_else(|| {
-            ErrorKind::InternalServerError.with_message("Analysis is missing from storage")
+            ErrorKind::InternalServerError.with_message("Audit is missing from storage")
         })?;
         let mut reader = data.into_reader();
         let mut ciphertext = Vec::new();
         reader.read_to_end(&mut ciphertext).await.map_err(|err| {
             ErrorKind::InternalServerError
-                .with_message("Failed to read analysis")
+                .with_message("Failed to read audit")
                 .with_context(err.to_string())
         })?;
 
@@ -312,14 +323,14 @@ impl RunBlobStore {
             .decrypt(workspace_id, &ciphertext)
             .map_err(|err| {
                 ErrorKind::InternalServerError
-                    .with_message("Failed to decrypt analysis")
+                    .with_message("Failed to decrypt audit")
                     .with_context(err.to_string())
             })?;
         engine
             .deserialize_audit(&mut serde_json::Deserializer::from_slice(&plaintext))
             .map_err(|err| {
                 ErrorKind::InternalServerError
-                    .with_message("Failed to decode analysis")
+                    .with_message("Failed to decode audit")
                     .with_context(err.to_string())
             })
     }
@@ -441,65 +452,29 @@ impl RunBlobStore {
         })
     }
 
-    /// Fetches and decrypts a redaction's stored review [`Audit`] by its file id.
+    /// Resolves the `workspace_files` row holding a redaction's review audit blob.
     ///
-    /// The review counterpart to
-    /// [`load_analyzed_document`](Self::load_analyzed_document); the `engine`
-    /// rebuilds the report from its serialized form. Errors if the redaction has
-    /// no review audit (409) or it has since been deleted (404).
-    pub async fn load_review_audit(
+    /// The connection-bound step of loading a review audit; pair with
+    /// [`load_audit`](Self::load_audit) to release the connection before the
+    /// object-store round-trip. Errors if the redaction has no review audit (409)
+    /// or it has since been deleted (404).
+    pub async fn resolve_review_file(
         &self,
         conn: &mut PgConn,
-        engine: &Engine,
         workspace_id: Uuid,
         review_file_id: Option<Uuid>,
-    ) -> Result<Audit> {
+    ) -> Result<WorkspaceFile> {
         let review_file_id = review_file_id.ok_or_else(|| {
             ErrorKind::Conflict
                 .with_message("Redaction has no review audit")
                 .with_resource("redaction")
         })?;
-        let review_file = conn
-            .find_file_in_workspace(workspace_id, review_file_id)
+        conn.find_file_in_workspace(workspace_id, review_file_id)
             .await?
             .ok_or_else(|| {
                 ErrorKind::NotFound
                     .with_message("The review audit for this redaction has been deleted")
                     .with_resource("redaction")
-            })?;
-        let key = AuditKey::from_str(&review_file.storage_path).map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Invalid review audit storage key")
-                .with_context(err.to_string())
-        })?;
-
-        let store = self.infra.nats.object_store::<AuditBucket>().await?;
-        let data = store.get(&key).await?.ok_or_else(|| {
-            ErrorKind::InternalServerError.with_message("Review audit is missing from storage")
-        })?;
-        let mut reader = data.into_reader();
-        let mut ciphertext = Vec::new();
-        reader.read_to_end(&mut ciphertext).await.map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Failed to read review audit")
-                .with_context(err.to_string())
-        })?;
-
-        let plaintext = self
-            .infra
-            .crypto
-            .decrypt(workspace_id, &ciphertext)
-            .map_err(|err| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to decrypt review audit")
-                    .with_context(err.to_string())
-            })?;
-        engine
-            .deserialize_audit(&mut serde_json::Deserializer::from_slice(&plaintext))
-            .map_err(|err| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to decode review audit")
-                    .with_context(err.to_string())
             })
     }
 }

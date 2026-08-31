@@ -48,18 +48,24 @@ async fn get_detection_analysis(
 ) -> Result<(StatusCode, Json<Audit>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting detection analysis");
 
-    let mut conn = pg_client.get_connection().await?;
+    // Resolve the detection and its audit file row under a scoped connection, then
+    // release it before the object-store load below so the pooled connection is
+    // not held across the NATS round-trip.
+    let audit_file = {
+        let mut conn = pg_client.get_connection().await?;
 
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
-        .await?;
+        auth_state
+            .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+            .await?;
 
-    let (detection, _pipeline) =
-        find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
+        let (detection, _pipeline) =
+            find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
 
-    let analyzed = blob
-        .load_analyzed_document(&mut conn, &engine, workspace.id, &detection)
-        .await?;
+        blob.resolve_audit_file(&mut conn, workspace.id, &detection)
+            .await?
+    };
+
+    let analyzed = blob.load_audit(&engine, workspace.id, &audit_file).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Detection analysis retrieved");
 
@@ -104,16 +110,24 @@ async fn download_detection_audit(
 ) -> Result<(StatusCode, HeaderMap, Body)> {
     tracing::debug!(target: TRACING_TARGET, "Downloading detection audit");
 
-    let mut conn = pg_client.get_connection().await?;
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
-        .await?;
+    // Resolve the detection and its audit file row under a scoped connection, then
+    // release it before the object-store load below so the pooled connection is
+    // not held across the NATS round-trip.
+    let (detection_id, audit_file) = {
+        let mut conn = pg_client.get_connection().await?;
+        auth_state
+            .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+            .await?;
 
-    let (detection, _pipeline) =
-        find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
-    let audit = blob
-        .load_analyzed_document(&mut conn, &engine, workspace.id, &detection)
-        .await?;
+        let (detection, _pipeline) =
+            find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
+        let audit_file = blob
+            .resolve_audit_file(&mut conn, workspace.id, &detection)
+            .await?;
+        (detection.id, audit_file)
+    };
+
+    let audit = blob.load_audit(&engine, workspace.id, &audit_file).await?;
 
     let (content_type, filename, body) = match query.format {
         ExportFormat::Json => {
@@ -125,7 +139,7 @@ async fn download_detection_audit(
             })?;
             (
                 "application/json",
-                format!("audit-{}.json", detection.id),
+                format!("audit-{detection_id}.json"),
                 buffer,
             )
         }
@@ -133,7 +147,7 @@ async fn download_detection_audit(
             let archive = build_audit_csv_zip(&audit)?;
             (
                 "application/zip",
-                format!("audit-{}.csv.zip", detection.id),
+                format!("audit-{detection_id}.csv.zip"),
                 archive,
             )
         }

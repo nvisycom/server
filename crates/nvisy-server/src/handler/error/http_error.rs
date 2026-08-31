@@ -279,6 +279,8 @@ pub enum ErrorKind {
     InternalServerError,
     /// 501 Not Implemented - Feature not yet implemented
     NotImplemented,
+    /// 503 Service Unavailable - The server is temporarily overloaded
+    ServiceUnavailable,
 }
 
 impl ErrorKind {
@@ -342,6 +344,7 @@ impl ErrorKind {
             Self::TooManyRequests => ErrorResponse::TOO_MANY_REQUESTS,
             Self::InternalServerError => ErrorResponse::INTERNAL_SERVER_ERROR,
             Self::NotImplemented => ErrorResponse::NOT_IMPLEMENTED,
+            Self::ServiceUnavailable => ErrorResponse::SERVICE_UNAVAILABLE,
         }
     }
 }
