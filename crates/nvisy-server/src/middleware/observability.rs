@@ -17,7 +17,6 @@ use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetReques
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::trace::TraceLayer;
 
-use super::RouteCategory;
 use super::counting_body::CountingBody;
 
 /// Tracing target for request metrics.
@@ -53,8 +52,7 @@ pub trait RouterObservabilityExt<S> {
 
     /// Layers metrics middleware for request tracking and performance monitoring.
     ///
-    /// This middleware tracks request counts by category, response times,
-    /// request/response body sizes, and client IP addresses.
+    /// This middleware tracks response times and request/response body sizes.
     fn with_metrics(self) -> Self;
 }
 
@@ -78,16 +76,15 @@ where
     }
 
     fn with_metrics(self) -> Self {
-        self.layer(ServiceBuilder::new().layer(from_fn(track_categorized_metrics)))
+        self.layer(ServiceBuilder::new().layer(from_fn(track_request_metrics)))
     }
 }
 
-/// Request metrics middleware with categorization and timing.
-pub async fn track_categorized_metrics(request: Request, next: Next) -> Response {
+/// Request metrics middleware with timing and body sizes.
+pub async fn track_request_metrics(request: Request, next: Next) -> Response {
     let start_time = Instant::now();
     let method = request.method().clone();
     let uri = request.uri().clone();
-    let category = RouteCategory::from_uri(&uri);
 
     let request_size = request
         .headers()
@@ -100,7 +97,6 @@ pub async fn track_categorized_metrics(request: Request, next: Next) -> Response
         target: TRACING_TARGET_METRICS,
         method = %method,
         uri = %uri,
-        category = category.as_str(),
         request_size = request_size,
         "request started"
     );
@@ -113,7 +109,6 @@ pub async fn track_categorized_metrics(request: Request, next: Next) -> Response
     // is not known here. Wrap the body to count bytes as they flow and emit the
     // "request completed" line when the stream ends (or is dropped) — which for
     // a streamed response is after this function returns.
-    let category_str = category.as_str();
     let span = tracing::Span::current();
     let (parts, body) = response.into_parts();
     let body = CountingBody::new(body, move |response_size| {
@@ -122,7 +117,6 @@ pub async fn track_categorized_metrics(request: Request, next: Next) -> Response
             target: TRACING_TARGET_METRICS,
             method = %method,
             uri = %uri,
-            category = category_str,
             status = %status,
             duration_ms = duration.as_millis() as u64,
             request_size = request_size,

@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
+use crate::handler::utility::FileHash;
 use crate::service::{EngineService, UnknownFormatToken};
 
 /// Request to update file metadata.
@@ -114,6 +115,11 @@ pub struct ListFiles {
     /// Filter by modality (`text`, `tabular`, `image`, `audio`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modality: Option<Vec<ModalityToken>>,
+    /// Filter to files whose content is exactly this SHA-256. Lets a client check
+    /// whether identical content already exists in the workspace before uploading
+    /// it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash: Option<FileHash>,
 }
 
 impl ListFiles {
@@ -137,6 +143,9 @@ impl ListFiles {
         }
         if let Some(extensions) = intersect_facets(formats, modality) {
             filter = filter.with_extensions(extensions);
+        }
+        if let Some(hash) = &self.hash {
+            filter = filter.with_hash(hash.to_bytes());
         }
         Ok(filter)
     }

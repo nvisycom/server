@@ -654,6 +654,11 @@ impl WorkspaceFileRepository for PgConnection {
             query = query.filter(dsl::file_extension.eq_any(extensions.to_vec()));
         }
 
+        // Apply the exact content-hash constraint (dedup lookup).
+        if let Some(hash) = filter.hash() {
+            query = query.filter(dsl::file_hash_sha256.eq(hash.to_vec()));
+        }
+
         // Apply sorting
         let query = match (sort_by.field, sort_by.order) {
             (FileSortField::Name, SortOrder::Asc) => query.order(dsl::display_name.asc()),
@@ -687,6 +692,7 @@ impl WorkspaceFileRepository for PgConnection {
         // Precompute filter values
         let search_term = filter.search_term().map(|s| s.to_string());
         let extensions: Option<Vec<String>> = filter.extensions().map(|e| e.to_vec());
+        let hash: Option<Vec<u8>> = filter.hash().map(|h| h.to_vec());
 
         // Build base query with filters
         let mut base_query = workspace_files::table
@@ -709,6 +715,11 @@ impl WorkspaceFileRepository for PgConnection {
         // nothing (an active facet with no members), so apply whenever `Some`.
         if let Some(ref extensions) = extensions {
             base_query = base_query.filter(dsl::file_extension.eq_any(extensions));
+        }
+
+        // Apply the exact content-hash constraint (dedup lookup).
+        if let Some(ref hash) = hash {
+            base_query = base_query.filter(dsl::file_hash_sha256.eq(hash));
         }
 
         let total = if pagination.include_count {
@@ -747,6 +758,11 @@ impl WorkspaceFileRepository for PgConnection {
         // nothing (an active facet with no members), so apply whenever `Some`.
         if let Some(ref extensions) = extensions {
             query = query.filter(dsl::file_extension.eq_any(extensions));
+        }
+
+        // Apply the exact content-hash constraint (dedup lookup).
+        if let Some(ref hash) = hash {
+            query = query.filter(dsl::file_hash_sha256.eq(hash));
         }
 
         let limit = pagination.fetch_limit();

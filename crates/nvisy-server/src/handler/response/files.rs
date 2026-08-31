@@ -26,6 +26,8 @@ pub struct File {
     pub file_extension: String,
     /// File size in bytes.
     pub file_size: i64,
+    /// Lowercase hex-encoded SHA-256 of the file's plaintext content.
+    pub file_hash: String,
     /// The file's role (original, redacted, audit).
     pub file_kind: FileKind,
     /// Account that uploaded/created the file.
@@ -50,6 +52,7 @@ impl File {
             original_filename: file.original_filename,
             file_extension: file.file_extension,
             file_size: file.file_size_bytes,
+            file_hash: hex::encode(&file.file_hash_sha256),
             file_kind: file.file_kind,
             uploaded_by,
             version_number: file.version_number,
