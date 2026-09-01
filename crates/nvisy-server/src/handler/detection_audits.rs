@@ -1,8 +1,11 @@
-//! Detection audit handlers: read and export a detection's analysis.
+//! Detection audit handlers: read and export a detection's analysis, and read
+//! the enrichment intermediates it extracted.
 //!
 //! Once a detection is complete, its `Audit` (the decrypted map of detected
-//! findings) can be reviewed inline or downloaded as JSON or a zip of CSV tables.
-//! The detection lifecycle itself (create, list, redact) lives in
+//! findings) can be reviewed inline or downloaded as JSON or a zip of CSV tables,
+//! and the enrichment intermediates (an image's OCR layout, an audio clip's
+//! transcript) can be read for client-side search and entity addition. The
+//! detection lifecycle itself (create, list, redact) lives in
 //! [`detections`](super::detections).
 
 use aide::axum::ApiRouter;
@@ -82,6 +85,69 @@ fn get_detection_analysis_docs(op: TransformOperation) -> TransformOperation {
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
+}
+
+/// Returns the detection's enrichment intermediates — an image's OCR layout, an
+/// audio clip's transcript — as the content the analysis extracted, so a client
+/// can search it and add entities the analysis missed.
+///
+/// Available only for a detection whose modality produced enrichment (a
+/// text/tabular document produces none — 404). Requires `ViewPipelines`.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %auth_state.account_id,
+        workspace_id = %workspace.id,
+        detection_id = %path_params.detection_id,
+    )
+)]
+async fn get_detection_artifacts(
+    State(pg_client): State<PgClient>,
+    State(blob): State<RunBlobStore>,
+    AuthState(auth_state): AuthState,
+    WorkspaceContext(workspace): WorkspaceContext,
+    Path(path_params): Path<DetectionPathParams>,
+) -> Result<(StatusCode, Json<serde_json::Value>)> {
+    tracing::debug!(target: TRACING_TARGET, "Getting detection intermediates");
+
+    // Resolve the detection and its intermediates file row under a scoped
+    // connection, then release it before the object-store load so the pooled
+    // connection is not held across the NATS round-trip.
+    let intermediates_file = {
+        let mut conn = pg_client.get_connection().await?;
+
+        auth_state
+            .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+            .await?;
+
+        let (detection, _pipeline) =
+            find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
+
+        blob.resolve_intermediates_file(&mut conn, workspace.id, &detection)
+            .await?
+    };
+
+    let intermediates = blob
+        .load_intermediates(workspace.id, &intermediates_file)
+        .await?;
+
+    tracing::debug!(target: TRACING_TARGET, "Detection intermediates retrieved");
+
+    Ok((StatusCode::OK, Json(intermediates)))
+}
+
+fn get_detection_artifacts_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get detection intermediates")
+        .description(
+            "Returns the detection's enrichment intermediates — an image's OCR layout or an \
+             audio clip's transcript — as `{ body, parts }`, so a client can search the extracted \
+             content and add entities the analysis missed. A text or tabular document produces no \
+             intermediates (404).",
+        )
+        .response::<200, Json<serde_json::Value>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Downloads a detection's audit as a file, in the requested `format`.
@@ -207,6 +273,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/workspaces/{workspaceSlug}/detections/{detectionId}/audit/",
             get_with(download_detection_audit, download_detection_audit_docs),
+        )
+        .api_route(
+            "/workspaces/{workspaceSlug}/detections/{detectionId}/artifacts/",
+            get_with(get_detection_artifacts, get_detection_artifacts_docs),
         )
         .with_path_items(|item| item.tag("Detections"))
 }

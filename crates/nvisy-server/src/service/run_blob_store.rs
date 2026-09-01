@@ -20,6 +20,7 @@ use nvisy_postgres::model::{
 };
 use nvisy_postgres::query::WorkspaceFileRepository;
 use nvisy_postgres::types::{FileKind, RetentionScope, RetentionSettings};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
@@ -241,6 +242,60 @@ impl RunBlobStore {
         })
     }
 
+    /// Serializes a detection's enrichment intermediates (OCR layout, transcript),
+    /// encrypts them with the workspace key, writes them to the audit bucket, and
+    /// builds the `intermediate`-kind [`WorkspaceFile`] row that will point at it —
+    /// without inserting the row (staged like the analysis, reclaimed on rollback).
+    ///
+    /// The intermediates carry document content, so they are encrypted at rest and
+    /// governed by their own retention scope, resolved here (workspace baseline,
+    /// pipeline override if set).
+    pub async fn stage_intermediates<T: Serialize>(
+        &self,
+        pipeline: &WorkspacePipeline,
+        workspace_settings: &RetentionSettings,
+        account_id: Uuid,
+        artifacts: &T,
+    ) -> Result<NewWorkspaceFile> {
+        let workspace_id = pipeline.workspace_id;
+        let plaintext = serde_json::to_vec(artifacts).map_err(analysis_serde_error)?;
+        let hash = Sha256::digest(&plaintext).to_vec();
+        let size = plaintext.len() as i64;
+        let ciphertext = self
+            .infra
+            .crypto
+            .encrypt(workspace_id, &plaintext)
+            .map_err(|err| {
+                ErrorKind::InternalServerError
+                    .with_message("Failed to encrypt intermediates")
+                    .with_context(err.to_string())
+            })?;
+
+        let store = self.infra.nats.object_store::<AuditBucket>().await?;
+        let key = AuditKey::generate(workspace_id);
+        store.put(&key, Cursor::new(ciphertext)).await?;
+
+        let over = pipeline.metadata.or_default().retention;
+        let expires_at = workspace_settings
+            .resolve(RetentionScope::Intermediates, over.as_ref())
+            .expires_at(jiff::Timestamp::now());
+
+        Ok(NewWorkspaceFile {
+            workspace_id,
+            account_id,
+            display_name: Some("analysis.intermediates".to_owned()),
+            original_filename: Some("analysis.intermediates".to_owned()),
+            file_extension: Some("json".to_owned()),
+            file_kind: Some(FileKind::Intermediate),
+            file_size_bytes: size,
+            file_hash_sha256: hash,
+            storage_path: key.to_string(),
+            storage_bucket: store.bucket().to_owned(),
+            expires_at: expires_at.map(Into::into),
+            ..Default::default()
+        })
+    }
+
     /// Deletes a staged object whose file row was never committed.
     ///
     /// The `stage_*` methods write an object before its `workspace_files` row; if
@@ -333,6 +388,79 @@ impl RunBlobStore {
                     .with_message("Failed to decode audit")
                     .with_context(err.to_string())
             })
+    }
+
+    /// Resolves the `workspace_files` row holding a detection's enrichment
+    /// intermediates.
+    ///
+    /// The connection-bound step; pair with [`load_intermediates`](Self::load_intermediates)
+    /// to release the connection before the object-store round-trip. A detection
+    /// whose modality produced no enrichment (text, tabular) has none — a `None`
+    /// reference maps to a 404, distinct from a reference to a since-deleted file.
+    pub async fn resolve_intermediates_file(
+        &self,
+        conn: &mut PgConn,
+        workspace_id: Uuid,
+        detection: &WorkspaceDetection,
+    ) -> Result<WorkspaceFile> {
+        let file_id = detection.intermediates_file_id.ok_or_else(|| {
+            ErrorKind::NotFound
+                .with_message("Detection has no enrichment intermediates")
+                .with_resource("detection")
+        })?;
+        conn.find_file_in_workspace(workspace_id, file_id)
+            .await?
+            .ok_or_else(|| {
+                ErrorKind::NotFound
+                    .with_message("The intermediates for this detection have been deleted")
+                    .with_resource("detection")
+            })
+    }
+
+    /// Loads a detection's enrichment intermediates from its already-resolved file
+    /// row, as the JSON value they were stored as. Holds no database connection:
+    /// only object-store I/O and decryption.
+    ///
+    /// Served to the client verbatim (the OCR layout / transcript), so it is
+    /// returned as an opaque [`serde_json::Value`] rather than reconstructed into
+    /// the engine's artifact types.
+    pub async fn load_intermediates(
+        &self,
+        workspace_id: Uuid,
+        intermediates_file: &WorkspaceFile,
+    ) -> Result<serde_json::Value> {
+        let key = AuditKey::from_str(&intermediates_file.storage_path).map_err(|err| {
+            ErrorKind::InternalServerError
+                .with_message("Invalid intermediates storage key")
+                .with_context(err.to_string())
+        })?;
+
+        let store = self.infra.nats.object_store::<AuditBucket>().await?;
+        let data = store.get(&key).await?.ok_or_else(|| {
+            ErrorKind::InternalServerError.with_message("Intermediates are missing from storage")
+        })?;
+        let mut reader = data.into_reader();
+        let mut ciphertext = Vec::new();
+        reader.read_to_end(&mut ciphertext).await.map_err(|err| {
+            ErrorKind::InternalServerError
+                .with_message("Failed to read intermediates")
+                .with_context(err.to_string())
+        })?;
+
+        let plaintext = self
+            .infra
+            .crypto
+            .decrypt(workspace_id, &ciphertext)
+            .map_err(|err| {
+                ErrorKind::InternalServerError
+                    .with_message("Failed to decrypt intermediates")
+                    .with_context(err.to_string())
+            })?;
+        serde_json::from_slice(&plaintext).map_err(|err| {
+            ErrorKind::InternalServerError
+                .with_message("Failed to decode intermediates")
+                .with_context(err.to_string())
+        })
     }
 
     /// Encrypts a redaction's review audit, writes it to the audit bucket, and

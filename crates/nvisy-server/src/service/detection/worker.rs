@@ -19,6 +19,7 @@ use nvisy_postgres::query::{
 use nvisy_postgres::types::{DetectionStatus, Json, RasterPolicy, WorkspaceSettings};
 use nvisy_postgres::{AsyncConnection, DieselError, PgError};
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use super::job::DetectionJob;
 use super::service::DetectionQueue;
@@ -252,17 +253,51 @@ impl DetectionWorker {
         JobOutcome::Done
     }
 
-    /// Best-effort reclaim of a staged audit object whose file row did not
-    /// commit. A failure only defers cleanup, so it is logged, never propagated.
-    async fn discard_staged_audit(&self, staged: &nvisy_postgres::model::NewWorkspaceFile) {
+    /// Best-effort reclaim of a staged object whose file row did not commit. A
+    /// failure only defers cleanup, so it is logged, never propagated.
+    async fn discard_staged(&self, staged: &nvisy_postgres::model::NewWorkspaceFile) {
         if let Err(err) = self.blob.discard_staged_object(staged).await {
             tracing::warn!(
                 target: TRACING_TARGET,
                 error = %err,
                 storage_path = %staged.storage_path,
-                "Failed to reclaim orphaned audit object; left for a later sweep",
+                "Failed to reclaim orphaned staged object; left for a later sweep",
             );
         }
+    }
+
+    /// Stages a detection's enrichment intermediates, or returns `None` when the
+    /// document produced none (a text/tabular modality: its artifact set is
+    /// empty). Skipping the empty case avoids an intermediates file that a client
+    /// would fetch only to find nothing.
+    async fn stage_intermediates<T: serde::Serialize>(
+        &self,
+        pipeline: &WorkspacePipeline,
+        settings: &WorkspaceSettings,
+        account_id: Uuid,
+        artifacts: &T,
+    ) -> Result<Option<nvisy_postgres::model::NewWorkspaceFile>> {
+        // The set serializes to `{ body, parts }`; an un-enriched document has a
+        // null body and no parts, and there is nothing worth persisting.
+        let value = serde_json::to_value(artifacts).map_err(|err| {
+            ErrorKind::InternalServerError
+                .with_message("Failed to serialize intermediates")
+                .with_context(err.to_string())
+        })?;
+        let has_body = value.get("body").is_some_and(|body| !body.is_null());
+        let has_parts = value
+            .get("parts")
+            .and_then(|parts| parts.as_object())
+            .is_some_and(|parts| !parts.is_empty());
+        if !has_body && !has_parts {
+            return Ok(None);
+        }
+
+        let file = self
+            .blob
+            .stage_intermediates(pipeline, &settings.retention, account_id, artifacts)
+            .await?;
+        Ok(Some(file))
     }
 
     /// Performs the analysis and records the detection as `Complete`.
@@ -326,17 +361,27 @@ impl DetectionWorker {
         // staging — runs with no DB connection held.
         let document = self.blob.build_document(&file, detection.id).await?;
         let analyzed = self.engine.analyze(document, &policies, &request).await?;
+        let audit = &analyzed.audit;
 
         // Write the (non-transactional) audit object first, then commit its file
         // row together with the detection's usage and status in one transaction
         // below.
         let audit_file = self
             .blob
-            .stage_analyzed_document(
+            .stage_analyzed_document(pipeline, &settings.retention, detection.account_id, audit)
+            .await?;
+
+        // Stage the enrichment intermediates (OCR layout, transcript) beside the
+        // audit, so the client can read them and add entities the analysis missed.
+        // A text/tabular document produces none — its artifacts serialize to an
+        // empty set — so nothing is stored and the detection carries no
+        // intermediates reference.
+        let intermediates_file = self
+            .stage_intermediates(
                 pipeline,
-                &settings.retention,
+                &settings,
                 detection.account_id,
-                &analyzed,
+                &analyzed.artifacts,
             )
             .await?;
 
@@ -345,7 +390,7 @@ impl DetectionWorker {
         // metadata for drill-down. Absent for a purely deterministic detection.
         // The report is layered onto the detection's existing metadata so tags and
         // any recorded error survive the write.
-        let usage = extract_detection_usage(detection.id, &analyzed);
+        let usage = extract_detection_usage(detection.id, audit);
         let metadata = usage.as_ref().map(|u| {
             let mut current = detection.metadata.or_default();
             current.usage = Some(u.report.clone());
@@ -385,10 +430,18 @@ impl DetectionWorker {
         // Phase 3: re-acquire a connection only for the fenced finalize
         // transaction, so the pool was free during the analysis above.
         let mut conn = self.infra.postgres.get_connection().await?;
+        // Kept to reclaim the staged objects if the transaction does not commit:
+        // on rollback their `workspace_files` rows never land, so the row-driven
+        // reaper could never find the objects otherwise.
         let staged_audit = audit_file.clone();
+        let staged_intermediates = intermediates_file.clone();
         let finalized = conn
             .transaction(async |conn| {
                 let audit_file_id = conn.create_workspace_file(audit_file).await?.id;
+                let intermediates_file_id = match intermediates_file {
+                    Some(file) => Some(conn.create_workspace_file(file).await?.id),
+                    None => None,
+                };
                 if let Some(usage) = &usage {
                     conn.record_detection_usage(&usage.per_model).await?;
                 }
@@ -398,15 +451,16 @@ impl DetectionWorker {
                         claim_token,
                         UpdateWorkspaceDetection {
                             audit_file_id: Some(Some(audit_file_id)),
+                            intermediates_file_id: Some(intermediates_file_id),
                             metadata,
                             ..Default::default()
                         },
                     )
                     .await?;
                 if !finalized {
-                    // Abort the audit-file and usage inserts: the detection is no
-                    // longer ours to finalize. `RollbackTransaction` unwinds the
-                    // writes without being a real error; it is matched below.
+                    // Abort the file and usage inserts: the detection is no longer
+                    // ours to finalize. `RollbackTransaction` unwinds the writes
+                    // without being a real error; it is matched below.
                     return Err(PgError::Query(DieselError::RollbackTransaction));
                 }
                 conn.insert_event_outbox(outbox_row).await?;
@@ -417,14 +471,20 @@ impl DetectionWorker {
         match finalized {
             Ok(()) => {}
             Err(PgError::Query(DieselError::RollbackTransaction)) => {
-                self.discard_staged_audit(&staged_audit).await;
+                self.discard_staged(&staged_audit).await;
+                if let Some(staged) = &staged_intermediates {
+                    self.discard_staged(staged).await;
+                }
                 tracing::warn!(target: TRACING_TARGET, detection_id = %detection.id, "Claim went stale before finalize; another worker owns the detection");
                 return Ok(());
             }
             Err(err) => {
-                // The transaction rolled back, so the audit row never committed;
-                // reclaim its object before surfacing the failure.
-                self.discard_staged_audit(&staged_audit).await;
+                // The transaction rolled back, so the file rows never committed;
+                // reclaim their objects before surfacing the failure.
+                self.discard_staged(&staged_audit).await;
+                if let Some(staged) = &staged_intermediates {
+                    self.discard_staged(staged).await;
+                }
                 return Err(err.into());
             }
         }
