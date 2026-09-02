@@ -62,6 +62,8 @@ pub enum RetentionScope {
     RedactedDocuments,
     /// Engine analysis (audit) blobs.
     AuditLogs,
+    /// Enrichment content extracted from a document (OCR layout, transcript).
+    Intermediates,
 }
 
 /// Retention for every scope. Missing fields default to [`Retention::Forever`],
@@ -77,6 +79,8 @@ pub struct RetentionSettings {
     pub redacted_documents: Retention,
     /// Retention for audit blobs.
     pub audit_logs: Retention,
+    /// Retention for enrichment intermediates (OCR layout, transcript).
+    pub intermediates: Retention,
 }
 
 impl RetentionSettings {
@@ -87,6 +91,7 @@ impl RetentionSettings {
             RetentionScope::OriginalDocuments => self.original_documents,
             RetentionScope::RedactedDocuments => self.redacted_documents,
             RetentionScope::AuditLogs => self.audit_logs,
+            RetentionScope::Intermediates => self.intermediates,
         }
     }
 

@@ -7,10 +7,11 @@ CREATE TYPE FILE_KIND AS ENUM (
     'original',     -- Source document (uploaded or imported)
     'redacted',     -- Redacted output produced by a redaction
     'audit',        -- Engine detection analysis blob (not shown in file lists)
-    'review'        -- Engine analysis after reviewer edits + redaction (not shown in file lists)
+    'review',       -- Engine analysis after reviewer edits + redaction (not shown in file lists)
+    'intermediate'  -- Enrichment extracted from a document: OCR layout, transcript (not shown in file lists)
 );
 
-COMMENT ON TYPE FILE_KIND IS 'The role of a file: original document, redacted output, detection audit, or review (redaction) audit.';
+COMMENT ON TYPE FILE_KIND IS 'The role of a file: original document, redacted output, detection audit, review (redaction) audit, or enrichment intermediate.';
 
 -- Workspace files table: one stored document, with version tracking and dedup.
 CREATE TABLE workspace_files (

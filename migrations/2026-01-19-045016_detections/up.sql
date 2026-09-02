@@ -47,6 +47,7 @@ CREATE TABLE workspace_detections (
     -- (redundant here, but the correct action for a produced artifact).
     input_file_id   UUID                    NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
     audit_file_id   UUID                    DEFAULT NULL REFERENCES workspace_files (id) ON DELETE SET NULL,
+    intermediates_file_id UUID              DEFAULT NULL REFERENCES workspace_files (id) ON DELETE SET NULL,
 
     -- Detection attributes
     trigger_type    PIPELINE_TRIGGER_TYPE   NOT NULL DEFAULT 'user',
@@ -100,6 +101,12 @@ CREATE INDEX workspace_detections_audit_file_idx
     ON workspace_detections (audit_file_id)
     WHERE audit_file_id IS NOT NULL;
 
+-- Same shape for the enrichment intermediates file, NULL until (and unless) a
+-- detection's analysis runs an enricher (an analysis with none produces no file).
+CREATE INDEX workspace_detections_intermediates_file_idx
+    ON workspace_detections (intermediates_file_id)
+    WHERE intermediates_file_id IS NOT NULL;
+
 -- Idempotent detect: at most one detection per (pipeline, idempotency key).
 CREATE UNIQUE INDEX workspace_detections_idempotency_idx
     ON workspace_detections (pipeline_id, idempotency_key)
@@ -118,6 +125,7 @@ COMMENT ON COLUMN workspace_detections.pipeline_id IS 'Pipeline whose config dro
 COMMENT ON COLUMN workspace_detections.account_id IS 'Account that triggered the detection';
 COMMENT ON COLUMN workspace_detections.input_file_id IS 'Source document the detection analyzes';
 COMMENT ON COLUMN workspace_detections.audit_file_id IS 'Audit file (file_kind=audit) holding the analysis between detect and redact';
+COMMENT ON COLUMN workspace_detections.intermediates_file_id IS 'Intermediates file (file_kind=intermediate) holding the enrichment (OCR layout, transcript) served to the client';
 COMMENT ON COLUMN workspace_detections.trigger_type IS 'How the detection was initiated';
 COMMENT ON COLUMN workspace_detections.status IS 'Current detection status';
 COMMENT ON COLUMN workspace_detections.idempotency_key IS 'Detect idempotency key (dedupes retries)';

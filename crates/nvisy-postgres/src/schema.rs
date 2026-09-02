@@ -289,6 +289,7 @@ diesel::table! {
         account_id -> Uuid,
         input_file_id -> Uuid,
         audit_file_id -> Nullable<Uuid>,
+        intermediates_file_id -> Nullable<Uuid>,
         trigger_type -> PipelineTriggerType,
         status -> DetectionStatus,
         idempotency_key -> Nullable<Text>,

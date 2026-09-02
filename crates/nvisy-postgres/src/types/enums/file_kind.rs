@@ -36,6 +36,14 @@ pub enum FileKind {
     #[db_rename = "review"]
     #[serde(rename = "review")]
     Review,
+
+    /// Enrichment content a detection extracted from a non-text document — an
+    /// image's OCR layout, an audio clip's transcript — served to the client so a
+    /// reviewer can search it and add entities the analysis missed. Carries
+    /// document content, not shown in file lists.
+    #[db_rename = "intermediate"]
+    #[serde(rename = "intermediate")]
+    Intermediate,
 }
 
 impl FileKind {

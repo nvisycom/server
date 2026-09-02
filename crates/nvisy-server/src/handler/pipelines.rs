@@ -274,6 +274,12 @@ async fn update_pipeline(
             (FileKind::Audit, audit_logs_expiry),
             // Review audits share the audit-logs scope with detection audits.
             (FileKind::Review, audit_logs_expiry),
+            (
+                FileKind::Intermediate,
+                workspace_retention
+                    .resolve(RetentionScope::Intermediates, Some(&over))
+                    .expires_at(now),
+            ),
         ]
     });
 

@@ -28,6 +28,10 @@ pub struct WorkspaceDetection {
     /// Audit file (`file_kind = audit`) holding the encrypted analysis. `None`
     /// until analysis writes it.
     pub audit_file_id: Option<Uuid>,
+    /// Intermediates file (`file_kind = intermediate`) holding the encrypted
+    /// enrichment (OCR layout, transcript, tokenized text). `None` until analysis
+    /// writes it, and stays `None` when the analysis ran no enricher.
+    pub intermediates_file_id: Option<Uuid>,
     /// How the detection was initiated.
     pub trigger_type: PipelineTriggerType,
     /// Current detection status.
@@ -59,6 +63,9 @@ pub struct NewWorkspaceDetection {
     pub input_file_id: Uuid,
     /// Audit file holding the encrypted analysis (set once analyzed).
     pub audit_file_id: Option<Uuid>,
+    /// Intermediates file holding the encrypted enrichment (set once analyzed, if
+    /// the document produced any).
+    pub intermediates_file_id: Option<Uuid>,
     /// Trigger type.
     pub trigger_type: Option<PipelineTriggerType>,
     /// Initial status.
@@ -78,6 +85,8 @@ pub struct UpdateWorkspaceDetection {
     pub status: Option<DetectionStatus>,
     /// Audit file holding the encrypted analysis.
     pub audit_file_id: Option<Option<Uuid>>,
+    /// Intermediates file holding the encrypted enrichment.
+    pub intermediates_file_id: Option<Option<Uuid>>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<Json<DetectionMetadata>>,
     /// When a worker last claimed this detection (lease timestamp).

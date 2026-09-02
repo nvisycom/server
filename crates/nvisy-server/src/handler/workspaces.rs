@@ -55,6 +55,7 @@ async fn backfill_retention(
         // Review audits share the audit-logs scope with detection audits; a
         // redaction stages them under `AuditLogs`, so they backfill under it too.
         (RetentionScope::AuditLogs, FileKind::Review),
+        (RetentionScope::Intermediates, FileKind::Intermediate),
     ] {
         let expires_at = retention.get(scope).expires_at(now);
         conn.backfill_files_expiry(workspace_id, kind, expires_at)

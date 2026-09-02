@@ -36,6 +36,8 @@ pub struct RetentionOverride {
     pub redacted_documents: Option<Retention>,
     /// Overrides audit-blob retention when set.
     pub audit_logs: Option<Retention>,
+    /// Overrides enrichment-intermediate retention when set.
+    pub intermediates: Option<Retention>,
 }
 
 impl RetentionOverride {
@@ -47,6 +49,7 @@ impl RetentionOverride {
             RetentionScope::OriginalDocuments => None,
             RetentionScope::RedactedDocuments => self.redacted_documents,
             RetentionScope::AuditLogs => self.audit_logs,
+            RetentionScope::Intermediates => self.intermediates,
         }
     }
 }
