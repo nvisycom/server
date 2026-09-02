@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 use bytes::Bytes;
 use elide_pipeline::file::Document;
-use elide_pipeline::{Audit, Engine};
+use elide_pipeline::{ArtifactSet, Audit, Engine};
 use nvisy_nats::object::{AuditBucket, AuditKey, FileKey, FilesBucket, ObjectBucket};
 use nvisy_postgres::PgConn;
 use nvisy_postgres::model::{
@@ -417,18 +417,20 @@ impl RunBlobStore {
             })
     }
 
-    /// Loads a detection's enrichment intermediates from its already-resolved file
-    /// row, as the JSON value they were stored as. Holds no database connection:
-    /// only object-store I/O and decryption.
+    /// Loads and decodes a detection's enrichment intermediates from its
+    /// already-resolved file row. Holds no database connection: only object-store
+    /// I/O and decryption.
     ///
-    /// Served to the client verbatim (the OCR layout / transcript), so it is
-    /// returned as an opaque [`serde_json::Value`] rather than reconstructed into
-    /// the engine's artifact types.
+    /// The `engine` reconstructs the [`ArtifactSet`] from its serialized form: it
+    /// serializes but does not `Deserialize`, since each group is tagged by
+    /// modality name and only the engine's registry can map those back to concrete
+    /// artifact types.
     pub async fn load_intermediates(
         &self,
+        engine: &Engine,
         workspace_id: Uuid,
         intermediates_file: &WorkspaceFile,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<ArtifactSet> {
         let key = AuditKey::from_str(&intermediates_file.storage_path).map_err(|err| {
             ErrorKind::InternalServerError
                 .with_message("Invalid intermediates storage key")
@@ -456,11 +458,13 @@ impl RunBlobStore {
                     .with_message("Failed to decrypt intermediates")
                     .with_context(err.to_string())
             })?;
-        serde_json::from_slice(&plaintext).map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Failed to decode intermediates")
-                .with_context(err.to_string())
-        })
+        engine
+            .deserialize_artifacts(&mut serde_json::Deserializer::from_slice(&plaintext))
+            .map_err(|err| {
+                ErrorKind::InternalServerError
+                    .with_message("Failed to decode intermediates")
+                    .with_context(err.to_string())
+            })
     }
 
     /// Encrypts a redaction's review audit, writes it to the audit bucket, and

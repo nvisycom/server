@@ -14,8 +14,8 @@ use aide::transform::TransformOperation;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use elide_pipeline::Audit;
 use elide_pipeline::export::{ExportCsv, ExportJson};
+use elide_pipeline::{ArtifactSet, Audit};
 use nvisy_postgres::PgClient;
 
 use super::detections::find_detection;
@@ -104,10 +104,11 @@ fn get_detection_analysis_docs(op: TransformOperation) -> TransformOperation {
 async fn get_detection_artifacts(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
+    State(engine): State<EngineService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<DetectionPathParams>,
-) -> Result<(StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<ArtifactSet>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting detection intermediates");
 
     // Resolve the detection and its intermediates file row under a scoped
@@ -128,7 +129,7 @@ async fn get_detection_artifacts(
     };
 
     let intermediates = blob
-        .load_intermediates(workspace.id, &intermediates_file)
+        .load_intermediates(&engine, workspace.id, &intermediates_file)
         .await?;
 
     tracing::debug!(target: TRACING_TARGET, "Detection intermediates retrieved");
@@ -144,7 +145,7 @@ fn get_detection_artifacts_docs(op: TransformOperation) -> TransformOperation {
              content and add entities the analysis missed. A text or tabular document produces no \
              intermediates (404).",
         )
-        .response::<200, Json<serde_json::Value>>()
+        .response::<200, Json<ArtifactSet>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
