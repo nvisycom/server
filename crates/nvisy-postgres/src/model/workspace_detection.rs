@@ -29,8 +29,8 @@ pub struct WorkspaceDetection {
     /// until analysis writes it.
     pub audit_file_id: Option<Uuid>,
     /// Intermediates file (`file_kind = intermediate`) holding the encrypted
-    /// enrichment (OCR layout, transcript). `None` until analysis writes it, and
-    /// stays `None` for a document whose modality needs no enrichment.
+    /// enrichment (OCR layout, transcript, tokenized text). `None` until analysis
+    /// writes it, and stays `None` when the analysis ran no enricher.
     pub intermediates_file_id: Option<Uuid>,
     /// How the detection was initiated.
     pub trigger_type: PipelineTriggerType,

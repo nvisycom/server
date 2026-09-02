@@ -102,7 +102,7 @@ CREATE INDEX workspace_detections_audit_file_idx
     WHERE audit_file_id IS NOT NULL;
 
 -- Same shape for the enrichment intermediates file, NULL until (and unless) a
--- detection extracts enrichment (text/tabular documents produce none).
+-- detection's analysis runs an enricher (an analysis with none produces no file).
 CREATE INDEX workspace_detections_intermediates_file_idx
     ON workspace_detections (intermediates_file_id)
     WHERE intermediates_file_id IS NOT NULL;

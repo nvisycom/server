@@ -267,9 +267,9 @@ impl DetectionWorker {
     }
 
     /// Stages a detection's enrichment intermediates, or returns `None` when the
-    /// document produced none (a text/tabular modality: its artifact set is
-    /// empty). Skipping the empty case avoids an intermediates file that a client
-    /// would fetch only to find nothing.
+    /// analysis ran no enricher for any group (its artifact set serializes empty).
+    /// Skipping the empty case avoids an intermediates file that a client would
+    /// fetch only to find nothing.
     async fn stage_intermediates<T: serde::Serialize>(
         &self,
         pipeline: &WorkspacePipeline,
@@ -371,10 +371,10 @@ impl DetectionWorker {
             .stage_analyzed_document(pipeline, &settings.retention, detection.account_id, audit)
             .await?;
 
-        // Stage the enrichment intermediates (OCR layout, transcript) beside the
-        // audit, so the client can read them and add entities the analysis missed.
-        // A text/tabular document produces none — its artifacts serialize to an
-        // empty set — so nothing is stored and the detection carries no
+        // Stage the enrichment intermediates (OCR layout, transcript, tokenized
+        // text) beside the audit, so the client can read them and add entities the
+        // analysis missed. An analysis that ran no enricher produces an empty
+        // artifact set — nothing is stored and the detection carries no
         // intermediates reference.
         let intermediates_file = self
             .stage_intermediates(

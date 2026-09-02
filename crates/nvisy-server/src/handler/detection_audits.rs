@@ -88,11 +88,12 @@ fn get_detection_analysis_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Returns the detection's enrichment intermediates — an image's OCR layout, an
-/// audio clip's transcript — as the content the analysis extracted, so a client
-/// can search it and add entities the analysis missed.
+/// audio clip's transcript, tokenized text — as the content the analysis
+/// extracted, so a client can search it and add entities the analysis missed.
 ///
-/// Available only for a detection whose modality produced enrichment (a
-/// text/tabular document produces none — 404). Requires `ViewPipelines`.
+/// Available only for a detection whose analysis enriched (ran an enricher for a
+/// group); a detection with no enrichment has none — 404. Requires
+/// `ViewPipelines`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -101,7 +102,7 @@ fn get_detection_analysis_docs(op: TransformOperation) -> TransformOperation {
         detection_id = %path_params.detection_id,
     )
 )]
-async fn get_detection_artifacts(
+async fn get_detection_intermediates(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
@@ -137,13 +138,13 @@ async fn get_detection_artifacts(
     Ok((StatusCode::OK, Json(intermediates)))
 }
 
-fn get_detection_artifacts_docs(op: TransformOperation) -> TransformOperation {
+fn get_detection_intermediates_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get detection intermediates")
         .description(
-            "Returns the detection's enrichment intermediates — an image's OCR layout or an \
-             audio clip's transcript — as `{ body, parts }`, so a client can search the extracted \
-             content and add entities the analysis missed. A text or tabular document produces no \
-             intermediates (404).",
+            "Returns the detection's enrichment intermediates — an image's OCR layout, an audio \
+             clip's transcript, or tokenized text — as `{ body, parts }`, so a client can search \
+             the extracted content and add entities the analysis missed. A detection whose \
+             analysis ran no enricher has no intermediates (404).",
         )
         .response::<200, Json<ArtifactSet>>()
         .response::<401, Json<ErrorResponse>>()
@@ -276,8 +277,11 @@ pub fn routes() -> ApiRouter<ServiceState> {
             get_with(download_detection_audit, download_detection_audit_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/detections/{detectionId}/artifacts/",
-            get_with(get_detection_artifacts, get_detection_artifacts_docs),
+            "/workspaces/{workspaceSlug}/detections/{detectionId}/intermediates/",
+            get_with(
+                get_detection_intermediates,
+                get_detection_intermediates_docs,
+            ),
         )
         .with_path_items(|item| item.tag("Detections"))
 }
