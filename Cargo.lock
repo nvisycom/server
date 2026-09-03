@@ -3000,7 +3000,7 @@ dependencies = [
 [[package]]
 name = "elide-export"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide-runtime?branch=main#9f800a84600d45a6c71b52645a3ac03db970ec55"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#1a27c2c779bd03ab80abe53da40ed8a29542d9b1"
 dependencies = [
  "csv",
  "elide",
@@ -3023,7 +3023,7 @@ dependencies = [
 [[package]]
 name = "elide-governance"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide-runtime?branch=main#9f800a84600d45a6c71b52645a3ac03db970ec55"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#1a27c2c779bd03ab80abe53da40ed8a29542d9b1"
 dependencies = [
  "elide-core",
  "elide-operator",
@@ -3161,7 +3161,7 @@ dependencies = [
 [[package]]
 name = "elide-pipeline"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide-runtime?branch=main#9f800a84600d45a6c71b52645a3ac03db970ec55"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#1a27c2c779bd03ab80abe53da40ed8a29542d9b1"
 dependencies = [
  "bytes",
  "elide",
@@ -3182,7 +3182,7 @@ dependencies = [
 [[package]]
 name = "elide-provider"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide-runtime?branch=main#9f800a84600d45a6c71b52645a3ac03db970ec55"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#1a27c2c779bd03ab80abe53da40ed8a29542d9b1"
 dependencies = [
  "elide",
  "elide-bentoml",
@@ -3206,7 +3206,7 @@ dependencies = [
 [[package]]
 name = "elide-review"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide-runtime?branch=main#9f800a84600d45a6c71b52645a3ac03db970ec55"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#1a27c2c779bd03ab80abe53da40ed8a29542d9b1"
 dependencies = [
  "elide",
  "elide-governance",
@@ -3230,7 +3230,7 @@ dependencies = [
 [[package]]
 name = "elide-template"
 version = "0.1.0"
-source = "git+https://github.com/nvisycom/elide-runtime?branch=main#9f800a84600d45a6c71b52645a3ac03db970ec55"
+source = "git+https://github.com/nvisycom/elide-runtime?branch=main#1a27c2c779bd03ab80abe53da40ed8a29542d9b1"
 dependencies = [
  "elide-core",
  "elide-governance",
