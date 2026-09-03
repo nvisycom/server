@@ -142,10 +142,10 @@ fn get_detection_intermediates_docs(op: TransformOperation) -> TransformOperatio
     op.summary("Get detection intermediates")
         .description(
             "Returns the detection's enrichment intermediates — an image's OCR layout, an audio \
-             clip's transcript, or tokenized text — as a `parts` list, each part carrying its \
-             path `id`, `modality`, and the extracted `artifact`, so a client can search the \
-             content and add entities the analysis missed. A detection whose analysis ran no \
-             enricher has no intermediates (404).",
+             clip's transcript, or tokenized text — as an object with a `parts` list, each part \
+             carrying its path `id`, `modality`, and the extracted `artifact`, so a client can \
+             search the content and add entities the analysis missed. A detection whose analysis \
+             ran no enricher has no intermediates (404).",
         )
         .response::<200, Json<ArtifactSet>>()
         .response::<401, Json<ErrorResponse>>()
