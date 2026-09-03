@@ -143,6 +143,15 @@ impl RunBlobStore {
 
     /// Reads a workspace file's bytes from object storage and builds an engine
     /// [`Document`], stamping the run's id as the correlation id.
+    ///
+    /// The document's name is the file's original filename, and its format is
+    /// resolved from the stored `file_extension` (the trusted, `NOT NULL` column
+    /// the codec dispatches on — the filename may lie about the type). The name is
+    /// the engine's identity for the document: it roots every part path and is how
+    /// `anonymize` matches an audit back to its document, so redaction would
+    /// silently no-op if it differed between passes. Both detect and redact build
+    /// from the same input-file row through here, so the name is identical by
+    /// construction.
     pub async fn build_document(
         &self,
         file: &WorkspaceFile,
@@ -176,7 +185,9 @@ impl RunBlobStore {
                     .with_context(err.to_string())
             })?;
 
-        Ok(Document::new(bytes, file.file_extension.clone()).with_correlation_id(correlation_id))
+        Ok(Document::new(file.original_filename.clone(), bytes)
+            .with_extension(file.file_extension.clone())
+            .with_correlation_id(correlation_id))
     }
 
     /// Encrypts the analysis, writes it to the audit bucket, and builds the

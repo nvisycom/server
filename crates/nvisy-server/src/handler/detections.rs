@@ -632,12 +632,14 @@ async fn redact_detection(
     let mut reviewed = blob.load_audit(&engine, workspace.id, &audit_file).await?;
 
     // Layer the reviewer's edits onto the working audit's report before redaction.
-    // Validation is report-relative (an unknown target or a self-contradiction →
-    // 400, via `EditError`'s `From` impl) so a reviewer is never told a decision
-    // took effect when the document says otherwise.
+    // Both validation and landing are report-relative (an unknown target, a
+    // self-contradiction, or an edit naming a part of the wrong modality → 400, via
+    // `EditError`'s `From` impl), so a reviewer is never told a decision took effect
+    // when the document says otherwise. `apply` is fallible in its own right: some
+    // landing failures (a modality mismatch) surface only when the edit lands.
     if let Some(edits) = &request.edits {
         edits.validate(&reviewed.report)?;
-        edits.apply(&mut reviewed.report);
+        edits.apply(&mut reviewed.report)?;
     }
 
     let document = blob.build_document(&file, detection.id).await?;
