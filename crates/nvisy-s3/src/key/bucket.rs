@@ -11,8 +11,11 @@
 pub enum Bucket {
     /// Uploaded and processed document files.
     Files,
-    /// Detection analysis blobs (audits, review audits, intermediates).
+    /// Detection analysis blobs (audits, review audits).
     Audits,
+    /// Transient pipeline artifacts (enrichment intermediates: OCR layout,
+    /// transcripts).
+    Artifacts,
     /// Account avatars.
     AccountAvatars,
     /// Workspace avatars (logos).
@@ -27,6 +30,7 @@ impl Bucket {
         match self {
             Self::Files => "DOCUMENT_FILES",
             Self::Audits => "DOCUMENT_AUDITS",
+            Self::Artifacts => "PIPELINE_ARTIFACTS",
             Self::AccountAvatars => "ACCOUNT_AVATARS",
             Self::WorkspaceAvatars => "WORKSPACE_AVATARS",
         }
@@ -39,6 +43,7 @@ impl Bucket {
         match self {
             Self::Files => "files",
             Self::Audits => "audits",
+            Self::Artifacts => "artifacts",
             Self::AccountAvatars => "account-avatars",
             Self::WorkspaceAvatars => "workspace-avatars",
         }
@@ -51,6 +56,7 @@ impl Bucket {
         match name {
             "DOCUMENT_FILES" => Some(Self::Files),
             "DOCUMENT_AUDITS" => Some(Self::Audits),
+            "PIPELINE_ARTIFACTS" => Some(Self::Artifacts),
             "ACCOUNT_AVATARS" => Some(Self::AccountAvatars),
             "WORKSPACE_AVATARS" => Some(Self::WorkspaceAvatars),
             _ => None,
@@ -69,6 +75,7 @@ mod tests {
         for bucket in [
             Bucket::Files,
             Bucket::Audits,
+            Bucket::Artifacts,
             Bucket::AccountAvatars,
             Bucket::WorkspaceAvatars,
         ] {

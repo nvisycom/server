@@ -2,7 +2,7 @@
 
 use nvisy_core::health::{ComponentHealth, HealthCheck};
 
-use crate::store::BlobStore;
+use super::BlobStore;
 
 /// Tracing target for blob-store health checks.
 const TRACING_TARGET: &str = "nvisy_s3::health";

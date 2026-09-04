@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 use crate::types::{AccountRefRow, CursorPage, CursorPagination, OffsetPagination, WithAccountRef};
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for workspace policy database operations.
 pub trait WorkspacePolicyRepository {
@@ -16,20 +16,20 @@ pub trait WorkspacePolicyRepository {
     fn create_workspace_policy(
         &mut self,
         new_policy: NewWorkspacePolicy,
-    ) -> impl Future<Output = PgResult<WorkspacePolicy>> + Send;
+    ) -> impl Future<Output = Result<WorkspacePolicy>> + Send;
 
     /// Finds a policy by its unique identifier.
     fn find_workspace_policy_by_id(
         &mut self,
         policy_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspacePolicy>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspacePolicy>>> + Send;
 
     /// Finds a policy by ID within a specific workspace.
     fn find_policy_in_workspace(
         &mut self,
         workspace_id: Uuid,
         policy_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspacePolicy>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspacePolicy>>> + Send;
 
     /// Finds a policy by slug within a specific workspace, with the handle and
     /// avatar of the account that created it.
@@ -37,14 +37,14 @@ pub trait WorkspacePolicyRepository {
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> impl Future<Output = PgResult<Option<WithAccountRef<WorkspacePolicy>>>> + Send;
+    ) -> impl Future<Output = Result<Option<WithAccountRef<WorkspacePolicy>>>> + Send;
 
     /// Lists all policies in a workspace with offset pagination.
     fn offset_list_workspace_policies(
         &mut self,
         workspace_id: Uuid,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspacePolicy>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspacePolicy>>> + Send;
 
     /// Lists all policies in a workspace with cursor pagination, each paired
     /// with the handle and avatar of the account that created it.
@@ -52,33 +52,33 @@ pub trait WorkspacePolicyRepository {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspacePolicy>>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspacePolicy>>>> + Send;
 
     /// Updates a policy with new data.
     fn update_workspace_policy(
         &mut self,
         policy_id: Uuid,
         updates: UpdateWorkspacePolicy,
-    ) -> impl Future<Output = PgResult<WorkspacePolicy>> + Send;
+    ) -> impl Future<Output = Result<WorkspacePolicy>> + Send;
 
     /// Soft deletes a policy by setting the deletion timestamp.
     fn delete_workspace_policy(
         &mut self,
         policy_id: Uuid,
-    ) -> impl Future<Output = PgResult<()>> + Send;
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Counts policies in a workspace.
     fn count_workspace_policies(
         &mut self,
         workspace_id: Uuid,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
+    ) -> impl Future<Output = Result<i64>> + Send;
 }
 
 impl WorkspacePolicyRepository for PgConnection {
     async fn create_workspace_policy(
         &mut self,
         new_policy: NewWorkspacePolicy,
-    ) -> PgResult<WorkspacePolicy> {
+    ) -> Result<WorkspacePolicy> {
         use schema::workspace_policies;
 
         let policy = diesel::insert_into(workspace_policies::table)
@@ -86,7 +86,7 @@ impl WorkspacePolicyRepository for PgConnection {
             .returning(WorkspacePolicy::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(policy)
     }
@@ -94,7 +94,7 @@ impl WorkspacePolicyRepository for PgConnection {
     async fn find_workspace_policy_by_id(
         &mut self,
         policy_id: Uuid,
-    ) -> PgResult<Option<WorkspacePolicy>> {
+    ) -> Result<Option<WorkspacePolicy>> {
         use schema::workspace_policies::{self, dsl};
 
         let policy = workspace_policies::table
@@ -104,7 +104,7 @@ impl WorkspacePolicyRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(policy)
     }
@@ -113,7 +113,7 @@ impl WorkspacePolicyRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         policy_id: Uuid,
-    ) -> PgResult<Option<WorkspacePolicy>> {
+    ) -> Result<Option<WorkspacePolicy>> {
         use schema::workspace_policies::{self, dsl};
 
         let policy = workspace_policies::table
@@ -124,7 +124,7 @@ impl WorkspacePolicyRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(policy)
     }
@@ -133,7 +133,7 @@ impl WorkspacePolicyRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         slug: &str,
-    ) -> PgResult<Option<WithAccountRef<WorkspacePolicy>>> {
+    ) -> Result<Option<WithAccountRef<WorkspacePolicy>>> {
         use schema::workspace_policies::dsl;
         use schema::{accounts, workspace_policies};
 
@@ -153,7 +153,7 @@ impl WorkspacePolicyRepository for PgConnection {
             .first::<(WorkspacePolicy, AccountRefRow)>(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(row.map(|(item, account)| WithAccountRef { item, account }))
     }
@@ -162,7 +162,7 @@ impl WorkspacePolicyRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<WorkspacePolicy>> {
+    ) -> Result<Vec<WorkspacePolicy>> {
         use schema::workspace_policies::{self, dsl};
 
         let policies = workspace_policies::table
@@ -174,7 +174,7 @@ impl WorkspacePolicyRepository for PgConnection {
             .select(WorkspacePolicy::as_select())
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(policies)
     }
@@ -183,7 +183,7 @@ impl WorkspacePolicyRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<WithAccountRef<WorkspacePolicy>>> {
+    ) -> Result<CursorPage<WithAccountRef<WorkspacePolicy>>> {
         use schema::workspace_policies::dsl;
         use schema::{accounts, workspace_policies};
 
@@ -195,7 +195,7 @@ impl WorkspacePolicyRepository for PgConnection {
                     .count()
                     .get_result::<i64>(self)
                     .await
-                    .map_err(PgError::from)?,
+                    .map_err(Error::from)?,
             )
         } else {
             None
@@ -230,7 +230,7 @@ impl WorkspacePolicyRepository for PgConnection {
                 .limit(limit)
                 .load(self)
                 .await
-                .map_err(PgError::from)?
+                .map_err(Error::from)?
         } else {
             query
                 .select((
@@ -245,7 +245,7 @@ impl WorkspacePolicyRepository for PgConnection {
                 .limit(limit)
                 .load(self)
                 .await
-                .map_err(PgError::from)?
+                .map_err(Error::from)?
         };
 
         let items: Vec<WithAccountRef<WorkspacePolicy>> = rows
@@ -262,7 +262,7 @@ impl WorkspacePolicyRepository for PgConnection {
         &mut self,
         policy_id: Uuid,
         updates: UpdateWorkspacePolicy,
-    ) -> PgResult<WorkspacePolicy> {
+    ) -> Result<WorkspacePolicy> {
         use schema::workspace_policies::{self, dsl};
 
         let policy = diesel::update(workspace_policies::table.filter(dsl::id.eq(policy_id)))
@@ -270,12 +270,12 @@ impl WorkspacePolicyRepository for PgConnection {
             .returning(WorkspacePolicy::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(policy)
     }
 
-    async fn delete_workspace_policy(&mut self, policy_id: Uuid) -> PgResult<()> {
+    async fn delete_workspace_policy(&mut self, policy_id: Uuid) -> Result<()> {
         use diesel::dsl::now;
         use schema::workspace_policies::{self, dsl};
 
@@ -283,12 +283,12 @@ impl WorkspacePolicyRepository for PgConnection {
             .set(dsl::deleted_at.eq(now))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(())
     }
 
-    async fn count_workspace_policies(&mut self, workspace_id: Uuid) -> PgResult<i64> {
+    async fn count_workspace_policies(&mut self, workspace_id: Uuid) -> Result<i64> {
         use schema::workspace_policies::{self, dsl};
 
         let count = workspace_policies::table
@@ -297,7 +297,7 @@ impl WorkspacePolicyRepository for PgConnection {
             .count()
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(count)
     }

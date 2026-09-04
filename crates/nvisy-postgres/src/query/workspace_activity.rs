@@ -13,7 +13,7 @@ use crate::types::{
     AccountRefRow, ActivityPayload, ActivityType, CursorPage, CursorPagination, Json,
     OffsetPagination, WithAccountRef,
 };
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Predicates that narrow an activity listing, all optional (an empty filter
 /// matches every activity in the workspace). Shared by the paginated feed and the
@@ -55,14 +55,14 @@ pub trait WorkspaceActivityRepository {
     fn log_activity(
         &mut self,
         activity: NewWorkspaceActivity,
-    ) -> impl Future<Output = PgResult<WorkspaceActivity>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceActivity>> + Send;
 
     /// Lists activities for a specific workspace with offset pagination.
     fn offset_list_workspace_activity(
         &mut self,
         workspace_id: Uuid,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceActivity>>> + Send;
 
     /// Lists a workspace's activities with cursor pagination, newest first, each
     /// paired with the handle and avatar of the account that performed it. The
@@ -73,7 +73,7 @@ pub trait WorkspaceActivityRepository {
         workspace_id: Uuid,
         filter: ActivityFilter,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceActivity>>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceActivity>>>> + Send;
 
     /// Lists a workspace's filtered activities oldest first (the natural order for
     /// an export), each paired with the performing account's handle and avatar. At
@@ -85,14 +85,14 @@ pub trait WorkspaceActivityRepository {
         workspace_id: Uuid,
         filter: ActivityFilter,
         limit: i64,
-    ) -> impl Future<Output = PgResult<Vec<WithAccountRef<WorkspaceActivity>>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WithAccountRef<WorkspaceActivity>>>> + Send;
 
     /// Gets recent activities across all workspaces for a specific user.
     fn get_account_recent_activity(
         &mut self,
         account_id: Uuid,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceActivity>>> + Send;
 
     /// Gets activities of a specific type within a workspace.
     fn get_activity_by_type(
@@ -100,35 +100,35 @@ pub trait WorkspaceActivityRepository {
         workspace_id: Uuid,
         activity_type_filter: ActivityType,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceActivity>>> + Send;
 
     /// Gets recent activities for a user within a specified time window.
     fn get_recent_account_activity(
         &mut self,
         account_id: Uuid,
         hours: i64,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceActivity>>> + Send;
 
     /// Logs integration-related activity using standardized parameters.
     fn log_integration_activity(
         &mut self,
         workspace_id: Uuid,
         params: LogEntityActivityParams,
-    ) -> impl Future<Output = PgResult<WorkspaceActivity>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceActivity>> + Send;
 
     /// Logs workspace member-related activity using standardized parameters.
     fn log_member_activity(
         &mut self,
         workspace_id: Uuid,
         params: LogEntityActivityParams,
-    ) -> impl Future<Output = PgResult<WorkspaceActivity>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceActivity>> + Send;
 
     /// Logs document-related activity using standardized parameters.
     fn log_document_activity(
         &mut self,
         workspace_id: Uuid,
         params: LogEntityActivityParams,
-    ) -> impl Future<Output = PgResult<WorkspaceActivity>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceActivity>> + Send;
 
     /// Gets the most active users in a workspace ranked by activity count.
     fn get_most_active_accounts(
@@ -136,14 +136,14 @@ pub trait WorkspaceActivityRepository {
         workspace_id: Uuid,
         hours: Option<i64>,
         limit: i64,
-    ) -> impl Future<Output = PgResult<Vec<(Uuid, i64)>>> + Send;
+    ) -> impl Future<Output = Result<Vec<(Uuid, i64)>>> + Send;
 
     /// Gets a breakdown of activities by type for analytical reporting.
     fn get_activity_type_breakdown(
         &mut self,
         workspace_id: Uuid,
         hours: Option<i64>,
-    ) -> impl Future<Output = PgResult<Vec<(ActivityType, i64)>>> + Send;
+    ) -> impl Future<Output = Result<Vec<(ActivityType, i64)>>> + Send;
 
     /// Gets activities originating from a specific IP address for security analysis.
     fn get_activities_by_ip(
@@ -151,20 +151,17 @@ pub trait WorkspaceActivityRepository {
         workspace_id: Uuid,
         ip_addr: IpNet,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceActivity>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceActivity>>> + Send;
 
     /// Cleans up old activity logs to manage database size and performance.
     fn cleanup_old_activities(
         &mut self,
         days_to_keep: i64,
-    ) -> impl Future<Output = PgResult<usize>> + Send;
+    ) -> impl Future<Output = Result<usize>> + Send;
 }
 
 impl WorkspaceActivityRepository for PgConnection {
-    async fn log_activity(
-        &mut self,
-        activity: NewWorkspaceActivity,
-    ) -> PgResult<WorkspaceActivity> {
+    async fn log_activity(&mut self, activity: NewWorkspaceActivity) -> Result<WorkspaceActivity> {
         use schema::workspace_activities;
 
         let activity = diesel::insert_into(workspace_activities::table)
@@ -172,7 +169,7 @@ impl WorkspaceActivityRepository for PgConnection {
             .returning(WorkspaceActivity::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(activity)
     }
@@ -181,7 +178,7 @@ impl WorkspaceActivityRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<WorkspaceActivity>> {
+    ) -> Result<Vec<WorkspaceActivity>> {
         use schema::workspace_activities::{self, dsl};
 
         let activities = workspace_activities::table
@@ -192,7 +189,7 @@ impl WorkspaceActivityRepository for PgConnection {
             .offset(pagination.offset)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(activities)
     }
@@ -202,7 +199,7 @@ impl WorkspaceActivityRepository for PgConnection {
         workspace_id: Uuid,
         filter: ActivityFilter,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<WithAccountRef<WorkspaceActivity>>> {
+    ) -> Result<CursorPage<WithAccountRef<WorkspaceActivity>>> {
         use diesel::dsl::count_star;
         use schema::workspace_activities::dsl;
         use schema::{accounts, workspace_activities};
@@ -217,7 +214,7 @@ impl WorkspaceActivityRepository for PgConnection {
                     .select(count_star())
                     .get_result(self)
                     .await
-                    .map_err(PgError::from)?,
+                    .map_err(Error::from)?,
             )
         } else {
             None
@@ -253,7 +250,7 @@ impl WorkspaceActivityRepository for PgConnection {
             .limit(pagination.fetch_limit())
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         let items: Vec<WithAccountRef<WorkspaceActivity>> = rows
             .into_iter()
@@ -270,7 +267,7 @@ impl WorkspaceActivityRepository for PgConnection {
         workspace_id: Uuid,
         filter: ActivityFilter,
         limit: i64,
-    ) -> PgResult<Vec<WithAccountRef<WorkspaceActivity>>> {
+    ) -> Result<Vec<WithAccountRef<WorkspaceActivity>>> {
         use schema::workspace_activities::dsl;
         use schema::{accounts, workspace_activities};
 
@@ -295,7 +292,7 @@ impl WorkspaceActivityRepository for PgConnection {
             .limit(limit)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(rows
             .into_iter()
@@ -307,7 +304,7 @@ impl WorkspaceActivityRepository for PgConnection {
         &mut self,
         account_id: Uuid,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<WorkspaceActivity>> {
+    ) -> Result<Vec<WorkspaceActivity>> {
         use schema::workspace_activities::{self, dsl};
 
         let activities = workspace_activities::table
@@ -318,7 +315,7 @@ impl WorkspaceActivityRepository for PgConnection {
             .offset(pagination.offset)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(activities)
     }
@@ -328,7 +325,7 @@ impl WorkspaceActivityRepository for PgConnection {
         workspace_id: Uuid,
         activity_type_filter: ActivityType,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<WorkspaceActivity>> {
+    ) -> Result<Vec<WorkspaceActivity>> {
         use schema::workspace_activities::{self, dsl};
 
         let activities = workspace_activities::table
@@ -340,7 +337,7 @@ impl WorkspaceActivityRepository for PgConnection {
             .offset(pagination.offset)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(activities)
     }
@@ -349,7 +346,7 @@ impl WorkspaceActivityRepository for PgConnection {
         &mut self,
         account_id: Uuid,
         hours: i64,
-    ) -> PgResult<Vec<WorkspaceActivity>> {
+    ) -> Result<Vec<WorkspaceActivity>> {
         use schema::workspace_activities::{self, dsl};
 
         let cutoff_time = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(hours));
@@ -362,7 +359,7 @@ impl WorkspaceActivityRepository for PgConnection {
             .limit(50)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(activities)
     }
@@ -371,7 +368,7 @@ impl WorkspaceActivityRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         params: LogEntityActivityParams,
-    ) -> PgResult<WorkspaceActivity> {
+    ) -> Result<WorkspaceActivity> {
         let activity = NewWorkspaceActivity {
             workspace_id,
             account_id: params.account_id,
@@ -388,7 +385,7 @@ impl WorkspaceActivityRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         params: LogEntityActivityParams,
-    ) -> PgResult<WorkspaceActivity> {
+    ) -> Result<WorkspaceActivity> {
         let activity = NewWorkspaceActivity {
             workspace_id,
             account_id: params.account_id,
@@ -405,7 +402,7 @@ impl WorkspaceActivityRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         params: LogEntityActivityParams,
-    ) -> PgResult<WorkspaceActivity> {
+    ) -> Result<WorkspaceActivity> {
         let activity = NewWorkspaceActivity {
             workspace_id,
             account_id: params.account_id,
@@ -423,7 +420,7 @@ impl WorkspaceActivityRepository for PgConnection {
         workspace_id: Uuid,
         hours: Option<i64>,
         limit: i64,
-    ) -> PgResult<Vec<(Uuid, i64)>> {
+    ) -> Result<Vec<(Uuid, i64)>> {
         use schema::workspace_activities::{self, dsl};
 
         let results = if let Some(time_window) = hours {
@@ -438,7 +435,7 @@ impl WorkspaceActivityRepository for PgConnection {
                 .limit(limit)
                 .load::<(Uuid, i64)>(self)
                 .await
-                .map_err(PgError::from)?
+                .map_err(Error::from)?
         } else {
             workspace_activities::table
                 .filter(dsl::workspace_id.eq(workspace_id))
@@ -448,7 +445,7 @@ impl WorkspaceActivityRepository for PgConnection {
                 .limit(limit)
                 .load::<(Uuid, i64)>(self)
                 .await
-                .map_err(PgError::from)?
+                .map_err(Error::from)?
         };
 
         Ok(results)
@@ -458,7 +455,7 @@ impl WorkspaceActivityRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         hours: Option<i64>,
-    ) -> PgResult<Vec<(ActivityType, i64)>> {
+    ) -> Result<Vec<(ActivityType, i64)>> {
         use schema::workspace_activities::{self, dsl};
 
         let results = if let Some(time_window) = hours {
@@ -472,7 +469,7 @@ impl WorkspaceActivityRepository for PgConnection {
                 .order(diesel::dsl::count(dsl::id).desc())
                 .load::<(ActivityType, i64)>(self)
                 .await
-                .map_err(PgError::from)?
+                .map_err(Error::from)?
         } else {
             workspace_activities::table
                 .filter(dsl::workspace_id.eq(workspace_id))
@@ -481,7 +478,7 @@ impl WorkspaceActivityRepository for PgConnection {
                 .order(diesel::dsl::count(dsl::id).desc())
                 .load::<(ActivityType, i64)>(self)
                 .await
-                .map_err(PgError::from)?
+                .map_err(Error::from)?
         };
 
         Ok(results)
@@ -492,7 +489,7 @@ impl WorkspaceActivityRepository for PgConnection {
         workspace_id: Uuid,
         ip_addr: IpNet,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<WorkspaceActivity>> {
+    ) -> Result<Vec<WorkspaceActivity>> {
         use schema::workspace_activities::{self, dsl};
 
         let activities = workspace_activities::table
@@ -504,12 +501,12 @@ impl WorkspaceActivityRepository for PgConnection {
             .offset(pagination.offset)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(activities)
     }
 
-    async fn cleanup_old_activities(&mut self, days_to_keep: i64) -> PgResult<usize> {
+    async fn cleanup_old_activities(&mut self, days_to_keep: i64) -> Result<usize> {
         use schema::workspace_activities::dsl::*;
 
         let cutoff_date =
@@ -519,7 +516,7 @@ impl WorkspaceActivityRepository for PgConnection {
             .filter(created_at.lt(cutoff_date))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(deleted_count)
     }

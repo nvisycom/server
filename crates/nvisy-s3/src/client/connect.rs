@@ -4,9 +4,8 @@ use aws_config::BehaviorVersion;
 use aws_credential_types::Credentials;
 use aws_sdk_s3::config::Region;
 
-use crate::config::S3Config;
-use crate::error::{S3Error, S3Result};
-use crate::store::BlobStore;
+use super::{BlobStore, S3Config};
+use crate::error::{Error, Result};
 
 /// Tracing target for connection setup.
 const TRACING_TARGET: &str = "nvisy_s3::connect";
@@ -22,7 +21,7 @@ impl BlobStore {
     /// (environment, profile, container/instance role). `endpoint` targets an
     /// S3-compatible server; unset targets AWS S3.
     #[tracing::instrument(name = "s3.connect", skip_all, fields(bucket = %config.bucket))]
-    pub async fn connect(config: &S3Config) -> S3Result<Self> {
+    pub async fn connect(config: &S3Config) -> Result<Self> {
         tracing::debug!(
             target: TRACING_TARGET,
             endpoint = ?config.endpoint,
@@ -46,7 +45,7 @@ impl BlobStore {
             }
             (None, None) => {}
             _ => {
-                return Err(S3Error::Config(
+                return Err(Error::Config(
                     "S3 credentials incomplete: set both an access key id and a secret access key, \
                      or neither (to use the default credential chain)"
                         .to_owned(),

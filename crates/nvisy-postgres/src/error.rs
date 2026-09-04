@@ -6,7 +6,9 @@
 use std::borrow::Cow;
 
 pub use deadpool::managed::TimeoutType;
-use diesel::result::{ConnectionError, Error};
+use diesel::result::ConnectionError;
+/// Re-export diesel's error type for use in transactions.
+pub use diesel::result::Error as DieselError;
 use diesel_async::pooled_connection::PoolError as DieselPoolError;
 use diesel_async::pooled_connection::deadpool::PoolError as DeadpoolError;
 
@@ -22,7 +24,7 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 /// and migration problems.
 #[derive(Debug, thiserror::Error)]
 #[must_use = "database errors should be handled appropriately"]
-pub enum PgError {
+pub enum Error {
     /// Configuration error.
     ///
     /// This includes invalid configuration parameters, missing required settings,
@@ -55,7 +57,7 @@ pub enum PgError {
     /// This includes SQL syntax errors, constraint violations, type mismatches,
     /// and other query-related failures.
     #[error("Database query error: {0}")]
-    Query(#[from] Error),
+    Query(#[from] DieselError),
 
     /// Unexpected error occurred.
     ///
@@ -72,10 +74,7 @@ pub enum PgError {
     Jiff(#[from] jiff::Error),
 }
 
-/// Re-export diesel's error type for use in transactions.
-pub use diesel::result::Error as DieselError;
-
-impl PgError {
+impl Error {
     /// Extracts the constraint name from a constraint violation error.
     ///
     /// This is useful for handling specific database constraint violations
@@ -86,11 +85,11 @@ impl PgError {
     /// - `Some(constraint_name)` if this error represents a constraint violation
     /// - `None` if this error is not related to a constraint violation
     pub fn constraint(&self) -> Option<&str> {
-        let PgError::Query(err) = self else {
+        let Error::Query(err) = self else {
             return None;
         };
 
-        let Error::DatabaseError(_, err) = err else {
+        let DieselError::DatabaseError(_, err) = err else {
             return None;
         };
 
@@ -110,7 +109,7 @@ impl PgError {
         self.constraint().and_then(ConstraintViolation::new)
     }
 
-    /// Builds an [`PgError::Unexpected`] from a static message.
+    /// Builds an [`Error::Unexpected`] from a static message.
     pub fn unexpected(message: impl Into<Cow<'static, str>>) -> Self {
         Self::Unexpected(message.into())
     }
@@ -121,7 +120,7 @@ impl PgError {
     /// Distinguishes a genuine not-found from an infrastructure failure so
     /// callers can map the former to a 404/401 and the latter to a 500.
     pub fn is_not_found(&self) -> bool {
-        matches!(self, PgError::Query(Error::NotFound))
+        matches!(self, Error::Query(DieselError::NotFound))
     }
 
     /// Returns whether this error indicates a transient failure that might succeed on retry.
@@ -131,7 +130,7 @@ impl PgError {
     pub fn is_transient(&self) -> bool {
         matches!(
             self,
-            PgError::Timeout(_) | PgError::Connection(ConnectionError::BadConnection(_))
+            Error::Timeout(_) | Error::Connection(ConnectionError::BadConnection(_))
         )
     }
 
@@ -144,7 +143,7 @@ impl PgError {
     }
 }
 
-impl From<DeadpoolError> for PgError {
+impl From<DeadpoolError> for Error {
     fn from(value: DeadpoolError) -> Self {
         match value {
             DeadpoolError::Timeout(timeout) => Self::Timeout(timeout),
@@ -174,6 +173,6 @@ impl From<DeadpoolError> for PgError {
 
 /// Specialized [`Result`] type for database operations.
 ///
-/// This is a convenience alias that uses [`PgError`] as the error type,
+/// This is a convenience alias that uses [`Error`] as the error type,
 /// making database operation signatures cleaner and more consistent.
-pub type PgResult<T, E = PgError> = Result<T, E>;
+pub type Result<T, E = Error> = std::result::Result<T, E>;

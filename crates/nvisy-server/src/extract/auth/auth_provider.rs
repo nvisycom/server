@@ -6,7 +6,7 @@
 
 use nvisy_postgres::model::WorkspaceMember;
 use nvisy_postgres::query::{WorkspaceFileRepository, WorkspaceMemberRepository};
-use nvisy_postgres::{PgConn, PgError};
+use nvisy_postgres::{Error as PgError, PgConn};
 use uuid::Uuid;
 
 use super::{AuthResult, Permission};

@@ -117,10 +117,7 @@ async-nats = { version = "0.50", features = [] }
 # Cloud object storage
 object_store = { version = "0.14", features = [] }
 
-# S3-compatible blob storage for first-party files (AWS S3, RustFS, MinIO, R2, ...).
-# default-features = false drops the SDK's legacy `rustls` feature (rustls 0.21 /
-# hyper 0.14 / h2 0.3, the source of several unreachable RustSec advisories); the
-# modern rustls-aws-lc + hyper-1.x stack comes in via `default-https-client`.
+# S3-compatible blob storage (AWS S3, RustFS, MinIO, R2)
 aws-config = { version = "1.11", default-features = false, features = [
     "default-https-client",
     "rt-tokio",

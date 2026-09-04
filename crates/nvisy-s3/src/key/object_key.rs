@@ -6,8 +6,8 @@ use std::str::FromStr;
 use base64::prelude::*;
 use uuid::Uuid;
 
-use crate::bucket::Bucket;
-use crate::error::{S3Error, S3Result};
+use super::bucket::Bucket;
+use crate::error::{Error, Result};
 
 /// Trait for object storage keys.
 ///
@@ -24,8 +24,8 @@ pub trait ObjectKey: fmt::Display + FromStr + Clone + Send + Sync + 'static {
 }
 
 /// Builds a key-parse error from any displayable cause.
-fn parse_error(message: impl std::fmt::Display) -> S3Error {
-    S3Error::operation_msg("parse_key", message.to_string())
+fn parse_error(message: impl std::fmt::Display) -> Error {
+    Error::operation_msg("parse_key", message.to_string())
 }
 
 /// A validated key for file objects.
@@ -83,7 +83,7 @@ impl FileKey {
     }
 
     /// Decodes a key payload from URL-safe base64.
-    fn decode_payload(s: &str) -> S3Result<Self> {
+    fn decode_payload(s: &str) -> Result<Self> {
         let (workspace_id, object_id) = decode_ids(s)?;
         Ok(Self::from_parts(workspace_id, object_id))
     }
@@ -96,9 +96,9 @@ impl fmt::Display for FileKey {
 }
 
 impl FromStr for FileKey {
-    type Err = S3Error;
+    type Err = Error;
 
-    fn from_str(s: &str) -> S3Result<Self> {
+    fn from_str(s: &str) -> Result<Self> {
         Self::decode_payload(strip_prefix::<Self>(s)?)
     }
 }
@@ -150,9 +150,64 @@ impl fmt::Display for AuditKey {
 }
 
 impl FromStr for AuditKey {
-    type Err = S3Error;
+    type Err = Error;
 
-    fn from_str(s: &str) -> S3Result<Self> {
+    fn from_str(s: &str) -> Result<Self> {
+        let (workspace_id, object_id) = decode_ids(strip_prefix::<Self>(s)?)?;
+        Ok(Self::from_parts(workspace_id, object_id))
+    }
+}
+
+/// A validated key for a transient pipeline-artifact object.
+///
+/// Addresses a detection's enrichment intermediates (an image's OCR layout, an
+/// audio transcript). Encoded as an `artifact_` prefix followed by URL-safe
+/// base64 of the concatenated workspace ID and object ID (32 bytes → base64),
+/// like [`FileKey`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ArtifactKey {
+    pub workspace_id: Uuid,
+    pub object_id: Uuid,
+}
+
+impl ObjectKey for ArtifactKey {
+    const BUCKET: Bucket = Bucket::Artifacts;
+    const PREFIX: &'static str = "artifact_";
+}
+
+impl ArtifactKey {
+    /// Generates a new artifact key with a fresh UUID v7 object ID.
+    pub fn generate(workspace_id: Uuid) -> Self {
+        Self {
+            workspace_id,
+            object_id: Uuid::now_v7(),
+        }
+    }
+
+    /// Creates an artifact key from existing IDs (for parsing stored keys).
+    pub fn from_parts(workspace_id: Uuid, object_id: Uuid) -> Self {
+        Self {
+            workspace_id,
+            object_id,
+        }
+    }
+}
+
+impl fmt::Display for ArtifactKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}{}",
+            Self::PREFIX,
+            encode_ids(self.workspace_id, self.object_id)
+        )
+    }
+}
+
+impl FromStr for ArtifactKey {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
         let (workspace_id, object_id) = decode_ids(strip_prefix::<Self>(s)?)?;
         Ok(Self::from_parts(workspace_id, object_id))
     }
@@ -191,9 +246,9 @@ impl fmt::Display for AccountAvatarKey {
 }
 
 impl FromStr for AccountAvatarKey {
-    type Err = S3Error;
+    type Err = Error;
 
-    fn from_str(s: &str) -> S3Result<Self> {
+    fn from_str(s: &str) -> Result<Self> {
         let (id, version) = split_id_version::<Self>(s)?;
         let account_id =
             Uuid::parse_str(id).map_err(|e| parse_error(format!("Invalid account UUID: {e}")))?;
@@ -234,9 +289,9 @@ impl fmt::Display for WorkspaceAvatarKey {
 }
 
 impl FromStr for WorkspaceAvatarKey {
-    type Err = S3Error;
+    type Err = Error;
 
-    fn from_str(s: &str) -> S3Result<Self> {
+    fn from_str(s: &str) -> Result<Self> {
         let (id, version) = split_id_version::<Self>(s)?;
         let workspace_id =
             Uuid::parse_str(id).map_err(|e| parse_error(format!("Invalid workspace UUID: {e}")))?;
@@ -245,13 +300,13 @@ impl FromStr for WorkspaceAvatarKey {
 }
 
 /// Strips a key type's prefix, erroring if it is absent.
-fn strip_prefix<K: ObjectKey>(s: &str) -> S3Result<&str> {
+fn strip_prefix<K: ObjectKey>(s: &str) -> Result<&str> {
     s.strip_prefix(K::PREFIX)
         .ok_or_else(|| parse_error(format!("Invalid key prefix: expected '{}'", K::PREFIX)))
 }
 
 /// Splits a prefix-stripped `{id}_{version}` payload into its two parts.
-fn split_id_version<K: ObjectKey>(s: &str) -> S3Result<(&str, &str)> {
+fn split_id_version<K: ObjectKey>(s: &str) -> Result<(&str, &str)> {
     strip_prefix::<K>(s)?
         .split_once('_')
         .ok_or_else(|| parse_error(format!("Expected '{}{{id}}_{{version}}'", K::PREFIX)))
@@ -266,7 +321,7 @@ fn encode_ids(first: Uuid, second: Uuid) -> String {
 }
 
 /// Decodes a URL-safe base64 payload back into two UUIDs.
-fn decode_ids(s: &str) -> S3Result<(Uuid, Uuid)> {
+fn decode_ids(s: &str) -> Result<(Uuid, Uuid)> {
     let bytes = BASE64_URL_SAFE_NO_PAD
         .decode(s)
         .map_err(|e| parse_error(format!("Invalid base64 encoding: {e}")))?;
@@ -338,6 +393,19 @@ mod tests {
             assert_eq!(key, decoded);
             assert!(key.to_string().starts_with("audit_"));
             assert!(AuditKey::from_str("file_abc").is_err());
+        }
+    }
+
+    mod artifact_key {
+        use super::*;
+
+        #[test]
+        fn round_trips_and_rejects_wrong_prefix() {
+            let key = ArtifactKey::from_parts(Uuid::new_v4(), Uuid::new_v4());
+            let decoded: ArtifactKey = key.to_string().parse().unwrap();
+            assert_eq!(key, decoded);
+            assert!(key.to_string().starts_with("artifact_"));
+            assert!(ArtifactKey::from_str("audit_abc").is_err());
         }
     }
 

@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::model::PipelinePolicy;
 use crate::types::Handle;
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for pipeline reference join tables.
 pub trait PipelineReferenceRepository {
@@ -26,7 +26,7 @@ pub trait PipelineReferenceRepository {
         workspace_id: Uuid,
         pipeline_id: Uuid,
         policy_ids: &[Uuid],
-    ) -> impl Future<Output = PgResult<()>> + Send;
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Lists the ids of the policies a pipeline references.
     ///
@@ -35,13 +35,13 @@ pub trait PipelineReferenceRepository {
     fn list_pipeline_policy_ids(
         &mut self,
         pipeline_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<Uuid>>> + Send;
+    ) -> impl Future<Output = Result<Vec<Uuid>>> + Send;
 
     /// Lists the slugs of the policies a pipeline references.
     fn list_pipeline_policy_slugs(
         &mut self,
         pipeline_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<Handle>>> + Send;
+    ) -> impl Future<Output = Result<Vec<Handle>>> + Send;
 
     /// Resolves policy slugs to their ids within a workspace, preserving order.
     ///
@@ -52,7 +52,7 @@ pub trait PipelineReferenceRepository {
         &mut self,
         workspace_id: Uuid,
         slugs: &[Handle],
-    ) -> impl Future<Output = PgResult<Option<Vec<Uuid>>>> + Send;
+    ) -> impl Future<Output = Result<Option<Vec<Uuid>>>> + Send;
 }
 
 impl PipelineReferenceRepository for PgConnection {
@@ -61,13 +61,13 @@ impl PipelineReferenceRepository for PgConnection {
         workspace_id: Uuid,
         pipeline_id: Uuid,
         policy_ids: &[Uuid],
-    ) -> PgResult<()> {
+    ) -> Result<()> {
         use schema::workspace_pipeline_policies::{self, dsl};
 
         diesel::delete(workspace_pipeline_policies::table.filter(dsl::pipeline_id.eq(pipeline_id)))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         if !policy_ids.is_empty() {
             let rows: Vec<PipelinePolicy> = dedup(policy_ids)
@@ -83,13 +83,13 @@ impl PipelineReferenceRepository for PgConnection {
                 .values(&rows)
                 .execute(self)
                 .await
-                .map_err(PgError::from)?;
+                .map_err(Error::from)?;
         }
 
         Ok(())
     }
 
-    async fn list_pipeline_policy_ids(&mut self, pipeline_id: Uuid) -> PgResult<Vec<Uuid>> {
+    async fn list_pipeline_policy_ids(&mut self, pipeline_id: Uuid) -> Result<Vec<Uuid>> {
         use schema::{workspace_pipeline_policies, workspace_policies};
 
         let ids = workspace_pipeline_policies::table
@@ -102,12 +102,12 @@ impl PipelineReferenceRepository for PgConnection {
             .select(workspace_pipeline_policies::policy_id)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(ids)
     }
 
-    async fn list_pipeline_policy_slugs(&mut self, pipeline_id: Uuid) -> PgResult<Vec<Handle>> {
+    async fn list_pipeline_policy_slugs(&mut self, pipeline_id: Uuid) -> Result<Vec<Handle>> {
         use schema::{workspace_pipeline_policies, workspace_policies};
 
         // Join to the parent so soft-deleted policies (deleted_at set, join row
@@ -122,7 +122,7 @@ impl PipelineReferenceRepository for PgConnection {
             .select(workspace_policies::slug)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(slugs)
     }
@@ -131,7 +131,7 @@ impl PipelineReferenceRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         slugs: &[Handle],
-    ) -> PgResult<Option<Vec<Uuid>>> {
+    ) -> Result<Option<Vec<Uuid>>> {
         use schema::workspace_policies::{self, dsl};
 
         if slugs.is_empty() {
@@ -146,7 +146,7 @@ impl PipelineReferenceRepository for PgConnection {
             .select((dsl::slug, dsl::id))
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(map_slugs_to_ids(slugs, found))
     }

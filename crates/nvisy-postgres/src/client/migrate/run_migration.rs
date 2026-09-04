@@ -7,11 +7,11 @@ use diesel_migrations::MigrationHarness;
 use tokio::task::spawn_blocking;
 
 use super::{MigrationResult, custom_hooks};
-use crate::{MIGRATIONS, PgClient, PgError, PgResult, TRACING_TARGET_MIGRATION};
+use crate::{Error, MIGRATIONS, PgClient, Result, TRACING_TARGET_MIGRATION};
 
 /// Run all pending migrations on the database.
 #[tracing::instrument(skip(pg), target = TRACING_TARGET_MIGRATION)]
-pub async fn run_pending_migrations(pg: &PgClient) -> PgResult<MigrationResult> {
+pub async fn run_pending_migrations(pg: &PgClient) -> Result<MigrationResult> {
     tracing::info!(
         target: TRACING_TARGET_MIGRATION,
         "Starting database migration process",
@@ -43,7 +43,7 @@ pub async fn run_pending_migrations(pg: &PgClient) -> PgResult<MigrationResult> 
             "Migration task panicked, join error occurred"
         );
 
-        PgError::Migration(err.into())
+        Error::Migration(err.into())
     })?;
 
     run_post_migrate_hook(conn.deref_mut()).await?;
@@ -55,7 +55,7 @@ pub async fn run_pending_migrations(pg: &PgClient) -> PgResult<MigrationResult> 
             "Database migration process failed"
         );
 
-        PgError::Migration(err)
+        Error::Migration(err)
     })?;
 
     tracing::info!(
@@ -69,11 +69,11 @@ pub async fn run_pending_migrations(pg: &PgClient) -> PgResult<MigrationResult> 
 }
 
 /// Runs the pre-migration hooks.
-async fn run_pre_migrate_hook(conn: &mut AsyncPgConnection) -> PgResult<()> {
+async fn run_pre_migrate_hook(conn: &mut AsyncPgConnection) -> Result<()> {
     tracing::debug!(target: TRACING_TARGET_MIGRATION, "Executing pre-migration hooks");
     if let Err(e) = custom_hooks::pre_migrate(conn).await {
         tracing::error!(target: TRACING_TARGET_MIGRATION, error = %e, "Pre-migration hook failed");
-        return Err(PgError::Migration(
+        return Err(Error::Migration(
             format!("Pre-migration hook failed: {}", e).into(),
         ));
     };
@@ -82,11 +82,11 @@ async fn run_pre_migrate_hook(conn: &mut AsyncPgConnection) -> PgResult<()> {
 }
 
 /// Runs the post-migration hooks.
-async fn run_post_migrate_hook(conn: &mut AsyncPgConnection) -> PgResult<()> {
+async fn run_post_migrate_hook(conn: &mut AsyncPgConnection) -> Result<()> {
     tracing::debug!(target: TRACING_TARGET_MIGRATION, "Executing post-migration hooks");
     if let Err(e) = custom_hooks::post_migrate(conn).await {
         tracing::error!(target: TRACING_TARGET_MIGRATION, error = %e, "Post-migration hook failed");
-        return Err(PgError::Migration(
+        return Err(Error::Migration(
             format!("Post-migration hook failed: {}", e).into(),
         ));
     };

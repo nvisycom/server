@@ -1,11 +1,11 @@
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use super::MigrationStatus;
-use crate::{PgError, PgResult, TRACING_TARGET_MIGRATION};
+use crate::{Error, Result, TRACING_TARGET_MIGRATION};
 
 /// Gets the current migration status of the database.
 #[tracing::instrument(skip(conn), target = TRACING_TARGET_MIGRATION)]
-pub async fn get_migration_status(conn: &mut AsyncPgConnection) -> PgResult<MigrationStatus> {
+pub async fn get_migration_status(conn: &mut AsyncPgConnection) -> Result<MigrationStatus> {
     tracing::debug!(
         target: TRACING_TARGET_MIGRATION,
         "Checking database migration status",
@@ -38,7 +38,7 @@ pub async fn get_migration_status(conn: &mut AsyncPgConnection) -> PgResult<Migr
 
 /// Verifies the integrity of the database schema.
 #[tracing::instrument(skip(conn), target = TRACING_TARGET_MIGRATION)]
-pub async fn verify_schema_integrity(conn: &mut AsyncPgConnection) -> PgResult<()> {
+pub async fn verify_schema_integrity(conn: &mut AsyncPgConnection) -> Result<()> {
     tracing::info!(target: TRACING_TARGET_MIGRATION, "Performing database schema integrity verification");
 
     use diesel::sql_query;
@@ -58,12 +58,12 @@ pub async fn verify_schema_integrity(conn: &mut AsyncPgConnection) -> PgResult<(
     )
     .get_result::<ExistsResult>(conn)
     .await
-    .map_err(|e| PgError::Migration(format!("Failed to check migration table: {}", e).into()))?
+    .map_err(|e| Error::Migration(format!("Failed to check migration table: {}", e).into()))?
     .exists;
 
     if !migration_table_exists {
         tracing::warn!(target: TRACING_TARGET_MIGRATION, "Migration table does not exist, database may not be initialized");
-        return Err(PgError::Migration(
+        return Err(Error::Migration(
             "Migration table __diesel_schema_migrations does not exist".into(),
         ));
     }
@@ -80,7 +80,7 @@ pub async fn verify_schema_integrity(conn: &mut AsyncPgConnection) -> PgResult<(
 /// On a fresh database the `__diesel_schema_migrations` table does not exist
 /// yet; that case is reported as zero applied migrations rather than an error.
 #[tracing::instrument(skip(conn), target = TRACING_TARGET_MIGRATION)]
-async fn get_applied_migrations(conn: &mut AsyncPgConnection) -> PgResult<Vec<String>> {
+async fn get_applied_migrations(conn: &mut AsyncPgConnection) -> Result<Vec<String>> {
     use diesel::sql_query;
 
     tracing::debug!(
@@ -102,7 +102,7 @@ async fn get_applied_migrations(conn: &mut AsyncPgConnection) -> PgResult<Vec<St
     )
     .get_result::<TableExists>(conn)
     .await
-    .map_err(|e| PgError::Migration(format!("Failed to check migration table: {}", e).into()))?
+    .map_err(|e| Error::Migration(format!("Failed to check migration table: {}", e).into()))?
     .exists;
 
     if !migration_table_exists {
@@ -118,7 +118,7 @@ async fn get_applied_migrations(conn: &mut AsyncPgConnection) -> PgResult<Vec<St
     let versions = sql_query("SELECT version FROM __diesel_schema_migrations ORDER BY version")
         .get_results::<MigrationVersion>(conn)
         .await
-        .map_err(|e| PgError::Migration(format!("Failed to get applied migrations: {}", e).into()))?
+        .map_err(|e| Error::Migration(format!("Failed to get applied migrations: {}", e).into()))?
         .into_iter()
         .map(|row| row.version)
         .collect();

@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::model::{EventOutbox, NewEventOutbox};
 use crate::types::OutboxStatus;
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Read and write operations on the event outbox.
 pub trait EventOutboxRepository {
@@ -25,7 +25,7 @@ pub trait EventOutboxRepository {
     fn insert_event_outbox(
         &mut self,
         row: NewEventOutbox,
-    ) -> impl Future<Output = PgResult<EventOutbox>> + Send;
+    ) -> impl Future<Output = Result<EventOutbox>> + Send;
 
     /// Claims up to `limit` due pending rows for processing, oldest first.
     ///
@@ -37,11 +37,11 @@ pub trait EventOutboxRepository {
     fn claim_outbox_batch(
         &mut self,
         limit: i64,
-    ) -> impl Future<Output = PgResult<Vec<EventOutbox>>> + Send;
+    ) -> impl Future<Output = Result<Vec<EventOutbox>>> + Send;
 
     /// Marks a row processed (its event durably projected), taking it out of the
     /// pending set. Runs in the drainer's batch transaction.
-    fn mark_outbox_processed(&mut self, id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
+    fn mark_outbox_processed(&mut self, id: Uuid) -> impl Future<Output = Result<()>> + Send;
 
     /// Records a failed attempt: increments `attempts` and defers the next attempt
     /// to `now() + backoff_secs` (computed by the database clock, so a drainer's
@@ -51,17 +51,17 @@ pub trait EventOutboxRepository {
         &mut self,
         id: Uuid,
         backoff_secs: i64,
-    ) -> impl Future<Output = PgResult<()>> + Send;
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Dead-letters a row: increments `attempts` and stamps `failed_at`, taking it
     /// out of the pending set so a poison event (one that can never decode or
     /// project) stops consuming drain cycles. The row is retained for inspection.
     /// Runs in the drainer's batch transaction.
-    fn mark_outbox_failed(&mut self, id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
+    fn mark_outbox_failed(&mut self, id: Uuid) -> impl Future<Output = Result<()>> + Send;
 }
 
 impl EventOutboxRepository for PgConnection {
-    async fn insert_event_outbox(&mut self, row: NewEventOutbox) -> PgResult<EventOutbox> {
+    async fn insert_event_outbox(&mut self, row: NewEventOutbox) -> Result<EventOutbox> {
         use schema::event_outbox;
 
         diesel::insert_into(event_outbox::table)
@@ -69,10 +69,10 @@ impl EventOutboxRepository for PgConnection {
             .returning(EventOutbox::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
-    async fn claim_outbox_batch(&mut self, limit: i64) -> PgResult<Vec<EventOutbox>> {
+    async fn claim_outbox_batch(&mut self, limit: i64) -> Result<Vec<EventOutbox>> {
         use schema::event_outbox::{self, dsl};
 
         event_outbox::table
@@ -85,10 +85,10 @@ impl EventOutboxRepository for PgConnection {
             .skip_locked()
             .load(self)
             .await
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
-    async fn mark_outbox_processed(&mut self, id: Uuid) -> PgResult<()> {
+    async fn mark_outbox_processed(&mut self, id: Uuid) -> Result<()> {
         use schema::event_outbox::{self, dsl};
 
         diesel::update(event_outbox::table.filter(dsl::id.eq(id)))
@@ -98,11 +98,11 @@ impl EventOutboxRepository for PgConnection {
             ))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
         Ok(())
     }
 
-    async fn defer_outbox_attempt(&mut self, id: Uuid, backoff_secs: i64) -> PgResult<()> {
+    async fn defer_outbox_attempt(&mut self, id: Uuid, backoff_secs: i64) -> Result<()> {
         use schema::event_outbox::{self, dsl};
 
         // The row stays `Pending`; only its attempt count and next-due time move.
@@ -118,11 +118,11 @@ impl EventOutboxRepository for PgConnection {
             ))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
         Ok(())
     }
 
-    async fn mark_outbox_failed(&mut self, id: Uuid) -> PgResult<()> {
+    async fn mark_outbox_failed(&mut self, id: Uuid) -> Result<()> {
         use schema::event_outbox::{self, dsl};
 
         diesel::update(event_outbox::table.filter(dsl::id.eq(id)))
@@ -132,7 +132,7 @@ impl EventOutboxRepository for PgConnection {
             ))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
         Ok(())
     }
 }

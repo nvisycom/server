@@ -7,7 +7,7 @@
 //! All conversions are implemented via the `From` trait for ergonomic usage.
 
 use nvisy_postgres::types::ConstraintViolation;
-use nvisy_postgres::{PgError, TimeoutType};
+use nvisy_postgres::{Error as PgError, TimeoutType};
 
 use crate::handler::{Error, ErrorKind};
 

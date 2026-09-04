@@ -8,7 +8,7 @@ use super::{
     MigrationResult, MigrationStatus, get_migration_status, run_pending_migrations,
     verify_schema_integrity,
 };
-use crate::{PgClient, PgResult};
+use crate::{PgClient, Result};
 
 /// Extension trait providing migration functionality for PgClient.
 ///
@@ -30,7 +30,7 @@ pub trait PgClientMigrationExt {
     ///
     /// Returns an error if any migration fails to apply or if there are
     /// connectivity issues with the database.
-    fn run_pending_migrations(&self) -> impl Future<Output = PgResult<MigrationResult>>;
+    fn run_pending_migrations(&self) -> impl Future<Output = Result<MigrationResult>>;
 
     /// Gets the current migration status of the database.
     ///
@@ -46,7 +46,7 @@ pub trait PgClientMigrationExt {
     ///
     /// Returns an error if there are connectivity issues or if the migration
     /// table cannot be accessed.
-    fn get_migration_status(&self) -> impl Future<Output = PgResult<MigrationStatus>>;
+    fn get_migration_status(&self) -> impl Future<Output = Result<MigrationStatus>>;
 
     /// Verifies the integrity of the database schema.
     ///
@@ -57,20 +57,20 @@ pub trait PgClientMigrationExt {
     ///
     /// Returns an error if schema integrity issues are detected or if
     /// verification cannot be completed.
-    fn verify_schema_integrity(&self) -> impl Future<Output = PgResult<()>>;
+    fn verify_schema_integrity(&self) -> impl Future<Output = Result<()>>;
 }
 
 impl PgClientMigrationExt for PgClient {
-    async fn run_pending_migrations(&self) -> PgResult<MigrationResult> {
+    async fn run_pending_migrations(&self) -> Result<MigrationResult> {
         run_pending_migrations(self).await
     }
 
-    async fn get_migration_status(&self) -> PgResult<MigrationStatus> {
+    async fn get_migration_status(&self) -> Result<MigrationStatus> {
         let mut conn = self.get_pooled_connection().await?;
         get_migration_status(&mut conn).await
     }
 
-    async fn verify_schema_integrity(&self) -> PgResult<()> {
+    async fn verify_schema_integrity(&self) -> Result<()> {
         let mut conn = self.get_pooled_connection().await?;
         verify_schema_integrity(&mut conn).await
     }

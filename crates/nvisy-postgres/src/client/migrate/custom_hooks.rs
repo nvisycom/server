@@ -7,14 +7,14 @@ use std::time::Instant;
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::PoolableConnection;
 
-use crate::{PgResult, TRACING_TARGET_MIGRATION};
+use crate::{Result, TRACING_TARGET_MIGRATION};
 
 /// Custom hook called before a connection has been used to run migrations.
 ///
 /// See [`PgDatabaseExt`] for more details.
 ///
 /// [`PgDatabaseExt`]: super::PgDatabaseExt
-pub async fn pre_migrate(conn: &mut AsyncPgConnection) -> PgResult<()> {
+pub async fn pre_migrate(conn: &mut AsyncPgConnection) -> Result<()> {
     let is_broken = conn.is_broken();
 
     tracing::info!(
@@ -41,7 +41,7 @@ pub async fn pre_migrate(conn: &mut AsyncPgConnection) -> PgResult<()> {
 /// See [`PgDatabaseExt`] for more details.
 ///
 /// [`PgDatabaseExt`]: super::PgDatabaseExt
-pub async fn post_migrate(conn: &mut AsyncPgConnection) -> PgResult<()> {
+pub async fn post_migrate(conn: &mut AsyncPgConnection) -> Result<()> {
     let is_broken = conn.is_broken();
 
     tracing::info!(

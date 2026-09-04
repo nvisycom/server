@@ -5,7 +5,7 @@ use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::error::{S3Error, S3Result};
+use crate::error::{Error, Result};
 use crate::key::ObjectKey;
 
 /// Tracing target for blob-store operations.
@@ -69,7 +69,7 @@ impl BlobStore {
     /// fits one part, and as a multipart upload otherwise, so an object of unknown
     /// length streams without being buffered whole in memory. A failure after the
     /// multipart upload begins aborts it so no partial upload lingers.
-    pub async fn put<K, R>(&self, key: &K, reader: R) -> S3Result<u64>
+    pub async fn put<K, R>(&self, key: &K, reader: R) -> Result<u64>
     where
         K: ObjectKey,
         R: AsyncRead + Unpin + Send,
@@ -90,7 +90,7 @@ impl BlobStore {
                 .body(ByteStream::from(first))
                 .send()
                 .await
-                .map_err(|err| S3Error::operation("put", err.into_service_error()))?;
+                .map_err(|err| Error::operation("put", err.into_service_error()))?;
             tracing::debug!(target: TRACING_TARGET, key = %object_key, size, "Object uploaded");
             return Ok(size);
         }
@@ -99,12 +99,7 @@ impl BlobStore {
     }
 
     /// Streams the remainder of `reader` after `first` as a multipart upload.
-    async fn put_multipart<R>(
-        &self,
-        object_key: &str,
-        first: Vec<u8>,
-        mut reader: R,
-    ) -> S3Result<u64>
+    async fn put_multipart<R>(&self, object_key: &str, first: Vec<u8>, mut reader: R) -> Result<u64>
     where
         R: AsyncRead + Unpin + Send,
     {
@@ -115,9 +110,9 @@ impl BlobStore {
             .key(object_key)
             .send()
             .await
-            .map_err(|err| S3Error::operation("put", err.into_service_error()))?;
+            .map_err(|err| Error::operation("put", err.into_service_error()))?;
         let upload_id = created.upload_id().ok_or_else(|| {
-            S3Error::operation_msg("put", "S3 create_multipart_upload returned no upload id")
+            Error::operation_msg("put", "S3 create_multipart_upload returned no upload id")
         })?;
 
         // Upload every part; on any failure, abort so no partial upload lingers.
@@ -150,7 +145,7 @@ impl BlobStore {
             .await;
         if let Err(err) = completed {
             self.abort_multipart(object_key, upload_id).await;
-            return Err(S3Error::operation("put", err.into_service_error()));
+            return Err(Error::operation("put", err.into_service_error()));
         }
 
         tracing::debug!(target: TRACING_TARGET, key = %object_key, size, "Object uploaded (multipart)");
@@ -165,7 +160,7 @@ impl BlobStore {
         upload_id: &str,
         first: Vec<u8>,
         reader: &mut R,
-    ) -> S3Result<(Vec<CompletedPart>, u64)>
+    ) -> Result<(Vec<CompletedPart>, u64)>
     where
         R: AsyncRead + Unpin + Send,
     {
@@ -186,7 +181,7 @@ impl BlobStore {
                 .body(ByteStream::from(part))
                 .send()
                 .await
-                .map_err(|err| S3Error::operation("put", err.into_service_error()))?;
+                .map_err(|err| Error::operation("put", err.into_service_error()))?;
             parts.push(
                 CompletedPart::builder()
                     .part_number(part_number)
@@ -229,7 +224,7 @@ impl BlobStore {
     }
 
     /// Fetches an object as a stream, or `None` if it does not exist.
-    pub async fn get<K: ObjectKey>(&self, key: &K) -> S3Result<Option<GetObject>> {
+    pub async fn get<K: ObjectKey>(&self, key: &K) -> Result<Option<GetObject>> {
         let object_key = Self::object_key(key);
         tracing::debug!(target: TRACING_TARGET, key = %object_key, "Fetching object");
 
@@ -247,7 +242,7 @@ impl BlobStore {
                 if service.is_no_such_key() {
                     return Ok(None);
                 }
-                return Err(S3Error::operation("get", service));
+                return Err(Error::operation("get", service));
             }
         };
 
@@ -260,7 +255,7 @@ impl BlobStore {
     }
 
     /// Deletes an object. Idempotent: deleting a missing object succeeds.
-    pub async fn delete<K: ObjectKey>(&self, key: &K) -> S3Result<()> {
+    pub async fn delete<K: ObjectKey>(&self, key: &K) -> Result<()> {
         let object_key = Self::object_key(key);
         tracing::debug!(target: TRACING_TARGET, key = %object_key, "Deleting object");
 
@@ -270,7 +265,7 @@ impl BlobStore {
             .key(&object_key)
             .send()
             .await
-            .map_err(|err| S3Error::operation("delete", err.into_service_error()))?;
+            .map_err(|err| Error::operation("delete", err.into_service_error()))?;
         Ok(())
     }
 
@@ -279,18 +274,18 @@ impl BlobStore {
     /// Succeeds when the endpoint is reachable and the bucket exists and is
     /// accessible with the current credentials — the same preconditions every
     /// object operation needs, so it doubles as a readiness check.
-    pub async fn ping(&self) -> S3Result<()> {
+    pub async fn ping(&self) -> Result<()> {
         self.client
             .head_bucket()
             .bucket(&self.bucket)
             .send()
             .await
-            .map_err(|err| S3Error::operation("head_bucket", err.into_service_error()))?;
+            .map_err(|err| Error::operation("head_bucket", err.into_service_error()))?;
         Ok(())
     }
 
     /// Whether an object exists, via a HEAD request.
-    pub async fn exists<K: ObjectKey>(&self, key: &K) -> S3Result<bool> {
+    pub async fn exists<K: ObjectKey>(&self, key: &K) -> Result<bool> {
         let object_key = Self::object_key(key);
         match self
             .client
@@ -306,7 +301,7 @@ impl BlobStore {
                 if service.is_not_found() {
                     Ok(false)
                 } else {
-                    Err(S3Error::operation("head", service))
+                    Err(Error::operation("head", service))
                 }
             }
         }
@@ -318,14 +313,14 @@ impl BlobStore {
 /// An empty return means the stream is exhausted. Reading the whole part up front
 /// is what lets a small object take the single-`PutObject` path and lets each
 /// multipart part meet S3's minimum size.
-async fn read_part<R: AsyncRead + Unpin>(reader: &mut R) -> S3Result<Vec<u8>> {
+async fn read_part<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Vec<u8>> {
     let mut buffer = Vec::with_capacity(PART_SIZE);
     let mut chunk = [0u8; 64 * 1024];
     while buffer.len() < PART_SIZE {
         let read = reader
             .read(&mut chunk)
             .await
-            .map_err(|err| S3Error::Body(err.to_string()))?;
+            .map_err(|err| Error::Body(err.to_string()))?;
         if read == 0 {
             break;
         }

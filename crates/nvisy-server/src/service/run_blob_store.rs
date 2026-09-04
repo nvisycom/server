@@ -1,9 +1,10 @@
 //! Pipeline-run blob I/O.
 //!
-//! [`RunBlobStore`] reads and writes a run's document, redacted output, and audit
-//! in the platform's first-party S3-compatible blob store (the `Files` and
-//! `Audits` [`Bucket`](nvisy_s3::Bucket)s), handling per-workspace encryption and
-//! the file-table bookkeeping each one needs. It is distinct from
+//! [`RunBlobStore`] reads and writes a run's document, redacted output, audit,
+//! and enrichment intermediates in the platform's first-party S3-compatible blob
+//! store (the `Files`, `Audits`, and `Artifacts`
+//! [`Bucket`](nvisy_s3::Bucket)s), handling per-workspace encryption and the
+//! file-table bookkeeping each one needs. It is distinct from
 //! [`ExternalObjectStore`](crate::service::ExternalObjectStore), which bridges
 //! external tenant object stores.
 
@@ -19,7 +20,7 @@ use nvisy_postgres::model::{
 };
 use nvisy_postgres::query::WorkspaceFileRepository;
 use nvisy_postgres::types::{FileKind, RetentionScope, RetentionSettings};
-use nvisy_s3::{AuditKey, Bucket, FileKey};
+use nvisy_s3::{ArtifactKey, AuditKey, Bucket, FileKey};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
@@ -56,7 +57,7 @@ fn invalid_key(err: impl std::fmt::Display) -> Error<'static> {
 /// argument. Not to be confused with
 /// [`ExternalObjectStore`](crate::service::ExternalObjectStore), which bridges *external*
 /// tenant object stores; this operates on the platform's own S3-compatible
-/// store, routing files and audits to the `Files` and `Audits`
+/// store, routing to the `Files`, `Audits`, and `Artifacts`
 /// [`Bucket`](nvisy_s3::Bucket) prefixes.
 #[derive(Clone)]
 #[must_use = "service does nothing unless you use it"]
@@ -129,6 +130,10 @@ impl RunBlobStore {
             }
             Bucket::Audits => {
                 let key = AuditKey::from_str(storage_path).map_err(invalid_key)?;
+                self.infra.blobs.delete(&key).await?;
+            }
+            Bucket::Artifacts => {
+                let key = ArtifactKey::from_str(storage_path).map_err(invalid_key)?;
                 self.infra.blobs.delete(&key).await?;
             }
             Bucket::AccountAvatars | Bucket::WorkspaceAvatars => {
@@ -253,9 +258,10 @@ impl RunBlobStore {
     }
 
     /// Serializes a detection's enrichment intermediates (OCR layout, transcript),
-    /// encrypts them with the workspace key, writes them to the audit bucket, and
-    /// builds the `intermediate`-kind [`WorkspaceFile`] row that will point at it —
-    /// without inserting the row (staged like the analysis, reclaimed on rollback).
+    /// encrypts them with the workspace key, writes them to the artifacts store,
+    /// and builds the `intermediate`-kind [`WorkspaceFile`] row that will point at
+    /// it — without inserting the row (staged like the analysis, reclaimed on
+    /// rollback).
     ///
     /// The intermediates carry document content, so they are encrypted at rest and
     /// governed by their own retention scope, resolved here (workspace baseline,
@@ -281,7 +287,7 @@ impl RunBlobStore {
                     .with_context(err.to_string())
             })?;
 
-        let key = AuditKey::generate(workspace_id);
+        let key = ArtifactKey::generate(workspace_id);
         self.infra.blobs.put(&key, Cursor::new(ciphertext)).await?;
 
         let over = pipeline.metadata.or_default().retention;
@@ -299,7 +305,7 @@ impl RunBlobStore {
             file_size_bytes: size,
             file_hash_sha256: hash,
             storage_path: key.to_string(),
-            storage_bucket: Bucket::Audits.name().to_owned(),
+            storage_bucket: Bucket::Artifacts.name().to_owned(),
             expires_at: expires_at.map(Into::into),
             ..Default::default()
         })
@@ -439,7 +445,7 @@ impl RunBlobStore {
         workspace_id: Uuid,
         intermediates_file: &WorkspaceFile,
     ) -> Result<ArtifactSet> {
-        let key = AuditKey::from_str(&intermediates_file.storage_path).map_err(|err| {
+        let key = ArtifactKey::from_str(&intermediates_file.storage_path).map_err(|err| {
             ErrorKind::InternalServerError
                 .with_message("Invalid intermediates storage key")
                 .with_context(err.to_string())

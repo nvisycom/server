@@ -7,12 +7,12 @@ use std::error::Error as StdError;
 type BoxError = Box<dyn StdError + Send + Sync>;
 
 /// Result alias for blob-store operations.
-pub type S3Result<T> = Result<T, S3Error>;
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// An error from the S3-compatible blob store.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum S3Error {
+pub enum Error {
     /// The client could not be built from the supplied configuration.
     #[error("failed to configure the blob store: {0}")]
     Config(String),
@@ -39,8 +39,8 @@ pub enum S3Error {
     Body(String),
 }
 
-impl S3Error {
-    /// Builds an [`S3Error::Operation`] for `operation`, keeping `error` as the
+impl Error {
+    /// Builds an [`Error::Operation`] for `operation`, keeping `error` as the
     /// message and its source so a caller can downcast to the typed SDK error.
     pub(crate) fn operation(
         operation: &'static str,
@@ -53,7 +53,7 @@ impl S3Error {
         }
     }
 
-    /// Builds an [`S3Error::Operation`] for `operation` from a message alone,
+    /// Builds an [`Error::Operation`] for `operation` from a message alone,
     /// for failures that do not wrap an underlying error.
     pub(crate) fn operation_msg(operation: &'static str, message: impl Into<String>) -> Self {
         Self::Operation {

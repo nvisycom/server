@@ -7,7 +7,7 @@
 use std::fmt;
 use std::time::Duration;
 
-use crate::{PgClient, PgError, PgResult, TRACING_TARGET_CONNECTION};
+use crate::{Error, PgClient, Result, TRACING_TARGET_CONNECTION};
 
 /// Complete database configuration including connection string and pool settings.
 ///
@@ -195,10 +195,10 @@ impl PgConfig {
     }
 
     /// Validates the configuration.
-    pub fn validate(&self) -> PgResult<()> {
+    pub fn validate(&self) -> Result<()> {
         // Validate database URL
         if self.postgres_url.is_empty() {
-            return Err(PgError::Config("database_url cannot be empty".to_string()));
+            return Err(Error::Config("database_url cannot be empty".to_string()));
         }
 
         // Basic URL validation
@@ -210,7 +210,7 @@ impl PgConfig {
 
         // Validate connection count
         if !(MIN_CONNECTIONS..=MAX_CONNECTIONS).contains(&self.postgres_max_connections) {
-            return Err(PgError::Config(format!(
+            return Err(Error::Config(format!(
                 "max_connections must be between {} and {}",
                 MIN_CONNECTIONS, MAX_CONNECTIONS
             )));
@@ -220,7 +220,7 @@ impl PgConfig {
         if let Some(timeout) = self.postgres_connection_timeout
             && !(MIN_CONN_TIMEOUT_SECS..=MAX_CONN_TIMEOUT_SECS).contains(&timeout.as_secs())
         {
-            return Err(PgError::Config(format!(
+            return Err(Error::Config(format!(
                 "connection timeout must be between {}s and {}s",
                 MIN_CONN_TIMEOUT_SECS, MAX_CONN_TIMEOUT_SECS
             )));
@@ -230,7 +230,7 @@ impl PgConfig {
         if let Some(timeout) = self.postgres_idle_timeout
             && !(MIN_IDLE_TIMEOUT_SECS..=MAX_IDLE_TIMEOUT_SECS).contains(&timeout.as_secs())
         {
-            return Err(PgError::Config(format!(
+            return Err(Error::Config(format!(
                 "idle timeout must be between {}s and {}s",
                 MIN_IDLE_TIMEOUT_SECS, MAX_IDLE_TIMEOUT_SECS
             )));
@@ -243,7 +243,7 @@ impl PgConfig {
     ///
     /// Validates the configuration for consistency and safety.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
-    pub fn build(self) -> PgResult<PgClient> {
+    pub fn build(self) -> Result<PgClient> {
         tracing::debug!(target: TRACING_TARGET_CONNECTION, "Validating database configuration");
         self.validate()?;
         tracing::debug!(target: TRACING_TARGET_CONNECTION, "Database configuration validation passed");

@@ -75,15 +75,15 @@ services:
   # Creates the first-party bucket once RustFS is up (RustFS does not
   # auto-create buckets). Exits after provisioning; safe to re-run.
   rustfs-init:
-    image: minio/mc:latest
+    image: rustfs/rc:latest
     container_name: nvisy-rustfs-init-dev
     depends_on:
       rustfs:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      mc alias set nvisy http://rustfs:9000 ${S3_ACCESS_KEY_ID:-rustfsadmin} ${S3_SECRET_ACCESS_KEY:-rustfsadmin} &&
-      mc mb --ignore-existing nvisy/${S3_BUCKET:-nvisy-dev}
+      rc alias set nvisy http://rustfs:9000 ${S3_ACCESS_KEY_ID:-rustfsadmin} ${S3_SECRET_ACCESS_KEY:-rustfsadmin} &&
+      rc bucket create --ignore-existing nvisy/${S3_BUCKET:-nvisy-dev}
       "
     networks:
       - nvisy-dev

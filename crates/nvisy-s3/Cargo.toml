@@ -31,16 +31,14 @@ ignored = ["aws-smithy-types"]
 cli = ["dep:clap"]
 
 [dependencies]
-# Workspace crates
+# Internal crates
 nvisy-core = { workspace = true }
 
 # Async runtime & IO
 tokio = { workspace = true, features = ["io-util"] }
 async-trait = { workspace = true }
 
-# AWS S3 SDK (works against AWS S3 and any S3-compatible endpoint: RustFS, MinIO, R2).
-# The TLS/runtime feature set (and the legacy-stack opt-out) lives on the
-# workspace dependency; only the crate-specific features are named here.
+# S3-compatible blob storage (AWS S3, RustFS, MinIO, R2)
 aws-config = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-types = { workspace = true, features = ["byte-stream-poll-next"] }

@@ -17,7 +17,7 @@ use nvisy_postgres::query::{
     WorkspaceRepository,
 };
 use nvisy_postgres::types::{DetectionStatus, Json, RasterPolicy, WorkspaceSettings};
-use nvisy_postgres::{AsyncConnection, DieselError, PgError};
+use nvisy_postgres::{AsyncConnection, DieselError, Error as PgError};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 

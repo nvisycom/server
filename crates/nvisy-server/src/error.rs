@@ -174,8 +174,8 @@ impl From<nvisy_nats::Error> for Error {
     }
 }
 
-impl From<nvisy_postgres::PgError> for Error {
-    fn from(err: nvisy_postgres::PgError) -> Self {
+impl From<nvisy_postgres::Error> for Error {
+    fn from(err: nvisy_postgres::Error) -> Self {
         Error::external("postgres", err.to_string()).with_source(err)
     }
 }

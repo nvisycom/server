@@ -7,7 +7,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceConnectionSchedule, WorkspaceConnectionSchedule};
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for connection sync-schedule operations.
 ///
@@ -18,7 +18,7 @@ pub trait WorkspaceConnectionScheduleRepository {
     fn create_connection_schedule(
         &mut self,
         schedule: NewWorkspaceConnectionSchedule,
-    ) -> impl Future<Output = PgResult<WorkspaceConnectionSchedule>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceConnectionSchedule>> + Send;
 
     /// Inserts or replaces a connection's sync schedule.
     ///
@@ -27,13 +27,13 @@ pub trait WorkspaceConnectionScheduleRepository {
     fn upsert_connection_schedule(
         &mut self,
         schedule: NewWorkspaceConnectionSchedule,
-    ) -> impl Future<Output = PgResult<WorkspaceConnectionSchedule>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceConnectionSchedule>> + Send;
 
     /// Finds a connection's sync schedule, if it has one.
     fn find_connection_schedule(
         &mut self,
         connection_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceConnectionSchedule>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceConnectionSchedule>>> + Send;
 
     /// Finds the sync schedules for a set of connections in one query.
     ///
@@ -42,14 +42,14 @@ pub trait WorkspaceConnectionScheduleRepository {
     fn find_schedules(
         &mut self,
         connection_ids: &[Uuid],
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceConnectionSchedule>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceConnectionSchedule>>> + Send;
 }
 
 impl WorkspaceConnectionScheduleRepository for PgConnection {
     async fn create_connection_schedule(
         &mut self,
         schedule: NewWorkspaceConnectionSchedule,
-    ) -> PgResult<WorkspaceConnectionSchedule> {
+    ) -> Result<WorkspaceConnectionSchedule> {
         use schema::workspace_connection_schedule;
 
         let schedule = diesel::insert_into(workspace_connection_schedule::table)
@@ -57,7 +57,7 @@ impl WorkspaceConnectionScheduleRepository for PgConnection {
             .returning(WorkspaceConnectionSchedule::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(schedule)
     }
@@ -65,7 +65,7 @@ impl WorkspaceConnectionScheduleRepository for PgConnection {
     async fn upsert_connection_schedule(
         &mut self,
         schedule: NewWorkspaceConnectionSchedule,
-    ) -> PgResult<WorkspaceConnectionSchedule> {
+    ) -> Result<WorkspaceConnectionSchedule> {
         use schema::workspace_connection_schedule::{self, dsl};
 
         let schedule = diesel::insert_into(workspace_connection_schedule::table)
@@ -80,7 +80,7 @@ impl WorkspaceConnectionScheduleRepository for PgConnection {
             .returning(WorkspaceConnectionSchedule::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(schedule)
     }
@@ -88,7 +88,7 @@ impl WorkspaceConnectionScheduleRepository for PgConnection {
     async fn find_connection_schedule(
         &mut self,
         connection_id: Uuid,
-    ) -> PgResult<Option<WorkspaceConnectionSchedule>> {
+    ) -> Result<Option<WorkspaceConnectionSchedule>> {
         use schema::workspace_connection_schedule::{self, dsl};
 
         let schedule = workspace_connection_schedule::table
@@ -97,7 +97,7 @@ impl WorkspaceConnectionScheduleRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(schedule)
     }
@@ -105,7 +105,7 @@ impl WorkspaceConnectionScheduleRepository for PgConnection {
     async fn find_schedules(
         &mut self,
         connection_ids: &[Uuid],
-    ) -> PgResult<Vec<WorkspaceConnectionSchedule>> {
+    ) -> Result<Vec<WorkspaceConnectionSchedule>> {
         use schema::workspace_connection_schedule::{self, dsl};
 
         if connection_ids.is_empty() {
@@ -117,7 +117,7 @@ impl WorkspaceConnectionScheduleRepository for PgConnection {
             .select(WorkspaceConnectionSchedule::as_select())
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(schedules)
     }

@@ -12,16 +12,12 @@
 //! Objects are already encrypted by the caller before they reach [`BlobStore`],
 //! so the store only ever sees ciphertext.
 
-mod bucket;
-mod config;
-mod connect;
+mod client;
 mod error;
-mod health;
 mod key;
-mod store;
 
-pub use bucket::Bucket;
-pub use config::S3Config;
-pub use error::{S3Error, S3Result};
-pub use key::{AccountAvatarKey, AuditKey, FileKey, ObjectKey, WorkspaceAvatarKey};
-pub use store::{BlobStore, GetObject};
+pub use client::{BlobStore, GetObject, S3Config};
+pub use error::{Error, Result};
+pub use key::{
+    AccountAvatarKey, ArtifactKey, AuditKey, Bucket, FileKey, ObjectKey, WorkspaceAvatarKey,
+};
