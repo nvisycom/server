@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::model::{NewWorkspace, UpdateWorkspace, Workspace};
 use crate::query::search::ilike_contains;
 use crate::types::{AccountRefRow, OffsetPagination, WithAccountRef};
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for workspace database operations.
 ///
@@ -26,31 +26,30 @@ pub trait WorkspaceRepository {
     fn create_workspace(
         &mut self,
         workspace: NewWorkspace,
-    ) -> impl Future<Output = PgResult<Workspace>> + Send;
+    ) -> impl Future<Output = Result<Workspace>> + Send;
 
     /// Finds a workspace by ID, excluding soft-deleted workspaces.
     fn find_workspace_by_id(
         &mut self,
         workspace_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<Workspace>>> + Send;
+    ) -> impl Future<Output = Result<Option<Workspace>>> + Send;
 
     /// Finds a workspace by slug, with the handle and avatar of the account that
     /// created it, excluding soft-deleted workspaces.
     fn find_workspace_by_slug(
         &mut self,
         slug: &str,
-    ) -> impl Future<Output = PgResult<Option<WithAccountRef<Workspace>>>> + Send;
+    ) -> impl Future<Output = Result<Option<WithAccountRef<Workspace>>>> + Send;
 
     /// Updates a workspace with partial changes.
     fn update_workspace(
         &mut self,
         workspace_id: Uuid,
         changes: UpdateWorkspace,
-    ) -> impl Future<Output = PgResult<Workspace>> + Send;
+    ) -> impl Future<Output = Result<Workspace>> + Send;
 
     /// Soft deletes a workspace by setting the deletion timestamp.
-    fn delete_workspace(&mut self, workspace_id: Uuid)
-    -> impl Future<Output = PgResult<()>> + Send;
+    fn delete_workspace(&mut self, workspace_id: Uuid) -> impl Future<Output = Result<()>> + Send;
 
     /// Lists workspaces.
     ///
@@ -58,7 +57,7 @@ pub trait WorkspaceRepository {
     fn list_workspaces(
         &mut self,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<Workspace>>> + Send;
+    ) -> impl Future<Output = Result<Vec<Workspace>>> + Send;
 
     /// Searches workspaces by name or description.
     ///
@@ -67,11 +66,11 @@ pub trait WorkspaceRepository {
         &mut self,
         search_query: &str,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<Workspace>>> + Send;
+    ) -> impl Future<Output = Result<Vec<Workspace>>> + Send;
 }
 
 impl WorkspaceRepository for PgConnection {
-    async fn create_workspace(&mut self, workspace: NewWorkspace) -> PgResult<Workspace> {
+    async fn create_workspace(&mut self, workspace: NewWorkspace) -> Result<Workspace> {
         use schema::workspaces;
 
         let workspace = diesel::insert_into(workspaces::table)
@@ -79,12 +78,12 @@ impl WorkspaceRepository for PgConnection {
             .returning(Workspace::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(workspace)
     }
 
-    async fn find_workspace_by_id(&mut self, workspace_id: Uuid) -> PgResult<Option<Workspace>> {
+    async fn find_workspace_by_id(&mut self, workspace_id: Uuid) -> Result<Option<Workspace>> {
         use schema::workspaces::dsl::*;
 
         let workspace = workspaces
@@ -94,7 +93,7 @@ impl WorkspaceRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(workspace)
     }
@@ -102,7 +101,7 @@ impl WorkspaceRepository for PgConnection {
     async fn find_workspace_by_slug(
         &mut self,
         slug_value: &str,
-    ) -> PgResult<Option<WithAccountRef<Workspace>>> {
+    ) -> Result<Option<WithAccountRef<Workspace>>> {
         use schema::workspaces::dsl;
         use schema::{accounts, workspaces};
 
@@ -121,7 +120,7 @@ impl WorkspaceRepository for PgConnection {
             .first::<(Workspace, AccountRefRow)>(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(row.map(|(item, account)| WithAccountRef { item, account }))
     }
@@ -130,7 +129,7 @@ impl WorkspaceRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         changes: UpdateWorkspace,
-    ) -> PgResult<Workspace> {
+    ) -> Result<Workspace> {
         use schema::workspaces::dsl::*;
 
         let workspace = diesel::update(workspaces)
@@ -140,12 +139,12 @@ impl WorkspaceRepository for PgConnection {
             .returning(Workspace::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(workspace)
     }
 
-    async fn delete_workspace(&mut self, workspace_id: Uuid) -> PgResult<()> {
+    async fn delete_workspace(&mut self, workspace_id: Uuid) -> Result<()> {
         use schema::workspaces::dsl::*;
 
         diesel::update(workspaces)
@@ -154,12 +153,12 @@ impl WorkspaceRepository for PgConnection {
             .set(deleted_at.eq(now))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(())
     }
 
-    async fn list_workspaces(&mut self, pagination: OffsetPagination) -> PgResult<Vec<Workspace>> {
+    async fn list_workspaces(&mut self, pagination: OffsetPagination) -> Result<Vec<Workspace>> {
         use schema::workspaces::dsl::*;
 
         let workspace_list = workspaces
@@ -170,7 +169,7 @@ impl WorkspaceRepository for PgConnection {
             .offset(pagination.offset)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(workspace_list)
     }
@@ -179,7 +178,7 @@ impl WorkspaceRepository for PgConnection {
         &mut self,
         search_query: &str,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<Workspace>> {
+    ) -> Result<Vec<Workspace>> {
         use schema::workspaces::dsl::*;
 
         let workspace_list = workspaces
@@ -195,7 +194,7 @@ impl WorkspaceRepository for PgConnection {
             .offset(pagination.offset)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(workspace_list)
     }

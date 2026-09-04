@@ -19,7 +19,7 @@ use nvisy_postgres::query::{
 use nvisy_postgres::types::{
     Handle, MemberInvitedParams, MemberJoinedParams, NotificationPayload, WorkspaceRole,
 };
-use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgError};
+use nvisy_postgres::{AsyncConnection, Error as PgError, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{

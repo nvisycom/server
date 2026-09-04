@@ -9,9 +9,7 @@ use diesel_async::RunQueryDsl;
 use diesel_async::pooled_connection::{AsyncDieselConnectionManager, ManagerConfig};
 
 use super::custom_hooks;
-use crate::{
-    ConnectionPool, PgConfig, PgError, PgResult, PooledConnection, TRACING_TARGET_CONNECTION,
-};
+use crate::{ConnectionPool, Error, PgConfig, PooledConnection, Result, TRACING_TARGET_CONNECTION};
 
 /// Connection pool status information.
 #[derive(Debug, Clone)]
@@ -78,7 +76,7 @@ impl PgClient {
         target = TRACING_TARGET_CONNECTION,
         fields(database_url = %config.database_url_masked())
     )]
-    pub fn new(config: PgConfig) -> PgResult<Self> {
+    pub fn new(config: PgConfig) -> Result<Self> {
         tracing::info!(target: TRACING_TARGET_CONNECTION, "Initializing database client");
 
         let mut manager_config = ManagerConfig::default();
@@ -98,7 +96,7 @@ impl PgClient {
             .build()
             .map_err(|e| {
                 tracing::error!(target: TRACING_TARGET_CONNECTION, error = %e, "Failed to create connection pool");
-                PgError::Unexpected(format!("Failed to build connection pool: {}", e).into())
+                Error::Unexpected(format!("Failed to build connection pool: {}", e).into())
             })?;
 
         Ok(Self {
@@ -126,7 +124,7 @@ impl PgClient {
         target = TRACING_TARGET_CONNECTION,
         fields(database_url = %config.database_url_masked())
     )]
-    pub async fn new_with_test(config: PgConfig) -> PgResult<Self> {
+    pub async fn new_with_test(config: PgConfig) -> Result<Self> {
         let this = Self::new(config)?;
 
         // Test connectivity
@@ -137,7 +135,7 @@ impl PgClient {
                     target: TRACING_TARGET_CONNECTION, error = %e,
                     "Failed to get connection from pool during initialization"
                 );
-                PgError::from(e)
+                Error::from(e)
             },
         )?;
 
@@ -154,7 +152,7 @@ impl PgClient {
             .await
             .map_err(|e| {
                 tracing::error!(target: TRACING_TARGET_CONNECTION, error = %e, "Database connectivity test failed");
-                PgError::from(e)
+                Error::from(e)
             })?;
 
         tracing::info!(
@@ -177,7 +175,7 @@ impl PgClient {
     ///
     /// Returns an error if no connection is available within the timeout period.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
-    pub async fn get_connection(&self) -> PgResult<PgConn> {
+    pub async fn get_connection(&self) -> Result<PgConn> {
         tracing::trace!(target: TRACING_TARGET_CONNECTION, "Acquiring connection from pool");
 
         let start = Instant::now();
@@ -188,7 +186,7 @@ impl PgClient {
                 elapsed = ?start.elapsed(),
                 "Failed to acquire connection from pool"
             );
-            PgError::from(e)
+            Error::from(e)
         })?;
 
         let elapsed = start.elapsed();
@@ -207,8 +205,8 @@ impl PgClient {
     /// Gets a raw pooled connection from the pool.
     ///
     /// This is intended for internal use by the migration module.
-    pub(crate) async fn get_pooled_connection(&self) -> PgResult<PooledConnection> {
-        let conn = self.inner.pool.get().await.map_err(PgError::from)?;
+    pub(crate) async fn get_pooled_connection(&self) -> Result<PooledConnection> {
+        let conn = self.inner.pool.get().await.map_err(Error::from)?;
         Ok(conn)
     }
 

@@ -8,6 +8,7 @@ members = [
     "./crates/nvisy-nats",
     "./crates/nvisy-inference",
     "./crates/nvisy-object",
+    "./crates/nvisy-s3",
     "./crates/nvisy-postgres",
     "./crates/nvisy-server",
     "./crates/nvisy-webhook",
@@ -40,6 +41,7 @@ nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-inference = { path = "./crates/nvisy-inference", version = "0.1.0" }
 nvisy-object = { path = "./crates/nvisy-object", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
+nvisy-s3 = { path = "./crates/nvisy-s3", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
 nvisy-webhook = { path = "./crates/nvisy-webhook", version = "0.1.0" }
 
@@ -114,6 +116,24 @@ async-nats = { version = "0.50", features = [] }
 
 # Cloud object storage
 object_store = { version = "0.14", features = [] }
+
+# S3-compatible blob storage (AWS S3, RustFS, MinIO, R2)
+aws-config = { version = "1.11", default-features = false, features = [
+    "default-https-client",
+    "rt-tokio",
+    "credentials-process",
+    "sso",
+    "behavior-version-latest",
+] }
+aws-sdk-s3 = { version = "1.144", default-features = false, features = [
+    "default-https-client",
+    "rt-tokio",
+    "sigv4a",
+    "http-1x",
+    "behavior-version-latest",
+] }
+aws-smithy-types = { version = "1.6", features = [] }
+aws-credential-types = { version = "1.2", features = [] }
 
 # Observability
 tracing = { version = "0.1", features = [] }

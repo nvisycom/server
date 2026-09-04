@@ -37,7 +37,7 @@ services:
       - "/etc/nats/nats.conf"
     volumes:
       - nats_data:/data
-      - ./nats.conf:/etc/nats/nats.conf:ro
+      - ./nats/nats.conf:/etc/nats/nats.conf:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
       interval: 5s
@@ -47,9 +47,59 @@ services:
     networks:
       - nvisy-dev
 
+  rustfs:
+    image: rustfs/rustfs:1.0.0-rc.5
+    container_name: nvisy-rustfs-dev
+    restart: unless-stopped
+    # Bound to loopback: the host-run server reaches RustFS at localhost:9000,
+    # but it is never exposed on the LAN (dev uses the well-known credentials).
+    ports:
+      - "127.0.0.1:${S3_PORT:-9000}:9000"
+      - "127.0.0.1:${S3_CONSOLE_PORT:-9001}:9001"
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:-rustfsadmin}
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+    volumes:
+      - rustfs_data:/data
+    # /health/ready (not /health) confirms storage is initialized, so bucket
+    # init only runs once RustFS can actually serve requests.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - nvisy-dev
+
+  # Creates the first-party bucket once RustFS is up (RustFS does not
+  # auto-create buckets). Exits after provisioning; safe to re-run.
+  rustfs-init:
+    image: rustfs/rc:v0.1.31
+    container_name: nvisy-rustfs-init-dev
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    # Configuration is passed through the environment and consumed by the
+    # mounted script, so a credential containing shell metacharacters cannot
+    # alter the command.
+    environment:
+      S3_ENDPOINT: http://rustfs:9000
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-rustfsadmin}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-rustfsadmin}
+      S3_BUCKET: ${S3_BUCKET:-nvisy-dev}
+    entrypoint: ["/bin/sh", "/init.sh"]
+    volumes:
+      - ./rustfs/init.sh:/init.sh:ro
+    networks:
+      - nvisy-dev
+
 volumes:
   postgres_data:
   nats_data:
+  rustfs_data:
 
 networks:
   nvisy-dev:

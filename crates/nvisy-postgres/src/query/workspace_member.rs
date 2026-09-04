@@ -13,7 +13,7 @@ use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, MemberFilter, MemberSortBy, MemberSortField,
     NotificationEvent, OffsetPagination, SortOrder, WorkspaceRole,
 };
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for workspace member database operations.
 ///
@@ -24,14 +24,14 @@ pub trait WorkspaceMemberRepository {
     fn add_workspace_member(
         &mut self,
         member: NewWorkspaceMember,
-    ) -> impl Future<Output = PgResult<WorkspaceMember>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceMember>> + Send;
 
     /// Finds a workspace member by workspace and account IDs.
     fn find_workspace_member(
         &mut self,
         workspace_id: Uuid,
         member_account_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceMember>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceMember>>> + Send;
 
     /// Updates a workspace member with partial changes.
     fn update_workspace_member(
@@ -39,14 +39,14 @@ pub trait WorkspaceMemberRepository {
         workspace_id: Uuid,
         member_account_id: Uuid,
         changes: UpdateWorkspaceMember,
-    ) -> impl Future<Output = PgResult<WorkspaceMember>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceMember>> + Send;
 
     /// Permanently removes a member from a workspace.
     fn remove_workspace_member(
         &mut self,
         workspace_id: Uuid,
         member_account_id: Uuid,
-    ) -> impl Future<Output = PgResult<()>> + Send;
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Lists members of a workspace with offset pagination.
     ///
@@ -57,7 +57,7 @@ pub trait WorkspaceMemberRepository {
         pagination: OffsetPagination,
         sort_by: MemberSortBy,
         filter: MemberFilter,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceMember>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceMember>>> + Send;
 
     /// Lists members of a workspace with cursor pagination.
     fn cursor_list_workspace_members(
@@ -65,7 +65,7 @@ pub trait WorkspaceMemberRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: MemberFilter,
-    ) -> impl Future<Output = PgResult<CursorPage<WorkspaceMember>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<WorkspaceMember>>> + Send;
 
     /// Lists workspaces where a user is a member.
     ///
@@ -74,14 +74,14 @@ pub trait WorkspaceMemberRepository {
         &mut self,
         account_id: Uuid,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceMember>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceMember>>> + Send;
 
     /// Lists user workspaces with full workspace details via JOIN.
     fn list_account_workspaces_with_details(
         &mut self,
         account_id: Uuid,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<(Workspace, WorkspaceMember)>>> + Send;
+    ) -> impl Future<Output = Result<Vec<(Workspace, WorkspaceMember)>>> + Send;
 
     /// Lists user workspaces with full workspace details using cursor
     /// pagination, each paired with the handle of the account that created the
@@ -90,7 +90,7 @@ pub trait WorkspaceMemberRepository {
         &mut self,
         account_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<(Workspace, WorkspaceMember, AccountRefRow)>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<(Workspace, WorkspaceMember, AccountRefRow)>>> + Send;
 
     /// Gets a user's role in a workspace for permission checking.
     ///
@@ -99,14 +99,14 @@ pub trait WorkspaceMemberRepository {
         &mut self,
         workspace_id: Uuid,
         account_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceRole>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceRole>>> + Send;
 
     /// Finds all members with a specific role.
     fn find_members_by_role(
         &mut self,
         workspace_id: Uuid,
         role: WorkspaceRole,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceMember>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceMember>>> + Send;
 
     /// Returns the account ids of members holding any of `roles` who accept
     /// `event` as an in-app notification.
@@ -119,14 +119,14 @@ pub trait WorkspaceMemberRepository {
         workspace_id: Uuid,
         roles: &[WorkspaceRole],
         event: NotificationEvent,
-    ) -> impl Future<Output = PgResult<Vec<Uuid>>> + Send;
+    ) -> impl Future<Output = Result<Vec<Uuid>>> + Send;
 
     /// Checks if a user has any access to a workspace.
     fn check_workspace_access(
         &mut self,
         workspace_id: Uuid,
         account_id: Uuid,
-    ) -> impl Future<Output = PgResult<bool>> + Send;
+    ) -> impl Future<Output = Result<bool>> + Send;
 
     /// Lists members of a workspace with account details using offset pagination.
     ///
@@ -137,7 +137,7 @@ pub trait WorkspaceMemberRepository {
         pagination: OffsetPagination,
         sort_by: MemberSortBy,
         filter: MemberFilter,
-    ) -> impl Future<Output = PgResult<Vec<(WorkspaceMember, Account)>>> + Send;
+    ) -> impl Future<Output = Result<Vec<(WorkspaceMember, Account)>>> + Send;
 
     /// Lists members of a workspace with account details using cursor pagination.
     ///
@@ -147,14 +147,14 @@ pub trait WorkspaceMemberRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: MemberFilter,
-    ) -> impl Future<Output = PgResult<CursorPage<(WorkspaceMember, Account)>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<(WorkspaceMember, Account)>>> + Send;
 
     /// Finds a workspace member with account details.
     fn find_workspace_member_with_account(
         &mut self,
         workspace_id: Uuid,
         member_account_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<(WorkspaceMember, Account)>>> + Send;
+    ) -> impl Future<Output = Result<Option<(WorkspaceMember, Account)>>> + Send;
 
     /// Finds a workspace member by their email address.
     ///
@@ -163,7 +163,7 @@ pub trait WorkspaceMemberRepository {
         &mut self,
         workspace_id: Uuid,
         email: &str,
-    ) -> impl Future<Output = PgResult<Option<(WorkspaceMember, Account)>>> + Send;
+    ) -> impl Future<Output = Result<Option<(WorkspaceMember, Account)>>> + Send;
 
     /// Checks if two accounts share at least one common workspace.
     ///
@@ -173,14 +173,14 @@ pub trait WorkspaceMemberRepository {
         &mut self,
         account_id_a: Uuid,
         account_id_b: Uuid,
-    ) -> impl Future<Output = PgResult<bool>> + Send;
+    ) -> impl Future<Output = Result<bool>> + Send;
 }
 
 impl WorkspaceMemberRepository for PgConnection {
     async fn add_workspace_member(
         &mut self,
         member: NewWorkspaceMember,
-    ) -> PgResult<WorkspaceMember> {
+    ) -> Result<WorkspaceMember> {
         use schema::workspace_members;
 
         let member = diesel::insert_into(workspace_members::table)
@@ -188,7 +188,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .returning(WorkspaceMember::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(member)
     }
@@ -197,7 +197,7 @@ impl WorkspaceMemberRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         member_account_id: Uuid,
-    ) -> PgResult<Option<WorkspaceMember>> {
+    ) -> Result<Option<WorkspaceMember>> {
         use schema::workspace_members::{self, dsl};
 
         let member = workspace_members::table
@@ -207,7 +207,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(member)
     }
@@ -217,7 +217,7 @@ impl WorkspaceMemberRepository for PgConnection {
         workspace_id: Uuid,
         member_account_id: Uuid,
         changes: UpdateWorkspaceMember,
-    ) -> PgResult<WorkspaceMember> {
+    ) -> Result<WorkspaceMember> {
         use schema::workspace_members::{self, dsl};
 
         let member = diesel::update(workspace_members::table)
@@ -227,7 +227,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .returning(WorkspaceMember::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(member)
     }
@@ -236,7 +236,7 @@ impl WorkspaceMemberRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         member_account_id: Uuid,
-    ) -> PgResult<()> {
+    ) -> Result<()> {
         use schema::workspace_members::{self, dsl};
 
         diesel::delete(workspace_members::table)
@@ -244,7 +244,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .filter(dsl::account_id.eq(member_account_id))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(())
     }
@@ -255,7 +255,7 @@ impl WorkspaceMemberRepository for PgConnection {
         pagination: OffsetPagination,
         sort_by: MemberSortBy,
         filter: MemberFilter,
-    ) -> PgResult<Vec<WorkspaceMember>> {
+    ) -> Result<Vec<WorkspaceMember>> {
         use schema::{accounts, workspace_members};
 
         // Build base query with JOIN for name sorting
@@ -290,7 +290,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .offset(pagination.offset)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(members)
     }
@@ -300,7 +300,7 @@ impl WorkspaceMemberRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: MemberFilter,
-    ) -> PgResult<CursorPage<WorkspaceMember>> {
+    ) -> Result<CursorPage<WorkspaceMember>> {
         use schema::workspace_members::{self, dsl};
 
         // Get total count only if requested
@@ -318,7 +318,7 @@ impl WorkspaceMemberRepository for PgConnection {
                     .count()
                     .get_result(self)
                     .await
-                    .map_err(PgError::from)?,
+                    .map_err(Error::from)?,
             )
         } else {
             None
@@ -348,7 +348,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .limit(pagination.fetch_limit())
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(CursorPage::new(items, total, pagination.limit, |m| {
             (m.created_at.into(), m.account_id)
@@ -359,7 +359,7 @@ impl WorkspaceMemberRepository for PgConnection {
         &mut self,
         account_id: Uuid,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<WorkspaceMember>> {
+    ) -> Result<Vec<WorkspaceMember>> {
         use schema::workspace_members::{self, dsl};
 
         let memberships = workspace_members::table
@@ -370,7 +370,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .offset(pagination.offset)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(memberships)
     }
@@ -379,7 +379,7 @@ impl WorkspaceMemberRepository for PgConnection {
         &mut self,
         account_id: Uuid,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<(Workspace, WorkspaceMember)>> {
+    ) -> Result<Vec<(Workspace, WorkspaceMember)>> {
         use schema::{workspace_members, workspaces};
 
         let results = workspace_members::table
@@ -392,7 +392,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .offset(pagination.offset)
             .load::<(Workspace, WorkspaceMember)>(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(results)
     }
@@ -401,7 +401,7 @@ impl WorkspaceMemberRepository for PgConnection {
         &mut self,
         account_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<(Workspace, WorkspaceMember, AccountRefRow)>> {
+    ) -> Result<CursorPage<(Workspace, WorkspaceMember, AccountRefRow)>> {
         use diesel::dsl::count_star;
         use schema::{accounts, workspace_members, workspaces};
 
@@ -421,7 +421,7 @@ impl WorkspaceMemberRepository for PgConnection {
                     .select(count_star())
                     .get_result(self)
                     .await
-                    .map_err(PgError::from)?,
+                    .map_err(Error::from)?,
             )
         } else {
             None
@@ -463,7 +463,7 @@ impl WorkspaceMemberRepository for PgConnection {
             ))
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(CursorPage::new(
             items,
@@ -479,7 +479,7 @@ impl WorkspaceMemberRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         account_id: Uuid,
-    ) -> PgResult<Option<WorkspaceRole>> {
+    ) -> Result<Option<WorkspaceRole>> {
         use schema::workspace_members::{self, dsl};
 
         let role = workspace_members::table
@@ -489,7 +489,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(role)
     }
@@ -498,7 +498,7 @@ impl WorkspaceMemberRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         role: WorkspaceRole,
-    ) -> PgResult<Vec<WorkspaceMember>> {
+    ) -> Result<Vec<WorkspaceMember>> {
         use schema::workspace_members::{self, dsl};
 
         let members = workspace_members::table
@@ -508,7 +508,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .order(dsl::created_at.asc())
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(members)
     }
@@ -518,7 +518,7 @@ impl WorkspaceMemberRepository for PgConnection {
         workspace_id: Uuid,
         roles: &[WorkspaceRole],
         event: NotificationEvent,
-    ) -> PgResult<Vec<Uuid>> {
+    ) -> Result<Vec<Uuid>> {
         use schema::workspace_members::{self, dsl};
 
         // A member accepts the event when their in-app preference list is empty
@@ -538,7 +538,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .select(dsl::account_id)
             .load::<Uuid>(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(account_ids)
     }
@@ -547,7 +547,7 @@ impl WorkspaceMemberRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         account_id: Uuid,
-    ) -> PgResult<bool> {
+    ) -> Result<bool> {
         use schema::workspace_members::{self, dsl};
 
         let is_member = workspace_members::table
@@ -557,7 +557,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .first::<Uuid>(self)
             .await
             .optional()
-            .map_err(PgError::from)?
+            .map_err(Error::from)?
             .is_some();
 
         Ok(is_member)
@@ -569,7 +569,7 @@ impl WorkspaceMemberRepository for PgConnection {
         pagination: OffsetPagination,
         sort_by: MemberSortBy,
         filter: MemberFilter,
-    ) -> PgResult<Vec<(WorkspaceMember, Account)>> {
+    ) -> Result<Vec<(WorkspaceMember, Account)>> {
         use schema::{accounts, workspace_members};
 
         let mut query = workspace_members::table
@@ -599,7 +599,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .offset(pagination.offset)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(results)
     }
@@ -609,7 +609,7 @@ impl WorkspaceMemberRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: MemberFilter,
-    ) -> PgResult<CursorPage<(WorkspaceMember, Account)>> {
+    ) -> Result<CursorPage<(WorkspaceMember, Account)>> {
         use diesel::dsl::count_star;
         use schema::{accounts, workspace_members};
 
@@ -634,7 +634,7 @@ impl WorkspaceMemberRepository for PgConnection {
                     .select(count_star())
                     .get_result(self)
                     .await
-                    .map_err(PgError::from)?,
+                    .map_err(Error::from)?,
             )
         } else {
             None
@@ -669,7 +669,7 @@ impl WorkspaceMemberRepository for PgConnection {
                 .select((WorkspaceMember::as_select(), Account::as_select()))
                 .load(self)
                 .await
-                .map_err(PgError::from)?
+                .map_err(Error::from)?
         } else {
             query
                 .order((
@@ -680,7 +680,7 @@ impl WorkspaceMemberRepository for PgConnection {
                 .select((WorkspaceMember::as_select(), Account::as_select()))
                 .load(self)
                 .await
-                .map_err(PgError::from)?
+                .map_err(Error::from)?
         };
 
         Ok(CursorPage::new(items, total, pagination.limit, |(m, _)| {
@@ -692,7 +692,7 @@ impl WorkspaceMemberRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         member_account_id: Uuid,
-    ) -> PgResult<Option<(WorkspaceMember, Account)>> {
+    ) -> Result<Option<(WorkspaceMember, Account)>> {
         use schema::{accounts, workspace_members};
 
         let result = workspace_members::table
@@ -704,7 +704,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(result)
     }
@@ -713,7 +713,7 @@ impl WorkspaceMemberRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         email: &str,
-    ) -> PgResult<Option<(WorkspaceMember, Account)>> {
+    ) -> Result<Option<(WorkspaceMember, Account)>> {
         use schema::{accounts, workspace_members};
 
         let result = workspace_members::table
@@ -725,7 +725,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(result)
     }
@@ -734,7 +734,7 @@ impl WorkspaceMemberRepository for PgConnection {
         &mut self,
         account_id_a: Uuid,
         account_id_b: Uuid,
-    ) -> PgResult<bool> {
+    ) -> Result<bool> {
         use diesel::dsl::exists;
         use schema::workspace_members;
 
@@ -759,7 +759,7 @@ impl WorkspaceMemberRepository for PgConnection {
         ))
         .get_result::<bool>(self)
         .await
-        .map_err(PgError::from)?;
+        .map_err(Error::from)?;
 
         Ok(shares)
     }

@@ -1,11 +1,12 @@
 //! Pipeline-run blob I/O.
 //!
-//! [`RunBlobStore`] reads and writes a run's document, redacted output, and audit
-//! in the platform's internal object store ([`FilesBucket`](nvisy_nats::object::FilesBucket)
-//! and [`AuditBucket`](nvisy_nats::object::AuditBucket)), handling per-workspace
-//! encryption and the file-table bookkeeping each one needs. It is distinct from
-//! [`ExternalObjectStore`](crate::service::ExternalObjectStore), which bridges external
-//! tenant object stores.
+//! [`RunBlobStore`] reads and writes a run's document, redacted output, audit,
+//! and enrichment intermediates in the platform's first-party S3-compatible blob
+//! store (the `Files`, `Audits`, and `Artifacts`
+//! [`Bucket`](nvisy_s3::Bucket)s), handling per-workspace encryption and the
+//! file-table bookkeeping each one needs. It is distinct from
+//! [`ExternalObjectStore`](crate::service::ExternalObjectStore), which bridges
+//! external tenant object stores.
 
 use std::io::Cursor;
 use std::str::FromStr;
@@ -13,13 +14,13 @@ use std::str::FromStr;
 use bytes::Bytes;
 use elide_pipeline::file::Document;
 use elide_pipeline::{ArtifactSet, Audit, Engine};
-use nvisy_nats::object::{AuditBucket, AuditKey, FileKey, FilesBucket, ObjectBucket};
 use nvisy_postgres::PgConn;
 use nvisy_postgres::model::{
     NewWorkspaceFile, WorkspaceDetection, WorkspaceFile, WorkspacePipeline,
 };
 use nvisy_postgres::query::WorkspaceFileRepository;
 use nvisy_postgres::types::{FileKind, RetentionScope, RetentionSettings};
+use nvisy_s3::{ArtifactKey, AuditKey, Bucket, FileKey};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
@@ -49,14 +50,15 @@ fn invalid_key(err: impl std::fmt::Display) -> Error<'static> {
         .with_context(err.to_string())
 }
 
-/// Reads and writes a pipeline run's blobs in the internal object store.
+/// Reads and writes a pipeline run's blobs in the first-party blob store.
 ///
 /// Cloneable and cheap to pass around: it holds the shared [`Infra`] clients
 /// (all `Arc`-backed) and takes the per-request database connection as a method
 /// argument. Not to be confused with
 /// [`ExternalObjectStore`](crate::service::ExternalObjectStore), which bridges *external*
-/// tenant object stores; this operates on the platform's own NATS buckets
-/// ([`FilesBucket`], [`AuditBucket`]).
+/// tenant object stores; this operates on the platform's own S3-compatible
+/// store, routing to the `Files`, `Audits`, and `Artifacts`
+/// [`Bucket`](nvisy_s3::Bucket) prefixes.
 #[derive(Clone)]
 #[must_use = "service does nothing unless you use it"]
 pub struct RunBlobStore {
@@ -109,33 +111,37 @@ impl RunBlobStore {
         Ok(PurgeOutcome::Purged)
     }
 
-    /// Removes an object from whichever internal bucket its row names. An
-    /// unparseable storage key or an unknown bucket is an error, not a silent
-    /// success: the object was not reclaimed, so the row stays pending.
+    /// Removes an object from whichever store its row names. An unparseable
+    /// storage key or an unknown store is an error, not a silent success: the
+    /// object was not reclaimed, so the row stays pending.
     async fn delete_object(&self, bucket: &str, storage_path: &str) -> Result<()> {
-        match bucket {
-            b if b == FilesBucket::NAME => {
+        let store = Bucket::from_name(bucket).ok_or_else(|| {
+            ErrorKind::InternalServerError
+                .with_message("File references an unknown storage bucket")
+                .with_context(format!("bucket: {bucket}"))
+        })?;
+
+        // Each store's key type differs, so parse the key for the store this row
+        // names before deleting.
+        match store {
+            Bucket::Files => {
                 let key = FileKey::from_str(storage_path).map_err(invalid_key)?;
-                self.infra
-                    .nats
-                    .object_store::<FilesBucket>()
-                    .await?
-                    .delete(&key)
-                    .await?;
+                self.infra.blobs.delete(&key).await?;
             }
-            b if b == AuditBucket::NAME => {
+            Bucket::Audits => {
                 let key = AuditKey::from_str(storage_path).map_err(invalid_key)?;
-                self.infra
-                    .nats
-                    .object_store::<AuditBucket>()
-                    .await?
-                    .delete(&key)
-                    .await?;
+                self.infra.blobs.delete(&key).await?;
             }
-            other => {
+            Bucket::Artifacts => {
+                let key = ArtifactKey::from_str(storage_path).map_err(invalid_key)?;
+                self.infra.blobs.delete(&key).await?;
+            }
+            Bucket::AccountAvatars | Bucket::WorkspaceAvatars => {
                 return Err(ErrorKind::InternalServerError
-                    .with_message("File references an unknown storage bucket")
-                    .with_context(format!("bucket: {other}")));
+                    .with_message(
+                        "Avatar objects are not reclaimed through the blob store's file purge",
+                    )
+                    .with_context(format!("bucket: {bucket}")));
             }
         }
         Ok(())
@@ -157,14 +163,13 @@ impl RunBlobStore {
         file: &WorkspaceFile,
         correlation_id: Uuid,
     ) -> Result<Document> {
-        let store = self.infra.nats.object_store::<FilesBucket>().await?;
         let key = FileKey::from_str(&file.storage_path).map_err(|err| {
             ErrorKind::InternalServerError
                 .with_message("Invalid file storage path")
                 .with_context(err.to_string())
         })?;
 
-        let data = store.get(&key).await?.ok_or_else(|| {
+        let data = self.infra.blobs.get(&key).await?.ok_or_else(|| {
             ErrorKind::InternalServerError.with_message("File content is missing from storage")
         })?;
         let mut reader = data.into_reader();
@@ -226,9 +231,8 @@ impl RunBlobStore {
                     .with_context(err.to_string())
             })?;
 
-        let store = self.infra.nats.object_store::<AuditBucket>().await?;
         let key = AuditKey::generate(workspace_id);
-        store.put(&key, Cursor::new(ciphertext)).await?;
+        self.infra.blobs.put(&key, Cursor::new(ciphertext)).await?;
 
         // Retention expiry for the audit scope (workspace baseline, pipeline
         // override if set).
@@ -247,16 +251,17 @@ impl RunBlobStore {
             file_size_bytes: size,
             file_hash_sha256: hash,
             storage_path: key.to_string(),
-            storage_bucket: store.bucket().to_owned(),
+            storage_bucket: Bucket::Audits.name().to_owned(),
             expires_at: expires_at.map(Into::into),
             ..Default::default()
         })
     }
 
     /// Serializes a detection's enrichment intermediates (OCR layout, transcript),
-    /// encrypts them with the workspace key, writes them to the audit bucket, and
-    /// builds the `intermediate`-kind [`WorkspaceFile`] row that will point at it —
-    /// without inserting the row (staged like the analysis, reclaimed on rollback).
+    /// encrypts them with the workspace key, writes them to the artifacts store,
+    /// and builds the `intermediate`-kind [`WorkspaceFile`] row that will point at
+    /// it — without inserting the row (staged like the analysis, reclaimed on
+    /// rollback).
     ///
     /// The intermediates carry document content, so they are encrypted at rest and
     /// governed by their own retention scope, resolved here (workspace baseline,
@@ -282,9 +287,8 @@ impl RunBlobStore {
                     .with_context(err.to_string())
             })?;
 
-        let store = self.infra.nats.object_store::<AuditBucket>().await?;
-        let key = AuditKey::generate(workspace_id);
-        store.put(&key, Cursor::new(ciphertext)).await?;
+        let key = ArtifactKey::generate(workspace_id);
+        self.infra.blobs.put(&key, Cursor::new(ciphertext)).await?;
 
         let over = pipeline.metadata.or_default().retention;
         let expires_at = workspace_settings
@@ -301,7 +305,7 @@ impl RunBlobStore {
             file_size_bytes: size,
             file_hash_sha256: hash,
             storage_path: key.to_string(),
-            storage_bucket: store.bucket().to_owned(),
+            storage_bucket: Bucket::Artifacts.name().to_owned(),
             expires_at: expires_at.map(Into::into),
             ..Default::default()
         })
@@ -371,8 +375,7 @@ impl RunBlobStore {
                 .with_context(err.to_string())
         })?;
 
-        let store = self.infra.nats.object_store::<AuditBucket>().await?;
-        let data = store.get(&key).await?.ok_or_else(|| {
+        let data = self.infra.blobs.get(&key).await?.ok_or_else(|| {
             ErrorKind::InternalServerError.with_message("Audit is missing from storage")
         })?;
         let mut reader = data.into_reader();
@@ -442,14 +445,13 @@ impl RunBlobStore {
         workspace_id: Uuid,
         intermediates_file: &WorkspaceFile,
     ) -> Result<ArtifactSet> {
-        let key = AuditKey::from_str(&intermediates_file.storage_path).map_err(|err| {
+        let key = ArtifactKey::from_str(&intermediates_file.storage_path).map_err(|err| {
             ErrorKind::InternalServerError
                 .with_message("Invalid intermediates storage key")
                 .with_context(err.to_string())
         })?;
 
-        let store = self.infra.nats.object_store::<AuditBucket>().await?;
-        let data = store.get(&key).await?.ok_or_else(|| {
+        let data = self.infra.blobs.get(&key).await?.ok_or_else(|| {
             ErrorKind::InternalServerError.with_message("Intermediates are missing from storage")
         })?;
         let mut reader = data.into_reader();
@@ -510,9 +512,8 @@ impl RunBlobStore {
                     .with_context(err.to_string())
             })?;
 
-        let store = self.infra.nats.object_store::<AuditBucket>().await?;
         let key = AuditKey::generate(workspace_id);
-        store.put(&key, Cursor::new(ciphertext)).await?;
+        self.infra.blobs.put(&key, Cursor::new(ciphertext)).await?;
 
         // A review audit shares the audit-logs retention scope with the detection
         // audit (workspace baseline, pipeline override if set).
@@ -531,7 +532,7 @@ impl RunBlobStore {
             file_size_bytes: size,
             file_hash_sha256: hash,
             storage_path: key.to_string(),
-            storage_bucket: store.bucket().to_owned(),
+            storage_bucket: Bucket::Audits.name().to_owned(),
             expires_at: expires_at.map(Into::into),
             ..Default::default()
         })
@@ -568,9 +569,8 @@ impl RunBlobStore {
                     .with_context(err.to_string())
             })?;
 
-        let store = self.infra.nats.object_store::<FilesBucket>().await?;
         let key = FileKey::generate(source.workspace_id);
-        store.put(&key, Cursor::new(ciphertext)).await?;
+        self.infra.blobs.put(&key, Cursor::new(ciphertext)).await?;
 
         let over = pipeline.metadata.or_default().retention;
         let expires_at = workspace_settings
@@ -589,7 +589,7 @@ impl RunBlobStore {
             file_size_bytes: plaintext_size,
             file_hash_sha256: plaintext_hash,
             storage_path: key.to_string(),
-            storage_bucket: store.bucket().to_owned(),
+            storage_bucket: Bucket::Files.name().to_owned(),
             expires_at: expires_at.map(Into::into),
             ..Default::default()
         })

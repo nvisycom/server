@@ -11,7 +11,7 @@ use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, OffsetPagination, ProviderType, SyncMode,
     WithAccountRef,
 };
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// A sync-scheduled connection paired with its cron expression, as returned by
 /// [`WorkspaceConnectionRepository::list_scheduled_connections`]. The cron is
@@ -33,13 +33,13 @@ pub trait WorkspaceConnectionRepository {
     fn create_workspace_connection(
         &mut self,
         new_connection: NewWorkspaceConnection,
-    ) -> impl Future<Output = PgResult<WorkspaceConnection>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceConnection>> + Send;
 
     /// Finds a connection by its unique identifier.
     fn find_workspace_connection_by_id(
         &mut self,
         connection_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceConnection>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceConnection>>> + Send;
 
     /// Finds a connection by ID within a specific workspace.
     ///
@@ -48,7 +48,7 @@ pub trait WorkspaceConnectionRepository {
         &mut self,
         workspace_id: Uuid,
         connection_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceConnection>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceConnection>>> + Send;
 
     /// Finds a connection by id within a specific workspace, with the handle and
     /// avatar of the account that created it.
@@ -58,14 +58,14 @@ pub trait WorkspaceConnectionRepository {
         &mut self,
         workspace_id: Uuid,
         connection_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WithAccountRef<WorkspaceConnection>>>> + Send;
+    ) -> impl Future<Output = Result<Option<WithAccountRef<WorkspaceConnection>>>> + Send;
 
     /// Finds connections by provider type within a workspace.
     fn find_workspace_connections_by_provider(
         &mut self,
         workspace_id: Uuid,
         provider: &str,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceConnection>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceConnection>>> + Send;
 
     /// Finds the workspace's most recently updated live, enabled connection of a
     /// given capability (e.g. its language model), if any. Resolves a capability
@@ -78,7 +78,7 @@ pub trait WorkspaceConnectionRepository {
         &mut self,
         workspace_id: Uuid,
         provider_type: ProviderType,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceConnection>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceConnection>>> + Send;
 
     /// Lists all active, import-mode connections that have a sync schedule,
     /// across every workspace, each paired with its cron. Used by the
@@ -86,14 +86,14 @@ pub trait WorkspaceConnectionRepository {
     /// schedule row.
     fn list_scheduled_connections(
         &mut self,
-    ) -> impl Future<Output = PgResult<Vec<ScheduledConnection>>> + Send;
+    ) -> impl Future<Output = Result<Vec<ScheduledConnection>>> + Send;
 
     /// Lists all connections in a workspace with offset pagination.
     fn offset_list_workspace_connections(
         &mut self,
         workspace_id: Uuid,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceConnection>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceConnection>>> + Send;
 
     /// Lists all connections in a workspace with cursor pagination, each paired
     /// with the handle and avatar of the account that created it.
@@ -105,40 +105,40 @@ pub trait WorkspaceConnectionRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         providers: &[String],
-    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceConnection>>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceConnection>>>> + Send;
 
     /// Updates a connection with new data.
     fn update_workspace_connection(
         &mut self,
         connection_id: Uuid,
         updates: UpdateWorkspaceConnection,
-    ) -> impl Future<Output = PgResult<WorkspaceConnection>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceConnection>> + Send;
 
     /// Soft deletes a connection by setting the deletion timestamp.
     fn delete_workspace_connection(
         &mut self,
         connection_id: Uuid,
-    ) -> impl Future<Output = PgResult<()>> + Send;
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Counts connections in a workspace.
     fn count_workspace_connections(
         &mut self,
         workspace_id: Uuid,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
+    ) -> impl Future<Output = Result<i64>> + Send;
 
     /// Counts connections by provider in a workspace.
     fn count_workspace_connections_by_provider(
         &mut self,
         workspace_id: Uuid,
         provider: &str,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
+    ) -> impl Future<Output = Result<i64>> + Send;
 }
 
 impl WorkspaceConnectionRepository for PgConnection {
     async fn create_workspace_connection(
         &mut self,
         new_connection: NewWorkspaceConnection,
-    ) -> PgResult<WorkspaceConnection> {
+    ) -> Result<WorkspaceConnection> {
         use schema::workspace_connections;
 
         let connection = diesel::insert_into(workspace_connections::table)
@@ -146,7 +146,7 @@ impl WorkspaceConnectionRepository for PgConnection {
             .returning(WorkspaceConnection::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(connection)
     }
@@ -154,7 +154,7 @@ impl WorkspaceConnectionRepository for PgConnection {
     async fn find_workspace_connection_by_id(
         &mut self,
         connection_id: Uuid,
-    ) -> PgResult<Option<WorkspaceConnection>> {
+    ) -> Result<Option<WorkspaceConnection>> {
         use schema::workspace_connections::{self, dsl};
 
         let connection = workspace_connections::table
@@ -164,7 +164,7 @@ impl WorkspaceConnectionRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(connection)
     }
@@ -173,7 +173,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         connection_id: Uuid,
-    ) -> PgResult<Option<WorkspaceConnection>> {
+    ) -> Result<Option<WorkspaceConnection>> {
         use schema::workspace_connections::{self, dsl};
 
         let connection = workspace_connections::table
@@ -184,7 +184,7 @@ impl WorkspaceConnectionRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(connection)
     }
@@ -193,7 +193,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         connection_id: Uuid,
-    ) -> PgResult<Option<WithAccountRef<WorkspaceConnection>>> {
+    ) -> Result<Option<WithAccountRef<WorkspaceConnection>>> {
         use schema::workspace_connections::dsl;
         use schema::{accounts, workspace_connections};
 
@@ -213,7 +213,7 @@ impl WorkspaceConnectionRepository for PgConnection {
             .first::<(WorkspaceConnection, AccountRefRow)>(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(row.map(|(item, account)| WithAccountRef { item, account }))
     }
@@ -222,7 +222,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         provider: &str,
-    ) -> PgResult<Vec<WorkspaceConnection>> {
+    ) -> Result<Vec<WorkspaceConnection>> {
         use schema::workspace_connections::{self, dsl};
 
         let connections = workspace_connections::table
@@ -233,7 +233,7 @@ impl WorkspaceConnectionRepository for PgConnection {
             .select(WorkspaceConnection::as_select())
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(connections)
     }
@@ -242,7 +242,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         provider_type: ProviderType,
-    ) -> PgResult<Option<WorkspaceConnection>> {
+    ) -> Result<Option<WorkspaceConnection>> {
         use schema::workspace_connections::{self, dsl};
 
         workspace_connections::table
@@ -255,10 +255,10 @@ impl WorkspaceConnectionRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
-    async fn list_scheduled_connections(&mut self) -> PgResult<Vec<ScheduledConnection>> {
+    async fn list_scheduled_connections(&mut self) -> Result<Vec<ScheduledConnection>> {
         use schema::workspace_connection_schedule as sched;
         use schema::workspace_connections::{self, dsl};
 
@@ -278,7 +278,7 @@ impl WorkspaceConnectionRepository for PgConnection {
             ))
             .load::<ScheduledConnection>(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(connections)
     }
@@ -287,7 +287,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<WorkspaceConnection>> {
+    ) -> Result<Vec<WorkspaceConnection>> {
         use schema::workspace_connections::{self, dsl};
 
         let connections = workspace_connections::table
@@ -299,7 +299,7 @@ impl WorkspaceConnectionRepository for PgConnection {
             .select(WorkspaceConnection::as_select())
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(connections)
     }
@@ -309,7 +309,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         providers: &[String],
-    ) -> PgResult<CursorPage<WithAccountRef<WorkspaceConnection>>> {
+    ) -> Result<CursorPage<WithAccountRef<WorkspaceConnection>>> {
         use schema::workspace_connections::dsl;
         use schema::{accounts, workspace_connections};
 
@@ -330,7 +330,7 @@ impl WorkspaceConnectionRepository for PgConnection {
                     .count()
                     .get_result::<i64>(self)
                     .await
-                    .map_err(PgError::from)?,
+                    .map_err(Error::from)?,
             )
         } else {
             None
@@ -371,7 +371,7 @@ impl WorkspaceConnectionRepository for PgConnection {
                     .limit(limit)
                     .load(self)
                     .await
-                    .map_err(PgError::from)?
+                    .map_err(Error::from)?
             } else {
                 query
                     .select((
@@ -386,7 +386,7 @@ impl WorkspaceConnectionRepository for PgConnection {
                     .limit(limit)
                     .load(self)
                     .await
-                    .map_err(PgError::from)?
+                    .map_err(Error::from)?
             };
 
         let items: Vec<WithAccountRef<WorkspaceConnection>> = rows
@@ -403,7 +403,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         &mut self,
         connection_id: Uuid,
         updates: UpdateWorkspaceConnection,
-    ) -> PgResult<WorkspaceConnection> {
+    ) -> Result<WorkspaceConnection> {
         use schema::workspace_connections::{self, dsl};
 
         let connection =
@@ -412,12 +412,12 @@ impl WorkspaceConnectionRepository for PgConnection {
                 .returning(WorkspaceConnection::as_returning())
                 .get_result(self)
                 .await
-                .map_err(PgError::from)?;
+                .map_err(Error::from)?;
 
         Ok(connection)
     }
 
-    async fn delete_workspace_connection(&mut self, connection_id: Uuid) -> PgResult<()> {
+    async fn delete_workspace_connection(&mut self, connection_id: Uuid) -> Result<()> {
         use diesel::dsl::now;
         use schema::workspace_connections::{self, dsl};
 
@@ -425,12 +425,12 @@ impl WorkspaceConnectionRepository for PgConnection {
             .set(dsl::deleted_at.eq(now))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(())
     }
 
-    async fn count_workspace_connections(&mut self, workspace_id: Uuid) -> PgResult<i64> {
+    async fn count_workspace_connections(&mut self, workspace_id: Uuid) -> Result<i64> {
         use schema::workspace_connections::{self, dsl};
 
         let count = workspace_connections::table
@@ -439,7 +439,7 @@ impl WorkspaceConnectionRepository for PgConnection {
             .count()
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(count)
     }
@@ -448,7 +448,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         provider: &str,
-    ) -> PgResult<i64> {
+    ) -> Result<i64> {
         use schema::workspace_connections::{self, dsl};
 
         let count = workspace_connections::table
@@ -458,7 +458,7 @@ impl WorkspaceConnectionRepository for PgConnection {
             .count()
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(count)
     }

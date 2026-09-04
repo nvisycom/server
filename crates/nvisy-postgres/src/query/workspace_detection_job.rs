@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceDetectionJob, WorkspaceDetectionJob};
 use crate::types::OutboxStatus;
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Read and write operations on the detection-job outbox.
 pub trait DetectionJobOutboxRepository {
@@ -26,7 +26,7 @@ pub trait DetectionJobOutboxRepository {
     fn insert_detection_job(
         &mut self,
         row: NewWorkspaceDetectionJob,
-    ) -> impl Future<Output = PgResult<WorkspaceDetectionJob>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceDetectionJob>> + Send;
 
     /// Claims up to `limit` due pending rows for publication, oldest first.
     ///
@@ -38,14 +38,12 @@ pub trait DetectionJobOutboxRepository {
     fn claim_detection_job_batch(
         &mut self,
         limit: i64,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceDetectionJob>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceDetectionJob>>> + Send;
 
     /// Marks a row processed (its job durably published), taking it out of the
     /// pending set. Runs in the drainer's batch transaction.
-    fn mark_detection_job_processed(
-        &mut self,
-        id: Uuid,
-    ) -> impl Future<Output = PgResult<()>> + Send;
+    fn mark_detection_job_processed(&mut self, id: Uuid)
+    -> impl Future<Output = Result<()>> + Send;
 
     /// Records a failed attempt: increments `attempts` and defers the next attempt
     /// to `now() + backoff_secs` (computed by the database clock, so a drainer's
@@ -55,20 +53,20 @@ pub trait DetectionJobOutboxRepository {
         &mut self,
         id: Uuid,
         backoff_secs: i64,
-    ) -> impl Future<Output = PgResult<()>> + Send;
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Dead-letters a row: increments `attempts` and marks it `Failed`, taking it
     /// out of the pending set so a job that can never publish stops consuming
     /// drain cycles. The row is retained for inspection. Runs in the drainer's
     /// batch transaction.
-    fn mark_detection_job_failed(&mut self, id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
+    fn mark_detection_job_failed(&mut self, id: Uuid) -> impl Future<Output = Result<()>> + Send;
 }
 
 impl DetectionJobOutboxRepository for PgConnection {
     async fn insert_detection_job(
         &mut self,
         row: NewWorkspaceDetectionJob,
-    ) -> PgResult<WorkspaceDetectionJob> {
+    ) -> Result<WorkspaceDetectionJob> {
         use schema::workspace_detection_jobs;
 
         diesel::insert_into(workspace_detection_jobs::table)
@@ -76,13 +74,13 @@ impl DetectionJobOutboxRepository for PgConnection {
             .returning(WorkspaceDetectionJob::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
     async fn claim_detection_job_batch(
         &mut self,
         limit: i64,
-    ) -> PgResult<Vec<WorkspaceDetectionJob>> {
+    ) -> Result<Vec<WorkspaceDetectionJob>> {
         use schema::workspace_detection_jobs::{self, dsl};
 
         workspace_detection_jobs::table
@@ -95,10 +93,10 @@ impl DetectionJobOutboxRepository for PgConnection {
             .skip_locked()
             .load(self)
             .await
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
-    async fn mark_detection_job_processed(&mut self, id: Uuid) -> PgResult<()> {
+    async fn mark_detection_job_processed(&mut self, id: Uuid) -> Result<()> {
         use schema::workspace_detection_jobs::{self, dsl};
 
         diesel::update(workspace_detection_jobs::table.filter(dsl::id.eq(id)))
@@ -108,11 +106,11 @@ impl DetectionJobOutboxRepository for PgConnection {
             ))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
         Ok(())
     }
 
-    async fn defer_detection_job_attempt(&mut self, id: Uuid, backoff_secs: i64) -> PgResult<()> {
+    async fn defer_detection_job_attempt(&mut self, id: Uuid, backoff_secs: i64) -> Result<()> {
         use schema::workspace_detection_jobs::{self, dsl};
 
         // The row stays `Pending`; only its attempt count and next-due time move.
@@ -128,11 +126,11 @@ impl DetectionJobOutboxRepository for PgConnection {
             ))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
         Ok(())
     }
 
-    async fn mark_detection_job_failed(&mut self, id: Uuid) -> PgResult<()> {
+    async fn mark_detection_job_failed(&mut self, id: Uuid) -> Result<()> {
         use schema::workspace_detection_jobs::{self, dsl};
 
         diesel::update(workspace_detection_jobs::table.filter(dsl::id.eq(id)))
@@ -142,7 +140,7 @@ impl DetectionJobOutboxRepository for PgConnection {
             ))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
         Ok(())
     }
 }

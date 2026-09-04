@@ -18,7 +18,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::types::{DetectionStatus, FileKind};
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Per-day detection counts and durations, as loaded from the grouped detection
 /// query.
@@ -169,7 +169,7 @@ pub trait WorkspaceAnalyticsRepository {
     fn snapshot(
         &mut self,
         workspace_id: Uuid,
-    ) -> impl Future<Output = PgResult<AnalyticsSnapshot>> + Send;
+    ) -> impl Future<Output = Result<AnalyticsSnapshot>> + Send;
 
     /// Daily detection activity for a workspace over `[from, to)` (UTC day
     /// boundaries; `to` exclusive). Returns one row per day that has at least one
@@ -185,11 +185,11 @@ pub trait WorkspaceAnalyticsRepository {
         workspace_id: Uuid,
         from: jiff::Timestamp,
         to: jiff::Timestamp,
-    ) -> impl Future<Output = PgResult<Vec<DetectionDayPoint>>> + Send;
+    ) -> impl Future<Output = Result<Vec<DetectionDayPoint>>> + Send;
 }
 
 impl WorkspaceAnalyticsRepository for PgConnection {
-    async fn snapshot(&mut self, workspace_id: Uuid) -> PgResult<AnalyticsSnapshot> {
+    async fn snapshot(&mut self, workspace_id: Uuid) -> Result<AnalyticsSnapshot> {
         // The four reads run in one read-only, repeatable-read transaction so the
         // snapshot is internally consistent: a detection cannot appear in the
         // status counts while its tokens are missing from the usage totals because
@@ -213,7 +213,7 @@ impl WorkspaceAnalyticsRepository for PgConnection {
         workspace_id: Uuid,
         from: jiff::Timestamp,
         to: jiff::Timestamp,
-    ) -> PgResult<Vec<DetectionDayPoint>> {
+    ) -> Result<Vec<DetectionDayPoint>> {
         use std::collections::BTreeMap;
 
         let from = jiff_diesel::Timestamp::from(from);
@@ -231,7 +231,7 @@ impl WorkspaceAnalyticsRepository for PgConnection {
                 let detection_rows =
                     load_detection_day_counts(conn, workspace_id, from, to).await?;
                 let token_rows = load_detection_day_tokens(conn, workspace_id, from, to).await?;
-                Ok::<_, PgError>((detection_rows, token_rows))
+                Ok::<_, Error>((detection_rows, token_rows))
             })
             .await?;
 
@@ -278,7 +278,7 @@ impl WorkspaceAnalyticsRepository for PgConnection {
 async fn load_storage_by_kind(
     conn: &mut PgConnection,
     workspace_id: Uuid,
-) -> PgResult<Vec<StorageByKind>> {
+) -> Result<Vec<StorageByKind>> {
     use bigdecimal::ToPrimitive;
     use diesel::dsl::{count_star, sum};
     use schema::workspace_files::{self, dsl};
@@ -290,7 +290,7 @@ async fn load_storage_by_kind(
         .select((dsl::file_kind, count_star(), sum(dsl::file_size_bytes)))
         .load(conn)
         .await
-        .map_err(PgError::from)?;
+        .map_err(Error::from)?;
 
     // Byte totals are converted to i64 at the boundary so callers do not depend
     // on BigDecimal. NULL (an empty group) and the physically impossible i64
@@ -311,7 +311,7 @@ async fn load_storage_by_kind(
 async fn load_detections_by_status(
     conn: &mut PgConnection,
     workspace_id: Uuid,
-) -> PgResult<Vec<DetectionStatusCount>> {
+) -> Result<Vec<DetectionStatusCount>> {
     use diesel::dsl::count_star;
     use schema::workspace_detections::dsl as detections;
     use schema::workspace_pipelines::dsl as pipelines;
@@ -325,7 +325,7 @@ async fn load_detections_by_status(
         .select((detections::status, count_star()))
         .load(conn)
         .await
-        .map_err(PgError::from)
+        .map_err(Error::from)
 }
 
 /// Mean and 95th-percentile duration (milliseconds) of the workspace's completed
@@ -333,7 +333,7 @@ async fn load_detections_by_status(
 async fn load_detection_durations(
     conn: &mut PgConnection,
     workspace_id: Uuid,
-) -> PgResult<DetectionDurations> {
+) -> Result<DetectionDurations> {
     use diesel::dsl::sql;
     use diesel::sql_types::{BigInt, Nullable};
     use schema::workspace_detections::dsl as detections;
@@ -366,7 +366,7 @@ async fn load_detection_durations(
         .select((avg_ms, p95_ms))
         .first(conn)
         .await
-        .map_err(PgError::from)?;
+        .map_err(Error::from)?;
 
     Ok(DetectionDurations { avg_ms, p95_ms })
 }
@@ -377,7 +377,7 @@ async fn load_detection_durations(
 async fn load_usage_by_model(
     conn: &mut PgConnection,
     workspace_id: Uuid,
-) -> PgResult<Vec<UsageByModel>> {
+) -> Result<Vec<UsageByModel>> {
     use bigdecimal::ToPrimitive;
     use diesel::dsl::sum;
     use schema::workspace_detection_usage::dsl as usage;
@@ -399,7 +399,7 @@ async fn load_usage_by_model(
         ))
         .load(conn)
         .await
-        .map_err(PgError::from)?;
+        .map_err(Error::from)?;
 
     let to_i64 = |v: Option<BigDecimal>| v.and_then(|b| b.to_i64());
     Ok(rows
@@ -430,7 +430,7 @@ async fn load_detection_day_counts(
     workspace_id: Uuid,
     from: jiff_diesel::Timestamp,
     to: jiff_diesel::Timestamp,
-) -> PgResult<Vec<DetectionDayCounts>> {
+) -> Result<Vec<DetectionDayCounts>> {
     use diesel::dsl::{case_when, count_star, sql, sum};
     use diesel::sql_types::{BigInt, Nullable as SqlNullable};
     use schema::workspace_detections::dsl as detections;
@@ -483,7 +483,7 @@ async fn load_detection_day_counts(
         ))
         .load(conn)
         .await
-        .map_err(PgError::from)
+        .map_err(Error::from)
 }
 
 /// Per-day inference token totals over `[from, to)`, scoped through the live
@@ -496,7 +496,7 @@ async fn load_detection_day_tokens(
     workspace_id: Uuid,
     from: jiff_diesel::Timestamp,
     to: jiff_diesel::Timestamp,
-) -> PgResult<Vec<DetectionDayTokens>> {
+) -> Result<Vec<DetectionDayTokens>> {
     use diesel::dsl::sum;
     use schema::workspace_detection_usage::dsl as usage;
     use schema::workspace_detections::dsl as detections;
@@ -531,5 +531,5 @@ async fn load_detection_day_tokens(
         ))
         .load(conn)
         .await
-        .map_err(PgError::from)
+        .map_err(Error::from)
 }

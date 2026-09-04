@@ -42,10 +42,6 @@ use super::nats_config::NatsConfig;
 use crate::kv::{
     ApiToken, ApiTokensBucket, ChatHistoryBucket, KvBucket, KvKey, KvStore, SessionKey, TokenKey,
 };
-use crate::object::{
-    AuditBucket, AvatarsBucket, FilesBucket, ObjectBucket, ObjectStore, ThumbnailsBucket,
-    WorkspaceAvatarsBucket,
-};
 use crate::stream::{BroadcastStream, EventPublisher, EventStream, EventSubscriber, WebhookStream};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
 
@@ -217,48 +213,6 @@ impl NatsClient {
         V: Serialize + DeserializeOwned + Send + Sync + 'static,
     {
         self.kv_store_with_ttl(ttl).await
-    }
-}
-
-// Object store getters
-impl NatsClient {
-    /// Get or create an object store for the specified bucket type.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn object_store<B>(&self) -> Result<ObjectStore<B>>
-    where
-        B: ObjectBucket,
-    {
-        ObjectStore::new(&self.inner.jetstream).await
-    }
-
-    /// Get or create a file store for primary file storage.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn file_store(&self) -> Result<ObjectStore<FilesBucket>> {
-        self.object_store().await
-    }
-
-    /// Get or create the redaction audit store.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn audit_store(&self) -> Result<ObjectStore<AuditBucket>> {
-        self.object_store().await
-    }
-
-    /// Get or create a thumbnail store for document thumbnails.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn thumbnail_store(&self) -> Result<ObjectStore<ThumbnailsBucket>> {
-        self.object_store().await
-    }
-
-    /// Get or create an avatar store for account avatars.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn avatar_store(&self) -> Result<ObjectStore<AvatarsBucket>> {
-        self.object_store().await
-    }
-
-    /// Get or create an avatar store for workspace avatars (logos).
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn workspace_avatar_store(&self) -> Result<ObjectStore<WorkspaceAvatarsBucket>> {
-        self.object_store().await
     }
 }
 

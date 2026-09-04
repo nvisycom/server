@@ -75,14 +75,6 @@ pub enum Error {
         actual: u64,
     },
 
-    /// Object store bucket not found
-    #[error("Object store bucket '{bucket}' not found")]
-    ObjectBucketNotFound { bucket: String },
-
-    /// Object not found in store
-    #[error("Object '{name}' not found in bucket '{bucket}'")]
-    ObjectNotFound { bucket: String, name: String },
-
     /// Invalid configuration
     #[error("Invalid configuration: {reason}")]
     InvalidConfig { reason: String },
@@ -157,21 +149,6 @@ impl Error {
         }
     }
 
-    /// Create an object bucket not found error
-    pub fn object_bucket_not_found(bucket: impl Into<String>) -> Self {
-        Self::ObjectBucketNotFound {
-            bucket: bucket.into(),
-        }
-    }
-
-    /// Create an object not found error
-    pub fn object_not_found(bucket: impl Into<String>, name: impl Into<String>) -> Self {
-        Self::ObjectNotFound {
-            bucket: bucket.into(),
-            name: name.into(),
-        }
-    }
-
     /// Create an invalid configuration error
     pub fn invalid_config(reason: impl Into<String>) -> Self {
         Self::InvalidConfig {
@@ -194,7 +171,6 @@ impl Error {
                 format!("Operation timed out after {:?}. Please try again.", timeout)
             }
             Error::KvKeyNotFound { key, .. } => format!("Key '{}' not found.", key),
-            Error::ObjectNotFound { name, .. } => format!("Object '{}' not found.", name),
             Error::Serialization(_) => "Data format error. Please check your input.".to_string(),
             Error::InvalidConfig { reason } => format!("Configuration error: {}", reason),
             _ => "An unexpected error occurred. Please try again.".to_string(),

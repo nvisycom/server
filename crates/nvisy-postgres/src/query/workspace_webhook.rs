@@ -11,7 +11,7 @@ use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, OffsetPagination, WebhookEvent, WebhookStatus,
     WithAccountRef,
 };
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for workspace webhook database operations.
 ///
@@ -21,20 +21,20 @@ pub trait WorkspaceWebhookRepository {
     fn create_workspace_webhook(
         &mut self,
         new_webhook: NewWorkspaceWebhook,
-    ) -> impl Future<Output = PgResult<WorkspaceWebhook>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceWebhook>> + Send;
 
     /// Finds a workspace webhook by ID.
     fn find_workspace_webhook_by_id(
         &mut self,
         webhook_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceWebhook>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceWebhook>>> + Send;
 
     /// Finds a webhook by ID, scoped to its workspace.
     fn find_webhook_in_workspace(
         &mut self,
         workspace_id: Uuid,
         webhook_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceWebhook>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceWebhook>>> + Send;
 
     /// Finds a webhook by id within a workspace, with the handle and avatar of
     /// the account that created it, excluding soft-deleted rows.
@@ -42,14 +42,14 @@ pub trait WorkspaceWebhookRepository {
         &mut self,
         workspace_id: Uuid,
         webhook_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WithAccountRef<WorkspaceWebhook>>>> + Send;
+    ) -> impl Future<Output = Result<Option<WithAccountRef<WorkspaceWebhook>>>> + Send;
 
     /// Lists all webhooks for a workspace with offset pagination.
     fn offset_list_workspace_webhooks(
         &mut self,
         workspace_id: Uuid,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceWebhook>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceWebhook>>> + Send;
 
     /// Lists all webhooks for a workspace with cursor pagination, each paired
     /// with the handle and avatar of the account that created it.
@@ -57,38 +57,38 @@ pub trait WorkspaceWebhookRepository {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceWebhook>>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceWebhook>>>> + Send;
 
     /// Updates a workspace webhook.
     fn update_workspace_webhook(
         &mut self,
         webhook_id: Uuid,
         changes: UpdateWorkspaceWebhook,
-    ) -> impl Future<Output = PgResult<WorkspaceWebhook>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceWebhook>> + Send;
 
     /// Soft deletes a workspace webhook.
     fn delete_workspace_webhook(
         &mut self,
         webhook_id: Uuid,
-    ) -> impl Future<Output = PgResult<()>> + Send;
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Records a successful webhook delivery.
     fn record_webhook_success(
         &mut self,
         webhook_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspaceWebhook>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceWebhook>> + Send;
 
     /// Records a failed webhook delivery.
     fn record_webhook_failure(
         &mut self,
         webhook_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspaceWebhook>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceWebhook>> + Send;
 
     /// Suspends a webhook (system-set, e.g. after repeated failures).
     fn suspend_webhook(
         &mut self,
         webhook_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspaceWebhook>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceWebhook>> + Send;
 
     /// Finds all enabled webhooks for a workspace that are subscribed to a specific event.
     ///
@@ -101,14 +101,14 @@ pub trait WorkspaceWebhookRepository {
         &mut self,
         workspace_id: Uuid,
         event: WebhookEvent,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceWebhook>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceWebhook>>> + Send;
 }
 
 impl WorkspaceWebhookRepository for PgConnection {
     async fn create_workspace_webhook(
         &mut self,
         new_webhook: NewWorkspaceWebhook,
-    ) -> PgResult<WorkspaceWebhook> {
+    ) -> Result<WorkspaceWebhook> {
         use schema::workspace_webhooks;
 
         let webhook = diesel::insert_into(workspace_webhooks::table)
@@ -116,7 +116,7 @@ impl WorkspaceWebhookRepository for PgConnection {
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(webhook)
     }
@@ -124,7 +124,7 @@ impl WorkspaceWebhookRepository for PgConnection {
     async fn find_workspace_webhook_by_id(
         &mut self,
         webhook_id: Uuid,
-    ) -> PgResult<Option<WorkspaceWebhook>> {
+    ) -> Result<Option<WorkspaceWebhook>> {
         use schema::workspace_webhooks::dsl::*;
 
         let webhook = workspace_webhooks
@@ -134,7 +134,7 @@ impl WorkspaceWebhookRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(webhook)
     }
@@ -143,7 +143,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         webhook_id: Uuid,
-    ) -> PgResult<Option<WorkspaceWebhook>> {
+    ) -> Result<Option<WorkspaceWebhook>> {
         use schema::workspace_webhooks::{self, dsl};
 
         let webhook = workspace_webhooks::table
@@ -154,7 +154,7 @@ impl WorkspaceWebhookRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(webhook)
     }
@@ -163,7 +163,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         webhook_id: Uuid,
-    ) -> PgResult<Option<WithAccountRef<WorkspaceWebhook>>> {
+    ) -> Result<Option<WithAccountRef<WorkspaceWebhook>>> {
         use schema::workspace_webhooks::dsl;
         use schema::{accounts, workspace_webhooks};
 
@@ -183,7 +183,7 @@ impl WorkspaceWebhookRepository for PgConnection {
             .first::<(WorkspaceWebhook, AccountRefRow)>(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(row.map(|(item, account)| WithAccountRef { item, account }))
     }
@@ -192,7 +192,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<WorkspaceWebhook>> {
+    ) -> Result<Vec<WorkspaceWebhook>> {
         use schema::workspace_webhooks::{self, dsl};
 
         let webhooks = workspace_webhooks::table
@@ -204,7 +204,7 @@ impl WorkspaceWebhookRepository for PgConnection {
             .offset(pagination.offset)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(webhooks)
     }
@@ -213,7 +213,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<WithAccountRef<WorkspaceWebhook>>> {
+    ) -> Result<CursorPage<WithAccountRef<WorkspaceWebhook>>> {
         use schema::workspace_webhooks::dsl;
         use schema::{accounts, workspace_webhooks};
 
@@ -226,7 +226,7 @@ impl WorkspaceWebhookRepository for PgConnection {
                     .count()
                     .get_result(self)
                     .await
-                    .map_err(PgError::from)?,
+                    .map_err(Error::from)?,
             )
         } else {
             None
@@ -261,7 +261,7 @@ impl WorkspaceWebhookRepository for PgConnection {
             .limit(pagination.fetch_limit())
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         let items: Vec<WithAccountRef<WorkspaceWebhook>> = rows
             .into_iter()
@@ -277,7 +277,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         webhook_id: Uuid,
         changes: UpdateWorkspaceWebhook,
-    ) -> PgResult<WorkspaceWebhook> {
+    ) -> Result<WorkspaceWebhook> {
         use schema::workspace_webhooks::dsl::*;
 
         let webhook = diesel::update(workspace_webhooks)
@@ -286,12 +286,12 @@ impl WorkspaceWebhookRepository for PgConnection {
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(webhook)
     }
 
-    async fn delete_workspace_webhook(&mut self, webhook_id: Uuid) -> PgResult<()> {
+    async fn delete_workspace_webhook(&mut self, webhook_id: Uuid) -> Result<()> {
         use diesel::dsl::now;
         use schema::workspace_webhooks::dsl::*;
 
@@ -300,12 +300,12 @@ impl WorkspaceWebhookRepository for PgConnection {
             .set(deleted_at.eq(now))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(())
     }
 
-    async fn record_webhook_success(&mut self, webhook_id: Uuid) -> PgResult<WorkspaceWebhook> {
+    async fn record_webhook_success(&mut self, webhook_id: Uuid) -> Result<WorkspaceWebhook> {
         use diesel::dsl::now;
         use schema::workspace_webhooks::dsl::*;
 
@@ -315,12 +315,12 @@ impl WorkspaceWebhookRepository for PgConnection {
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(webhook)
     }
 
-    async fn record_webhook_failure(&mut self, webhook_id: Uuid) -> PgResult<WorkspaceWebhook> {
+    async fn record_webhook_failure(&mut self, webhook_id: Uuid) -> Result<WorkspaceWebhook> {
         use diesel::dsl::now;
         use schema::workspace_webhooks::dsl::*;
 
@@ -333,12 +333,12 @@ impl WorkspaceWebhookRepository for PgConnection {
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(webhook)
     }
 
-    async fn suspend_webhook(&mut self, webhook_id: Uuid) -> PgResult<WorkspaceWebhook> {
+    async fn suspend_webhook(&mut self, webhook_id: Uuid) -> Result<WorkspaceWebhook> {
         use schema::workspace_webhooks::dsl::*;
 
         let webhook = diesel::update(workspace_webhooks)
@@ -347,7 +347,7 @@ impl WorkspaceWebhookRepository for PgConnection {
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(webhook)
     }
@@ -356,7 +356,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         ws_id: Uuid,
         event: WebhookEvent,
-    ) -> PgResult<Vec<WorkspaceWebhook>> {
+    ) -> Result<Vec<WorkspaceWebhook>> {
         use schema::workspace_webhooks::dsl::*;
 
         // Query webhooks whose events array contains the target event via the
@@ -372,7 +372,7 @@ impl WorkspaceWebhookRepository for PgConnection {
             .select(WorkspaceWebhook::as_select())
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(webhooks)
     }

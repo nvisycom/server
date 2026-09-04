@@ -25,6 +25,8 @@ use std::sync::Arc;
 use nvisy_core::health::HealthCheck;
 use nvisy_nats::{NatsClient, NatsConfig};
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
+use nvisy_s3::BlobStore;
+pub use nvisy_s3::S3Config;
 use nvisy_webhook::WebhookService;
 use tokio_util::sync::CancellationToken;
 
@@ -119,12 +121,14 @@ impl ServiceState {
         sync_config: SyncConfig,
         webhook_service: WebhookService,
         upload_config: UploadConfig,
+        s3_config: S3Config,
     ) -> Result<Self> {
         let postgres_client = connect_postgres(postgres_config).await?;
         let nats_client = connect_nats(nats_config).await?;
+        let blobs = connect_blobs(s3_config).await?;
 
         let crypto = CryptoService::from_config(&crypto_config).await?;
-        let infra = Infra::new(postgres_client, nats_client, crypto);
+        let infra = Infra::new(postgres_client, nats_client, crypto, blobs);
 
         let engine = EngineService::from_config(engine_config).await?;
         let session_keys = SessionKeys::from_config(&session_config).await?;
@@ -132,6 +136,7 @@ impl ServiceState {
         let health_checkers: Vec<Arc<dyn HealthCheck>> = vec![
             Arc::new(infra.postgres.clone()),
             Arc::new(infra.nats.clone()),
+            Arc::new(infra.blobs.clone()),
             Arc::new(webhook_service.clone()),
         ];
 
@@ -211,6 +216,25 @@ async fn connect_nats(config: NatsConfig) -> Result<NatsClient> {
         .map_err(|e| Error::external("NATS", "Failed to connect to NATS").with_source(e))
 }
 
+/// Connects to the S3-compatible blob store and verifies it is reachable.
+///
+/// The AWS SDK builds its client lazily, so [`BlobStore::connect`] alone never
+/// touches the network. A follow-up [`ping`](BlobStore::ping) makes a bad
+/// endpoint, wrong credentials, or missing bucket fail at startup — matching the
+/// fail-fast contract of the Postgres and NATS connectors — rather than at the
+/// first upload.
+async fn connect_blobs(config: S3Config) -> Result<BlobStore> {
+    let blobs = BlobStore::connect(&config)
+        .await
+        .map_err(|e| Error::external("S3", "Failed to connect to the blob store").with_source(e))?;
+
+    blobs.ping().await.map_err(|e| {
+        Error::external("S3", "Blob store is unreachable or its bucket is missing").with_source(e)
+    })?;
+
+    Ok(blobs)
+}
+
 /// Derives [`FromRef`] by cloning a stored [`ServiceState`] field.
 ///
 /// [`FromRef`]: axum::extract::FromRef
@@ -253,11 +277,12 @@ macro_rules! impl_di_infra {
     )+};
 }
 
-// The three ambient clients, resolved from the shared `Infra`:
+// The ambient clients, resolved from the shared `Infra`:
 impl_di_infra!(
     postgres: PgClient,
     nats: NatsClient,
     crypto: CryptoService,
+    blobs: BlobStore,
 );
 
 // Stored fields (external services + stateful singletons + security):

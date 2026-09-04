@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::model::{ChatSession, NewChatSession, UpdateChatSession};
 use crate::types::{CursorPage, CursorPagination};
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for chat session database operations.
 pub trait ChatSessionRepository {
@@ -16,14 +16,14 @@ pub trait ChatSessionRepository {
     fn create_chat_session(
         &mut self,
         new_session: NewChatSession,
-    ) -> impl Future<Output = PgResult<ChatSession>> + Send;
+    ) -> impl Future<Output = Result<ChatSession>> + Send;
 
     /// Finds a live session by id within a workspace.
     fn find_chat_session_in_workspace(
         &mut self,
         workspace_id: Uuid,
         session_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<ChatSession>>> + Send;
+    ) -> impl Future<Output = Result<Option<ChatSession>>> + Send;
 
     /// Lists a workspace's live sessions, newest first, cursor-paginated.
     ///
@@ -33,14 +33,14 @@ pub trait ChatSessionRepository {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<ChatSession>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<ChatSession>>> + Send;
 
     /// Updates a session (title and/or activity timestamp).
     fn update_chat_session(
         &mut self,
         session_id: Uuid,
         updates: UpdateChatSession,
-    ) -> impl Future<Output = PgResult<ChatSession>> + Send;
+    ) -> impl Future<Output = Result<ChatSession>> + Send;
 
     /// Soft-deletes a live session within a workspace, returning whether a live
     /// session was deleted.
@@ -48,11 +48,11 @@ pub trait ChatSessionRepository {
         &mut self,
         workspace_id: Uuid,
         session_id: Uuid,
-    ) -> impl Future<Output = PgResult<bool>> + Send;
+    ) -> impl Future<Output = Result<bool>> + Send;
 }
 
 impl ChatSessionRepository for PgConnection {
-    async fn create_chat_session(&mut self, new_session: NewChatSession) -> PgResult<ChatSession> {
+    async fn create_chat_session(&mut self, new_session: NewChatSession) -> Result<ChatSession> {
         use schema::chat_sessions;
 
         diesel::insert_into(chat_sessions::table)
@@ -60,14 +60,14 @@ impl ChatSessionRepository for PgConnection {
             .returning(ChatSession::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
     async fn find_chat_session_in_workspace(
         &mut self,
         workspace_id: Uuid,
         session_id: Uuid,
-    ) -> PgResult<Option<ChatSession>> {
+    ) -> Result<Option<ChatSession>> {
         use schema::chat_sessions::{self, dsl};
 
         chat_sessions::table
@@ -78,14 +78,14 @@ impl ChatSessionRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
     async fn list_chat_sessions(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<ChatSession>> {
+    ) -> Result<CursorPage<ChatSession>> {
         use diesel::dsl::count_star;
         use schema::chat_sessions::{self, dsl};
 
@@ -98,7 +98,7 @@ impl ChatSessionRepository for PgConnection {
                     .select(count_star())
                     .get_result(self)
                     .await
-                    .map_err(PgError::from)?,
+                    .map_err(Error::from)?,
             )
         } else {
             None
@@ -124,7 +124,7 @@ impl ChatSessionRepository for PgConnection {
             .limit(pagination.fetch_limit())
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(CursorPage::new(sessions, total, pagination.limit, |s| {
             (s.created_at.into(), s.id)
@@ -135,7 +135,7 @@ impl ChatSessionRepository for PgConnection {
         &mut self,
         session_id: Uuid,
         updates: UpdateChatSession,
-    ) -> PgResult<ChatSession> {
+    ) -> Result<ChatSession> {
         use schema::chat_sessions::{self, dsl};
 
         diesel::update(chat_sessions::table.filter(dsl::id.eq(session_id)))
@@ -143,14 +143,10 @@ impl ChatSessionRepository for PgConnection {
             .returning(ChatSession::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
-    async fn delete_chat_session(
-        &mut self,
-        workspace_id: Uuid,
-        session_id: Uuid,
-    ) -> PgResult<bool> {
+    async fn delete_chat_session(&mut self, workspace_id: Uuid, session_id: Uuid) -> Result<bool> {
         use diesel::dsl::now;
         use schema::chat_sessions::{self, dsl};
 
@@ -163,7 +159,7 @@ impl ChatSessionRepository for PgConnection {
         .set(dsl::deleted_at.eq(now))
         .execute(self)
         .await
-        .map_err(PgError::from)?;
+        .map_err(Error::from)?;
 
         Ok(affected > 0)
     }

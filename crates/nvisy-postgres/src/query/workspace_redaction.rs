@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceRedaction, WorkspaceRedaction};
 use crate::types::{CursorPage, CursorPagination};
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for workspace redaction database operations.
 ///
@@ -20,7 +20,7 @@ pub trait WorkspaceRedactionRepository {
     fn create_redaction(
         &mut self,
         new_redaction: NewWorkspaceRedaction,
-    ) -> impl Future<Output = PgResult<WorkspaceRedaction>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceRedaction>> + Send;
 
     /// Finds a redaction by its id, scoped to a workspace.
     ///
@@ -31,21 +31,21 @@ pub trait WorkspaceRedactionRepository {
         &mut self,
         workspace_id: Uuid,
         redaction_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceRedaction>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceRedaction>>> + Send;
 
     /// Lists a detection's redactions with cursor pagination, newest first.
     fn cursor_list_detection_redactions(
         &mut self,
         detection_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<WorkspaceRedaction>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<WorkspaceRedaction>>> + Send;
 }
 
 impl WorkspaceRedactionRepository for PgConnection {
     async fn create_redaction(
         &mut self,
         new_redaction: NewWorkspaceRedaction,
-    ) -> PgResult<WorkspaceRedaction> {
+    ) -> Result<WorkspaceRedaction> {
         use schema::workspace_redactions;
 
         let redaction = diesel::insert_into(workspace_redactions::table)
@@ -53,7 +53,7 @@ impl WorkspaceRedactionRepository for PgConnection {
             .returning(WorkspaceRedaction::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(redaction)
     }
@@ -62,7 +62,7 @@ impl WorkspaceRedactionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         redaction_id: Uuid,
-    ) -> PgResult<Option<WorkspaceRedaction>> {
+    ) -> Result<Option<WorkspaceRedaction>> {
         use schema::workspace_redactions::dsl as redactions;
         use schema::{workspace_detections, workspace_pipelines, workspace_redactions};
 
@@ -78,7 +78,7 @@ impl WorkspaceRedactionRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(redaction)
     }
@@ -87,7 +87,7 @@ impl WorkspaceRedactionRepository for PgConnection {
         &mut self,
         detection_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<WorkspaceRedaction>> {
+    ) -> Result<CursorPage<WorkspaceRedaction>> {
         use schema::workspace_redactions::{self, dsl};
 
         let base_query = workspace_redactions::table.filter(dsl::detection_id.eq(detection_id));
@@ -98,7 +98,7 @@ impl WorkspaceRedactionRepository for PgConnection {
                     .count()
                     .get_result::<i64>(self)
                     .await
-                    .map_err(PgError::from)?,
+                    .map_err(Error::from)?,
             )
         } else {
             None
@@ -121,7 +121,7 @@ impl WorkspaceRedactionRepository for PgConnection {
                 .limit(limit)
                 .load(self)
                 .await
-                .map_err(PgError::from)?
+                .map_err(Error::from)?
         } else {
             workspace_redactions::table
                 .filter(dsl::detection_id.eq(detection_id))
@@ -130,7 +130,7 @@ impl WorkspaceRedactionRepository for PgConnection {
                 .limit(limit)
                 .load(self)
                 .await
-                .map_err(PgError::from)?
+                .map_err(Error::from)?
         };
 
         Ok(CursorPage::new(items, total, pagination.limit, |row| {

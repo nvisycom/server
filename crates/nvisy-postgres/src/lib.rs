@@ -41,4 +41,4 @@ pub use crate::client::{
     ConnectionPool, MigrationResult, MigrationStatus, PgClient, PgClientMigrationExt, PgConfig,
     PgConn, PgPoolStatus,
 };
-pub use crate::error::{DieselError, PgError, PgResult, TimeoutType};
+pub use crate::error::{DieselError, Error, Result, TimeoutType};

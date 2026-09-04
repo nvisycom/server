@@ -14,7 +14,7 @@ use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, DetectionStatus, FileFilter, FileKind, FileSortBy,
     FileSortField, OffsetPagination, SortOrder, WithAccountRef,
 };
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// A live file imported from a connection, for deletion reconciliation.
 ///
@@ -50,7 +50,7 @@ pub trait WorkspaceFileRepository {
     fn create_workspace_file(
         &mut self,
         new_file: NewWorkspaceFile,
-    ) -> impl Future<Output = PgResult<WorkspaceFile>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceFile>> + Send;
 
     /// Creates a workspace file and records its import origin (the connection and
     /// remote object key it came from) in a single transaction.
@@ -59,13 +59,13 @@ pub trait WorkspaceFileRepository {
         new_file: NewWorkspaceFile,
         connection_id: Uuid,
         source_key: String,
-    ) -> impl Future<Output = PgResult<WorkspaceFile>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceFile>> + Send;
 
     /// Finds a workspace file by its unique identifier.
     fn find_workspace_file_by_id(
         &mut self,
         file_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceFile>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceFile>>> + Send;
 
     /// Finds a file by ID within a specific workspace.
     ///
@@ -74,7 +74,7 @@ pub trait WorkspaceFileRepository {
         &mut self,
         workspace_id: Uuid,
         file_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceFile>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceFile>>> + Send;
 
     /// Finds a file by id within a workspace, with the handle and avatar of the
     /// account that uploaded it.
@@ -84,7 +84,7 @@ pub trait WorkspaceFileRepository {
         &mut self,
         workspace_id: Uuid,
         file_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WithAccountRef<WorkspaceFile>>>> + Send;
+    ) -> impl Future<Output = Result<Option<WithAccountRef<WorkspaceFile>>>> + Send;
 
     /// Returns the remote object keys already imported (live) from a connection.
     ///
@@ -92,7 +92,7 @@ pub trait WorkspaceFileRepository {
     fn imported_keys_for_connection(
         &mut self,
         connection_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<String>>> + Send;
+    ) -> impl Future<Output = Result<Vec<String>>> + Send;
 
     /// Returns each live file imported from a connection, for deletion
     /// reconciliation (a source key absent from the remote listing identifies a
@@ -100,7 +100,7 @@ pub trait WorkspaceFileRepository {
     fn imported_files_for_connection(
         &mut self,
         connection_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<ImportedFileRef>>> + Send;
+    ) -> impl Future<Output = Result<Vec<ImportedFileRef>>> + Send;
 
     /// Returns up to `limit` live files whose retention window has elapsed
     /// (`expires_at < now`). The file reaper sweeps these, purges their objects,
@@ -108,7 +108,7 @@ pub trait WorkspaceFileRepository {
     fn files_due_for_expiry(
         &mut self,
         limit: i64,
-    ) -> impl Future<Output = PgResult<Vec<ExpiredFileRef>>> + Send;
+    ) -> impl Future<Output = Result<Vec<ExpiredFileRef>>> + Send;
 
     /// Returns up to `limit` soft-deleted files whose backing object has not yet
     /// been reclaimed (`deleted_at IS NOT NULL AND purged_at IS NULL`). The reaper
@@ -117,12 +117,12 @@ pub trait WorkspaceFileRepository {
     fn files_pending_purge(
         &mut self,
         limit: i64,
-    ) -> impl Future<Output = PgResult<Vec<ExpiredFileRef>>> + Send;
+    ) -> impl Future<Output = Result<Vec<ExpiredFileRef>>> + Send;
 
     /// Stamps `purged_at = now()` once a file's backing object is removed, taking
     /// the row out of the reaper's pending-purge set. Idempotent: only sets it
     /// when currently NULL.
-    fn mark_file_purged(&mut self, file_id: Uuid) -> impl Future<Output = PgResult<()>> + Send;
+    fn mark_file_purged(&mut self, file_id: Uuid) -> impl Future<Output = Result<()>> + Send;
 
     /// Recomputes `expires_at` for live files of `kind` in `workspace_id`,
     /// returning the number updated. Used to backfill when retention settings
@@ -132,7 +132,7 @@ pub trait WorkspaceFileRepository {
         workspace_id: Uuid,
         kind: FileKind,
         expires_at: Option<jiff::Timestamp>,
-    ) -> impl Future<Output = PgResult<usize>> + Send;
+    ) -> impl Future<Output = Result<usize>> + Send;
 
     /// Recomputes `expires_at` for live files of `kind` produced by a specific
     /// pipeline's detections and redactions (detection audits, redaction outputs,
@@ -144,25 +144,24 @@ pub trait WorkspaceFileRepository {
         pipeline_id: Uuid,
         kind: FileKind,
         expires_at: Option<jiff::Timestamp>,
-    ) -> impl Future<Output = PgResult<usize>> + Send;
+    ) -> impl Future<Output = Result<usize>> + Send;
 
     /// Lists all files uploaded by a specific account with offset pagination.
     fn offset_list_account_files(
         &mut self,
         account_id: Uuid,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceFile>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceFile>>> + Send;
 
     /// Updates a workspace file with new metadata or settings.
     fn update_workspace_file(
         &mut self,
         file_id: Uuid,
         updates: UpdateWorkspaceFile,
-    ) -> impl Future<Output = PgResult<WorkspaceFile>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceFile>> + Send;
 
     /// Soft deletes a workspace file by setting the deletion timestamp.
-    fn delete_workspace_file(&mut self, file_id: Uuid)
-    -> impl Future<Output = PgResult<()>> + Send;
+    fn delete_workspace_file(&mut self, file_id: Uuid) -> impl Future<Output = Result<()>> + Send;
 
     /// Lists all files in a workspace with sorting and filtering options.
     ///
@@ -173,7 +172,7 @@ pub trait WorkspaceFileRepository {
         pagination: OffsetPagination,
         sort_by: FileSortBy,
         filter: FileFilter,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceFile>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceFile>>> + Send;
 
     /// Lists all files in a workspace with cursor pagination and optional
     /// filtering, each paired with the handle and avatar of the account that
@@ -183,19 +182,19 @@ pub trait WorkspaceFileRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: FileFilter,
-    ) -> impl Future<Output = PgResult<CursorPage<WithAccountRef<WorkspaceFile>>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceFile>>>> + Send;
 
     /// Finds workspace files with a matching SHA-256 hash.
     fn find_workspace_files_by_hash(
         &mut self,
         file_hash: &[u8],
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceFile>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceFile>>> + Send;
 
     /// Calculates total storage usage for an account.
     fn get_account_storage_usage(
         &mut self,
         account_id: Uuid,
-    ) -> impl Future<Output = PgResult<BigDecimal>> + Send;
+    ) -> impl Future<Output = Result<BigDecimal>> + Send;
 
     /// Soft-deletes the live files among `file_ids` that belong to
     /// `workspace_id`, returning the rows it actually transitioned.
@@ -213,7 +212,7 @@ pub trait WorkspaceFileRepository {
         &mut self,
         workspace_id: Uuid,
         file_ids: &[Uuid],
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceFile>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceFile>>> + Send;
 
     /// Lists all versions of a file (the file itself and all files that have it as parent).
     ///
@@ -221,7 +220,7 @@ pub trait WorkspaceFileRepository {
     fn list_workspace_file_versions(
         &mut self,
         file_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceFile>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceFile>>> + Send;
 
     /// Finds the latest version of a file by traversing the version chain.
     ///
@@ -230,20 +229,17 @@ pub trait WorkspaceFileRepository {
     fn find_latest_workspace_file_version(
         &mut self,
         file_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceFile>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceFile>>> + Send;
 
     /// Gets the next version number for creating a new version of a file.
     fn get_next_workspace_file_version_number(
         &mut self,
         file_id: Uuid,
-    ) -> impl Future<Output = PgResult<i32>> + Send;
+    ) -> impl Future<Output = Result<i32>> + Send;
 }
 
 impl WorkspaceFileRepository for PgConnection {
-    async fn create_workspace_file(
-        &mut self,
-        new_file: NewWorkspaceFile,
-    ) -> PgResult<WorkspaceFile> {
+    async fn create_workspace_file(&mut self, new_file: NewWorkspaceFile) -> Result<WorkspaceFile> {
         use schema::workspace_files;
 
         let file = diesel::insert_into(workspace_files::table)
@@ -251,7 +247,7 @@ impl WorkspaceFileRepository for PgConnection {
             .returning(WorkspaceFile::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(file)
     }
@@ -261,7 +257,7 @@ impl WorkspaceFileRepository for PgConnection {
         new_file: NewWorkspaceFile,
         connection_id: Uuid,
         source_key: String,
-    ) -> PgResult<WorkspaceFile> {
+    ) -> Result<WorkspaceFile> {
         use diesel_async::AsyncConnection;
         use schema::{workspace_file_imports, workspace_files};
 
@@ -271,7 +267,7 @@ impl WorkspaceFileRepository for PgConnection {
                 .returning(WorkspaceFile::as_returning())
                 .get_result(conn)
                 .await
-                .map_err(PgError::from)?;
+                .map_err(Error::from)?;
 
             diesel::insert_into(workspace_file_imports::table)
                 .values(NewWorkspaceFileImport {
@@ -281,17 +277,14 @@ impl WorkspaceFileRepository for PgConnection {
                 })
                 .execute(conn)
                 .await
-                .map_err(PgError::from)?;
+                .map_err(Error::from)?;
 
-            Ok::<_, PgError>(file)
+            Ok::<_, Error>(file)
         })
         .await
     }
 
-    async fn find_workspace_file_by_id(
-        &mut self,
-        file_id: Uuid,
-    ) -> PgResult<Option<WorkspaceFile>> {
+    async fn find_workspace_file_by_id(&mut self, file_id: Uuid) -> Result<Option<WorkspaceFile>> {
         use schema::workspace_files::{self, dsl};
 
         let file = workspace_files::table
@@ -301,7 +294,7 @@ impl WorkspaceFileRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(file)
     }
@@ -310,7 +303,7 @@ impl WorkspaceFileRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         file_id: Uuid,
-    ) -> PgResult<Option<WorkspaceFile>> {
+    ) -> Result<Option<WorkspaceFile>> {
         use schema::workspace_files::{self, dsl};
 
         let file = workspace_files::table
@@ -321,12 +314,12 @@ impl WorkspaceFileRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(file)
     }
 
-    async fn imported_keys_for_connection(&mut self, connection_id: Uuid) -> PgResult<Vec<String>> {
+    async fn imported_keys_for_connection(&mut self, connection_id: Uuid) -> Result<Vec<String>> {
         use schema::{workspace_file_imports, workspace_files};
 
         let keys = workspace_file_imports::table
@@ -336,7 +329,7 @@ impl WorkspaceFileRepository for PgConnection {
             .select(workspace_file_imports::source_key)
             .load::<String>(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(keys)
     }
@@ -344,7 +337,7 @@ impl WorkspaceFileRepository for PgConnection {
     async fn imported_files_for_connection(
         &mut self,
         connection_id: Uuid,
-    ) -> PgResult<Vec<ImportedFileRef>> {
+    ) -> Result<Vec<ImportedFileRef>> {
         use schema::{workspace_file_imports, workspace_files};
 
         let files = workspace_file_imports::table
@@ -358,12 +351,12 @@ impl WorkspaceFileRepository for PgConnection {
             ))
             .load::<ImportedFileRef>(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(files)
     }
 
-    async fn files_due_for_expiry(&mut self, limit: i64) -> PgResult<Vec<ExpiredFileRef>> {
+    async fn files_due_for_expiry(&mut self, limit: i64) -> Result<Vec<ExpiredFileRef>> {
         use diesel::dsl::{exists, not, now};
         use schema::workspace_detections::dsl as detections;
         use schema::{workspace_detections, workspace_files};
@@ -401,12 +394,12 @@ impl WorkspaceFileRepository for PgConnection {
             .limit(limit)
             .load::<ExpiredFileRef>(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(files)
     }
 
-    async fn files_pending_purge(&mut self, limit: i64) -> PgResult<Vec<ExpiredFileRef>> {
+    async fn files_pending_purge(&mut self, limit: i64) -> Result<Vec<ExpiredFileRef>> {
         use schema::workspace_files;
 
         let files = workspace_files::table
@@ -420,12 +413,12 @@ impl WorkspaceFileRepository for PgConnection {
             .limit(limit)
             .load::<ExpiredFileRef>(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(files)
     }
 
-    async fn mark_file_purged(&mut self, file_id: Uuid) -> PgResult<()> {
+    async fn mark_file_purged(&mut self, file_id: Uuid) -> Result<()> {
         use schema::workspace_files::{self, dsl};
 
         diesel::update(workspace_files::table)
@@ -434,7 +427,7 @@ impl WorkspaceFileRepository for PgConnection {
             .set(dsl::purged_at.eq(diesel::dsl::now))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(())
     }
@@ -444,7 +437,7 @@ impl WorkspaceFileRepository for PgConnection {
         workspace_id: Uuid,
         kind: FileKind,
         expires_at: Option<jiff::Timestamp>,
-    ) -> PgResult<usize> {
+    ) -> Result<usize> {
         use schema::workspace_files::{self, dsl};
 
         let expires_at = expires_at.map(jiff_diesel::Timestamp::from);
@@ -456,7 +449,7 @@ impl WorkspaceFileRepository for PgConnection {
             .set(dsl::expires_at.eq(expires_at))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(count)
     }
@@ -466,7 +459,7 @@ impl WorkspaceFileRepository for PgConnection {
         pipeline_id: Uuid,
         kind: FileKind,
         expires_at: Option<jiff::Timestamp>,
-    ) -> PgResult<usize> {
+    ) -> Result<usize> {
         use schema::workspace_detections::dsl as detections;
         use schema::workspace_redactions::dsl as redactions;
         use schema::{workspace_detections, workspace_files, workspace_redactions};
@@ -485,7 +478,7 @@ impl WorkspaceFileRepository for PgConnection {
                 .select(detections::audit_file_id.assume_not_null())
                 .load(self)
                 .await
-                .map_err(PgError::from)?,
+                .map_err(Error::from)?,
             FileKind::Redacted => workspace_redactions::table
                 .inner_join(workspace_detections::table)
                 .filter(detections::pipeline_id.eq(pipeline_id))
@@ -493,7 +486,7 @@ impl WorkspaceFileRepository for PgConnection {
                 .select(redactions::output_file_id.assume_not_null())
                 .load(self)
                 .await
-                .map_err(PgError::from)?,
+                .map_err(Error::from)?,
             FileKind::Review => workspace_redactions::table
                 .inner_join(workspace_detections::table)
                 .filter(detections::pipeline_id.eq(pipeline_id))
@@ -501,7 +494,7 @@ impl WorkspaceFileRepository for PgConnection {
                 .select(redactions::review_file_id.assume_not_null())
                 .load(self)
                 .await
-                .map_err(PgError::from)?,
+                .map_err(Error::from)?,
             _ => return Ok(0),
         };
 
@@ -515,7 +508,7 @@ impl WorkspaceFileRepository for PgConnection {
             .set(workspace_files::expires_at.eq(expires_at))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(count)
     }
@@ -524,7 +517,7 @@ impl WorkspaceFileRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         file_id: Uuid,
-    ) -> PgResult<Option<WithAccountRef<WorkspaceFile>>> {
+    ) -> Result<Option<WithAccountRef<WorkspaceFile>>> {
         use schema::workspace_files::dsl;
         use schema::{accounts, workspace_files};
 
@@ -544,7 +537,7 @@ impl WorkspaceFileRepository for PgConnection {
             .first::<(WorkspaceFile, AccountRefRow)>(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(row.map(|(item, account)| WithAccountRef { item, account }))
     }
@@ -553,7 +546,7 @@ impl WorkspaceFileRepository for PgConnection {
         &mut self,
         account_id: Uuid,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<WorkspaceFile>> {
+    ) -> Result<Vec<WorkspaceFile>> {
         use schema::workspace_files::{self, dsl};
 
         let files = workspace_files::table
@@ -565,7 +558,7 @@ impl WorkspaceFileRepository for PgConnection {
             .select(WorkspaceFile::as_select())
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(files)
     }
@@ -574,7 +567,7 @@ impl WorkspaceFileRepository for PgConnection {
         &mut self,
         file_id: Uuid,
         updates: UpdateWorkspaceFile,
-    ) -> PgResult<WorkspaceFile> {
+    ) -> Result<WorkspaceFile> {
         use schema::workspace_files::{self, dsl};
 
         let file = diesel::update(workspace_files::table.filter(dsl::id.eq(file_id)))
@@ -582,12 +575,12 @@ impl WorkspaceFileRepository for PgConnection {
             .returning(WorkspaceFile::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(file)
     }
 
-    async fn delete_workspace_file(&mut self, file_id: Uuid) -> PgResult<()> {
+    async fn delete_workspace_file(&mut self, file_id: Uuid) -> Result<()> {
         use diesel_async::AsyncConnection;
         use schema::{workspace_file_imports, workspace_files};
 
@@ -608,16 +601,16 @@ impl WorkspaceFileRepository for PgConnection {
             .set(workspace_files::deleted_at.eq(diesel::dsl::now))
             .execute(conn)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
             diesel::delete(
                 workspace_file_imports::table.filter(workspace_file_imports::file_id.eq(file_id)),
             )
             .execute(conn)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
-            Ok::<_, PgError>(())
+            Ok::<_, Error>(())
         })
         .await
     }
@@ -628,7 +621,7 @@ impl WorkspaceFileRepository for PgConnection {
         pagination: OffsetPagination,
         sort_by: FileSortBy,
         filter: FileFilter,
-    ) -> PgResult<Vec<WorkspaceFile>> {
+    ) -> Result<Vec<WorkspaceFile>> {
         use schema::workspace_files::{self, dsl};
 
         // Build base query
@@ -675,7 +668,7 @@ impl WorkspaceFileRepository for PgConnection {
             .offset(pagination.offset)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(files)
     }
@@ -685,7 +678,7 @@ impl WorkspaceFileRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: FileFilter,
-    ) -> PgResult<CursorPage<WithAccountRef<WorkspaceFile>>> {
+    ) -> Result<CursorPage<WithAccountRef<WorkspaceFile>>> {
         use schema::workspace_files::dsl;
         use schema::{accounts, workspace_files};
 
@@ -728,7 +721,7 @@ impl WorkspaceFileRepository for PgConnection {
                     .count()
                     .get_result::<i64>(self)
                     .await
-                    .map_err(PgError::from)?,
+                    .map_err(Error::from)?,
             )
         } else {
             None
@@ -789,7 +782,7 @@ impl WorkspaceFileRepository for PgConnection {
                 .limit(limit)
                 .load(self)
                 .await
-                .map_err(PgError::from)?
+                .map_err(Error::from)?
         } else {
             query
                 .select((
@@ -804,7 +797,7 @@ impl WorkspaceFileRepository for PgConnection {
                 .limit(limit)
                 .load(self)
                 .await
-                .map_err(PgError::from)?
+                .map_err(Error::from)?
         };
 
         let items: Vec<WithAccountRef<WorkspaceFile>> = rows
@@ -820,7 +813,7 @@ impl WorkspaceFileRepository for PgConnection {
     async fn find_workspace_files_by_hash(
         &mut self,
         file_hash: &[u8],
-    ) -> PgResult<Vec<WorkspaceFile>> {
+    ) -> Result<Vec<WorkspaceFile>> {
         use schema::workspace_files::{self, dsl};
 
         let files = workspace_files::table
@@ -829,12 +822,12 @@ impl WorkspaceFileRepository for PgConnection {
             .select(WorkspaceFile::as_select())
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(files)
     }
 
-    async fn get_account_storage_usage(&mut self, account_id: Uuid) -> PgResult<BigDecimal> {
+    async fn get_account_storage_usage(&mut self, account_id: Uuid) -> Result<BigDecimal> {
         use schema::workspace_files::{self, dsl};
 
         let usage: Option<BigDecimal> = workspace_files::table
@@ -843,7 +836,7 @@ impl WorkspaceFileRepository for PgConnection {
             .select(diesel::dsl::sum(dsl::file_size_bytes))
             .first(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(usage.unwrap_or_else(|| BigDecimal::from(0)))
     }
@@ -852,7 +845,7 @@ impl WorkspaceFileRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         file_ids: &[Uuid],
-    ) -> PgResult<Vec<WorkspaceFile>> {
+    ) -> Result<Vec<WorkspaceFile>> {
         use diesel::dsl::{exists, not};
         use schema::workspace_detections::dsl as detections;
         use schema::{workspace_detections, workspace_file_imports, workspace_files};
@@ -890,7 +883,7 @@ impl WorkspaceFileRepository for PgConnection {
         .returning(WorkspaceFile::as_returning())
         .get_results(self)
         .await
-        .map_err(PgError::from)?;
+        .map_err(Error::from)?;
 
         // Drop the import-origin rows of exactly the files just deleted, so
         // re-import is never blocked (see `delete_workspace_file`).
@@ -901,15 +894,12 @@ impl WorkspaceFileRepository for PgConnection {
         )
         .execute(self)
         .await
-        .map_err(PgError::from)?;
+        .map_err(Error::from)?;
 
         Ok(deleted)
     }
 
-    async fn list_workspace_file_versions(
-        &mut self,
-        file_id: Uuid,
-    ) -> PgResult<Vec<WorkspaceFile>> {
+    async fn list_workspace_file_versions(&mut self, file_id: Uuid) -> Result<Vec<WorkspaceFile>> {
         use schema::workspace_files::{self, dsl};
 
         // Get the original file and all files that have it (or its descendants) as parent
@@ -921,7 +911,7 @@ impl WorkspaceFileRepository for PgConnection {
             .select(WorkspaceFile::as_select())
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(files)
     }
@@ -929,7 +919,7 @@ impl WorkspaceFileRepository for PgConnection {
     async fn find_latest_workspace_file_version(
         &mut self,
         file_id: Uuid,
-    ) -> PgResult<Option<WorkspaceFile>> {
+    ) -> Result<Option<WorkspaceFile>> {
         use schema::workspace_files::{self, dsl};
 
         // Find the file with highest version_number that has file_id as parent,
@@ -942,12 +932,12 @@ impl WorkspaceFileRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(latest)
     }
 
-    async fn get_next_workspace_file_version_number(&mut self, file_id: Uuid) -> PgResult<i32> {
+    async fn get_next_workspace_file_version_number(&mut self, file_id: Uuid) -> Result<i32> {
         use diesel::dsl::max;
         use schema::workspace_files::{self, dsl};
 
@@ -958,7 +948,7 @@ impl WorkspaceFileRepository for PgConnection {
             .select(max(dsl::version_number))
             .first(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(max_version.unwrap_or(0) + 1)
     }

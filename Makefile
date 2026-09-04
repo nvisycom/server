@@ -97,9 +97,11 @@ reset-docker: ## Resets Docker containers (down -v, then up -d).
 	@$(call log,Docker containers reset successfully.)
 
 .PHONY: run
-run: ## Runs the server with .env loaded (starts Postgres and NATS first).
-	@$(call log,Starting Postgres and NATS...)
-	@docker compose -f ./docker/docker-compose.dev.yml up -d postgres nats
+run: ## Runs the server with .env loaded (starts Postgres, NATS, and RustFS first).
+	@$(call log,Starting Postgres, NATS, and RustFS...)
+	@docker compose -f ./docker/docker-compose.dev.yml up -d --wait postgres nats rustfs
+	@$(call log,Provisioning the blob store bucket...)
+	@docker compose -f ./docker/docker-compose.dev.yml up --exit-code-from rustfs-init rustfs-init
 	@$(call log,Starting server...)
 	@cargo run --features dotenv --bin nvisy-cli
 

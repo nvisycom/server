@@ -12,7 +12,7 @@ use crate::types::{
     CursorPage, CursorPagination, InviteFilter, InviteSortBy, InviteSortField, InviteStatus,
     OffsetPagination, SortOrder,
 };
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for workspace invitation database operations.
 ///
@@ -23,54 +23,54 @@ pub trait WorkspaceInviteRepository {
     fn create_workspace_invite(
         &mut self,
         invite: NewWorkspaceInvite,
-    ) -> impl Future<Output = PgResult<WorkspaceInvite>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceInvite>> + Send;
 
     /// Finds a workspace invitation by its unique token string.
     fn find_workspace_invite_by_token(
         &mut self,
         token: &str,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceInvite>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceInvite>>> + Send;
 
     /// Finds a workspace invitation by its unique identifier.
     fn find_workspace_invite_by_id(
         &mut self,
         invite_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceInvite>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceInvite>>> + Send;
 
     /// Finds an invitation by ID, scoped to its workspace.
     fn find_invite_in_workspace(
         &mut self,
         workspace_id: Uuid,
         invite_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceInvite>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceInvite>>> + Send;
 
     /// Updates a workspace invitation with new values and status changes.
     fn update_workspace_invite(
         &mut self,
         invite_id: Uuid,
         changes: UpdateWorkspaceInvite,
-    ) -> impl Future<Output = PgResult<WorkspaceInvite>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceInvite>> + Send;
 
     /// Accepts a workspace invitation and marks it as successfully processed.
     fn accept_workspace_invite(
         &mut self,
         invite_id: Uuid,
         _acceptor_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspaceInvite>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceInvite>> + Send;
 
     /// Rejects or declines a workspace invitation.
     fn reject_workspace_invite(
         &mut self,
         invite_id: Uuid,
         updated_by_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspaceInvite>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceInvite>> + Send;
 
     /// Cancels a workspace invitation before it can be used.
     fn cancel_workspace_invite(
         &mut self,
         invite_id: Uuid,
         updated_by_id: Uuid,
-    ) -> impl Future<Output = PgResult<WorkspaceInvite>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceInvite>> + Send;
 
     /// Lists workspace invitations with offset pagination.
     ///
@@ -81,7 +81,7 @@ pub trait WorkspaceInviteRepository {
         pagination: OffsetPagination,
         sort_by: InviteSortBy,
         filter: InviteFilter,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceInvite>>> + Send;
 
     /// Lists workspace invitations with cursor pagination.
     fn cursor_list_workspace_invites(
@@ -90,18 +90,17 @@ pub trait WorkspaceInviteRepository {
         pagination: CursorPagination,
         sort_by: InviteSortBy,
         filter: InviteFilter,
-    ) -> impl Future<Output = PgResult<CursorPage<WorkspaceInvite>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<WorkspaceInvite>>> + Send;
 
     /// Performs system-wide cleanup of expired workspace invitations.
-    fn cleanup_expired_workspace_invites(&mut self)
-    -> impl Future<Output = PgResult<usize>> + Send;
+    fn cleanup_expired_workspace_invites(&mut self) -> impl Future<Output = Result<usize>> + Send;
 
     /// Finds workspace invitations filtered by their current status.
     fn find_workspace_invites_by_status(
         &mut self,
         status: InviteStatus,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<WorkspaceInvite>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceInvite>>> + Send;
 
     /// Revokes a workspace invitation through administrative action.
     fn revoke_workspace_invite(
@@ -109,21 +108,21 @@ pub trait WorkspaceInviteRepository {
         invite_id: Uuid,
         updated_by_id: Uuid,
         _reason: Option<String>,
-    ) -> impl Future<Output = PgResult<WorkspaceInvite>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceInvite>> + Send;
 
     /// Finds a pending workspace invitation by workspace and email.
     fn find_pending_workspace_invite_by_email(
         &mut self,
         workspace_id: Uuid,
         email: &str,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceInvite>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceInvite>>> + Send;
 }
 
 impl WorkspaceInviteRepository for PgConnection {
     async fn create_workspace_invite(
         &mut self,
         invite: NewWorkspaceInvite,
-    ) -> PgResult<WorkspaceInvite> {
+    ) -> Result<WorkspaceInvite> {
         use schema::workspace_invites;
 
         let invite = diesel::insert_into(workspace_invites::table)
@@ -131,7 +130,7 @@ impl WorkspaceInviteRepository for PgConnection {
             .returning(WorkspaceInvite::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(invite)
     }
@@ -139,7 +138,7 @@ impl WorkspaceInviteRepository for PgConnection {
     async fn find_workspace_invite_by_token(
         &mut self,
         token: &str,
-    ) -> PgResult<Option<WorkspaceInvite>> {
+    ) -> Result<Option<WorkspaceInvite>> {
         use schema::workspace_invites::dsl::*;
 
         let invite = workspace_invites
@@ -148,7 +147,7 @@ impl WorkspaceInviteRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(invite)
     }
@@ -156,7 +155,7 @@ impl WorkspaceInviteRepository for PgConnection {
     async fn find_workspace_invite_by_id(
         &mut self,
         invite_id: Uuid,
-    ) -> PgResult<Option<WorkspaceInvite>> {
+    ) -> Result<Option<WorkspaceInvite>> {
         use schema::workspace_invites::dsl::*;
 
         let invite = workspace_invites
@@ -165,7 +164,7 @@ impl WorkspaceInviteRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(invite)
     }
@@ -174,7 +173,7 @@ impl WorkspaceInviteRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         invite_id: Uuid,
-    ) -> PgResult<Option<WorkspaceInvite>> {
+    ) -> Result<Option<WorkspaceInvite>> {
         use schema::workspace_invites::{self, dsl};
 
         let invite = workspace_invites::table
@@ -184,7 +183,7 @@ impl WorkspaceInviteRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(invite)
     }
@@ -193,7 +192,7 @@ impl WorkspaceInviteRepository for PgConnection {
         &mut self,
         invite_id: Uuid,
         changes: UpdateWorkspaceInvite,
-    ) -> PgResult<WorkspaceInvite> {
+    ) -> Result<WorkspaceInvite> {
         use schema::workspace_invites::dsl::*;
 
         let invite = diesel::update(workspace_invites)
@@ -202,7 +201,7 @@ impl WorkspaceInviteRepository for PgConnection {
             .returning(WorkspaceInvite::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(invite)
     }
@@ -211,7 +210,7 @@ impl WorkspaceInviteRepository for PgConnection {
         &mut self,
         invite_id: Uuid,
         _acceptor_id: Uuid,
-    ) -> PgResult<WorkspaceInvite> {
+    ) -> Result<WorkspaceInvite> {
         let changes = UpdateWorkspaceInvite {
             invite_status: Some(InviteStatus::Accepted),
             responded_at: Some(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
@@ -225,7 +224,7 @@ impl WorkspaceInviteRepository for PgConnection {
         &mut self,
         invite_id: Uuid,
         updated_by_id: Uuid,
-    ) -> PgResult<WorkspaceInvite> {
+    ) -> Result<WorkspaceInvite> {
         let changes = UpdateWorkspaceInvite {
             invite_status: Some(InviteStatus::Declined),
             updated_by: Some(updated_by_id),
@@ -239,7 +238,7 @@ impl WorkspaceInviteRepository for PgConnection {
         &mut self,
         invite_id: Uuid,
         updated_by_id: Uuid,
-    ) -> PgResult<WorkspaceInvite> {
+    ) -> Result<WorkspaceInvite> {
         let changes = UpdateWorkspaceInvite {
             invite_status: Some(InviteStatus::Canceled),
             updated_by: Some(updated_by_id),
@@ -255,7 +254,7 @@ impl WorkspaceInviteRepository for PgConnection {
         pagination: OffsetPagination,
         sort_by: InviteSortBy,
         filter: InviteFilter,
-    ) -> PgResult<Vec<WorkspaceInvite>> {
+    ) -> Result<Vec<WorkspaceInvite>> {
         use schema::workspace_invites;
 
         let mut query = workspace_invites::table
@@ -290,7 +289,7 @@ impl WorkspaceInviteRepository for PgConnection {
             .offset(pagination.offset)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(invites)
     }
@@ -301,7 +300,7 @@ impl WorkspaceInviteRepository for PgConnection {
         pagination: CursorPagination,
         sort_by: InviteSortBy,
         filter: InviteFilter,
-    ) -> PgResult<CursorPage<WorkspaceInvite>> {
+    ) -> Result<CursorPage<WorkspaceInvite>> {
         use diesel::dsl::count_star;
         use schema::workspace_invites::{self, dsl};
 
@@ -345,7 +344,7 @@ impl WorkspaceInviteRepository for PgConnection {
                     .select(count_star())
                     .get_result(self)
                     .await
-                    .map_err(PgError::from)?,
+                    .map_err(Error::from)?,
             )
         } else {
             None
@@ -370,14 +369,14 @@ impl WorkspaceInviteRepository for PgConnection {
         .limit(pagination.fetch_limit())
         .load(self)
         .await
-        .map_err(PgError::from)?;
+        .map_err(Error::from)?;
 
         Ok(CursorPage::new(items, total, pagination.limit, |i| {
             (i.created_at.into(), i.id)
         }))
     }
 
-    async fn cleanup_expired_workspace_invites(&mut self) -> PgResult<usize> {
+    async fn cleanup_expired_workspace_invites(&mut self) -> Result<usize> {
         use diesel::dsl::now;
         use schema::workspace_invites::dsl::*;
 
@@ -387,7 +386,7 @@ impl WorkspaceInviteRepository for PgConnection {
             .set(invite_status.eq(InviteStatus::Expired))
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(updated_count)
     }
@@ -396,7 +395,7 @@ impl WorkspaceInviteRepository for PgConnection {
         &mut self,
         status: InviteStatus,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<WorkspaceInvite>> {
+    ) -> Result<Vec<WorkspaceInvite>> {
         use schema::workspace_invites::dsl::*;
 
         let invites = workspace_invites
@@ -407,7 +406,7 @@ impl WorkspaceInviteRepository for PgConnection {
             .offset(pagination.offset)
             .load(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(invites)
     }
@@ -417,7 +416,7 @@ impl WorkspaceInviteRepository for PgConnection {
         invite_id: Uuid,
         updated_by_id: Uuid,
         _reason: Option<String>,
-    ) -> PgResult<WorkspaceInvite> {
+    ) -> Result<WorkspaceInvite> {
         let changes = UpdateWorkspaceInvite {
             invite_status: Some(InviteStatus::Revoked),
             updated_by: Some(updated_by_id),
@@ -431,7 +430,7 @@ impl WorkspaceInviteRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         email: &str,
-    ) -> PgResult<Option<WorkspaceInvite>> {
+    ) -> Result<Option<WorkspaceInvite>> {
         use diesel::dsl::now;
         use schema::workspace_invites::{self, dsl};
 
@@ -444,7 +443,7 @@ impl WorkspaceInviteRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(invite)
     }

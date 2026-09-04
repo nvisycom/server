@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::model::{Account, NewAccount, UpdateAccount};
 use crate::types::Handle;
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for account database operations.
 ///
@@ -22,7 +22,7 @@ pub trait AccountRepository {
     fn create_account(
         &mut self,
         new_account: NewAccount,
-    ) -> impl Future<Output = PgResult<Account>> + Send;
+    ) -> impl Future<Output = Result<Account>> + Send;
 
     /// Finds an account by its unique identifier.
     ///
@@ -31,7 +31,7 @@ pub trait AccountRepository {
     fn find_account_by_id(
         &mut self,
         account_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<Account>>> + Send;
+    ) -> impl Future<Output = Result<Option<Account>>> + Send;
 
     /// Finds an account by email address.
     ///
@@ -40,7 +40,7 @@ pub trait AccountRepository {
     fn find_account_by_email(
         &mut self,
         email: &str,
-    ) -> impl Future<Output = PgResult<Option<Account>>> + Send;
+    ) -> impl Future<Output = Result<Option<Account>>> + Send;
 
     /// Finds an account by its public handle.
     ///
@@ -49,7 +49,7 @@ pub trait AccountRepository {
     fn find_account_by_username(
         &mut self,
         username: &Handle,
-    ) -> impl Future<Output = PgResult<Option<Account>>> + Send;
+    ) -> impl Future<Output = Result<Option<Account>>> + Send;
 
     /// Finds an account by either email address or username.
     ///
@@ -59,7 +59,7 @@ pub trait AccountRepository {
     fn find_account_by_identifier(
         &mut self,
         identifier: &str,
-    ) -> impl Future<Output = PgResult<Option<Account>>> + Send;
+    ) -> impl Future<Output = Result<Option<Account>>> + Send;
 
     /// Updates an account with new information.
     ///
@@ -69,7 +69,7 @@ pub trait AccountRepository {
         &mut self,
         account_id: Uuid,
         updates: UpdateAccount,
-    ) -> impl Future<Output = PgResult<Account>> + Send;
+    ) -> impl Future<Output = Result<Account>> + Send;
 
     /// Soft deletes an account by setting the deletion timestamp.
     ///
@@ -79,23 +79,18 @@ pub trait AccountRepository {
     fn delete_account(
         &mut self,
         account_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<Account>>> + Send;
+    ) -> impl Future<Output = Result<Option<Account>>> + Send;
 
     /// Verifies an account by setting the verification status to true.
     ///
     /// Typically called after email verification is complete.
-    fn verify_account(
-        &mut self,
-        account_id: Uuid,
-    ) -> impl Future<Output = PgResult<Account>> + Send;
+    fn verify_account(&mut self, account_id: Uuid) -> impl Future<Output = Result<Account>> + Send;
 
     /// Suspends an account by setting the suspension status to true.
     ///
     /// Suspended accounts cannot authenticate or access resources.
-    fn suspend_account(
-        &mut self,
-        account_id: Uuid,
-    ) -> impl Future<Output = PgResult<Account>> + Send;
+    fn suspend_account(&mut self, account_id: Uuid)
+    -> impl Future<Output = Result<Account>> + Send;
 
     /// Unsuspends an account by setting the suspension status to false.
     ///
@@ -103,12 +98,12 @@ pub trait AccountRepository {
     fn unsuspend_account(
         &mut self,
         account_id: Uuid,
-    ) -> impl Future<Output = PgResult<Account>> + Send;
+    ) -> impl Future<Output = Result<Account>> + Send;
 
     /// Checks if an email address is already registered in the system.
     ///
     /// Used during registration to prevent duplicate accounts.
-    fn email_exists(&mut self, email: &str) -> impl Future<Output = PgResult<bool>> + Send;
+    fn email_exists(&mut self, email: &str) -> impl Future<Output = Result<bool>> + Send;
 
     /// Checks if an email address is used by another account.
     ///
@@ -117,13 +112,12 @@ pub trait AccountRepository {
         &mut self,
         email: &str,
         exclude_account_id: Uuid,
-    ) -> impl Future<Output = PgResult<bool>> + Send;
+    ) -> impl Future<Output = Result<bool>> + Send;
 
     /// Checks if a username is already registered in the system.
     ///
     /// Used during registration to prevent duplicate handles.
-    fn username_exists(&mut self, username: &Handle)
-    -> impl Future<Output = PgResult<bool>> + Send;
+    fn username_exists(&mut self, username: &Handle) -> impl Future<Output = Result<bool>> + Send;
 
     /// Checks if a username is used by another account.
     ///
@@ -132,11 +126,11 @@ pub trait AccountRepository {
         &mut self,
         username: &Handle,
         exclude_account_id: Uuid,
-    ) -> impl Future<Output = PgResult<bool>> + Send;
+    ) -> impl Future<Output = Result<bool>> + Send;
 }
 
 impl AccountRepository for PgConnection {
-    async fn create_account(&mut self, mut new_account: NewAccount) -> PgResult<Account> {
+    async fn create_account(&mut self, mut new_account: NewAccount) -> Result<Account> {
         use schema::accounts;
 
         // Normalize fields: trim whitespace
@@ -150,10 +144,10 @@ impl AccountRepository for PgConnection {
             .returning(Account::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
-    async fn find_account_by_id(&mut self, account_id: Uuid) -> PgResult<Option<Account>> {
+    async fn find_account_by_id(&mut self, account_id: Uuid) -> Result<Option<Account>> {
         use schema::accounts::{self, dsl};
 
         accounts::table
@@ -163,10 +157,10 @@ impl AccountRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
-    async fn find_account_by_email(&mut self, email: &str) -> PgResult<Option<Account>> {
+    async fn find_account_by_email(&mut self, email: &str) -> Result<Option<Account>> {
         use schema::accounts::{self, dsl};
 
         accounts::table
@@ -176,10 +170,10 @@ impl AccountRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
-    async fn find_account_by_username(&mut self, username: &Handle) -> PgResult<Option<Account>> {
+    async fn find_account_by_username(&mut self, username: &Handle) -> Result<Option<Account>> {
         use schema::accounts::{self, dsl};
 
         accounts::table
@@ -189,10 +183,10 @@ impl AccountRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
-    async fn find_account_by_identifier(&mut self, identifier: &str) -> PgResult<Option<Account>> {
+    async fn find_account_by_identifier(&mut self, identifier: &str) -> Result<Option<Account>> {
         if identifier.contains('@') {
             return self.find_account_by_email(identifier).await;
         }
@@ -211,7 +205,7 @@ impl AccountRepository for PgConnection {
         &mut self,
         account_id: Uuid,
         mut updates: UpdateAccount,
-    ) -> PgResult<Account> {
+    ) -> Result<Account> {
         use schema::accounts::{self, dsl};
 
         // Normalize fields: trim whitespace
@@ -228,10 +222,10 @@ impl AccountRepository for PgConnection {
             .returning(Account::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
-    async fn delete_account(&mut self, account_id: Uuid) -> PgResult<Option<Account>> {
+    async fn delete_account(&mut self, account_id: Uuid) -> Result<Option<Account>> {
         use diesel::dsl::now;
         use schema::accounts::{self, dsl};
 
@@ -241,10 +235,10 @@ impl AccountRepository for PgConnection {
             .get_result(self)
             .await
             .optional()
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
-    async fn verify_account(&mut self, account_id: Uuid) -> PgResult<Account> {
+    async fn verify_account(&mut self, account_id: Uuid) -> Result<Account> {
         self.update_account(
             account_id,
             UpdateAccount {
@@ -255,7 +249,7 @@ impl AccountRepository for PgConnection {
         .await
     }
 
-    async fn suspend_account(&mut self, account_id: Uuid) -> PgResult<Account> {
+    async fn suspend_account(&mut self, account_id: Uuid) -> Result<Account> {
         self.update_account(
             account_id,
             UpdateAccount {
@@ -266,7 +260,7 @@ impl AccountRepository for PgConnection {
         .await
     }
 
-    async fn unsuspend_account(&mut self, account_id: Uuid) -> PgResult<Account> {
+    async fn unsuspend_account(&mut self, account_id: Uuid) -> Result<Account> {
         self.update_account(
             account_id,
             UpdateAccount {
@@ -277,7 +271,7 @@ impl AccountRepository for PgConnection {
         .await
     }
 
-    async fn email_exists(&mut self, email: &str) -> PgResult<bool> {
+    async fn email_exists(&mut self, email: &str) -> Result<bool> {
         use schema::accounts::{self, dsl};
 
         let count: i64 = accounts::table
@@ -286,7 +280,7 @@ impl AccountRepository for PgConnection {
             .count()
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(count > 0)
     }
@@ -295,7 +289,7 @@ impl AccountRepository for PgConnection {
         &mut self,
         email: &str,
         exclude_account_id: Uuid,
-    ) -> PgResult<bool> {
+    ) -> Result<bool> {
         use schema::accounts::{self, dsl};
 
         let count: i64 = accounts::table
@@ -305,12 +299,12 @@ impl AccountRepository for PgConnection {
             .count()
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(count > 0)
     }
 
-    async fn username_exists(&mut self, username: &Handle) -> PgResult<bool> {
+    async fn username_exists(&mut self, username: &Handle) -> Result<bool> {
         use schema::accounts::{self, dsl};
 
         let count: i64 = accounts::table
@@ -319,7 +313,7 @@ impl AccountRepository for PgConnection {
             .count()
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(count > 0)
     }
@@ -328,7 +322,7 @@ impl AccountRepository for PgConnection {
         &mut self,
         username: &Handle,
         exclude_account_id: Uuid,
-    ) -> PgResult<bool> {
+    ) -> Result<bool> {
         use schema::accounts::{self, dsl};
 
         let count: i64 = accounts::table
@@ -338,7 +332,7 @@ impl AccountRepository for PgConnection {
             .count()
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(count > 0)
     }

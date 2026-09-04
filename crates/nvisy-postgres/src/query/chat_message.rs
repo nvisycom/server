@@ -7,7 +7,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{ChatMessage, NewChatMessage, UpdateChatSession};
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// What to update on a message's session when appending it, applied in the same
 /// transaction as the insert so the message and its session state never diverge.
@@ -29,13 +29,13 @@ pub trait ChatMessageRepository {
         &mut self,
         new_message: NewChatMessage,
         session_update: AppendSessionUpdate,
-    ) -> impl Future<Output = PgResult<ChatMessage>> + Send;
+    ) -> impl Future<Output = Result<ChatMessage>> + Send;
 
     /// Loads all of a session's messages (the whole tree), oldest first.
     fn list_chat_messages(
         &mut self,
         session_id: Uuid,
-    ) -> impl Future<Output = PgResult<Vec<ChatMessage>>> + Send;
+    ) -> impl Future<Output = Result<Vec<ChatMessage>>> + Send;
 
     /// Finds a message by id within a session, scoping a client-supplied parent
     /// to the session it belongs to.
@@ -43,7 +43,7 @@ pub trait ChatMessageRepository {
         &mut self,
         session_id: Uuid,
         message_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<ChatMessage>>> + Send;
+    ) -> impl Future<Output = Result<Option<ChatMessage>>> + Send;
 }
 
 impl ChatMessageRepository for PgConnection {
@@ -51,7 +51,7 @@ impl ChatMessageRepository for PgConnection {
         &mut self,
         new_message: NewChatMessage,
         session_update: AppendSessionUpdate,
-    ) -> PgResult<ChatMessage> {
+    ) -> Result<ChatMessage> {
         use diesel::dsl::now;
         use diesel_async::AsyncConnection;
         use schema::{chat_messages, chat_sessions};
@@ -68,7 +68,7 @@ impl ChatMessageRepository for PgConnection {
                 .returning(ChatMessage::as_returning())
                 .get_result(conn)
                 .await
-                .map_err(PgError::from)?;
+                .map_err(Error::from)?;
 
             let update = UpdateChatSession {
                 title: session_update.title,
@@ -79,14 +79,14 @@ impl ChatMessageRepository for PgConnection {
                 .set((update, chat_sessions::updated_at.eq(now)))
                 .execute(conn)
                 .await
-                .map_err(PgError::from)?;
+                .map_err(Error::from)?;
 
-            Ok::<_, PgError>(message)
+            Ok::<_, Error>(message)
         })
         .await
     }
 
-    async fn list_chat_messages(&mut self, session_id: Uuid) -> PgResult<Vec<ChatMessage>> {
+    async fn list_chat_messages(&mut self, session_id: Uuid) -> Result<Vec<ChatMessage>> {
         use schema::chat_messages::{self, dsl};
 
         chat_messages::table
@@ -95,14 +95,14 @@ impl ChatMessageRepository for PgConnection {
             .select(ChatMessage::as_select())
             .load(self)
             .await
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
     async fn find_chat_message_in_session(
         &mut self,
         session_id: Uuid,
         message_id: Uuid,
-    ) -> PgResult<Option<ChatMessage>> {
+    ) -> Result<Option<ChatMessage>> {
         use schema::chat_messages::{self, dsl};
 
         chat_messages::table
@@ -112,7 +112,7 @@ impl ChatMessageRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 }
 

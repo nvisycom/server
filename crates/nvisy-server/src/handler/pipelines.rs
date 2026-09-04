@@ -13,7 +13,7 @@ use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineRepository,
 };
 use nvisy_postgres::types::{FileKind, Handle, RetentionScope, WithAccountRef};
-use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, PgResult};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, Result as PgResult};
 use uuid::Uuid;
 
 use crate::extract::{

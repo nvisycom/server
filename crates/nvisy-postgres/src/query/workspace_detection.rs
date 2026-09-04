@@ -13,7 +13,7 @@ use crate::model::{
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Handle,
 };
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Resolved display name of a detection's input file.
 ///
@@ -50,7 +50,7 @@ pub trait WorkspaceDetectionRepository {
     fn create_workspace_detection(
         &mut self,
         new_detection: NewWorkspaceDetection,
-    ) -> impl Future<Output = PgResult<WorkspaceDetection>> + Send;
+    ) -> impl Future<Output = Result<WorkspaceDetection>> + Send;
 
     /// Finds a detection by its opaque id, scoped to a workspace, returning the
     /// detection and its owning pipeline.
@@ -62,7 +62,7 @@ pub trait WorkspaceDetectionRepository {
         &mut self,
         workspace_id: Uuid,
         detection_id: Uuid,
-    ) -> impl Future<Output = PgResult<Option<(WorkspaceDetection, WorkspacePipeline)>>> + Send;
+    ) -> impl Future<Output = Result<Option<(WorkspaceDetection, WorkspacePipeline)>>> + Send;
 
     /// Finds a detection by its `(pipeline, idempotency key)` pair, for detect
     /// replay.
@@ -70,7 +70,7 @@ pub trait WorkspaceDetectionRepository {
         &mut self,
         pipeline_id: Uuid,
         idempotency_key: &str,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceDetection>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceDetection>>> + Send;
 
     /// Lists a specific pipeline's detections with cursor pagination. `filter`
     /// narrows by status and/or file (its `pipeline_id` is ignored — the listing
@@ -80,7 +80,7 @@ pub trait WorkspaceDetectionRepository {
         pipeline_id: Uuid,
         pagination: CursorPagination,
         filter: &DetectionFilter,
-    ) -> impl Future<Output = PgResult<CursorPage<DetectionListRow>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<DetectionListRow>>> + Send;
 
     /// Lists all detections across a workspace's pipelines with cursor
     /// pagination.
@@ -96,7 +96,7 @@ pub trait WorkspaceDetectionRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: &DetectionFilter,
-    ) -> impl Future<Output = PgResult<CursorPage<DetectionListRow>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<DetectionListRow>>> + Send;
 
     /// Atomically claims a detection, transitioning it to `Executing`.
     ///
@@ -113,7 +113,7 @@ pub trait WorkspaceDetectionRepository {
         &mut self,
         detection_id: Uuid,
         stale_before: jiff::Timestamp,
-    ) -> impl Future<Output = PgResult<Option<WorkspaceDetection>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceDetection>>> + Send;
 
     /// Resolves the display name of a detection's input file.
     ///
@@ -124,7 +124,7 @@ pub trait WorkspaceDetectionRepository {
         &mut self,
         workspace_id: Uuid,
         detection: &WorkspaceDetection,
-    ) -> impl Future<Output = PgResult<DetectionFiles>> + Send;
+    ) -> impl Future<Output = Result<DetectionFiles>> + Send;
 
     /// Transitions a detection to `Complete` only while the caller still holds
     /// its claim — the detection is still `Executing` and its `claimed_at` matches
@@ -138,7 +138,7 @@ pub trait WorkspaceDetectionRepository {
         detection_id: Uuid,
         claimed_at: jiff::Timestamp,
         updates: UpdateWorkspaceDetection,
-    ) -> impl Future<Output = PgResult<bool>> + Send;
+    ) -> impl Future<Output = Result<bool>> + Send;
 
     /// Transitions a detection to `Failed` only while the caller still holds its
     /// claim — the detection is still `Executing` and its `claimed_at` matches the
@@ -153,7 +153,7 @@ pub trait WorkspaceDetectionRepository {
         detection_id: Uuid,
         claimed_at: jiff::Timestamp,
         updates: UpdateWorkspaceDetection,
-    ) -> impl Future<Output = PgResult<bool>> + Send;
+    ) -> impl Future<Output = Result<bool>> + Send;
 
     /// Transitions a detection to `Failed` only while it is still `Pending` — no
     /// worker has claimed it. For the enqueue-failure path in the create handler:
@@ -166,7 +166,7 @@ pub trait WorkspaceDetectionRepository {
         &mut self,
         detection_id: Uuid,
         updates: UpdateWorkspaceDetection,
-    ) -> impl Future<Output = PgResult<bool>> + Send;
+    ) -> impl Future<Output = Result<bool>> + Send;
 
     /// Records a detection's per-model inference usage. A no-op for an empty slice
     /// (a deterministic detection spends no tokens). Inserted once, at analyze
@@ -174,14 +174,14 @@ pub trait WorkspaceDetectionRepository {
     fn record_detection_usage(
         &mut self,
         usage: &[NewWorkspaceDetectionUsage],
-    ) -> impl Future<Output = PgResult<()>> + Send;
+    ) -> impl Future<Output = Result<()>> + Send;
 }
 
 impl WorkspaceDetectionRepository for PgConnection {
     async fn create_workspace_detection(
         &mut self,
         new_detection: NewWorkspaceDetection,
-    ) -> PgResult<WorkspaceDetection> {
+    ) -> Result<WorkspaceDetection> {
         use schema::workspace_detections;
 
         let detection = diesel::insert_into(workspace_detections::table)
@@ -189,7 +189,7 @@ impl WorkspaceDetectionRepository for PgConnection {
             .returning(WorkspaceDetection::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(detection)
     }
@@ -198,7 +198,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         detection_id: Uuid,
-    ) -> PgResult<Option<(WorkspaceDetection, WorkspacePipeline)>> {
+    ) -> Result<Option<(WorkspaceDetection, WorkspacePipeline)>> {
         use schema::workspace_detections::dsl as detections;
         use schema::{workspace_detections, workspace_pipelines};
 
@@ -218,7 +218,7 @@ impl WorkspaceDetectionRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(detection)
     }
@@ -227,7 +227,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         &mut self,
         pipeline_id: Uuid,
         idempotency_key: &str,
-    ) -> PgResult<Option<WorkspaceDetection>> {
+    ) -> Result<Option<WorkspaceDetection>> {
         use schema::workspace_detections::{self, dsl};
 
         let detection = workspace_detections::table
@@ -237,7 +237,7 @@ impl WorkspaceDetectionRepository for PgConnection {
             .first(self)
             .await
             .optional()
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(detection)
     }
@@ -247,7 +247,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         pipeline_id: Uuid,
         pagination: CursorPagination,
         filter: &DetectionFilter,
-    ) -> PgResult<CursorPage<DetectionListRow>> {
+    ) -> Result<CursorPage<DetectionListRow>> {
         use schema::workspace_detections::dsl;
         use schema::{accounts, workspace_detections, workspace_files, workspace_pipelines};
 
@@ -285,7 +285,7 @@ impl WorkspaceDetectionRepository for PgConnection {
                     .count()
                     .get_result::<i64>(self)
                     .await
-                    .map_err(PgError::from)?,
+                    .map_err(Error::from)?,
             )
         } else {
             None
@@ -319,7 +319,7 @@ impl WorkspaceDetectionRepository for PgConnection {
                     .limit(limit)
                     .load(self)
                     .await
-                    .map_err(PgError::from)?
+                    .map_err(Error::from)?
             } else {
                 query
                     .select(selection)
@@ -327,7 +327,7 @@ impl WorkspaceDetectionRepository for PgConnection {
                     .limit(limit)
                     .load(self)
                     .await
-                    .map_err(PgError::from)?
+                    .map_err(Error::from)?
             };
 
         let items = rows
@@ -352,7 +352,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination,
         filter: &DetectionFilter,
-    ) -> PgResult<CursorPage<DetectionListRow>> {
+    ) -> Result<CursorPage<DetectionListRow>> {
         use schema::accounts::dsl as accounts;
         use schema::workspace_detections::dsl as detections;
         use schema::workspace_files::dsl as files;
@@ -396,7 +396,7 @@ impl WorkspaceDetectionRepository for PgConnection {
                     .count()
                     .get_result::<i64>(self)
                     .await
-                    .map_err(PgError::from)?,
+                    .map_err(Error::from)?,
             )
         } else {
             None
@@ -431,7 +431,7 @@ impl WorkspaceDetectionRepository for PgConnection {
                     .limit(limit)
                     .load(self)
                     .await
-                    .map_err(PgError::from)?
+                    .map_err(Error::from)?
             } else {
                 scoped()
                     .select(selection)
@@ -439,7 +439,7 @@ impl WorkspaceDetectionRepository for PgConnection {
                     .limit(limit)
                     .load(self)
                     .await
-                    .map_err(PgError::from)?
+                    .map_err(Error::from)?
             };
 
         let items = rows
@@ -463,7 +463,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         &mut self,
         detection_id: Uuid,
         stale_before: jiff::Timestamp,
-    ) -> PgResult<Option<WorkspaceDetection>> {
+    ) -> Result<Option<WorkspaceDetection>> {
         use schema::workspace_detections::{self, dsl};
 
         let stale_before = jiff_diesel::Timestamp::from(stale_before);
@@ -489,7 +489,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         .get_result(self)
         .await
         .optional()
-        .map_err(PgError::from)?;
+        .map_err(Error::from)?;
 
         Ok(claimed)
     }
@@ -498,7 +498,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         detection: &WorkspaceDetection,
-    ) -> PgResult<DetectionFiles> {
+    ) -> Result<DetectionFiles> {
         use schema::workspace_files::{self, dsl};
 
         // Select the display name only, scoped to the workspace and excluding
@@ -507,7 +507,7 @@ impl WorkspaceDetectionRepository for PgConnection {
             conn: &mut PgConnection,
             workspace_id: Uuid,
             file_id: Uuid,
-        ) -> PgResult<Option<String>> {
+        ) -> Result<Option<String>> {
             workspace_files::table
                 .filter(dsl::id.eq(file_id))
                 .filter(dsl::workspace_id.eq(workspace_id))
@@ -516,7 +516,7 @@ impl WorkspaceDetectionRepository for PgConnection {
                 .first::<String>(conn)
                 .await
                 .optional()
-                .map_err(PgError::from)
+                .map_err(Error::from)
         }
 
         let input = name_of(self, workspace_id, detection.input_file_id).await?;
@@ -529,7 +529,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         detection_id: Uuid,
         claimed_at: jiff::Timestamp,
         mut updates: UpdateWorkspaceDetection,
-    ) -> PgResult<bool> {
+    ) -> Result<bool> {
         use schema::workspace_detections::{self, dsl};
 
         // Force the terminal transition and stamp the terminal time here, so every
@@ -552,7 +552,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         .set(&updates)
         .execute(self)
         .await
-        .map_err(PgError::from)?;
+        .map_err(Error::from)?;
 
         Ok(updated == 1)
     }
@@ -562,7 +562,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         detection_id: Uuid,
         claimed_at: jiff::Timestamp,
         mut updates: UpdateWorkspaceDetection,
-    ) -> PgResult<bool> {
+    ) -> Result<bool> {
         use schema::workspace_detections::{self, dsl};
 
         // Force the terminal transition and stamp the terminal time here, mirroring
@@ -582,7 +582,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         .set(&updates)
         .execute(self)
         .await
-        .map_err(PgError::from)?;
+        .map_err(Error::from)?;
 
         Ok(updated == 1)
     }
@@ -591,7 +591,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         &mut self,
         detection_id: Uuid,
         mut updates: UpdateWorkspaceDetection,
-    ) -> PgResult<bool> {
+    ) -> Result<bool> {
         use schema::workspace_detections::{self, dsl};
 
         // Force the terminal transition and stamp the terminal time, as the other
@@ -609,15 +609,12 @@ impl WorkspaceDetectionRepository for PgConnection {
         .set(&updates)
         .execute(self)
         .await
-        .map_err(PgError::from)?;
+        .map_err(Error::from)?;
 
         Ok(updated == 1)
     }
 
-    async fn record_detection_usage(
-        &mut self,
-        usage: &[NewWorkspaceDetectionUsage],
-    ) -> PgResult<()> {
+    async fn record_detection_usage(&mut self, usage: &[NewWorkspaceDetectionUsage]) -> Result<()> {
         use schema::workspace_detection_usage;
 
         if usage.is_empty() {
@@ -628,7 +625,7 @@ impl WorkspaceDetectionRepository for PgConnection {
             .values(usage)
             .execute(self)
             .await
-            .map_err(PgError::from)?;
+            .map_err(Error::from)?;
 
         Ok(())
     }

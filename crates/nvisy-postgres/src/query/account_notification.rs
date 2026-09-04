@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::model::{AccountNotification, NewAccountNotification, UpdateAccountNotification};
 use crate::types::{CursorPage, CursorPagination, OffsetPagination};
-use crate::{PgConnection, PgError, PgResult, schema};
+use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for account notification database operations.
 ///
@@ -20,14 +20,14 @@ pub trait AccountNotificationRepository {
     fn create_account_notification(
         &mut self,
         new_notification: NewAccountNotification,
-    ) -> impl Future<Output = PgResult<AccountNotification>> + Send;
+    ) -> impl Future<Output = Result<AccountNotification>> + Send;
 
     /// Creates many account notifications in one statement, returning the number
     /// inserted. Used to fan a broadcast out to its recipients in a single query.
     fn create_account_notifications(
         &mut self,
         new_notifications: Vec<NewAccountNotification>,
-    ) -> impl Future<Output = PgResult<usize>> + Send;
+    ) -> impl Future<Output = Result<usize>> + Send;
 
     /// Lists account notifications with offset pagination.
     ///
@@ -36,7 +36,7 @@ pub trait AccountNotificationRepository {
         &mut self,
         account_id: Uuid,
         pagination: OffsetPagination,
-    ) -> impl Future<Output = PgResult<Vec<AccountNotification>>> + Send;
+    ) -> impl Future<Output = Result<Vec<AccountNotification>>> + Send;
 
     /// Lists account notifications with cursor pagination.
     ///
@@ -45,7 +45,7 @@ pub trait AccountNotificationRepository {
         &mut self,
         account_id: Uuid,
         pagination: CursorPagination,
-    ) -> impl Future<Output = PgResult<CursorPage<AccountNotification>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<AccountNotification>>> + Send;
 
     /// Marks all unread account notifications as read.
     ///
@@ -53,7 +53,7 @@ pub trait AccountNotificationRepository {
     fn mark_all_account_notifications_as_read(
         &mut self,
         account_id: Uuid,
-    ) -> impl Future<Output = PgResult<usize>> + Send;
+    ) -> impl Future<Output = Result<usize>> + Send;
 
     /// Marks a single notification as read, scoped to its owning account.
     ///
@@ -65,27 +65,27 @@ pub trait AccountNotificationRepository {
         &mut self,
         account_id: Uuid,
         notification_id: Uuid,
-    ) -> impl Future<Output = PgResult<bool>> + Send;
+    ) -> impl Future<Output = Result<bool>> + Send;
 
     /// Deletes all expired account notifications system-wide.
     ///
     /// Returns the count of deleted notifications.
     fn delete_expired_account_notifications(
         &mut self,
-    ) -> impl Future<Output = PgResult<usize>> + Send;
+    ) -> impl Future<Output = Result<usize>> + Send;
 
     /// Counts unread account notifications.
     fn count_unread_account_notifications(
         &mut self,
         account_id: Uuid,
-    ) -> impl Future<Output = PgResult<i64>> + Send;
+    ) -> impl Future<Output = Result<i64>> + Send;
 }
 
 impl AccountNotificationRepository for PgConnection {
     async fn create_account_notification(
         &mut self,
         new_notification: NewAccountNotification,
-    ) -> PgResult<AccountNotification> {
+    ) -> Result<AccountNotification> {
         use schema::account_notifications;
 
         diesel::insert_into(account_notifications::table)
@@ -93,13 +93,13 @@ impl AccountNotificationRepository for PgConnection {
             .returning(AccountNotification::as_returning())
             .get_result(self)
             .await
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
     async fn create_account_notifications(
         &mut self,
         new_notifications: Vec<NewAccountNotification>,
-    ) -> PgResult<usize> {
+    ) -> Result<usize> {
         use schema::account_notifications;
 
         if new_notifications.is_empty() {
@@ -110,14 +110,14 @@ impl AccountNotificationRepository for PgConnection {
             .values(&new_notifications)
             .execute(self)
             .await
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
     async fn offset_list_account_notifications(
         &mut self,
         account_id: Uuid,
         pagination: OffsetPagination,
-    ) -> PgResult<Vec<AccountNotification>> {
+    ) -> Result<Vec<AccountNotification>> {
         use diesel::dsl::now;
         use schema::account_notifications::{self, dsl};
 
@@ -130,14 +130,14 @@ impl AccountNotificationRepository for PgConnection {
             .select(AccountNotification::as_select())
             .load(self)
             .await
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 
     async fn cursor_list_account_notifications(
         &mut self,
         acct_id: Uuid,
         pagination: CursorPagination,
-    ) -> PgResult<CursorPage<AccountNotification>> {
+    ) -> Result<CursorPage<AccountNotification>> {
         use diesel::dsl::{count_star, now};
         use schema::account_notifications::{self, dsl};
 
@@ -152,7 +152,7 @@ impl AccountNotificationRepository for PgConnection {
                     .select(count_star())
                     .get_result(self)
                     .await
-                    .map_err(PgError::from)?,
+                    .map_err(Error::from)?,
             )
         } else {
             None
@@ -172,7 +172,7 @@ impl AccountNotificationRepository for PgConnection {
                 .select(AccountNotification::as_select())
                 .load(self)
                 .await
-                .map_err(PgError::from)?
+                .map_err(Error::from)?
         } else {
             account_notifications::table
                 .filter(base_filter)
@@ -181,7 +181,7 @@ impl AccountNotificationRepository for PgConnection {
                 .select(AccountNotification::as_select())
                 .load(self)
                 .await
-                .map_err(PgError::from)?
+                .map_err(Error::from)?
         };
 
         Ok(CursorPage::new(items, total, pagination.limit, |n| {
@@ -189,10 +189,7 @@ impl AccountNotificationRepository for PgConnection {
         }))
     }
 
-    async fn mark_all_account_notifications_as_read(
-        &mut self,
-        account_id: Uuid,
-    ) -> PgResult<usize> {
+    async fn mark_all_account_notifications_as_read(&mut self, account_id: Uuid) -> Result<usize> {
         use schema::account_notifications::{self, dsl};
 
         let update_data = UpdateAccountNotification {
@@ -207,14 +204,14 @@ impl AccountNotificationRepository for PgConnection {
         .set(&update_data)
         .execute(self)
         .await
-        .map_err(PgError::from)
+        .map_err(Error::from)
     }
 
     async fn mark_account_notification_as_read(
         &mut self,
         account_id: Uuid,
         notification_id: Uuid,
-    ) -> PgResult<bool> {
+    ) -> Result<bool> {
         use schema::account_notifications::{self, dsl};
 
         let update_data = UpdateAccountNotification {
@@ -232,12 +229,12 @@ impl AccountNotificationRepository for PgConnection {
         .set(&update_data)
         .execute(self)
         .await
-        .map_err(PgError::from)?;
+        .map_err(Error::from)?;
 
         Ok(updated > 0)
     }
 
-    async fn delete_expired_account_notifications(&mut self) -> PgResult<usize> {
+    async fn delete_expired_account_notifications(&mut self) -> Result<usize> {
         use diesel::dsl::now;
         use schema::account_notifications::{self, dsl};
 
@@ -248,10 +245,10 @@ impl AccountNotificationRepository for PgConnection {
         )
         .execute(self)
         .await
-        .map_err(PgError::from)
+        .map_err(Error::from)
     }
 
-    async fn count_unread_account_notifications(&mut self, account_id: Uuid) -> PgResult<i64> {
+    async fn count_unread_account_notifications(&mut self, account_id: Uuid) -> Result<i64> {
         use diesel::dsl::{count_star, now};
         use schema::account_notifications::{self, dsl};
 
@@ -262,6 +259,6 @@ impl AccountNotificationRepository for PgConnection {
             .select(count_star())
             .get_result(self)
             .await
-            .map_err(PgError::from)
+            .map_err(Error::from)
     }
 }

@@ -14,12 +14,11 @@ use axum::extract::multipart::Field;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use futures::StreamExt;
-use nvisy_nats::NatsClient;
-use nvisy_nats::object::{FileKey, FilesBucket, ObjectStore};
 use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceFile as FileModel};
 use nvisy_postgres::query::WorkspaceFileRepository;
 use nvisy_postgres::types::{FileKind, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
+use nvisy_s3::{BlobStore, Bucket, FileKey};
 use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
 
@@ -125,7 +124,7 @@ fn list_files_docs(op: TransformOperation) -> TransformOperation {
 struct FileUploadContext {
     workspace_id: Uuid,
     account_id: Uuid,
-    file_store: ObjectStore<FilesBucket>,
+    blobs: BlobStore,
     crypto: CryptoService,
     /// Engine handle, used to reject upload of a format no codec can decode.
     engine: EngineService,
@@ -171,7 +170,7 @@ async fn stage_file(ctx: &FileUploadContext, field: Field<'_>) -> Result<StagedF
             ));
     }
 
-    // Generate file key with unique object ID for NATS storage
+    // Generate file key with a unique object ID for blob storage.
     let file_key = FileKey::generate(ctx.workspace_id);
 
     tracing::debug!(
@@ -180,18 +179,18 @@ async fn stage_file(ctx: &FileUploadContext, field: Field<'_>) -> Result<StagedF
         "Streaming file to storage"
     );
 
-    // Step 1: Encrypt the plaintext as it streams to NATS. The limited reader
-    // aborts an oversized upload before its excess is encrypted and stored,
+    // Step 1: Encrypt the plaintext as it streams to the blob store. The limited
+    // reader aborts an oversized upload before its excess is encrypted and stored,
     // enforcing the effective per-file cap directly (the request-body layer only
     // bounds the whole multipart request). The measured reader captures the
-    // plaintext size and hash (NATS only sees ciphertext).
+    // plaintext size and hash (the store only sees ciphertext).
     let cap = ctx.max_upload_bytes;
     let source = StreamReader::new(field.map(|result| result.map_err(std::io::Error::other)));
     let (limited, limit_state) = LimitedReader::new(source, cap);
     let (measured, measurements) = HashingReader::new(limited);
     let encrypted = ctx.crypto.encrypt_reader(ctx.workspace_id, measured);
 
-    if let Err(err) = ctx.file_store.put(&file_key, Box::pin(encrypted)).await {
+    if let Err(err) = ctx.blobs.put(&file_key, Box::pin(encrypted)).await {
         // The limited reader aborts the stream, which fails the `put`. When that
         // is why it failed, report the size limit (413) rather than a storage
         // error; the reader's error is stringified in transit, so consult the
@@ -222,7 +221,7 @@ async fn stage_file(ctx: &FileUploadContext, field: Field<'_>) -> Result<StagedF
         file_size_bytes: measurements.bytes() as i64,
         file_hash_sha256: measurements.sha256().to_vec(),
         storage_path: file_key.to_string(),
-        storage_bucket: ctx.file_store.bucket().to_owned(),
+        storage_bucket: Bucket::Files.name().to_owned(),
         expires_at: ctx.expires_at.map(Into::into),
         ..Default::default()
     };
@@ -280,7 +279,7 @@ impl FileUploadContext {
     /// the rare storage-error case, not worth failing the response over.
     async fn discard_staged(&self, staged: &[StagedFile]) {
         for file in staged {
-            if let Err(err) = self.file_store.delete(&file.key).await {
+            if let Err(err) = self.blobs.delete(&file.key).await {
                 tracing::warn!(
                     target: TRACING_TARGET,
                     error = %err,
@@ -302,7 +301,7 @@ impl FileUploadContext {
 )]
 async fn upload_file(
     State(pg_client): State<PgClient>,
-    State(nats_client): State<NatsClient>,
+    State(blobs): State<BlobStore>,
     State(crypto): State<CryptoService>,
     State(engine): State<EngineService>,
     State(upload): State<UploadConfig>,
@@ -312,8 +311,6 @@ async fn upload_file(
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Files>)> {
     tracing::info!(target: TRACING_TARGET, "Uploading files");
-
-    let file_store = nats_client.object_store::<FilesBucket>().await?;
 
     // Do the quick pre-flight DB work under a connection, then release it: auth,
     // resolve the uploader's identity, and read the workspace's upload settings.
@@ -342,7 +339,7 @@ async fn upload_file(
     let ctx = FileUploadContext {
         workspace_id: workspace.id,
         account_id: auth_claims.account_id,
-        file_store,
+        blobs,
         crypto,
         engine,
         expires_at,
@@ -563,7 +560,7 @@ fn update_file_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn download_file(
     State(pg_client): State<PgClient>,
-    State(nats_client): State<NatsClient>,
+    State(blobs): State<BlobStore>,
     State(crypto): State<CryptoService>,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<WorkspaceFilePathParams>,
@@ -579,18 +576,6 @@ async fn download_file(
 
     let file = find_file(&mut conn, workspace.id, path_params.file_id).await?;
 
-    let file_store = nats_client
-        .object_store::<FilesBucket>()
-        .await
-        .map_err(|err| {
-            tracing::error!(
-                target: TRACING_TARGET,
-                error = %err,
-                "Failed to create file store"
-            );
-            ErrorKind::InternalServerError.with_message("Failed to initialize file storage")
-        })?;
-
     let file_key = FileKey::from_str(&file.storage_path).map_err(|err| {
         tracing::error!(
             target: TRACING_TARGET,
@@ -603,8 +588,8 @@ async fn download_file(
             .with_context(format!("Parse error: {}", err))
     })?;
 
-    // Get streaming content from NATS file store
-    let get_result = file_store
+    // Get streaming content from the blob store.
+    let get_result = blobs
         .get(&file_key)
         .await
         .map_err(|err| {
@@ -807,9 +792,9 @@ async fn bulk_delete_files(
         .filter(|id| !deleted_ids.contains(id))
         .collect();
 
-    // Release the batch connection before purging: each purge does a NATS delete
-    // and re-acquires a short-lived connection of its own, so one connection is
-    // never pinned across the whole (potentially long) sequence of object deletes.
+    // Release the batch connection before purging: each purge does an object-store
+    // delete and re-acquires a short-lived connection of its own, so one connection
+    // is never pinned across the whole (potentially long) sequence of object deletes.
     drop(conn);
 
     // Purge each object, reclaiming storage the same way retention expiry does.

@@ -173,6 +173,7 @@ impl Cli {
             service.sync,
             webhook,
             self.middleware.upload.clone(),
+            service.s3,
         )
         .await?)
     }
