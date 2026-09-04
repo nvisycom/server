@@ -25,21 +25,6 @@ ignore = [
     # of `image` (image -> exr -> pulp -> paste) with no workspace-level fix;
     # elide ignores the same advisory upstream.
     "RUSTSEC-2024-0436",
-    # The four advisories below all trace to a single source: the legacy TLS/HTTP
-    # stack that `aws-smithy-http-client` 1.4.0 bundles in its default feature
-    # (`legacy-rustls` = rustls 0.21 -> rustls-webpki 0.101.7, and legacy hyper
-    # 0.14 -> h2 0.3). Our blob-store client uses the SDK's default modern
-    # provider (`rustls-aws-lc`, hyper 1.x, h2 0.4) and never constructs the
-    # legacy provider, so none of these code paths are reachable in our usage.
-    # We are already on the latest published aws-config/aws-sdk-s3/smithy crates,
-    # so there is no dependency-side fix until the SDK drops the legacy stack.
-    #
-    # rustls-webpki 0.101.7 (legacy rustls 0.21):
-    "RUSTSEC-2026-0104", # CRL-parsing panic (only when parsing CRLs; we do not)
-    "RUSTSEC-2026-0098", # name constraints accepted for URI names
-    "RUSTSEC-2026-0099", # name constraints accepted for wildcard-name certs
-    # h2 0.3.27 (legacy hyper 0.14):
-    "RUSTSEC-2026-0258", # unbounded empty DATA frames (h2 client we do not use)
 ]
 
 [licenses]

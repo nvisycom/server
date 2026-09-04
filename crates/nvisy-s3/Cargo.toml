@@ -38,9 +38,11 @@ nvisy-core = { workspace = true }
 tokio = { workspace = true, features = ["io-util"] }
 async-trait = { workspace = true }
 
-# AWS S3 SDK (works against AWS S3 and any S3-compatible endpoint: RustFS, MinIO, R2)
-aws-config = { workspace = true, features = ["behavior-version-latest"] }
-aws-sdk-s3 = { workspace = true, features = ["behavior-version-latest"] }
+# AWS S3 SDK (works against AWS S3 and any S3-compatible endpoint: RustFS, MinIO, R2).
+# The TLS/runtime feature set (and the legacy-stack opt-out) lives on the
+# workspace dependency; only the crate-specific features are named here.
+aws-config = { workspace = true }
+aws-sdk-s3 = { workspace = true }
 aws-smithy-types = { workspace = true, features = ["byte-stream-poll-next"] }
 aws-credential-types = { workspace = true, features = ["hardcoded-credentials"] }
 
