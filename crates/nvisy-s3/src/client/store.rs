@@ -16,6 +16,11 @@ const TRACING_TARGET: &str = "nvisy_s3::store";
 /// comfortably above the floor.
 const PART_SIZE: usize = 8 * 1024 * 1024;
 
+/// S3 accepts at most 10,000 parts per multipart upload. With [`PART_SIZE`] parts
+/// that caps a single object at ~78 GiB; an upload that would exceed the limit is
+/// rejected (and aborted) rather than submitting a part S3 refuses.
+const MAX_PARTS: i32 = 10_000;
+
 /// A handle to a stored object's content and size.
 ///
 /// `into_reader` yields an [`AsyncRead`] over the object's bytes; `size` is the
@@ -170,6 +175,13 @@ impl BlobStore {
         let mut part_number = 1;
 
         loop {
+            if part_number > MAX_PARTS {
+                return Err(Error::operation_msg(
+                    "put",
+                    format!("object exceeds the maximum of {MAX_PARTS} upload parts"),
+                ));
+            }
+
             total += part.len() as u64;
             let uploaded = self
                 .client

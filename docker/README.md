@@ -104,7 +104,7 @@ health check endpoint at `/health/`.
 
 ## NATS Configuration
 
-The default NATS configuration (`nats.conf`) enables JetStream with:
+The default NATS configuration (`nats/nats.conf`) enables JetStream with:
 
 - 1 GB memory store for high-throughput streams
 - 10 GB file store for persistent data

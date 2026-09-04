@@ -37,7 +37,7 @@ services:
       - "/etc/nats/nats.conf"
     volumes:
       - nats_data:/data
-      - ./nats.conf:/etc/nats/nats.conf:ro
+      - ./nats/nats.conf:/etc/nats/nats.conf:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
       interval: 5s
@@ -48,7 +48,7 @@ services:
       - nvisy
 
   rustfs:
-    image: rustfs/rustfs:latest
+    image: rustfs/rustfs:1.0.0-rc.5
     container_name: nvisy-rustfs
     restart: unless-stopped
     # No host ports: the server reaches RustFS over the internal network at
@@ -61,8 +61,10 @@ services:
       RUSTFS_CONSOLE_ADDRESS: ":9001"
     volumes:
       - rustfs_data:/data
+    # /health/ready (not /health) confirms storage is initialized, so bucket
+    # init only runs once RustFS can actually serve requests.
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health/ready"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -73,16 +75,22 @@ services:
   # Creates the first-party bucket once RustFS is up (RustFS does not
   # auto-create buckets). Exits after provisioning; safe to re-run.
   rustfs-init:
-    image: rustfs/rc:latest
+    image: rustfs/rc:v0.1.31
     container_name: nvisy-rustfs-init
     depends_on:
       rustfs:
         condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      rc alias set nvisy http://rustfs:9000 ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required} ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required} &&
-      rc bucket create --ignore-existing nvisy/${S3_BUCKET:-nvisy}
-      "
+    # Configuration is passed through the environment and consumed by the
+    # mounted script, so a credential containing shell metacharacters cannot
+    # alter the command.
+    environment:
+      S3_ENDPOINT: http://rustfs:9000
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
+      S3_BUCKET: ${S3_BUCKET:-nvisy}
+    entrypoint: ["/bin/sh", "/init.sh"]
+    volumes:
+      - ./rustfs/init.sh:/init.sh:ro
     networks:
       - nvisy
 
