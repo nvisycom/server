@@ -9,7 +9,7 @@ Webhook delivery types and traits for the Nvisy platform.
 Defines the `WebhookProvider` trait for delivery implementations and the
 `WebhookService` wrapper that adds observability. Application events such
 as pipeline completion are delivered as HMAC-SHA256 signed HTTP callbacks.
-For an HTTP-based client implementation, see the `nvisy-reqwest` crate.
+For an HTTP-based client implementation, see the `reqwest` module.
 
 ## Documentation
 
