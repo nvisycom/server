@@ -23,9 +23,9 @@ pub trait ObjectKey: fmt::Display + FromStr + Clone + Send + Sync + 'static {
     const BUCKET: Bucket;
 }
 
-/// Builds a key-parse error for `operation` from any displayable cause.
+/// Builds a key-parse error from any displayable cause.
 fn parse_error(message: impl std::fmt::Display) -> S3Error {
-    S3Error::operation("parse_key", message)
+    S3Error::operation_msg("parse_key", message.to_string())
 }
 
 /// A validated key for file objects.

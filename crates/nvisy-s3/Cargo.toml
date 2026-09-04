@@ -20,6 +20,12 @@ documentation = { workspace = true }
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[package.metadata.cargo-machete]
+# `aws-smithy-types` has no direct import: it is declared only to turn on its
+# `byte-stream-poll-next` feature, which is what makes `ByteStream::into_async_read`
+# available on the get path. cargo-machete cannot see feature-only deps.
+ignored = ["aws-smithy-types"]
+
 [features]
 # Exposes the config type's `clap::Args` derive for the CLI binary.
 cli = ["dep:clap"]

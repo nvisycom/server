@@ -117,36 +117,44 @@ impl BlobStore {
             .await
             .map_err(|err| S3Error::operation("put", err.into_service_error()))?;
         let upload_id = created.upload_id().ok_or_else(|| {
-            S3Error::operation("put", "S3 create_multipart_upload returned no upload id")
+            S3Error::operation_msg("put", "S3 create_multipart_upload returned no upload id")
         })?;
 
         // Upload every part; on any failure, abort so no partial upload lingers.
         let result = self
             .upload_parts(object_key, upload_id, first, &mut reader)
             .await;
-        match result {
-            Ok((parts, size)) => {
-                self.client
-                    .complete_multipart_upload()
-                    .bucket(&self.bucket)
-                    .key(object_key)
-                    .upload_id(upload_id)
-                    .multipart_upload(
-                        CompletedMultipartUpload::builder()
-                            .set_parts(Some(parts))
-                            .build(),
-                    )
-                    .send()
-                    .await
-                    .map_err(|err| S3Error::operation("put", err.into_service_error()))?;
-                tracing::debug!(target: TRACING_TARGET, key = %object_key, size, "Object uploaded (multipart)");
-                Ok(size)
-            }
+        let (parts, size) = match result {
+            Ok(uploaded) => uploaded,
             Err(err) => {
                 self.abort_multipart(object_key, upload_id).await;
-                Err(err)
+                return Err(err);
             }
+        };
+
+        // Parts uploaded; completing them can still fail. Abort on that too, so a
+        // failure never leaves the uploaded parts billing until S3 lifecycle reaps
+        // them.
+        let completed = self
+            .client
+            .complete_multipart_upload()
+            .bucket(&self.bucket)
+            .key(object_key)
+            .upload_id(upload_id)
+            .multipart_upload(
+                CompletedMultipartUpload::builder()
+                    .set_parts(Some(parts))
+                    .build(),
+            )
+            .send()
+            .await;
+        if let Err(err) = completed {
+            self.abort_multipart(object_key, upload_id).await;
+            return Err(S3Error::operation("put", err.into_service_error()));
         }
+
+        tracing::debug!(target: TRACING_TARGET, key = %object_key, size, "Object uploaded (multipart)");
+        Ok(size)
     }
 
     /// Uploads `first` and every subsequent part read from `reader`, returning the

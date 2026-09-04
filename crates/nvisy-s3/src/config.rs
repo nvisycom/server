@@ -33,7 +33,12 @@ pub struct S3Config {
     /// S3 uses virtual-host style.
     #[cfg_attr(
         feature = "cli",
-        arg(long, env = "S3_FORCE_PATH_STYLE", default_value_t = true)
+        arg(
+            long,
+            env = "S3_FORCE_PATH_STYLE",
+            action = clap::ArgAction::Set,
+            default_value_t = true
+        )
     )]
     pub force_path_style: bool,
 

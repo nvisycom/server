@@ -51,9 +51,11 @@ services:
     image: rustfs/rustfs:latest
     container_name: nvisy-rustfs-dev
     restart: unless-stopped
+    # Bound to loopback: the host-run server reaches RustFS at localhost:9000,
+    # but it is never exposed on the LAN (dev uses the well-known credentials).
     ports:
-      - "${S3_PORT:-9000}:9000"
-      - "${S3_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${S3_PORT:-9000}:9000"
+      - "127.0.0.1:${S3_CONSOLE_PORT:-9001}:9001"
     environment:
       RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:-rustfsadmin}
       RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:-rustfsadmin}

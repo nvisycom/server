@@ -51,9 +51,9 @@ services:
     image: rustfs/rustfs:latest
     container_name: nvisy-rustfs
     restart: unless-stopped
-    ports:
-      - "${S3_PORT:-9000}:9000"
-      - "${S3_CONSOLE_PORT:-9001}:9001"
+    # No host ports: the server reaches RustFS over the internal network at
+    # http://rustfs:9000. Expose the console deliberately (an SSH tunnel or a
+    # temporary compose override) rather than publishing it by default.
     environment:
       RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required}
       RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
