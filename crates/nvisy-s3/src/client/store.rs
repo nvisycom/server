@@ -100,7 +100,12 @@ impl BlobStore {
             return Ok(size);
         }
 
-        self.put_multipart(&object_key, first, reader).await
+        // Box the multipart future so it is heap-allocated rather than inlined
+        // into `put`'s own future. With a deeply-nested reader type the combined
+        // future is otherwise large enough to overflow a worker thread's stack
+        // just being constructed, even for the small-object path that never runs
+        // this branch.
+        Box::pin(self.put_multipart(&object_key, first, reader)).await
     }
 
     /// Streams the remainder of `reader` after `first` as a multipart upload.
@@ -327,7 +332,9 @@ impl BlobStore {
 /// multipart part meet S3's minimum size.
 async fn read_part<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Vec<u8>> {
     let mut buffer = Vec::with_capacity(PART_SIZE);
-    let mut chunk = [0u8; 64 * 1024];
+    // Heap-allocate the scratch chunk: as a stack array it would be embedded in
+    // this future (and transitively in `put`'s), enlarging it needlessly.
+    let mut chunk = vec![0u8; 64 * 1024];
     while buffer.len() < PART_SIZE {
         let read = reader
             .read(&mut chunk)
