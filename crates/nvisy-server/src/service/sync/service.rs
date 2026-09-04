@@ -1,9 +1,9 @@
 //! Connection sync service: moves objects between a workspace's external
-//! object-store connection and the internal NATS file store.
+//! object-store connection and the first-party blob store.
 //!
 //! Import pulls an object from the customer's connection and stores it as a
 //! [`WorkspaceFile`]; export pushes a stored file back out to the connection.
-//! Both directions stream end to end and keep files encrypted at rest in NATS.
+//! Both directions stream end to end and keep files encrypted at rest.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path as StdPath;
@@ -11,7 +11,6 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use futures::stream::{self, StreamExt};
-use nvisy_nats::object::{FileKey, FilesBucket, ObjectBucket};
 use nvisy_object::client::ObjectStoreClient;
 use nvisy_object::providers::StorageConfig;
 use nvisy_postgres::model::{
@@ -23,6 +22,7 @@ use nvisy_postgres::query::{
 };
 use nvisy_postgres::types::{FileKind, SyncDeletionPolicy};
 use nvisy_postgres::{AsyncConnection, PgConn};
+use nvisy_s3::{Bucket, FileKey};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -295,15 +295,14 @@ impl ConnectionSyncService {
         let mut conn = self.infra.postgres.get_connection().await?;
         conn.delete_workspace_file(file_id).await?;
 
-        if let Ok(file_key) = FileKey::from_str(storage_path) {
-            let store = self.infra.nats.object_store::<FilesBucket>().await?;
-            if let Err(err) = store.delete(&file_key).await {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    error = %err,
-                    "Failed to delete stored object for vanished source object",
-                );
-            }
+        if let Ok(file_key) = FileKey::from_str(storage_path)
+            && let Err(err) = self.infra.blobs.delete(&file_key).await
+        {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                "Failed to delete stored object for vanished source object",
+            );
         }
         Ok(())
     }
@@ -311,7 +310,7 @@ impl ConnectionSyncService {
     /// Imports one object at `remote_key` using an already-connected `client`.
     ///
     /// Streams the object's bytes from the external store, encrypts them with
-    /// the workspace key, writes them to the NATS files bucket, and records an
+    /// the workspace key, writes them to the files store, and records an
     /// original-kind file along with its import origin (connection and remote
     /// key). If recording fails, the just-written object is deleted so none is
     /// orphaned.
@@ -323,7 +322,7 @@ impl ConnectionSyncService {
         remote_key: &str,
         expires_at: Option<jiff::Timestamp>,
     ) -> Result<WorkspaceFile> {
-        // Stream external bytes -> hash+measure -> encrypt -> NATS files bucket.
+        // Stream external bytes -> hash+measure -> encrypt -> files store.
         let source = client.get_stream(remote_key).await?;
         let (measured, measurements) = HashingReader::new(stream_to_reader(source));
         let ciphertext = Box::pin(
@@ -332,9 +331,8 @@ impl ConnectionSyncService {
                 .encrypt_reader(connection.workspace_id, measured),
         );
 
-        let store = self.infra.nats.object_store::<FilesBucket>().await?;
         let file_key = FileKey::generate(connection.workspace_id);
-        store.put(&file_key, ciphertext).await?;
+        self.infra.blobs.put(&file_key, ciphertext).await?;
 
         // The object now exists in storage; if recording it in the database
         // fails, delete it so no orphaned object is left behind.
@@ -351,7 +349,7 @@ impl ConnectionSyncService {
         {
             Ok(file) => Ok(file),
             Err(err) => {
-                if let Err(cleanup) = store.delete(&file_key).await {
+                if let Err(cleanup) = self.infra.blobs.delete(&file_key).await {
                     tracing::error!(
                         target: TRACING_TARGET,
                         error = %cleanup,
@@ -389,7 +387,7 @@ impl ConnectionSyncService {
             file_size_bytes: measurements.bytes() as i64,
             file_hash_sha256: measurements.sha256().to_vec(),
             storage_path: file_key.to_string(),
-            storage_bucket: FilesBucket::NAME.to_owned(),
+            storage_bucket: Bucket::Files.name().to_owned(),
             expires_at: expires_at.map(Into::into),
             ..Default::default()
         };
@@ -400,7 +398,7 @@ impl ConnectionSyncService {
 
     /// Exports a stored workspace file back out to the connection at `remote_key`.
     ///
-    /// Streams the file's bytes from the NATS files bucket, decrypts them, and
+    /// Streams the file's bytes from the files store, decrypts them, and
     /// uploads them to the external store. `remote_key` is resolved relative to
     /// the connection's configured root path.
     #[tracing::instrument(
@@ -419,17 +417,16 @@ impl ConnectionSyncService {
 
         let client = self.object.connect(config).await?;
 
-        let store = self.infra.nats.object_store::<FilesBucket>().await?;
         let file_key = FileKey::from_str(&file.storage_path).map_err(|err| {
             ErrorKind::InternalServerError
                 .with_message("Invalid file storage path")
                 .with_context(err.to_string())
         })?;
-        let stored = store.get(&file_key).await?.ok_or_else(|| {
+        let stored = self.infra.blobs.get(&file_key).await?.ok_or_else(|| {
             ErrorKind::InternalServerError.with_message("File content is missing from storage")
         })?;
 
-        // NATS ciphertext reader -> decrypt -> external multipart upload.
+        // Stored ciphertext reader -> decrypt -> external multipart upload.
         let plaintext = Box::pin(
             self.infra
                 .crypto

@@ -4,31 +4,38 @@ Docker configuration for the Nvisy server.
 
 ## Infrastructure Requirements
 
-Nvisy requires two external services:
+Nvisy requires three external services:
 
 **PostgreSQL 18+**. PostgreSQL serves as the primary data store for all
 application state: accounts, workspaces, documents, connections, and file
 metadata. It uses the `pgcrypto` and `pg_trgm` contrib extensions, both bundled
 with the standard image. The recommended image is `postgres:18`.
 
-**NATS 2.10+** with JetStream enabled. NATS handles three concerns: pub/sub
-messaging for real-time events, persistent job queues for asynchronous
-processing, and object storage for uploaded files. JetStream must be enabled
-with sufficient storage allocation: the default configuration uses 1 GB of
-memory store and 10 GB of file store.
+**NATS 2.10+** with JetStream enabled. NATS handles pub/sub messaging for
+real-time events and persistent job queues for asynchronous processing.
+JetStream must be enabled with sufficient storage allocation: the default
+configuration uses 1 GB of memory store and 10 GB of file store.
+
+**An S3-compatible object store** for first-party blobs — uploaded files,
+detection audits, redacted output, and avatars. The compose files use
+[RustFS](https://rustfs.com) (MinIO-compatible, Apache-2.0); AWS S3 or any
+S3-compatible service (MinIO, Cloudflare R2, …) works by pointing `S3_ENDPOINT`
+at it. The configured `S3_BUCKET` must exist before the server starts — the
+compose files provision it with a one-shot init container.
 
 ## Quick Start
 
 ### Development (infrastructure only)
 
-Start PostgreSQL and NATS for local development:
+Start PostgreSQL, NATS, and RustFS for local development:
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
 ```
 
-This starts both services with development defaults (`postgres:postgres`
-credentials, JetStream enabled). Then generate configuration and run the server
+This starts the services with development defaults (`postgres:postgres`
+credentials, JetStream enabled, RustFS with `rustfsadmin` credentials and the
+`nvisy-dev` bucket auto-created). Then generate configuration and run the server
 locally:
 
 ```bash
@@ -51,9 +58,9 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-The production compose file starts all three services on a private bridge
-network. The server waits for PostgreSQL and NATS health checks to pass before
-starting.
+The production compose file starts every service on a private bridge network.
+The server waits for the PostgreSQL, NATS, and RustFS health checks to pass —
+and for the bucket-provisioning init container to finish — before starting.
 
 ## Services
 
@@ -61,6 +68,7 @@ starting.
 | ---------- | ---------- | -------------------------------- |
 | PostgreSQL | 5432       | Primary database                 |
 | NATS       | 4222, 8222 | Message queue (JetStream)        |
+| RustFS     | 9000, 9001 | S3-compatible blob store         |
 | Server     | 8080       | Nvisy API                        |
 
 ## Configuration
@@ -103,24 +111,25 @@ The default NATS configuration (`nats.conf`) enables JetStream with:
 - 8 MB maximum payload size
 
 Adjust these values based on expected workload. The memory store is used for
-ephemeral streams; the file store is used for durable subscriptions and object
-storage.
+ephemeral streams; the file store is used for durable subscriptions and job
+queues.
 
 ## Encryption at Rest
 
 The server encrypts sensitive payloads at the application layer with
 XChaCha20-Poly1305 under per-workspace keys before they reach storage — file
 bytes, redacted output, analyzed documents, webhook signing secrets, and
-policy/context definitions. This protects those payloads even against a live
-read of the datastore.
+policy/context definitions. The blob store only ever receives ciphertext; any
+server-side encryption it offers is redundant defense-in-depth. This protects
+those payloads even against a live read of the datastore.
 
 For everything else on disk — NATS stream/consumer metadata and KV entries,
 Postgres rows, backups — provision the data volumes on **encrypted storage**.
-This is the NATS-recommended approach over the server's built-in JetStream
-encryption: it adds no runtime overhead, keeps key management out of NATS, and
+This adds no runtime overhead, keeps key management out of the datastores, and
 covers the whole volume.
 
-The persistent volumes to encrypt are `nats_data` and `postgres_data`:
+The persistent volumes to encrypt are `nats_data`, `postgres_data`, and
+`rustfs_data`:
 
 - **Cloud:** back the volumes with an encrypted block device (e.g. an encrypted
   EBS volume, or a cloud disk with default SSE enabled), or bind-mount them onto
@@ -141,9 +150,10 @@ All services expose health check endpoints:
 | Server     | `/health/`              | HTTP GET |
 | PostgreSQL | `pg_isready`            | CLI      |
 | NATS       | `/healthz` on port 8222 | HTTP GET |
+| RustFS     | `/health` on port 9000  | HTTP GET |
 
 The compose files configure health checks with 5-second intervals. The server
-depends on both PostgreSQL and NATS being healthy before it starts accepting
+depends on PostgreSQL, NATS, and RustFS being healthy before it starts accepting
 requests.
 
 ## Database Migrations

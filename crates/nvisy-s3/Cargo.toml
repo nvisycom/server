@@ -1,0 +1,55 @@
+[package]
+name = "nvisy-s3"
+description = "First-party S3-compatible blob storage (files, audits, avatars) for Nvisy"
+readme = "./README.md"
+keywords = ["nvisy", "s3", "object-storage", "storage"]
+categories = ["filesystem"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+# Exposes the config type's `clap::Args` derive for the CLI binary.
+cli = ["dep:clap"]
+
+[dependencies]
+# Workspace crates
+nvisy-core = { workspace = true }
+
+# Async runtime & IO
+tokio = { workspace = true, features = ["io-util"] }
+async-trait = { workspace = true }
+
+# AWS S3 SDK (works against AWS S3 and any S3-compatible endpoint: RustFS, MinIO, R2)
+aws-config = { workspace = true, features = ["behavior-version-latest"] }
+aws-sdk-s3 = { workspace = true, features = ["behavior-version-latest"] }
+aws-smithy-types = { workspace = true, features = ["byte-stream-poll-next"] }
+aws-credential-types = { workspace = true, features = ["hardcoded-credentials"] }
+
+# CLI configuration (optional; enabled by the server binary)
+clap = { workspace = true, features = ["derive", "env"], optional = true }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+# Errors
+thiserror = { workspace = true, features = [] }
+
+# Primitive datatypes
+uuid = { workspace = true, features = ["v7"] }
+base64 = { workspace = true, features = [] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

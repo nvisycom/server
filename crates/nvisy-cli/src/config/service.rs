@@ -7,7 +7,7 @@ use clap::Args;
 use nvisy_nats::NatsConfig;
 use nvisy_postgres::PgConfig;
 use nvisy_server::service::{
-    CryptoConfig, EngineConfig, HealthConfig, SessionKeysConfig, SyncConfig,
+    CryptoConfig, EngineConfig, HealthConfig, S3Config, SessionKeysConfig, SyncConfig,
 };
 
 /// Aggregated external-service arguments (database, NATS, auth keys).
@@ -40,4 +40,8 @@ pub struct ServiceArgs {
     /// Connection sync configuration.
     #[clap(flatten)]
     pub sync: SyncConfig,
+
+    /// S3-compatible blob storage configuration.
+    #[clap(flatten)]
+    pub s3: S3Config,
 }

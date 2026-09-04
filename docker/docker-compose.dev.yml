@@ -47,9 +47,49 @@ services:
     networks:
       - nvisy-dev
 
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: nvisy-rustfs-dev
+    restart: unless-stopped
+    ports:
+      - "${S3_PORT:-9000}:9000"
+      - "${S3_CONSOLE_PORT:-9001}:9001"
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:-rustfsadmin}
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+    volumes:
+      - rustfs_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - nvisy-dev
+
+  # Creates the first-party bucket once RustFS is up (RustFS does not
+  # auto-create buckets). Exits after provisioning; safe to re-run.
+  rustfs-init:
+    image: minio/mc:latest
+    container_name: nvisy-rustfs-init-dev
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set nvisy http://rustfs:9000 ${S3_ACCESS_KEY_ID:-rustfsadmin} ${S3_SECRET_ACCESS_KEY:-rustfsadmin} &&
+      mc mb --ignore-existing nvisy/${S3_BUCKET:-nvisy-dev}
+      "
+    networks:
+      - nvisy-dev
+
 volumes:
   postgres_data:
   nats_data:
+  rustfs_data:
 
 networks:
   nvisy-dev:

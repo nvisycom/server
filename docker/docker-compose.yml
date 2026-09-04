@@ -47,6 +47,45 @@ services:
     networks:
       - nvisy
 
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: nvisy-rustfs
+    restart: unless-stopped
+    ports:
+      - "${S3_PORT:-9000}:9000"
+      - "${S3_CONSOLE_PORT:-9001}:9001"
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+    volumes:
+      - rustfs_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - nvisy
+
+  # Creates the first-party bucket once RustFS is up (RustFS does not
+  # auto-create buckets). Exits after provisioning; safe to re-run.
+  rustfs-init:
+    image: minio/mc:latest
+    container_name: nvisy-rustfs-init
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set nvisy http://rustfs:9000 ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required} ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required} &&
+      mc mb --ignore-existing nvisy/${S3_BUCKET:-nvisy}
+      "
+    networks:
+      - nvisy
+
   server:
     build:
       context: ..
@@ -63,6 +102,12 @@ services:
       SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-30s}
       POSTGRES_URL: postgresql://${POSTGRES_USER:-nvisy}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-nvisy}
       NATS_URL: nats://nats:4222
+      S3_BUCKET: ${S3_BUCKET:-nvisy}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ENDPOINT: http://rustfs:9000
+      S3_FORCE_PATH_STYLE: "true"
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
       AUTH_PUBLIC_PEM_FILEPATH: ${AUTH_PUBLIC_PEM_FILEPATH:-/etc/nvisy/public.pem}
       AUTH_PRIVATE_PEM_FILEPATH: ${AUTH_PRIVATE_PEM_FILEPATH:-/etc/nvisy/private.pem}
       ENCRYPTION_KEY_FILEPATH: ${ENCRYPTION_KEY_FILEPATH:-/etc/nvisy/encryption.key}
@@ -77,12 +122,17 @@ services:
         condition: service_healthy
       nats:
         condition: service_healthy
+      rustfs:
+        condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
     networks:
       - nvisy
 
 volumes:
   postgres_data:
   nats_data:
+  rustfs_data:
 
 networks:
   nvisy:

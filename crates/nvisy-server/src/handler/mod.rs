@@ -196,12 +196,18 @@ mod test {
     use crate::handler::{CustomRoutes, routes};
     use crate::middleware::UploadConfig;
     use crate::service::{
-        CryptoConfig, EngineConfig, HealthConfig, ServiceState, SessionKeysConfig, SyncConfig,
+        CryptoConfig, EngineConfig, HealthConfig, S3Config, ServiceState, SessionKeysConfig,
+        SyncConfig,
     };
 
     /// Builds the service sub-configs from the environment for integration tests.
-    fn configs_from_env() -> anyhow::Result<(PgConfig, NatsConfig, SessionKeysConfig, CryptoConfig)>
-    {
+    fn configs_from_env() -> anyhow::Result<(
+        PgConfig,
+        NatsConfig,
+        SessionKeysConfig,
+        CryptoConfig,
+        S3Config,
+    )> {
         dotenvy::dotenv().ok();
         let var = std::env::var;
 
@@ -221,14 +227,26 @@ mod test {
             key_path: var("ENCRYPTION_KEY_FILEPATH")?.into(),
         };
 
-        Ok((postgres, nats, session, crypto))
+        let s3 = S3Config {
+            bucket: var("S3_BUCKET")?,
+            region: var("S3_REGION").unwrap_or_else(|_| "us-east-1".to_owned()),
+            endpoint: var("S3_ENDPOINT").ok(),
+            force_path_style: var("S3_FORCE_PATH_STYLE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(true),
+            access_key_id: var("S3_ACCESS_KEY_ID").ok(),
+            secret_access_key: var("S3_SECRET_ACCESS_KEY").ok(),
+        };
+
+        Ok((postgres, nats, session, crypto, s3))
     }
 
     /// Returns a new [`TestServer`] with the given router.
     pub async fn create_test_server_with_router(
         router: impl Fn(ServiceState) -> ApiRouter<ServiceState>,
     ) -> anyhow::Result<TestServer> {
-        let (postgres, nats, session, crypto) = configs_from_env()?;
+        let (postgres, nats, session, crypto, s3) = configs_from_env()?;
         let webhook_service = ReqwestClient::default().into_service();
         let state = ServiceState::from_config(
             postgres,
@@ -240,6 +258,7 @@ mod test {
             SyncConfig::default(),
             webhook_service,
             UploadConfig::default(),
+            s3,
         )
         .await?;
         let router = router(state.clone());

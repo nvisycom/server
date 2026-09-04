@@ -12,6 +12,7 @@ mod pg_document;
 mod pg_error;
 mod pg_pipeline;
 mod pg_workspace;
+mod s3_error;
 mod webhook_error;
 
 pub use http_error::{Error, ErrorKind, Result};

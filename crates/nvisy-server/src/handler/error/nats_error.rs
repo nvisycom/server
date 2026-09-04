@@ -44,19 +44,6 @@ impl<'a> From<nvisy_nats::Error> for HttpError<'a> {
                 .with_resource(bucket.clone())
                 .with_context("The requested storage bucket does not exist"),
 
-            nvisy_nats::Error::ObjectNotFound {
-                ref name,
-                ref bucket,
-            } => ErrorKind::NotFound
-                .with_message("Object not found")
-                .with_resource(name.clone())
-                .with_context(format!("Object not found in bucket '{}'", bucket)),
-
-            nvisy_nats::Error::ObjectBucketNotFound { ref bucket } => ErrorKind::NotFound
-                .with_message("Object storage bucket not found")
-                .with_resource(bucket.clone())
-                .with_context("The requested object storage bucket does not exist"),
-
             // Revision conflicts -> Conflict
             nvisy_nats::Error::KvRevisionMismatch { ref key, .. } => ErrorKind::Conflict
                 .with_message("Resource has been modified")
@@ -161,16 +148,6 @@ mod tests {
         assert_eq!(http_err.kind(), ErrorKind::InternalServerError);
         assert_eq!(http_err.resource(), Some("test_stream"));
         assert!(http_err.context().unwrap().contains("stream"));
-    }
-
-    #[test]
-    fn test_object_not_found_conversion() {
-        let nats_err = nvisy_nats::Error::object_not_found("files", "document.pdf");
-        let http_err: HttpError = nats_err.into();
-
-        assert_eq!(http_err.kind(), ErrorKind::NotFound);
-        assert_eq!(http_err.resource(), Some("document.pdf"));
-        assert!(http_err.context().unwrap().contains("files"));
     }
 
     #[test]

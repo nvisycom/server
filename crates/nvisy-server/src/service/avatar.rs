@@ -1,7 +1,7 @@
 //! Avatar service: stores, serves, and removes account and workspace avatars.
 //!
 //! Uploads are normalized to WebP (decoded, bounded, resized, re-encoded) and
-//! stored unencrypted in NATS object storage, keyed by `(owner, content hash)`
+//! stored unencrypted in the blob store, keyed by `(owner, content hash)`
 //! so each version is its own object and the serve URL can be cached immutably.
 //! Because the stored bytes are always WebP, the serve `Content-Type` is
 //! constant and no per-object mime is persisted; re-encoding also strips
@@ -10,9 +10,9 @@
 use std::io::Cursor;
 
 use image::{ImageFormat, ImageReader};
-use nvisy_nats::object::{AccountAvatarKey, WorkspaceAvatarKey};
 use nvisy_postgres::model::{Account, UpdateAccount, UpdateWorkspace};
 use nvisy_postgres::query::{AccountRepository, WorkspaceRepository};
+use nvisy_s3::{AccountAvatarKey, GetObject, WorkspaceAvatarKey};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -59,8 +59,8 @@ impl AvatarService {
         let webp = process_avatar(upload).await?;
         let version = content_version(&webp);
 
-        let store = self.infra.nats.avatar_store().await?;
-        store
+        self.infra
+            .blobs
             .put(
                 &AccountAvatarKey::new(account_id, &version),
                 Cursor::new(webp),
@@ -84,7 +84,8 @@ impl AvatarService {
         if let Some(old_version) = previous.and_then(|a| avatar_version(a.avatar_url.as_deref()))
             && old_version != version
         {
-            store
+            self.infra
+                .blobs
                 .delete(&AccountAvatarKey::new(account_id, old_version))
                 .await?;
         }
@@ -94,9 +95,9 @@ impl AvatarService {
 
     /// Streams the account avatar for a specific version, or `None` if absent.
     pub async fn account_avatar(&self, account_id: Uuid, version: &str) -> Result<Option<Vec<u8>>> {
-        let store = self.infra.nats.avatar_store().await?;
         read_object(
-            store
+            self.infra
+                .blobs
                 .get(&AccountAvatarKey::new(account_id, version))
                 .await?,
         )
@@ -109,8 +110,8 @@ impl AvatarService {
         let account = conn.find_account_by_id(account_id).await?;
 
         if let Some(version) = account.and_then(|a| avatar_version(a.avatar_url.as_deref())) {
-            let store = self.infra.nats.avatar_store().await?;
-            store
+            self.infra
+                .blobs
                 .delete(&AccountAvatarKey::new(account_id, version))
                 .await?;
         }
@@ -139,8 +140,8 @@ impl AvatarService {
         let webp = process_avatar(upload).await?;
         let version = content_version(&webp);
 
-        let store = self.infra.nats.workspace_avatar_store().await?;
-        store
+        self.infra
+            .blobs
             .put(
                 &WorkspaceAvatarKey::new(workspace_id, &version),
                 Cursor::new(webp),
@@ -163,7 +164,8 @@ impl AvatarService {
         if let Some(old_version) = previous.and_then(|w| avatar_version(w.avatar_url.as_deref()))
             && old_version != version
         {
-            store
+            self.infra
+                .blobs
                 .delete(&WorkspaceAvatarKey::new(workspace_id, old_version))
                 .await?;
         }
@@ -177,9 +179,9 @@ impl AvatarService {
         workspace_id: Uuid,
         version: &str,
     ) -> Result<Option<Vec<u8>>> {
-        let store = self.infra.nats.workspace_avatar_store().await?;
         read_object(
-            store
+            self.infra
+                .blobs
                 .get(&WorkspaceAvatarKey::new(workspace_id, version))
                 .await?,
         )
@@ -192,8 +194,8 @@ impl AvatarService {
         let workspace = conn.find_workspace_by_id(workspace_id).await?;
 
         if let Some(version) = workspace.and_then(|w| avatar_version(w.avatar_url.as_deref())) {
-            let store = self.infra.nats.workspace_avatar_store().await?;
-            store
+            self.infra
+                .blobs
                 .delete(&WorkspaceAvatarKey::new(workspace_id, version))
                 .await?;
         }
@@ -212,7 +214,7 @@ impl AvatarService {
 
 /// Reads a stored object's bytes into memory, or `None` when absent. Avatars are
 /// small (bounded by the target dimension), so buffering is fine.
-async fn read_object(result: Option<nvisy_nats::object::GetResult>) -> Result<Option<Vec<u8>>> {
+async fn read_object(result: Option<GetObject>) -> Result<Option<Vec<u8>>> {
     use tokio::io::AsyncReadExt;
 
     let Some(stored) = result else {
