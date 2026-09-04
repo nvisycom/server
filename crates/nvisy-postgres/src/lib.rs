@@ -3,8 +3,12 @@
 #![doc = include_str!("../README.md")]
 
 /// Embeds all migrations into the final binary.
+///
+/// Points at the single canonical `migrations/` directory at the repository root
+/// (resolved from this crate's manifest directory), so there is one source of
+/// truth for migrations rather than a copy kept in sync inside the crate.
 pub(crate) const MIGRATIONS: diesel_migrations::EmbeddedMigrations =
-    diesel_migrations::embed_migrations!();
+    diesel_migrations::embed_migrations!("../../migrations");
 
 /// Tracing target for database query operations.
 ///

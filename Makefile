@@ -8,10 +8,8 @@ endif
 # PostgreSQL connection URL for diesel CLI.
 POSTGRES_URL ?= postgresql://postgres:postgres@localhost:5432/postgres
 
-# Migration directories and files.
+# Generated database schema file (produced by `diesel print-schema`).
 SCHEMA_OUTPUT = ./crates/nvisy-postgres/src/schema.rs
-MIGRATIONS_IN_DIR = ./migrations
-MIGRATIONS_OUT_DIR = ./crates/nvisy-postgres/src/migrations
 
 # Auth secret keys.
 PRIVATE_KEY_FILE = private.pem
@@ -68,17 +66,9 @@ generate-keys: ## Generates auth key pair and encryption key.
 
 .PHONY: generate-migrations
 generate-migrations: ## Regenerates the Postgres migrations and database schema.
-	@$(call log,Deleting embedded migrations directory...)
-	@rm -rf $(MIGRATIONS_OUT_DIR)
-	@$(call log,Embedded migrations directory deleted.)
 	@$(call log,Deleting a generated database schema file...)
 	@rm -f $(SCHEMA_OUTPUT)
 	@$(call log,Database schema file deleted.)
-	@$(call log,Ensuring migrations directory exists...)
-	@mkdir -p $(MIGRATIONS_OUT_DIR)
-	@$(call log,Copying migrations to $(MIGRATIONS_OUT_DIR)...)
-	@cp -r $(MIGRATIONS_IN_DIR)/* $(MIGRATIONS_OUT_DIR)
-	@$(call log,Migrations copied successfully.)
 	@$(call log,Running migrations...)
 	@DATABASE_URL=$(POSTGRES_URL) diesel migration run
 	@$(call log,Migrations applied successfully.)
@@ -88,9 +78,6 @@ generate-migrations: ## Regenerates the Postgres migrations and database schema.
 
 .PHONY: clear-migrations
 clear-migrations: ## Reverts all database migrations.
-	@$(call log,Deleting copied migrations...)
-	@rm -rf $(MIGRATIONS_OUT_DIR)
-	@$(call log,Copied migrations deleted.)
 	@$(call log,Reverting all migrations...)
 	@while DATABASE_URL=$(POSTGRES_URL) diesel migration list | grep -q "\\[X\\]"; do \
 		$(call log,Reverting migration...); \
