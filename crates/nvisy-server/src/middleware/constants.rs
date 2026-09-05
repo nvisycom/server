@@ -6,8 +6,10 @@
 /// and prevent denial-of-service attacks via large payloads.
 pub const DEFAULT_MAX_BODY_SIZE: usize = 4 * 1024 * 1024;
 
-/// Maximum file size for uploads: 12MB.
+/// Default server-wide hard cap for a file upload: 500 MiB.
 ///
-/// Used in file upload handlers to enforce file size limits
-/// before accepting file data into memory.
-pub const DEFAULT_MAX_FILE_BODY_SIZE: usize = 12 * 1024 * 1024;
+/// This is the ceiling, not a per-request buffer — uploads stream through the
+/// encrypt/hash readers straight into S3 multipart parts, so raising it costs no
+/// extra memory (one part, ~8 MiB, is in flight at a time). A workspace may set a
+/// lower soft cap via its settings; it can never exceed this.
+pub const DEFAULT_MAX_FILE_BODY_SIZE: usize = 500 * 1024 * 1024;
