@@ -570,9 +570,17 @@ async fn download_file(
 
     let mut conn = pg_client.get_connection().await?;
 
-    // Resolve the file first: the permission a download requires depends on the
-    // file's kind, so that the raw original bytes, the redacted output, and the
-    // engine's audit blobs are each gated separately.
+    // Gate on workspace file access before resolving the file, so a caller who
+    // cannot see files cannot distinguish a missing file from a forbidden one.
+    // Every kind-specific download permission below already requires at least the
+    // role this check does, so it never rejects an otherwise-authorized caller.
+    auth_claims
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewFiles)
+        .await?;
+
+    // The permission a download requires depends on the file's kind, so that the
+    // raw original bytes, the redacted output, and the engine's audit blobs are
+    // each gated separately.
     let file = find_file(&mut conn, workspace.id, path_params.file_id).await?;
 
     let permission = match file.file_kind {
