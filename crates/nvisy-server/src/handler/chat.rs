@@ -53,7 +53,7 @@ async fn create_session(
 ) -> Result<(StatusCode, Json<ChatSession>)> {
     let mut conn = pg_client.get_connection().await?;
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
+        .authorize_workspace(&mut conn, workspace.id, Permission::UseChat)
         .await?;
 
     let session = conn
@@ -86,7 +86,7 @@ async fn list_sessions(
 ) -> Result<(StatusCode, Json<ChatSessionsPage>)> {
     let mut conn = pg_client.get_connection().await?;
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
+        .authorize_workspace(&mut conn, workspace.id, Permission::UseChat)
         .await?;
 
     let page = conn
@@ -116,7 +116,7 @@ async fn list_messages(
 ) -> Result<(StatusCode, Json<Vec<ChatMessage>>)> {
     let mut conn = pg_client.get_connection().await?;
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
+        .authorize_workspace(&mut conn, workspace.id, Permission::UseChat)
         .await?;
 
     // Scope the session to the workspace before reading its messages.
@@ -152,7 +152,7 @@ async fn delete_session(
 ) -> Result<StatusCode> {
     let mut conn = pg_client.get_connection().await?;
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
+        .authorize_workspace(&mut conn, workspace.id, Permission::UseChat)
         .await?;
 
     let deleted = conn
@@ -198,7 +198,7 @@ async fn send_message(
 
     let mut conn = pg_client.get_connection().await?;
     auth_state
-        .authorize_workspace(&mut conn, workspace_id, Permission::ViewWorkspace)
+        .authorize_workspace(&mut conn, workspace_id, Permission::UseChat)
         .await?;
 
     // Scope the session to the workspace before writing to it.

@@ -124,7 +124,7 @@ async fn list_activities(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewActivity)
         .await?;
 
     let actor = resolve_actor(&mut conn, filter_query.actor.as_ref()).await?;
@@ -191,7 +191,7 @@ async fn export_activities(
 
     let mut conn = pg_client.get_connection().await?;
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewActivity)
         .await?;
 
     let window = window_query.resolve()?;

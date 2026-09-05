@@ -32,7 +32,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::detection_audits";
 /// Returns the detection's analysis (the detected findings) for review.
 ///
 /// Fetches and decrypts the engine's `Audit` from the audit bucket. Available
-/// once the detection is complete. Requires `ViewPipelines`.
+/// once the detection is complete. Requires `DownloadAudit`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -58,7 +58,7 @@ async fn get_detection_analysis(
         let mut conn = pg_client.get_connection().await?;
 
         auth_state
-            .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+            .authorize_workspace(&mut conn, workspace.id, Permission::DownloadAudit)
             .await?;
 
         let (detection, _pipeline) =
@@ -93,7 +93,8 @@ fn get_detection_analysis_docs(op: TransformOperation) -> TransformOperation {
 ///
 /// Available only for a detection whose analysis enriched (ran an enricher for a
 /// group); a detection with no enrichment has none — 404. Requires
-/// `ViewPipelines`.
+/// `DownloadOriginalFiles`, since intermediates carry the original document's
+/// content.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -119,7 +120,7 @@ async fn get_detection_intermediates(
         let mut conn = pg_client.get_connection().await?;
 
         auth_state
-            .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+            .authorize_workspace(&mut conn, workspace.id, Permission::DownloadOriginalFiles)
             .await?;
 
         let (detection, _pipeline) =
@@ -158,7 +159,7 @@ fn get_detection_intermediates_docs(op: TransformOperation) -> TransformOperatio
 /// `json` yields a pretty-printed JSON file with the full structure — body,
 /// parts, context, and each entity's provenance chain. `csv` (the default)
 /// yields a zip of `entities.csv`, `provenance.csv`, and `reviews.csv`, which
-/// join on `entity_id`. Requires `ViewPipelines` permission.
+/// join on `entity_id`. Requires `DownloadAudit` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -185,7 +186,7 @@ async fn download_detection_audit(
     let (detection_id, audit_file) = {
         let mut conn = pg_client.get_connection().await?;
         auth_state
-            .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+            .authorize_workspace(&mut conn, workspace.id, Permission::DownloadAudit)
             .await?;
 
         let (detection, _pipeline) =

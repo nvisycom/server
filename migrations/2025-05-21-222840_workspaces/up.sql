@@ -93,11 +93,11 @@ COMMENT ON COLUMN workspaces.deleted_at IS 'Soft-deletion timestamp; NULL means 
 CREATE TYPE WORKSPACE_ROLE AS ENUM (
     'owner',        -- Full workspace ownership and management
     'admin',        -- Can manage members, connections, and settings
-    'member',       -- Can edit content and manage files
-    'guest'         -- Read-only access to workspace content
+    'editor',       -- Can edit content and download original files
+    'reviewer'      -- Can review redacted output and audits, not originals
 );
 
-COMMENT ON TYPE WORKSPACE_ROLE IS 'Access role of a workspace member: owner, admin, member, or guest.';
+COMMENT ON TYPE WORKSPACE_ROLE IS 'Access role of a workspace member: owner, admin, editor, or reviewer.';
 
 -- Workspace members table: an account's membership in a workspace.
 CREATE TABLE workspace_members (
@@ -107,7 +107,7 @@ CREATE TABLE workspace_members (
     PRIMARY KEY (workspace_id, account_id),
 
     -- Role
-    member_role        WORKSPACE_ROLE NOT NULL DEFAULT 'guest',
+    member_role        WORKSPACE_ROLE NOT NULL DEFAULT 'reviewer',
 
     -- Notification preferences
     notify_via_email          BOOLEAN              NOT NULL DEFAULT FALSE,
@@ -185,7 +185,7 @@ CREATE TABLE workspace_invites (
     invitee_email  TEXT            DEFAULT NULL,
     CONSTRAINT workspace_invites_invitee_email_format CHECK (invitee_email IS NULL OR is_valid_email(invitee_email)),
 
-    invited_role   WORKSPACE_ROLE  NOT NULL DEFAULT 'guest',
+    invited_role   WORKSPACE_ROLE  NOT NULL DEFAULT 'reviewer',
 
     invite_token   TEXT            NOT NULL DEFAULT generate_secure_token(32),
     CONSTRAINT workspace_invites_invite_token_not_empty CHECK (trim(invite_token) <> ''),

@@ -46,7 +46,7 @@ async fn list_detection_redactions(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewDetections)
         .await?;
 
     // Confirm the detection exists in this workspace (404 otherwise) before
@@ -114,7 +114,7 @@ async fn get_redaction_review(
         let mut conn = pg_client.get_connection().await?;
 
         auth_state
-            .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+            .authorize_workspace(&mut conn, workspace.id, Permission::DownloadAudit)
             .await?;
 
         let redaction =

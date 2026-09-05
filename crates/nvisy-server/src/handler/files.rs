@@ -570,11 +570,30 @@ async fn download_file(
 
     let mut conn = pg_client.get_connection().await?;
 
+    // Gate on workspace file access before resolving the file, so a caller who
+    // cannot see files cannot distinguish a missing file from a forbidden one.
+    // Every kind-specific download permission below already requires at least the
+    // role this check does, so it never rejects an otherwise-authorized caller.
     auth_claims
-        .authorize_workspace(&mut conn, workspace.id, Permission::DownloadFiles)
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewFiles)
         .await?;
 
+    // The permission a download requires depends on the file's kind, so that the
+    // raw original bytes, the redacted output, and the engine's audit blobs are
+    // each gated separately.
     let file = find_file(&mut conn, workspace.id, path_params.file_id).await?;
+
+    let permission = match file.file_kind {
+        // Intermediates carry the original document's content (OCR layout,
+        // transcript, tokenized text), so they are gated as an original.
+        FileKind::Original | FileKind::Intermediate => Permission::DownloadOriginalFiles,
+        FileKind::Redacted => Permission::DownloadRedactedFiles,
+        FileKind::Audit | FileKind::Review => Permission::DownloadAudit,
+    };
+
+    auth_claims
+        .authorize_workspace(&mut conn, workspace.id, permission)
+        .await?;
 
     let file_key = FileKey::from_str(&file.storage_path).map_err(|err| {
         tracing::error!(
@@ -645,7 +664,12 @@ async fn download_file(
 
 fn download_file_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Download file")
-        .description("Downloads a file by ID. Returns the file content as a binary stream.")
+        .description(
+            "Downloads a file by ID. Returns the file content as a binary stream. The required \
+             permission depends on the file's kind: an original file (or an intermediate, which \
+             carries the original's content) needs DownloadOriginalFiles, a redacted output needs \
+             DownloadRedactedFiles, and an audit blob needs DownloadAudit.",
+        )
         .download_response("The file content.", &["application/octet-stream"])
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
