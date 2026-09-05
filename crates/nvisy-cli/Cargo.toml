@@ -37,11 +37,11 @@ otel = ["tracing-subscriber/env-filter"]
 dotenv = ["dep:dotenvy"]
 
 [dependencies]
-# Internal crates
-nvisy-nats = { workspace = true, features = ["cli"] }
-nvisy-postgres = { workspace = true, features = ["cli"] }
-nvisy-webhook = { workspace = true, features = ["reqwest", "cli"] }
+# Internal crates. Service configs and their clap wiring come through
+# nvisy-server's `cli` feature; the reqwest webhook client is the binary's own
+# choice of `WebhookService` implementation, so nvisy-webhook is a direct dep.
 nvisy-server = { workspace = true, features = ["cli"] }
+nvisy-webhook = { workspace = true, features = ["reqwest", "cli"] }
 
 # Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }

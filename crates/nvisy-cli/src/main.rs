@@ -12,7 +12,7 @@ use nvisy_server::handler::{CustomRoutes, routes};
 use nvisy_server::middleware::*;
 use nvisy_server::service::ServiceState;
 
-use crate::config::{Cli, MiddlewareConfig};
+use crate::config::Cli;
 use crate::server::TRACING_TARGET_SHUTDOWN;
 
 #[tokio::main]
@@ -62,14 +62,11 @@ async fn run() -> anyhow::Result<()> {
 }
 
 /// Creates the router with all middleware layers applied.
-fn create_router(state: ServiceState, middleware: &MiddlewareConfig) -> Router {
-    let api_routes =
-        routes(CustomRoutes::new(), state.clone(), &middleware.upload).with_state(state);
-
-    api_routes
-        .with_open_api(&middleware.openapi)
-        .with_metrics()
-        .with_security(&middleware.cors, &middleware.upload, &Default::default())
-        .with_observability()
-        .with_recovery(&middleware.recovery)
+fn create_router(state: ServiceState, middleware: &MiddlewareArgs) -> Router {
+    // The upload limits are stored on the state; capture them before `with_state`
+    // consumes it, since the middleware runs after the state is erased.
+    let upload = state.upload.clone();
+    routes(CustomRoutes::new(), state.clone())
+        .with_state(state)
+        .with_middleware(middleware, &upload)
 }

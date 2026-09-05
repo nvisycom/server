@@ -6718,8 +6718,6 @@ dependencies = [
  "clap",
  "dotenvy",
  "humantime",
- "nvisy-nats",
- "nvisy-postgres",
  "nvisy-server",
  "nvisy-webhook",
  "serde",

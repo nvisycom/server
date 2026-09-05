@@ -42,23 +42,31 @@ pub type RouterMapFn = fn(ApiRouter<ServiceState>) -> ApiRouter<ServiceState>;
 ///
 /// ```rust
 /// use nvisy_server::handler::CustomRoutes;
+/// use nvisy_server::service::ServiceState;
 ///
-/// let custom = CustomRoutes::new();
+/// let custom = CustomRoutes::<ServiceState>::new();
 /// assert!(custom.is_empty());
 /// ```
-#[derive(Default, Clone)]
-pub struct CustomRoutes {
+/// The type parameter `S` is the application state the custom routes are typed
+/// to — [`ServiceState`] for the first-party binary (the default), or a
+/// downstream state that embeds it. The built-in routes are always assembled
+/// against [`ServiceState`] and merged with these by
+/// [`routes`](crate::handler::routes)
+/// after erasure, so the map-middleware hooks operate on `ServiceState` (the
+/// built-in router), not on `S`.
+#[derive(Clone)]
+pub struct CustomRoutes<S = ServiceState> {
     /// Custom private routes that require authentication.
-    pub private_routes: Option<ApiRouter<ServiceState>>,
+    pub private_routes: Option<ApiRouter<S>>,
     /// Custom public routes that don't require authentication.
-    pub public_routes: Option<ApiRouter<ServiceState>>,
-    /// Function to map private routes before middlewares are applied.
+    pub public_routes: Option<ApiRouter<S>>,
+    /// Function to map the built-in private routes before middlewares are applied.
     pub private_before_middleware: Option<RouterMapFn>,
-    /// Function to map private routes after middlewares are applied.
+    /// Function to map the built-in private routes after middlewares are applied.
     pub private_after_middleware: Option<RouterMapFn>,
-    /// Function to map public routes before middlewares are applied.
+    /// Function to map the built-in public routes before middlewares are applied.
     pub public_before_middleware: Option<RouterMapFn>,
-    /// Function to map public routes after middlewares are applied.
+    /// Function to map the built-in public routes after middlewares are applied.
     pub public_after_middleware: Option<RouterMapFn>,
     /// Flag to disable authentication routes.
     pub disable_authentication: bool,
@@ -67,7 +75,27 @@ pub struct CustomRoutes {
     pub excluded_modules: HashSet<BuiltinModule>,
 }
 
-impl CustomRoutes {
+impl<S> Default for CustomRoutes<S> {
+    /// An empty configuration — no custom routes, hooks, or exclusions. Does not
+    /// require `S: Default` (unlike a derived impl), so it works for any state.
+    fn default() -> Self {
+        Self {
+            private_routes: None,
+            public_routes: None,
+            private_before_middleware: None,
+            private_after_middleware: None,
+            public_before_middleware: None,
+            public_after_middleware: None,
+            disable_authentication: false,
+            excluded_modules: HashSet::new(),
+        }
+    }
+}
+
+impl<S> CustomRoutes<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
     /// Creates a new empty `CustomRoutes` instance.
     #[inline]
     pub fn new() -> Self {
@@ -77,7 +105,7 @@ impl CustomRoutes {
     /// Sets the private routes.
     ///
     /// Private routes will be protected by authentication middleware.
-    pub fn with_private_routes(mut self, routes: ApiRouter<ServiceState>) -> Self {
+    pub fn with_private_routes(mut self, routes: ApiRouter<S>) -> Self {
         self.private_routes = Some(routes);
         self
     }
@@ -85,13 +113,13 @@ impl CustomRoutes {
     /// Sets the public routes.
     ///
     /// Public routes will be accessible without authentication.
-    pub fn with_public_routes(mut self, routes: ApiRouter<ServiceState>) -> Self {
+    pub fn with_public_routes(mut self, routes: ApiRouter<S>) -> Self {
         self.public_routes = Some(routes);
         self
     }
 
     /// Adds custom private routes, merging with existing private routes if any.
-    pub fn add_private_routes(mut self, routes: ApiRouter<ServiceState>) -> Self {
+    pub fn add_private_routes(mut self, routes: ApiRouter<S>) -> Self {
         self.private_routes = match self.private_routes {
             Some(existing) => Some(existing.merge(routes)),
             None => Some(routes),
@@ -100,7 +128,7 @@ impl CustomRoutes {
     }
 
     /// Adds custom public routes, merging with existing public routes if any.
-    pub fn add_public_routes(mut self, routes: ApiRouter<ServiceState>) -> Self {
+    pub fn add_public_routes(mut self, routes: ApiRouter<S>) -> Self {
         match self.public_routes {
             Some(existing) => self.public_routes = Some(existing.merge(routes)),
             None => self.public_routes = Some(routes),
@@ -148,49 +176,56 @@ impl CustomRoutes {
     }
 
     /// Takes the private routes, leaving `None` in their place.
-    pub fn take_private_routes(&mut self) -> Option<ApiRouter<ServiceState>> {
+    pub fn take_private_routes(&mut self) -> Option<ApiRouter<S>> {
         self.private_routes.take()
     }
 
     /// Takes the public routes, leaving `None` in their place.
-    pub fn take_public_routes(&mut self) -> Option<ApiRouter<ServiceState>> {
+    pub fn take_public_routes(&mut self) -> Option<ApiRouter<S>> {
         self.public_routes.take()
     }
 
-    /// Sets a function to map private routes before middlewares are applied.
+    /// Sets a hook to transform the built-in private router before the auth
+    /// layers are applied.
     ///
-    /// This allows you to transform the router before authentication and other middlewares.
+    /// The hook runs on the built-in `ServiceState` router during assembly;
+    /// authentication and the merge of any custom private routes happen after it.
     pub fn with_private_before_middleware(mut self, f: RouterMapFn) -> Self {
         self.private_before_middleware = Some(f);
         self
     }
 
-    /// Sets a function to map private routes after middlewares are applied.
+    /// Sets a hook to transform the built-in private router after the before-hook
+    /// but still before the auth layers and the custom-route merge.
     ///
-    /// This allows you to transform the router after authentication and other middlewares.
+    /// The hook runs on the built-in `ServiceState` router while it is still
+    /// typed to `ServiceState`, so it cannot see custom `S` routes or the auth
+    /// layers.
     pub fn with_private_after_middleware(mut self, f: RouterMapFn) -> Self {
         self.private_after_middleware = Some(f);
         self
     }
 
-    /// Sets a function to map public routes before middlewares are applied.
+    /// Sets a hook to transform the built-in public router (first of the two).
     ///
-    /// This allows you to transform the router before middlewares.
+    /// Runs on the built-in `ServiceState` router during assembly, before custom
+    /// public routes are merged.
     pub fn with_public_before_middleware(mut self, f: RouterMapFn) -> Self {
         self.public_before_middleware = Some(f);
         self
     }
 
-    /// Sets a function to map public routes after middlewares are applied.
+    /// Sets a hook to transform the built-in public router (second of the two).
     ///
-    /// This allows you to transform the router after middlewares.
+    /// Runs on the built-in `ServiceState` router during assembly, before custom
+    /// public routes are merged.
     pub fn with_public_after_middleware(mut self, f: RouterMapFn) -> Self {
         self.public_after_middleware = Some(f);
         self
     }
 
-    /// Applies the before-middleware function to private routes if it exists.
-    /// This applies to ALL private routes (built-in + custom).
+    /// Applies the before-middleware function to the built-in private routes if
+    /// it exists. Downstream custom routes are merged afterwards and untouched.
     pub(crate) fn map_private_before_middleware(
         &self,
         routes: ApiRouter<ServiceState>,
@@ -202,8 +237,8 @@ impl CustomRoutes {
         }
     }
 
-    /// Applies the after-middleware function to private routes if it exists.
-    /// This applies to ALL private routes (built-in + custom).
+    /// Applies the after-middleware function to the built-in private routes if
+    /// it exists. Downstream custom routes are merged afterwards and untouched.
     pub(crate) fn map_private_after_middleware(
         &self,
         routes: ApiRouter<ServiceState>,
@@ -215,8 +250,8 @@ impl CustomRoutes {
         }
     }
 
-    /// Applies the before-middleware function to public routes if it exists.
-    /// This applies to ALL public routes (built-in + custom).
+    /// Applies the before-middleware function to the built-in public routes if
+    /// it exists. Downstream custom routes are merged afterwards and untouched.
     pub(crate) fn map_public_before_middleware(
         &self,
         routes: ApiRouter<ServiceState>,
@@ -228,8 +263,8 @@ impl CustomRoutes {
         }
     }
 
-    /// Applies the after-middleware function to public routes if it exists.
-    /// This applies to ALL public routes (built-in + custom).
+    /// Applies the after-middleware function to the built-in public routes if
+    /// it exists. Downstream custom routes are merged afterwards and untouched.
     pub(crate) fn map_public_after_middleware(
         &self,
         routes: ApiRouter<ServiceState>,

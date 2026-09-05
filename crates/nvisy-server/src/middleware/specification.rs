@@ -93,6 +93,31 @@ pub trait RouterOpenApiExt<S> {
     ///     .with_open_api(&OpenApiConfig::default());
     /// ```
     fn with_open_api(self, config: &OpenApiConfig) -> Router<S>;
+
+    /// Like [`with_open_api`](Self::with_open_api), but layers a caller-supplied
+    /// transform on top of the built-in one.
+    ///
+    /// The built-in document metadata — the server's info block and the tags for
+    /// every built-in route group — is applied first, then `transform` runs, so a
+    /// caller can override the title/contact/license and add its own tags while
+    /// keeping the built-ins. Null-variant collapsing and the served routes are
+    /// identical to [`with_open_api`](Self::with_open_api).
+    ///
+    /// A wrapping binary that contributes its own routes uses this to brand the
+    /// combined document:
+    ///
+    /// ```rust
+    /// # use aide::axum::ApiRouter;
+    /// # use axum::Router;
+    /// # use nvisy_server::middleware::{OpenApiConfig, RouterOpenApiExt};
+    /// let app: Router<()> = ApiRouter::new().with_open_api_using(
+    ///     &OpenApiConfig::default(),
+    ///     |api| api.title("Cloud API").version("1.0"),
+    /// );
+    /// ```
+    fn with_open_api_using<F>(self, config: &OpenApiConfig, transform: F) -> Router<S>
+    where
+        F: FnOnce(TransformOpenApi) -> TransformOpenApi;
 }
 
 impl<S> RouterOpenApiExt<S> for ApiRouter<S>
@@ -100,6 +125,13 @@ where
     S: Clone + Send + Sync + 'static,
 {
     fn with_open_api(self, config: &OpenApiConfig) -> Router<S> {
+        self.with_open_api_using(config, |api| api)
+    }
+
+    fn with_open_api_using<F>(self, config: &OpenApiConfig, transform: F) -> Router<S>
+    where
+        F: FnOnce(TransformOpenApi) -> TransformOpenApi,
+    {
         async fn serve_openapi(Extension(api): Extension<OpenApi>) -> Json<OpenApi> {
             Json(api)
         }
@@ -112,7 +144,9 @@ where
             .route(&config.scalar_ui, scalar.axum_route())
             .route(&config.open_api_json, get(serve_openapi));
 
-        let router = router.finish_api_with(&mut api, api_docs);
+        // Built-in metadata (info + route tags) first, then the caller's
+        // transform, so a downstream can override info and append its own tags.
+        let router = router.finish_api_with(&mut api, |api| transform(api_docs(api)));
         collapse_null_types(&mut api);
         router.layer(Extension(api))
     }
@@ -131,8 +165,11 @@ where
 /// what is actually sent.
 ///
 /// This runs after schema generation because aide accumulates the component
-/// schemas into `api.components` only once the router is finished.
-fn collapse_null_types(api: &mut OpenApi) {
+/// schemas into `api.components` only once the router is finished. It is applied
+/// automatically by [`with_open_api`](RouterOpenApiExt::with_open_api); it is
+/// public so a binary that assembles and serves its own [`OpenApi`] document by
+/// hand can apply the same normalization rather than reimplement it.
+pub fn collapse_null_types(api: &mut OpenApi) {
     let Some(components) = api.components.as_mut() else {
         return;
     };

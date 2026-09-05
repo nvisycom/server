@@ -28,7 +28,13 @@ default = []
 
 # CLI support: derives clap::Args on config structs so the binary can parse them
 # from flags/env directly, keeping the dependency optional for library users.
-cli = ["dep:clap", "dep:humantime", "nvisy-s3/cli"]
+cli = [
+    "dep:clap",
+    "dep:humantime",
+    "nvisy-s3/cli",
+    "nvisy-postgres/cli",
+    "nvisy-nats/cli",
+]
 
 [dependencies]
 # Elide crates. The workspace dep disables default features, so re-enable every
