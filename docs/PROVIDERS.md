@@ -33,8 +33,8 @@ processing context.
 ### Document Upload
 
 Documents can be uploaded directly to the server via multipart HTTP. The server
-stores each document as an encrypted binary object in NATS object storage with
-metadata (type, size, hash, version chain) tracked in PostgreSQL.
+stores each document as an encrypted binary object in the S3-compatible blob
+store with metadata (type, size, hash, version chain) tracked in PostgreSQL.
 
 ## Provider Abstraction
 

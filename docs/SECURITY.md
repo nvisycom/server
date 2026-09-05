@@ -57,6 +57,16 @@ to fail.
 Encrypted credentials are decrypted only when dispatching a job to the runtime.
 They are never exposed through the API.
 
+## Document Encryption at Rest
+
+Document bytes — uploaded files, redacted output, detection audits, and pipeline
+artifacts — are encrypted with the same per-workspace key before they reach
+storage, streamed through XChaCha20-Poly1305 so large files are never buffered
+whole. The S3-compatible blob store therefore only ever holds ciphertext; any
+server-side encryption the backend offers is redundant defense-in-depth. The
+encryption boundary sits above the store, so the choice of backend (RustFS, AWS
+S3, MinIO, R2) never widens the trust surface.
+
 ## Authorization
 
 Access control uses a role-based model with four hierarchical workspace roles:

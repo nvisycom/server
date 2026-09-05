@@ -26,14 +26,6 @@ Policies can extend prebuilt regulation packs (HIPAA, GDPR, PCI-DSS, CCPA)
 with workspace-specific additions. The server tracks policy versions so that
 audit trails reference the exact rules that governed each redaction decision.
 
-### Context Files
-
-Workspaces can upload context files (stored as encrypted JSON in NATS object
-storage) that provide additional input for detection: custom entity
-definitions, domain-specific terminology, and organization-specific patterns.
-These are passed to the runtime alongside the document and policy when a job
-is dispatched.
-
 ### Results and Annotations
 
 After the runtime processes a document, the server stores the detection
@@ -54,7 +46,7 @@ for the audit trail.
 When a redaction job is requested, the server:
 
 1. Decrypts the document and provider credentials
-2. Resolves the workspace's active detection policy and context files
+2. Resolves the workspace's active detection policy
 3. Dispatches the job to the runtime over NATS JetStream
 4. Receives results (annotations, redacted document) from the runtime
 5. Stores the redacted document as a new version and records annotations

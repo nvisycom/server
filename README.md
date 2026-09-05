@@ -43,7 +43,7 @@ credential encryption.
 ## Requirements
 
 - **Rust + Cargo** — 1.95+, Edition 2024
-- **PostgreSQL** 18+ and **NATS** 2.10+ (JetStream) — the dev compose file provides both
+- **PostgreSQL** 18+, **NATS** 2.10+ (JetStream), and an **S3-compatible blob store** (RustFS by default) — the dev compose file provides all three
 
 ## Quick start
 
@@ -54,7 +54,7 @@ server locally:
 make install-all       # Install tools and make scripts executable
 make generate-all      # Generate .env, auth keys, and apply migrations
 
-docker compose -f docker/docker-compose.dev.yml up -d   # Start Postgres + NATS
+docker compose -f docker/docker-compose.dev.yml up -d   # Start Postgres, NATS, RustFS
 make run                                                # Run the server
 ```
 
@@ -67,7 +67,7 @@ configuration.
 
 | Command | What it does |
 | --- | --- |
-| `make run` | Run the server (starts Postgres and NATS first) |
+| `make run` | Run the server (starts Postgres, NATS, and RustFS first) |
 | `make ci` | Run all CI checks locally (check, fmt, clippy, test, docs) |
 | `make fmt` | Fix code formatting (nightly rustfmt) |
 | `make security` | Run security checks (`cargo deny`) |

@@ -32,7 +32,7 @@ pipeline itself:
 - **Credential management:** Encrypted storage of provider credentials using
   workspace-derived keys (HKDF-SHA256 + XChaCha20-Poly1305)
 - **Document storage:** File upload, versioning, annotations, and metadata
-  tracking via NATS object storage and PostgreSQL
+  tracking via an S3-compatible blob store and PostgreSQL
 - **Pipeline orchestration:** Processing workflow definitions, scheduling,
   run history, and artifact tracking
 - **Webhooks:** Event subscription management with HMAC-SHA256 signed

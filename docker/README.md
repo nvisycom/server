@@ -40,7 +40,7 @@ locally:
 
 ```bash
 make generate-all   # .env, keys, migrations
-cargo run --features dotenv --bin nvisy-server
+cargo run --features dotenv --bin nvisy-cli
 ```
 
 The API documentation is available at:
@@ -150,7 +150,7 @@ All services expose health check endpoints:
 | Server     | `/health/`              | HTTP GET |
 | PostgreSQL | `pg_isready`            | CLI      |
 | NATS       | `/healthz` on port 8222 | HTTP GET |
-| RustFS     | `/health` on port 9000  | HTTP GET |
+| RustFS     | `/health/ready` on port 9000 | HTTP GET |
 
 The compose files configure health checks with 5-second intervals. The server
 depends on PostgreSQL, NATS, and RustFS being healthy before it starts accepting

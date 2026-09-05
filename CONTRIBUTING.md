@@ -4,9 +4,10 @@ Thank you for your interest in contributing to Nvisy Server.
 
 ## Requirements
 
-- Rust 1.92+ (nightly for formatting)
+- Rust 1.95+ (nightly for formatting)
 - PostgreSQL 18+
 - NATS 2.10+ (with JetStream)
+- An S3-compatible blob store (RustFS by default; the dev compose file provides it)
 
 ## Setup
 
@@ -55,5 +56,5 @@ cargo install cargo-deny --locked
 
 ## License
 
-By contributing, you agree your contributions will be licensed under the MIT
-License.
+By contributing, you agree your contributions will be licensed under the
+Apache 2.0 License.
