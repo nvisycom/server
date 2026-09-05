@@ -13,13 +13,11 @@
 //! - **Observability**: Comprehensive logging and tracing
 
 mod client_ext;
-pub(crate) mod custom_hooks;
 mod migrate_result;
 mod run_migration;
 mod run_utility;
 
-// Re-export main types for convenience
 pub use client_ext::PgClientMigrationExt;
 pub use migrate_result::{MigrationResult, MigrationStatus};
-pub use run_migration::run_pending_migrations;
-pub use run_utility::{get_migration_status, verify_schema_integrity};
+use run_migration::{run_migrations, run_pending_migrations};
+use run_utility::{get_migration_status, verify_schema_integrity};

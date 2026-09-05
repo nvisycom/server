@@ -4,8 +4,11 @@
 //! to the `PgClient` struct, keeping migration-related functionality separate
 //! from the core database client implementation.
 
+use diesel::migration::MigrationSource;
+use diesel::pg::Pg;
+
 use super::{
-    MigrationResult, MigrationStatus, get_migration_status, run_pending_migrations,
+    MigrationResult, MigrationStatus, get_migration_status, run_migrations, run_pending_migrations,
     verify_schema_integrity,
 };
 use crate::{PgClient, Result};
@@ -31,6 +34,17 @@ pub trait PgClientMigrationExt {
     /// Returns an error if any migration fails to apply or if there are
     /// connectivity issues with the database.
     fn run_pending_migrations(&self) -> impl Future<Output = Result<MigrationResult>>;
+
+    /// Runs all pending migrations from a caller-supplied `source`, through the
+    /// same advisory-locked flow as [`run_pending_migrations`](Self::run_pending_migrations).
+    ///
+    /// A downstream binary uses this for its own `embed_migrations!` set. Apply
+    /// it *after* [`run_pending_migrations`](Self::run_pending_migrations): sources
+    /// are applied in call order and do not interleave, and downstream migrations
+    /// may depend on upstream schema but never the reverse.
+    fn run_migrations<S>(&self, source: S) -> impl Future<Output = Result<MigrationResult>>
+    where
+        S: MigrationSource<Pg> + Send + 'static;
 
     /// Gets the current migration status of the database.
     ///
@@ -63,6 +77,13 @@ pub trait PgClientMigrationExt {
 impl PgClientMigrationExt for PgClient {
     async fn run_pending_migrations(&self) -> Result<MigrationResult> {
         run_pending_migrations(self).await
+    }
+
+    async fn run_migrations<S>(&self, source: S) -> Result<MigrationResult>
+    where
+        S: MigrationSource<Pg> + Send + 'static,
+    {
+        run_migrations(self, source).await
     }
 
     async fn get_migration_status(&self) -> Result<MigrationStatus> {
