@@ -24,14 +24,18 @@ pub enum Permission {
     DeleteWorkspace,
 
     // File permissions
-    /// Can view and download files.
+    /// Can list files and view their metadata.
     ViewFiles,
     /// Can upload new files to the workspace.
     UploadFiles,
     /// Can update file metadata and properties.
     UpdateFiles,
-    /// Can download files from the workspace.
-    DownloadFiles,
+    /// Can download the bytes of original (source) files.
+    DownloadOriginalFiles,
+    /// Can download the bytes of redacted output files.
+    DownloadRedactedFiles,
+    /// Can download detection audit content (analyses and reviews).
+    DownloadAudit,
     /// Can delete files from the workspace.
     DeleteFiles,
 
@@ -44,8 +48,24 @@ pub enum Permission {
     UpdatePipelines,
     /// Can delete pipelines.
     DeletePipelines,
-    /// Can execute pipeline runs.
-    RunPipelines,
+
+    // Detection permissions
+    /// Can view detections and their results (analyses, redactions, audits).
+    ViewDetections,
+    /// Can run detections (analyze a file for findings).
+    RunDetections,
+    /// Can run redactions (apply policies and produce a redacted file).
+    RunRedactions,
+
+    // Reporting permissions
+    /// Can view workspace analytics.
+    ViewAnalytics,
+    /// Can view the workspace activity log.
+    ViewActivity,
+
+    // Chat permissions
+    /// Can use workspace chat sessions.
+    UseChat,
 
     // Member management permissions
     /// Can view workspace members and their roles.
@@ -98,25 +118,32 @@ impl Permission {
     #[must_use]
     pub const fn minimum_required_role(self) -> WorkspaceRole {
         match self {
-            // Guest-level permissions (read-only access)
+            // Reviewer-level permissions (review access, no original files)
             Self::ViewWorkspace
             | Self::ViewFiles
+            | Self::DownloadRedactedFiles
+            | Self::DownloadAudit
             | Self::ViewPipelines
+            | Self::ViewDetections
+            | Self::ViewAnalytics
+            | Self::ViewActivity
             | Self::ViewMembers
             | Self::ViewConnections
             | Self::ViewPolicies
-            | Self::ViewWebhooks => WorkspaceRole::Guest,
+            | Self::ViewWebhooks => WorkspaceRole::Reviewer,
 
-            // Member-level permissions (create and modify own resources)
+            // Editor-level permissions (create and modify own resources)
             Self::UploadFiles
             | Self::UpdateFiles
-            | Self::DownloadFiles
+            | Self::DownloadOriginalFiles
             | Self::DeleteFiles
             | Self::CreatePipelines
             | Self::UpdatePipelines
             | Self::DeletePipelines
-            | Self::RunPipelines
-            | Self::RunConnectionSyncs => WorkspaceRole::Member,
+            | Self::RunDetections
+            | Self::RunRedactions
+            | Self::UseChat
+            | Self::RunConnectionSyncs => WorkspaceRole::Editor,
 
             // Admin-level permissions (manage workspace resources)
             Self::UpdateWorkspace

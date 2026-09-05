@@ -25,16 +25,16 @@ pub enum WorkspaceRole {
     #[serde(rename = "admin")]
     Admin,
 
-    /// Can edit content and manage files, but cannot manage members or workspace settings
-    #[db_rename = "member"]
-    #[serde(rename = "member")]
-    Member,
+    /// Can edit content and download original files, but cannot manage members or workspace settings
+    #[db_rename = "editor"]
+    #[serde(rename = "editor")]
+    Editor,
 
-    /// Read-only access to workspace content
-    #[db_rename = "guest"]
-    #[serde(rename = "guest")]
+    /// Can review redacted output and audits, but cannot download original files
+    #[db_rename = "reviewer"]
+    #[serde(rename = "reviewer")]
     #[default]
-    Guest,
+    Reviewer,
 }
 
 impl WorkspaceRole {
@@ -42,8 +42,8 @@ impl WorkspaceRole {
     #[inline]
     pub const fn hierarchy_level(self) -> u8 {
         match self {
-            WorkspaceRole::Guest => 1,
-            WorkspaceRole::Member => 2,
+            WorkspaceRole::Reviewer => 1,
+            WorkspaceRole::Editor => 2,
             WorkspaceRole::Admin => 3,
             WorkspaceRole::Owner => 4,
         }

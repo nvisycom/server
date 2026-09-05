@@ -34,7 +34,7 @@ async fn get_analytics(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewAnalytics)
         .await?;
 
     let snapshot = conn.snapshot(workspace.id).await?;
@@ -76,7 +76,7 @@ async fn get_detection_timeseries(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewAnalytics)
         .await?;
 
     let points = conn

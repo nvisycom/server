@@ -151,7 +151,7 @@ mod create_invite_tests {
         let actor_id = Uuid::now_v7();
         let request = CreateInvite {
             invitee_email: "invitee@example.com".to_owned(),
-            invited_role: WorkspaceRole::Member,
+            invited_role: WorkspaceRole::Editor,
             expires_in: InviteExpiration::In7Days,
         };
 
@@ -159,7 +159,7 @@ mod create_invite_tests {
 
         assert_eq!(model.workspace_id, workspace_id);
         assert_eq!(model.invitee_email.as_deref(), Some("invitee@example.com"));
-        assert_eq!(model.invited_role, Some(WorkspaceRole::Member));
+        assert_eq!(model.invited_role, Some(WorkspaceRole::Editor));
         assert_eq!(model.created_by, actor_id);
         assert_eq!(model.updated_by, actor_id);
         // The DB default supplies the token; the request never sets one.

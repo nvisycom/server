@@ -48,7 +48,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::detections";
 ///
 /// Returns the detection holding the findings for review. A repeated request with
 /// the same `Idempotency-Key` returns the existing detection instead of analyzing
-/// again. Requires `RunPipelines` permission.
+/// again. Requires `RunDetections` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -72,7 +72,7 @@ async fn create_detection(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::RunPipelines)
+        .authorize_workspace(&mut conn, workspace.id, Permission::RunDetections)
         .await?;
 
     let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
@@ -253,7 +253,7 @@ async fn list_pipeline_detections(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewDetections)
         .await?;
 
     let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
@@ -298,7 +298,7 @@ fn list_pipeline_detections_docs(op: TransformOperation) -> TransformOperation {
 /// Lists all detections across the workspace's pipelines.
 ///
 /// Aggregates detections from every pipeline in the workspace, most recent first,
-/// with optional status and pipeline filters. Requires `ViewPipelines`.
+/// with optional status and pipeline filters. Requires `ViewDetections`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -318,7 +318,7 @@ async fn list_workspace_detections(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewDetections)
         .await?;
 
     let page = conn
@@ -380,7 +380,7 @@ async fn get_detection(
     let mut conn = pg_client.get_connection().await?;
 
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewDetections)
         .await?;
 
     let (detection, pipeline) =
@@ -447,7 +447,7 @@ async fn stream_detection_events(
     let detection_id = path_params.detection_id.as_uuid();
     let mut conn = pg_client.get_connection().await?;
     auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
+        .authorize_workspace(&mut conn, workspace.id, Permission::ViewDetections)
         .await?;
 
     // Subscribe BEFORE reading the current status: core-NATS broadcasts are not
@@ -556,7 +556,7 @@ fn status_event(event: &DetectionStatusEvent) -> Event {
 ///
 /// Applies the pipeline's policies to the detection's stored analysis, stores the
 /// redacted bytes as a new file, and emits a redaction event. Requires
-/// `RunPipelines` permission. A detection can be redacted more than once.
+/// `RunRedactions` permission. A detection can be redacted more than once.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -587,7 +587,7 @@ async fn redact_detection(
         let mut conn = pg_client.get_connection().await?;
 
         auth_state
-            .authorize_workspace(&mut conn, workspace.id, Permission::RunPipelines)
+            .authorize_workspace(&mut conn, workspace.id, Permission::RunRedactions)
             .await?;
 
         let (detection, pipeline) =
