@@ -33,6 +33,7 @@ mod workspaces;
 use std::collections::HashSet;
 
 use aide::axum::ApiRouter;
+use axum::extract::FromRef;
 use axum::http::{Method, Uri};
 use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
@@ -40,7 +41,7 @@ pub use error::{Error, ErrorKind, Result};
 pub use invites::{CreatedInvite, InviteOutcome, create_invite};
 pub use utility::{BuiltinModule, CustomRoutes, RouterMapFn};
 
-use crate::middleware::{UploadConfig, require_authentication, validate_token_middleware};
+use crate::middleware::{require_authentication, validate_token_middleware};
 use crate::service::ServiceState;
 
 /// Tracing target for unmatched-route fallbacks.
@@ -65,12 +66,12 @@ async fn handler(method: Method, uri: Uri) -> Response {
         .into_response()
 }
 
-/// Returns an [`ApiRouter`] with all private routes, minus any excluded module.
+/// Returns an [`ApiRouter`] with all built-in private routes, minus any excluded
+/// module. Downstream routes are merged separately by [`routes`], after this
+/// built-in router is erased to the caller's state type.
 fn private_routes(
-    additional_routes: Option<ApiRouter<ServiceState>>,
     excluded: &HashSet<BuiltinModule>,
     service_state: ServiceState,
-    upload: &UploadConfig,
 ) -> ApiRouter<ServiceState> {
     let mut router = ApiRouter::new();
 
@@ -89,7 +90,7 @@ fn private_routes(
         .merge(connections::routes())
         .merge(chat::routes())
         .merge(connection_syncs::routes())
-        .merge(files::routes(upload.max_file_body_bytes))
+        .merge(files::routes(service_state.upload.max_file_body_bytes))
         .merge(pipelines::routes())
         .merge(detections::routes())
         .merge(detection_audits::routes())
@@ -111,18 +112,13 @@ fn private_routes(
         router = router.merge(webhooks::routes());
     }
 
-    if let Some(additional) = additional_routes {
-        router = router.merge(additional);
-    }
-
     router
 }
 
-/// Returns an [`ApiRouter`] with all public routes, minus any excluded module.
+/// Returns an [`ApiRouter`] with all built-in public routes, minus any excluded
+/// module. Downstream routes are merged separately by [`routes`].
 fn public_routes(
-    additional_routes: Option<ApiRouter<ServiceState>>,
     excluded: &HashSet<BuiltinModule>,
-    _service_state: ServiceState,
     disable_authentication: bool,
 ) -> ApiRouter<ServiceState> {
     let mut router = ApiRouter::new();
@@ -137,46 +133,61 @@ fn public_routes(
     // infrastructure shared by accounts and workspaces, always mounted.
     router = router.merge(avatars::routes());
 
-    if let Some(additional) = additional_routes {
-        router = router.merge(additional);
-    }
-
     router
 }
 
-/// Returns an [`ApiRouter`] with all routes.
-pub fn routes(
-    mut routes: CustomRoutes,
-    state: ServiceState,
-    upload: &UploadConfig,
-) -> ApiRouter<ServiceState> {
-    let require_authentication = from_fn_with_state(state.clone(), require_authentication);
-    let validate_token_middleware = from_fn_with_state(state.clone(), validate_token_middleware);
+/// Returns an [`ApiRouter`] with all routes, over any application state `S` from
+/// which this crate's [`ServiceState`] can be extracted.
+///
+/// Built-in handlers extract their services from [`ServiceState`], so they are
+/// assembled and layered as an `ApiRouter<ServiceState>`, then erased to
+/// `ApiRouter<S>` with [`with_state`](ApiRouter::with_state) once the state is
+/// baked in. A wrapping binary embeds `ServiceState` inside its own `S` (via a
+/// [`FromRef`] impl) and contributes its own `ApiRouter<S>` routes through
+/// [`CustomRoutes`], which are merged after the erasure — so built-in routes and
+/// downstream routes sit side by side under one final state type.
+///
+/// For the common case the binary uses `ServiceState` directly (`S =
+/// ServiceState`), which satisfies the bound via axum's reflexive `FromRef`.
+pub fn routes<S>(mut routes: CustomRoutes<S>, state: S) -> ApiRouter<S>
+where
+    S: Clone + Send + Sync + 'static,
+    ServiceState: FromRef<S>,
+{
+    let service_state = ServiceState::from_ref(&state);
+
+    // Auth middleware extracts from `ServiceState`; the layer captures its own
+    // state, independent of the router's `S`.
+    let require_authentication = from_fn_with_state(service_state.clone(), require_authentication);
+    let validate_token_middleware =
+        from_fn_with_state(service_state.clone(), validate_token_middleware);
 
     let excluded = std::mem::take(&mut routes.excluded_modules);
 
-    // Private routes.
-    let mut private_router = private_routes(
-        routes.private_routes.take(),
-        &excluded,
-        state.clone(),
-        upload,
-    );
+    // Built-in private routes are assembled and their map hooks applied while
+    // still typed to `ServiceState`, then erased to `S` and merged with the
+    // downstream's private routes. The auth `route_layer`s are applied to the
+    // *combined* router, so custom private routes are authenticated too — a
+    // `route_layer` only covers routes already present when it runs.
+    let mut private_router = private_routes(&excluded, service_state.clone());
     private_router = routes.map_private_before_middleware(private_router);
+    private_router = routes.map_private_after_middleware(private_router);
+    let mut private_router: ApiRouter<S> = private_router.with_state(service_state.clone());
+    if let Some(additional) = routes.private_routes.take() {
+        private_router = private_router.merge(additional);
+    }
     private_router = private_router
         .route_layer(require_authentication)
         .route_layer(validate_token_middleware);
-    private_router = routes.map_private_after_middleware(private_router);
 
-    // Public routes.
-    let mut public_router = public_routes(
-        routes.public_routes.take(),
-        &excluded,
-        state,
-        routes.disable_authentication,
-    );
+    // Built-in public routes, same erasure (no auth layers).
+    let mut public_router = public_routes(&excluded, routes.disable_authentication);
     public_router = routes.map_public_before_middleware(public_router);
     public_router = routes.map_public_after_middleware(public_router);
+    let mut public_router: ApiRouter<S> = public_router.with_state(service_state);
+    if let Some(additional) = routes.public_routes.take() {
+        public_router = public_router.merge(additional);
+    }
 
     ApiRouter::new()
         .merge(private_router)
@@ -277,10 +288,7 @@ mod test {
 
     /// Returns a new [`TestServer`] with the default router and state.
     pub async fn create_test_server() -> anyhow::Result<TestServer> {
-        create_test_server_with_router(|state| {
-            routes(CustomRoutes::new(), state, &UploadConfig::default())
-        })
-        .await
+        create_test_server_with_router(|state| routes(CustomRoutes::new(), state)).await
     }
 
     #[tokio::test]
@@ -317,7 +325,6 @@ mod test {
                     .exclude(BuiltinModule::Invites)
                     .add_private_routes(custom.clone()),
                 state,
-                &UploadConfig::default(),
             )
         })
         .await?;
@@ -326,11 +333,45 @@ mod test {
         Ok(())
     }
 
+    #[tokio::test]
+    #[ignore = "requires database and key files"]
+    async fn custom_private_routes_require_authentication() -> anyhow::Result<()> {
+        use aide::axum::routing::get_with;
+
+        use crate::extract::Json;
+        use crate::handler::response::InviteSent;
+
+        // A custom private route mounted via `add_private_routes`. It must be
+        // covered by the auth layers just like the built-in private routes: the
+        // auth `route_layer`s are applied to the merged router, so an
+        // unauthenticated request is rejected before reaching the handler.
+        let custom = ApiRouter::new().api_route(
+            "/custom/private/",
+            get_with(
+                || async { Json(InviteSent::new()) },
+                |op| op.summary("custom private route"),
+            ),
+        );
+
+        let server = create_test_server_with_router(move |state| {
+            routes(
+                CustomRoutes::new().add_private_routes(custom.clone()),
+                state,
+            )
+        })
+        .await?;
+
+        // No Authorization header -> 401, proving the custom route is protected.
+        let response = server.get("/custom/private/").await;
+        response.assert_status_unauthorized();
+        Ok(())
+    }
+
     #[test]
     fn exclude_marks_only_the_named_module() {
         use crate::handler::BuiltinModule;
 
-        let routes = CustomRoutes::new().exclude(BuiltinModule::Invites);
+        let routes = CustomRoutes::<ServiceState>::new().exclude(BuiltinModule::Invites);
         assert!(routes.is_excluded(BuiltinModule::Invites));
         assert!(!routes.is_excluded(BuiltinModule::Tokens));
         assert!(!routes.is_excluded(BuiltinModule::Webhooks));

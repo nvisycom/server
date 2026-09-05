@@ -45,6 +45,7 @@
 //! }
 //! ```
 
+mod args;
 mod authentication;
 mod authorization;
 mod constants;
@@ -55,6 +56,7 @@ mod security;
 mod specification;
 mod sunset;
 
+pub use args::{MiddlewareArgs, RouterMiddlewareExt};
 pub use authentication::{RouterAuthExt, require_authentication, validate_token_middleware};
 pub use authorization::require_admin;
 pub use constants::{DEFAULT_MAX_BODY_SIZE, DEFAULT_MAX_FILE_BODY_SIZE};
@@ -64,5 +66,5 @@ pub use security::{
     CorsConfig, FrameOptions, ReferrerPolicy, RouterSecurityExt, SecurityHeadersConfig,
     UploadConfig,
 };
-pub use specification::{OpenApiConfig, RouterOpenApiExt};
+pub use specification::{OpenApiConfig, RouterOpenApiExt, collapse_null_types};
 pub use sunset::{SunsetConfig, sunset_headers};
