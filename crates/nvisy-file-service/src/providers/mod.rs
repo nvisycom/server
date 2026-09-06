@@ -15,6 +15,7 @@ mod onedrive;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use strum::EnumIter;
 
 use crate::client::FileServiceClient;
 use crate::oauth::{OAuthProvider, OAuthTokens};
@@ -23,7 +24,7 @@ use crate::oauth::{OAuthProvider, OAuthTokens};
 ///
 /// The serialized form (snake_case) is the `provider` tag stored on a connection
 /// and used in the API, so every provider name lives in exactly one place.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, EnumIter)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
@@ -138,5 +139,30 @@ impl FileServiceConfig {
     ) -> Box<dyn FileServiceClient> {
         self.provider
             .connect(http, access_token, self.settings.root.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use strum::IntoEnumIterator;
+
+    use super::*;
+
+    /// The stored `id()` must equal the serde tag, since the two are written to
+    /// different columns of the same connection and are later compared.
+    #[test]
+    fn provider_id_matches_serde_tag() {
+        for provider in Provider::iter() {
+            let tag = serde_json::to_value(provider)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned();
+            assert_eq!(
+                provider.id(),
+                tag,
+                "id() and serde tag disagree for {provider:?}"
+            );
+        }
     }
 }

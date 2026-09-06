@@ -213,7 +213,7 @@ mod test {
     use crate::handler::{CustomRoutes, routes};
     use crate::middleware::UploadConfig;
     use crate::service::{
-        CloudFilesConfig, CryptoConfig, EngineConfig, HealthConfig, S3Config, ServiceState,
+        CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig, S3Config, ServiceState,
         SessionKeysConfig, SyncConfig,
     };
 
@@ -273,7 +273,7 @@ mod test {
             EngineConfig::default(),
             HealthConfig::default(),
             SyncConfig::default(),
-            CloudFilesConfig::default(),
+            FileConnectorsConfig::default(),
             webhook_service,
             UploadConfig::default(),
             s3,

@@ -78,8 +78,11 @@ impl Client for S3Provider {
             .with_region(&creds.region);
 
         if let Some(endpoint) = &creds.endpoint {
+            // Validate the custom endpoint and enable plaintext HTTP only for a
+            // local emulator (e.g. MinIO), never for a remote host.
+            let allow_http = super::endpoint_allow_http(endpoint, Self::ID)?;
             builder = builder.with_endpoint(endpoint);
-            if endpoint.starts_with("http://") {
+            if allow_http {
                 builder = builder.with_allow_http(true);
             }
         }

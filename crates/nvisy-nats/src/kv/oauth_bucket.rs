@@ -1,19 +1,48 @@
 //! The in-flight OAuth authorization-state bucket and its key.
 
 use std::marker::PhantomData;
+use std::str::FromStr;
 use std::time::Duration;
 
-use derive_more::{Display, From, FromStr};
+use derive_more::Display;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use super::core::{KvBucket, KvKey};
 
 /// The CSRF-state key for an in-flight OAuth authorization. The value is the
-/// opaque state token the provider echoes back to the callback; NATS KV keys
-/// allow the URL-safe characters an OAuth state uses.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Display, FromStr, From)]
+/// opaque state token the provider echoes back to the callback.
+///
+/// The provider echoes this back into a callback URL, so it is untrusted on the
+/// way in. [`FromStr`] enforces NATS KV key syntax — non-empty and only the
+/// `-/_=.` and alphanumeric characters KV allows — so a malformed value is
+/// rejected before it reaches the store (a URL-safe OAuth state always passes).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Display)]
 pub struct OAuthStateKey(pub String);
+
+impl FromStr for OAuthStateKey {
+    type Err = InvalidOAuthStateKey;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(InvalidOAuthStateKey);
+        }
+        let valid = s
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'/' | b'_' | b'=' | b'.'));
+        if valid {
+            Ok(Self(s.to_owned()))
+        } else {
+            Err(InvalidOAuthStateKey)
+        }
+    }
+}
+
+/// Returned when a string is not a valid [`OAuthStateKey`] (empty, or containing
+/// characters NATS KV keys disallow).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("invalid OAuth state key")]
+pub struct InvalidOAuthStateKey;
 
 impl KvKey for OAuthStateKey {}
 
@@ -51,8 +80,18 @@ mod tests {
 
     #[test]
     fn oauth_state_key_roundtrip() {
-        let key = OAuthStateKey("abc-123_XYZ".to_owned());
+        // A URL-safe base64 OAuth state (with padding) round-trips.
+        let key = OAuthStateKey("abc-123_XYZ=".to_owned());
         let parsed: OAuthStateKey = key.to_string().parse().unwrap();
         assert_eq!(key, parsed);
+    }
+
+    #[test]
+    fn oauth_state_key_rejects_invalid() {
+        // Empty and characters outside the NATS KV key set are rejected.
+        assert!("".parse::<OAuthStateKey>().is_err());
+        assert!("has space".parse::<OAuthStateKey>().is_err());
+        assert!("bad*char".parse::<OAuthStateKey>().is_err());
+        assert!("newline\n".parse::<OAuthStateKey>().is_err());
     }
 }

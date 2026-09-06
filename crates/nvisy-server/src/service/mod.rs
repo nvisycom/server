@@ -2,12 +2,12 @@
 
 mod avatar;
 mod chat;
-mod cloud_file_service;
 mod connection_config;
 mod crypto;
 mod detection;
 mod engine;
 mod event;
+mod file_connectors;
 mod file_reaper;
 mod health;
 mod infra;
@@ -24,7 +24,7 @@ mod worker;
 use std::sync::Arc;
 
 use nvisy_core::health::HealthCheck;
-use nvisy_file_service::CloudFileService;
+use nvisy_file_service::FileService;
 use nvisy_nats::{NatsClient, NatsConfig};
 pub use nvisy_object_store::client::ExternalObjectStore;
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
@@ -36,7 +36,6 @@ use tokio_util::sync::CancellationToken;
 use crate::middleware::UploadConfig;
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::chat::{ChatService, TurnLocation};
-pub use crate::service::cloud_file_service::{CloudFilesConfig, CloudFilesRedirect};
 pub use crate::service::connection_config::ConnectionConfig;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
@@ -50,6 +49,7 @@ pub use crate::service::event::{
     ConnectionRef, DetectionRef, EventEmitter, EventOrigin, EventOutboxDrainer, FileRef, InviteRef,
     MemberRef, PipelineRef, PolicyRef, WebhookRef, WorkspaceEvent, WorkspaceRef, event_outbox_row,
 };
+pub use crate::service::file_connectors::{FileConnectorsConfig, FileServiceRedirect};
 pub use crate::service::file_reaper::FileReaper;
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::infra::Infra;
@@ -88,21 +88,20 @@ pub struct ServiceState {
     // Shared infrastructure (Postgres, NATS, crypto):
     pub infra: Infra,
 
-    // App-wide shutdown signal: cancelled once on Ctrl+C/SIGTERM so long-lived
-    // handlers (SSE streams) and background workers can wind down promptly.
-    pub shutdown: CancellationToken,
-
-    // External services:
-    pub webhook: WebhookService,
-    pub cloud_files: CloudFileService,
+    // Integrations: external connectors and the sync engine that drives them.
+    pub file_service: FileService,
     /// Frontend URL the cloud file OAuth callback redirects to when done.
-    pub cloud_files_redirect: Option<String>,
+    pub file_service_redirect: FileServiceRedirect,
+    pub connection_sync: ConnectionSyncService,
+    pub webhook: WebhookService,
 
     // Redaction engine:
     pub engine: EngineService,
 
-    // Stateful singletons:
-    pub connection_sync: ConnectionSyncService,
+    // Operational: the app-wide shutdown signal (cancelled once on Ctrl+C/SIGTERM
+    // so long-lived handlers and background workers wind down promptly) and the
+    // cached health snapshot.
+    pub shutdown: CancellationToken,
     pub health_cache: HealthCache,
 
     // Security services:
@@ -126,7 +125,7 @@ impl ServiceState {
         engine_config: EngineConfig,
         health_config: HealthConfig,
         sync_config: SyncConfig,
-        cloud_files_config: CloudFilesConfig,
+        file_connectors_config: FileConnectorsConfig,
         webhook_service: WebhookService,
         upload_config: UploadConfig,
         s3_config: S3Config,
@@ -152,22 +151,22 @@ impl ServiceState {
         // service from the same `Infra` their `FromRef` impls use. The cloud
         // file service (HTTP client + OAuth apps) is built by the crate; the
         // post-auth redirect is a host-side concern kept alongside it.
-        let (cloud_files, cloud_files_redirect) = cloud_files_config.build();
+        let (file_service, file_service_redirect) = file_connectors_config.build()?;
         let connection_sync = ConnectionSyncService::new(
             infra.clone(),
             ExternalObjectStore::new(),
-            cloud_files.clone(),
+            file_service.clone(),
             sync_config,
         );
 
         let service_state = Self {
             infra,
-            shutdown: CancellationToken::new(),
-            webhook: webhook_service,
-            cloud_files,
-            cloud_files_redirect,
-            engine,
+            file_service,
+            file_service_redirect,
             connection_sync,
+            webhook: webhook_service,
+            engine,
+            shutdown: CancellationToken::new(),
             health_cache: HealthCache::new(&health_config, health_checkers),
             password: PasswordService::new(),
             session_keys,
@@ -302,13 +301,16 @@ impl_di_infra!(
     blobs: BlobStore,
 );
 
-// Stored fields (external services + stateful singletons + security):
+// Stored fields, in the struct's domain order (infra, integrations, engine,
+// operational, security, limits):
 impl_di_field!(
     infra: Infra,
-    shutdown: CancellationToken,
+    file_service: FileService,
+    file_service_redirect: FileServiceRedirect,
+    connection_sync: ConnectionSyncService,
     webhook: WebhookService,
     engine: EngineService,
-    connection_sync: ConnectionSyncService,
+    shutdown: CancellationToken,
     health_cache: HealthCache,
     password: PasswordService,
     session_keys: SessionKeys,
@@ -330,20 +332,5 @@ impl_di_compose!(
 impl axum::extract::FromRef<ServiceState> for ExternalObjectStore {
     fn from_ref(_state: &ServiceState) -> Self {
         ExternalObjectStore::new()
-    }
-}
-
-// `CloudFileService` holds the shared HTTP client and OAuth apps, so it is
-// cloned from the stored instance rather than reconstructed.
-impl axum::extract::FromRef<ServiceState> for CloudFileService {
-    fn from_ref(state: &ServiceState) -> Self {
-        state.cloud_files.clone()
-    }
-}
-
-// The OAuth callback's post-auth redirect, cloned from the stored setting.
-impl axum::extract::FromRef<ServiceState> for CloudFilesRedirect {
-    fn from_ref(state: &ServiceState) -> Self {
-        CloudFilesRedirect(state.cloud_files_redirect.clone())
     }
 }

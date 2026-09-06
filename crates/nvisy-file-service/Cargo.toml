@@ -56,6 +56,7 @@ percent-encoding = { workspace = true, features = [] }
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
+strum = { workspace = true, features = ["derive"] }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }

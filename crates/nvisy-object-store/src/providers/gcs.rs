@@ -69,6 +69,9 @@ impl Client for GcsProvider {
         }
 
         if let Some(endpoint) = &creds.endpoint {
+            // Validate the custom endpoint: only http(s), and plaintext http only
+            // for a local emulator (e.g. a fake-gcs server).
+            super::endpoint_allow_http(endpoint, Self::ID)?;
             // `with_base_url` sets a custom service endpoint (e.g. a fake-gcs
             // server); `with_url` instead parses a `gs://bucket/path` object URL,
             // which is not what an endpoint override is.

@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use futures::TryStreamExt;
 use futures::stream::{self, StreamExt};
-use nvisy_file_service::CloudFileService;
+use nvisy_file_service::FileService;
 use nvisy_file_service::oauth::OAuthTokens;
 use nvisy_postgres::model::{
     NewWorkspaceConnectionSync, NewWorkspaceFile, WorkspaceConnection, WorkspaceConnectionSync,
@@ -86,7 +86,7 @@ struct FinishRun {
 pub struct ConnectionSyncService {
     infra: Infra,
     object: ExternalObjectStore,
-    cloud: CloudFileService,
+    cloud: FileService,
     /// Maximum objects imported concurrently within a single sync.
     import_concurrency: usize,
     // Cancellation tokens for transfers running in this process, keyed by run id.
@@ -101,7 +101,7 @@ impl ConnectionSyncService {
     pub fn new(
         infra: Infra,
         object: ExternalObjectStore,
-        cloud: CloudFileService,
+        cloud: FileService,
         config: SyncConfig,
     ) -> Self {
         Self {

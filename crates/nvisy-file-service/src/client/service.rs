@@ -1,6 +1,6 @@
 //! The dependency-injected entry point and the provider-neutral client surface.
 //!
-//! [`CloudFileService`] holds the shared HTTP client and the configured OAuth
+//! [`FileService`] holds the shared HTTP client and the configured OAuth
 //! apps, and turns a stored [`FileServiceConfig`] into a connected provider
 //! client, refreshing the OAuth token when expired. [`FileServiceClient`] is the
 //! provider-neutral surface the sync engine drives (list, stream a file's bytes,
@@ -42,24 +42,30 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// OAuth app credentials, and builds a fresh provider client per request.
 #[derive(Clone)]
 #[must_use = "service does nothing unless you use it"]
-pub struct CloudFileService {
+pub struct FileService {
     http: reqwest::Client,
     apps: OAuthApps,
 }
 
-impl CloudFileService {
-    /// Creates a new [`CloudFileService`] with the given OAuth app credentials.
+impl FileService {
+    /// Creates a new [`FileService`] with the given OAuth app credentials.
     ///
     /// Builds an HTTP client with finite connect and read timeouts so a stalled
     /// provider cannot pin a caller for its whole timeout window; no total
     /// request timeout is set, since transfers are streamed and can run long.
-    pub fn new(apps: OAuthApps) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client cannot be built. Falling back to a
+    /// default client would silently drop the connect and read timeouts and let
+    /// a stalled provider pin a caller indefinitely.
+    pub fn new(apps: OAuthApps) -> Result<Self> {
         let http = reqwest::Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
             .read_timeout(READ_TIMEOUT)
             .build()
-            .unwrap_or_default();
-        Self { http, apps }
+            .map_err(|err| Error::connection("failed to build HTTP client").with_source(err))?;
+        Ok(Self { http, apps })
     }
 
     /// An [`OAuthClient`] for `provider`, resolving its configured app, or an

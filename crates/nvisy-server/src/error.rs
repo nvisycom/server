@@ -186,6 +186,12 @@ impl From<crate::service::CryptoError> for Error {
     }
 }
 
+impl From<nvisy_file_service::Error> for Error {
+    fn from(err: nvisy_file_service::Error) -> Self {
+        Error::external("file-service", err.to_string()).with_source(err)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

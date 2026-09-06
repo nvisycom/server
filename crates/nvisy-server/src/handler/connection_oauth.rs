@@ -25,7 +25,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Redirect;
-use nvisy_file_service::CloudFileService;
+use nvisy_file_service::FileService;
 use nvisy_file_service::providers::{ConnectionSettings, FileServiceConfig, Provider};
 use nvisy_nats::NatsClient;
 use nvisy_nats::kv::{OAuthStateBucket as OAuthStateKvBucket, OAuthStateKey};
@@ -44,7 +44,7 @@ use crate::handler::request::{OAuthCallbackQuery, OAuthStartPathParams, StartClo
 use crate::handler::response::ErrorResponse;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
-    CloudFilesRedirect, ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin,
+    ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin, FileServiceRedirect,
     ServiceState, WorkspaceEvent,
 };
 
@@ -94,7 +94,7 @@ pub struct OAuthStartResponse {
 async fn start_oauth(
     State(pg_client): State<PgClient>,
     State(nats): State<NatsClient>,
-    State(cloud): State<CloudFileService>,
+    State(cloud): State<FileService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<OAuthStartPathParams>,
@@ -151,8 +151,8 @@ async fn oauth_callback(
     State(pg_client): State<PgClient>,
     State(nats): State<NatsClient>,
     State(crypto): State<CryptoService>,
-    State(cloud): State<CloudFileService>,
-    State(redirect): State<CloudFilesRedirect>,
+    State(cloud): State<FileService>,
+    State(redirect): State<FileServiceRedirect>,
     security: SecurityContext,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> Redirect {
@@ -184,7 +184,7 @@ async fn complete_callback(
     pg_client: &PgClient,
     nats: &NatsClient,
     crypto: &CryptoService,
-    cloud: &CloudFileService,
+    cloud: &FileService,
     security: &SecurityContext,
     query: OAuthCallbackQuery,
 ) -> Result<Uuid> {

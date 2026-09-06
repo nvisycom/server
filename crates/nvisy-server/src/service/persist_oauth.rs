@@ -26,7 +26,12 @@ pub async fn persist_refreshed_tokens(
 ) -> Result<()> {
     let crypto = crypto.clone();
     conn.transaction(async move |conn| {
-        let Some(current) = conn.find_workspace_connection_by_id(connection_id).await? else {
+        // Lock the row for the transaction so a concurrent config replace cannot
+        // overwrite this token update from a stale read, and vice versa.
+        let Some(current) = conn
+            .find_workspace_connection_by_id_for_update(connection_id)
+            .await?
+        else {
             return Ok(());
         };
         let mut config: ConnectionConfig =

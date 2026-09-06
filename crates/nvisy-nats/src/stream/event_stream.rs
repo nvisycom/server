@@ -1,4 +1,4 @@
-//! Event stream configuration for NATS JetStream.
+//! The concrete event-stream markers, each pinning an [`EventStream`]'s config.
 
 use std::marker::PhantomData;
 use std::time::Duration;
@@ -6,41 +6,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-/// Marker trait for event streams.
-///
-/// Defines the configuration for a NATS JetStream stream, including the single
-/// payload type it carries. A stream is a pure type-level tag — all of its
-/// configuration lives in an associated type and consts — so it is never
-/// instantiated and carries no value bounds.
-pub trait EventStream: 'static {
-    /// The payload type published to and consumed from this stream.
-    type Message: Serialize + DeserializeOwned + Send + Sync + 'static;
-
-    /// Stream name used in NATS JetStream.
-    const NAME: &'static str;
-
-    /// Subject pattern for publishing/subscribing to this stream.
-    const SUBJECT: &'static str;
-
-    /// Maximum age for messages in this stream.
-    /// Returns `None` for streams where messages should not expire.
-    const MAX_AGE: Option<Duration>;
-
-    /// Default consumer name for this stream.
-    const CONSUMER_NAME: &'static str;
-
-    /// How long the server waits for an ack before redelivering a message.
-    /// `None` uses the JetStream default (30s). Set this above the longest
-    /// expected processing time so a slow-but-healthy job is not redelivered
-    /// and run a second time concurrently.
-    const ACK_WAIT: Option<Duration> = None;
-
-    /// Maximum number of delivery attempts before the server stops redelivering a
-    /// message. `None` means unlimited (redeliver until the message ages out).
-    /// Set this to bound retries for consumers that nack on failure, so a
-    /// permanently-failing message is not redelivered indefinitely.
-    const MAX_DELIVER: Option<i64> = None;
-}
+use super::core::EventStream;
 
 /// Stream for webhook delivery.
 ///

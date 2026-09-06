@@ -74,10 +74,11 @@ impl Client for AzureProvider {
         }
 
         if let Some(endpoint) = &creds.endpoint {
+            // Validate the custom endpoint and enable plaintext HTTP only for a
+            // local emulator (Azurite), never for a remote host.
+            let allow_http = super::endpoint_allow_http(endpoint, Self::ID)?;
             builder = builder.with_endpoint(endpoint.clone());
-            // Local emulators (Azurite) serve plain HTTP, which object_store
-            // rejects unless explicitly allowed, matching the S3 provider.
-            if endpoint.starts_with("http://") {
+            if allow_http {
                 builder = builder.with_allow_http(true);
             }
         }

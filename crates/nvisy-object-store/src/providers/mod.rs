@@ -84,6 +84,62 @@ impl StorageConfig {
     }
 }
 
+/// Validates a caller-supplied custom endpoint and reports whether plaintext
+/// HTTP is permitted for it.
+///
+/// Custom endpoints are attacker-influenced (a workspace member with connection
+/// management sets them), and provider builders send authenticated requests to
+/// whatever host is given. To bound the SSRF/credential-leak surface:
+///
+/// - only `http`/`https` schemes are accepted;
+/// - plaintext `http` is allowed only for loopback hosts (local emulators such
+///   as Azurite, MinIO, or a fake GCS server), never for a remote host, so
+///   credentials are not sent unencrypted over the network.
+///
+/// Returns `Ok(true)` when the provider builder should enable HTTP (loopback
+/// `http`), `Ok(false)` for `https`, and an error for anything else.
+fn endpoint_allow_http(endpoint: &str, label: &str) -> Result<bool, Error> {
+    let reject = |msg: &str| Error::connection(format!("{msg}: {endpoint}"), label);
+
+    let (scheme, rest) = endpoint
+        .split_once("://")
+        .ok_or_else(|| reject("endpoint must be an http(s) URL"))?;
+
+    match scheme {
+        "https" => Ok(false),
+        "http" => {
+            let host = rest
+                .split(['/', '?', '#'])
+                .next()
+                .unwrap_or(rest)
+                .rsplit_once('@')
+                .map_or(rest, |(_creds, hostport)| hostport);
+            // Strip the optional port; keep IPv6 literals (`[::1]:80`) intact.
+            let host = match host.strip_prefix('[') {
+                Some(after) => after.split_once(']').map_or(host, |(h, _)| h),
+                None => host.split_once(':').map_or(host, |(h, _)| h),
+            };
+            if is_loopback_host(host) {
+                Ok(true)
+            } else {
+                Err(reject(
+                    "plaintext http endpoints are only allowed for loopback hosts",
+                ))
+            }
+        }
+        _ => Err(reject("endpoint scheme must be http or https")),
+    }
+}
+
+/// Whether `host` names the local loopback interface (a local emulator).
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host == "::1"
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
 /// Scopes a client's keys under `root_path` when one is set, so callers address
 /// objects relative to it.
 fn with_root_path(client: ObjectStoreClient, root_path: Option<&str>) -> ObjectStoreClient {
@@ -147,7 +203,41 @@ fn redact(value: Option<&str>) -> &'static str {
 mod tests {
     use serde_json::json;
 
-    use super::{StorageConfig, connect};
+    use super::{StorageConfig, connect, endpoint_allow_http};
+
+    #[test]
+    fn endpoint_https_disallows_http() {
+        assert!(!endpoint_allow_http("https://s3.example.com", "s3").unwrap());
+    }
+
+    #[test]
+    fn endpoint_http_allowed_only_for_loopback() {
+        for ep in [
+            "http://localhost:9000",
+            "http://127.0.0.1:10000/devstoreaccount1",
+            "http://[::1]:4443",
+        ] {
+            assert!(endpoint_allow_http(ep, "s3").unwrap(), "{ep}");
+        }
+    }
+
+    #[test]
+    fn endpoint_http_rejected_for_remote() {
+        for ep in [
+            "http://s3.example.com",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://evil.internal:9000",
+        ] {
+            assert!(endpoint_allow_http(ep, "s3").is_err(), "{ep}");
+        }
+    }
+
+    #[test]
+    fn endpoint_rejects_bad_scheme() {
+        assert!(endpoint_allow_http("ftp://host/x", "s3").is_err());
+        assert!(endpoint_allow_http("s3.example.com", "s3").is_err());
+        assert!(endpoint_allow_http("file:///etc/passwd", "s3").is_err());
+    }
 
     #[tokio::test]
     async fn deserializes_provider_tagged_config() {

@@ -41,6 +41,17 @@ pub trait WorkspaceConnectionRepository {
         connection_id: Uuid,
     ) -> impl Future<Output = Result<Option<WorkspaceConnection>>> + Send;
 
+    /// Finds a connection by id and takes a row lock (`SELECT ... FOR UPDATE`)
+    /// for the current transaction.
+    ///
+    /// Use this on the read of any read-modify-write of `encrypted_data` (token
+    /// refresh, config replace) so concurrent writers serialize and neither
+    /// overwrites the other from a stale snapshot. Must run inside a transaction.
+    fn find_workspace_connection_by_id_for_update(
+        &mut self,
+        connection_id: Uuid,
+    ) -> impl Future<Output = Result<Option<WorkspaceConnection>>> + Send;
+
     /// Finds a connection by ID within a specific workspace.
     ///
     /// Provides workspace-scoped access control at the database level.
@@ -161,6 +172,25 @@ impl WorkspaceConnectionRepository for PgConnection {
             .filter(dsl::id.eq(connection_id))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceConnection::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)?;
+
+        Ok(connection)
+    }
+
+    async fn find_workspace_connection_by_id_for_update(
+        &mut self,
+        connection_id: Uuid,
+    ) -> Result<Option<WorkspaceConnection>> {
+        use schema::workspace_connections::{self, dsl};
+
+        let connection = workspace_connections::table
+            .filter(dsl::id.eq(connection_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspaceConnection::as_select())
+            .for_update()
             .first(self)
             .await
             .optional()

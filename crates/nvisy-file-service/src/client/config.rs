@@ -2,9 +2,9 @@
 //!
 //! One [`clap::Args`]-derived struct per provider (behind the `cli` feature),
 //! mirroring how `NatsConfig` and `PgConfig` are configured. [`OAuthAppsConfig`]
-//! resolves these into an [`OAuthApps`] and a [`CloudFileService`].
+//! resolves these into an [`OAuthApps`] and a [`FileService`].
 
-use super::{CloudFileService, OAuthApps};
+use super::{FileService, OAuthApps};
 use crate::oauth::OAuthApp;
 
 /// One provider's OAuth app credentials.
@@ -116,8 +116,13 @@ impl OAuthAppsConfig {
         }
     }
 
-    /// Builds a [`CloudFileService`] from this configuration.
-    pub fn build(self) -> CloudFileService {
-        CloudFileService::new(self.into_apps())
+    /// Builds a [`FileService`] from this configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client cannot be built (see
+    /// [`FileService::new`]).
+    pub fn build(self) -> crate::Result<FileService> {
+        FileService::new(self.into_apps())
     }
 }

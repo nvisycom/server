@@ -31,6 +31,12 @@ pub use service::ExternalObjectStore;
 /// concurrent requests during a streaming [`put_multipart`](ObjectStoreClient::put_multipart).
 const MULTIPART_MAX_CONCURRENCY: usize = 8;
 
+/// Size each streamed chunk is split into before upload, so backpressure is
+/// applied per part. Matches `WriteMultipart`'s internal 5 MiB part size (also
+/// the S3 minimum part size), so no part is further subdivided past the capacity
+/// check.
+const MULTIPART_PART_SIZE: usize = 5 * 1024 * 1024;
+
 /// Parses a caller-supplied key into an object-store [`Path`], surfacing a
 /// malformed key as an error rather than silently normalizing it.
 fn parse_key(key: &str) -> Result<Path, Error> {
@@ -244,21 +250,26 @@ impl ObjectStoreClient {
         let mut writer = WriteMultipart::new(upload);
 
         while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(bytes) => {
-                    // Bound in-flight part uploads so a large body cannot spawn
-                    // an unbounded number of concurrent requests.
-                    if let Err(e) = writer.wait_for_capacity(MULTIPART_MAX_CONCURRENCY).await {
-                        let _ = writer.abort().await;
-                        return Err(Error::from(e));
-                    }
-                    writer.put(bytes);
-                }
+            let mut bytes = match chunk {
+                Ok(bytes) => bytes,
                 Err(e) => {
                     // Abort so the backend does not retain orphaned parts.
                     let _ = writer.abort().await;
                     return Err(e);
                 }
+            };
+
+            // A single stream item can be arbitrarily large, and `put` splits it
+            // into part-sized uploads internally. Split it here and wait for
+            // capacity before *each* part, so one big item cannot exceed the
+            // in-flight bound (a single check per item could not).
+            while !bytes.is_empty() {
+                let part = bytes.split_to(bytes.len().min(MULTIPART_PART_SIZE));
+                if let Err(e) = writer.wait_for_capacity(MULTIPART_MAX_CONCURRENCY).await {
+                    let _ = writer.abort().await;
+                    return Err(Error::from(e));
+                }
+                writer.put(part);
             }
         }
 
@@ -304,6 +315,33 @@ mod tests {
     async fn verify_reachable() {
         let client = test_client();
         client.verify_reachable().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn put_multipart_single_item_larger_than_concurrency() {
+        // One stream item bigger than MAX_CONCURRENCY parts: the per-part
+        // capacity wait must split and bound it rather than spawn every part at
+        // once. Correctness check: the reassembled object matches the input.
+        let client = test_client();
+        let size = MULTIPART_PART_SIZE * (MULTIPART_MAX_CONCURRENCY + 3) + 123;
+        let data = Bytes::from(vec![7u8; size]);
+        let stream = futures::stream::once({
+            let data = data.clone();
+            async move { Ok(data) }
+        });
+
+        client
+            .put_multipart(
+                "big.bin",
+                Some("application/octet-stream"),
+                Box::pin(stream),
+            )
+            .await
+            .unwrap();
+
+        let result = client.get("big.bin").await.unwrap();
+        assert_eq!(result.data.len(), size);
+        assert_eq!(result.data, data);
     }
 
     #[tokio::test]

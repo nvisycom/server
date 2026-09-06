@@ -1,6 +1,6 @@
 //! The client layer: the DI entry point, its config, and the connected client.
 //!
-//! [`CloudFileService`] is the entry point and dependency-injected service;
+//! [`FileService`] is the entry point and dependency-injected service;
 //! [`FileServiceClient`] is the provider-neutral surface the sync engine drives.
 
 mod apps;
@@ -13,4 +13,4 @@ pub use self::config::{
     BoxConfig, DropboxConfig, GoogleDriveConfig, OAuthAppsConfig, OneDriveConfig,
 };
 pub use self::connected::ConnectedFileService;
-pub use self::service::{ByteStream, CloudFileService, FileEntry, FileServiceClient};
+pub use self::service::{ByteStream, FileEntry, FileService, FileServiceClient};

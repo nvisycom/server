@@ -13,7 +13,10 @@ use crate::error::Result;
 use crate::oauth::OAuthProvider;
 
 /// Provider identifier stored in the connection's `provider` column.
-pub const PROVIDER_ID: &str = "onedrive";
+///
+/// Must match `Provider::OneDrive`'s serde tag (`one_drive`) so the stored
+/// provider column and the serialized config agree.
+pub const PROVIDER_ID: &str = "one_drive";
 
 /// Microsoft identity platform authorize endpoint (multi-tenant + personal).
 const AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";

@@ -15,12 +15,12 @@
 //! ```
 
 mod core;
-mod generic_store;
 mod oauth_bucket;
 mod scheduler_bucket;
+mod typed_store;
 
 pub use core::{KvBucket, KvKey};
 
-pub use generic_store::{KvEntry, KvStore, KvValue};
 pub use oauth_bucket::{OAuthStateBucket, OAuthStateKey};
 pub use scheduler_bucket::{SchedulerLockKey, SchedulerLocksBucket};
+pub use typed_store::{KvEntry, KvStore, KvValue};

@@ -19,7 +19,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_file_service::CloudFileService;
+use nvisy_file_service::FileService;
 use nvisy_inference::Error as InferenceError;
 use nvisy_postgres::model::{
     NewWorkspaceConnection, NewWorkspaceConnectionSchedule, UpdateWorkspaceConnection,
@@ -396,6 +396,17 @@ async fn update_connection(
         .unwrap_or_else(|| existing.display_name.clone());
     let sync = request.sync;
     conn.transaction(async |conn| {
+        // Lock the row first so this update serializes against a concurrent
+        // token refresh (persist_refreshed_tokens), preventing a lost update to
+        // `encrypted_data`. A row deleted since the pre-transaction read is
+        // treated as gone.
+        if conn
+            .find_workspace_connection_by_id_for_update(connection_id)
+            .await?
+            .is_none()
+        {
+            return Err(ErrorKind::NotFound.with_message("Connection not found"));
+        }
         conn.update_workspace_connection(connection_id, update_data)
             .await?;
         if let Some(sync) = sync {
@@ -534,7 +545,7 @@ async fn verify_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(object): State<ExternalObjectStore>,
-    State(cloud): State<CloudFileService>,
+    State(cloud): State<FileService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionPathParams>,
