@@ -12,7 +12,7 @@
 
 use serde::Deserialize;
 
-use super::http::response_stream;
+use super::response_stream;
 use crate::client::{ByteStream, FileEntry, FileServiceClient};
 use crate::error::Result;
 use crate::oauth::OAuthProvider;

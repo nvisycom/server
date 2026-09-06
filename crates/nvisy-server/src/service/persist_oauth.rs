@@ -36,7 +36,7 @@ pub async fn persist_refreshed_tokens(
         };
         let mut config: ConnectionConfig =
             crypto.decrypt_json(workspace_id, &current.encrypted_data)?;
-        let ConnectionConfig::CloudFiles(cloud) = &mut config else {
+        let ConnectionConfig::FileService(cloud) = &mut config else {
             return Ok(());
         };
         cloud.set_tokens(new_tokens);

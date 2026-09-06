@@ -1,7 +1,7 @@
 //! The result of connecting a cloud file-service config.
 
 use super::FileServiceClient;
-use crate::providers::FileServiceConfig;
+use crate::provider::FileServiceConfig;
 
 /// A connected client plus, when a refresh happened, the updated config the
 /// caller must persist back to the connection.

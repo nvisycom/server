@@ -552,16 +552,19 @@ async fn verify_connection(
 ) -> Result<(StatusCode, Json<ConnectionVerification>)> {
     tracing::debug!(target: TRACING_TARGET, "Verifying workspace connection");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
-        .await?;
-
-    let connection = find_connection(&mut conn, workspace.id, path_params.connection_id)
-        .await?
-        .0
-        .item;
+    // Do the DB work up front, then release the connection before the provider
+    // I/O below. `connect`/`verify` reach external services with no total
+    // timeout, so holding a pooled connection across them could exhaust the pool.
+    let connection = {
+        let mut conn = pg_client.get_connection().await?;
+        auth_state
+            .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
+            .await?;
+        find_connection(&mut conn, workspace.id, path_params.connection_id)
+            .await?
+            .0
+            .item
+    };
 
     let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
 
@@ -586,11 +589,14 @@ async fn verify_connection(
                 ConnectionVerification::unreachable(err.kind().reason())
             }
         },
-        ConnectionConfig::CloudFiles(config) => match cloud.connect(&config).await {
+        ConnectionConfig::FileService(config) => match cloud.connect(&config).await {
             Ok(connected) => {
                 // A refresh during verification produces fresh tokens; persist
-                // them so the renewed credentials are not thrown away.
+                // them so the renewed credentials are not thrown away. Acquire a
+                // connection only for this write and release it before the
+                // provider `verify` I/O below.
                 if let Some(refreshed) = connected.refreshed {
+                    let mut conn = pg_client.get_connection().await?;
                     persist_refreshed_tokens(
                         &mut conn,
                         &crypto,

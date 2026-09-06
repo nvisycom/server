@@ -130,7 +130,7 @@ impl ConnectionSyncService {
                 let client = self.object.connect(config).await?;
                 Ok(Arc::new(ObjectStoreSource(client)))
             }
-            ConnectionConfig::CloudFiles(config) => {
+            ConnectionConfig::FileService(config) => {
                 let connected = self.cloud.connect(config).await?;
                 if let Some(refreshed) = connected.refreshed {
                     self.persist_refreshed_tokens(connection, refreshed.tokens().clone())

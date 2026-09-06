@@ -50,7 +50,7 @@ COMMENT ON TYPE SYNC_DELETION_POLICY IS 'How an import reconciles files whose so
 CREATE TYPE PROVIDER_TYPE AS ENUM (
     'object_store',     -- External object storage (s3, azure, gcs)
     'language_model',   -- LLM inference (openai, ollama, anthropic)
-    'cloud_files'       -- External cloud file service (google_drive)
+    'file_service'      -- External file service (google_drive, dropbox, ...)
 );
 
 COMMENT ON TYPE PROVIDER_TYPE IS 'Capability category of a connection provider (object store, language model, ...).';
@@ -133,8 +133,8 @@ COMMENT ON COLUMN workspace_connections.id IS 'Unique connection identifier';
 COMMENT ON COLUMN workspace_connections.workspace_id IS 'Workspace this connection belongs to';
 COMMENT ON COLUMN workspace_connections.account_id IS 'Account that created the connection';
 COMMENT ON COLUMN workspace_connections.display_name IS 'Human-readable connection display name (1-255 chars)';
-COMMENT ON COLUMN workspace_connections.provider IS 'Concrete provider identifier (e.g. s3, azure, gcs, openai, ollama, anthropic)';
-COMMENT ON COLUMN workspace_connections.provider_type IS 'Capability category of the provider (object_store, language_model, cloud_files)';
+COMMENT ON COLUMN workspace_connections.provider IS 'Concrete provider identifier (e.g. s3, azure, gcs, openai, ollama, anthropic, google_drive, dropbox)';
+COMMENT ON COLUMN workspace_connections.provider_type IS 'Capability category of the provider (object_store, language_model, file_service)';
 COMMENT ON COLUMN workspace_connections.encrypted_data IS 'XChaCha20-Poly1305 encrypted JSON: provider config + credentials';
 COMMENT ON COLUMN workspace_connections.is_active IS 'Whether the connection is enabled';
 COMMENT ON COLUMN workspace_connections.metadata IS 'Non-encrypted metadata for filtering/display';

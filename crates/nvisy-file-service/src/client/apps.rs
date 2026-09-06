@@ -1,7 +1,7 @@
 //! The configured OAuth apps, keyed by provider.
 
 use crate::oauth::OAuthApp;
-use crate::providers::Provider;
+use crate::provider::Provider;
 
 /// The OAuth application credentials for each supported provider, supplied by the
 /// host's configuration. A provider with no configured app cannot be connected.

@@ -31,6 +31,7 @@ where
 
     const ACK_WAIT: Option<Duration> = Some(Duration::from_secs(90));
     const CONSUMER_NAME: &'static str = "webhook-worker";
+    const DESCRIPTION: &'static str = "Webhook delivery jobs";
     const MAX_AGE: Option<Duration> = Some(Duration::from_secs(24 * 60 * 60));
     const MAX_DELIVER: Option<i64> = Some(3);
     const NAME: &'static str = "WEBHOOKS";
@@ -61,6 +62,7 @@ where
     // exceed that so a slow-but-healthy job is not redelivered mid-run.
     const ACK_WAIT: Option<Duration> = Some(Duration::from_secs(35 * 60));
     const CONSUMER_NAME: &'static str = "connection-sync-worker";
+    const DESCRIPTION: &'static str = "Connection sync jobs";
     const MAX_AGE: Option<Duration> = Some(Duration::from_secs(60 * 60));
     const NAME: &'static str = "CONNECTION_SYNCS";
     const SUBJECT: &'static str = "connection.sync.jobs";
@@ -91,6 +93,7 @@ where
     // expected analyze so a slow-but-healthy job is not redelivered mid-run.
     const ACK_WAIT: Option<Duration> = Some(Duration::from_secs(15 * 60));
     const CONSUMER_NAME: &'static str = "detection-worker";
+    const DESCRIPTION: &'static str = "Pipeline detection jobs";
     const MAX_AGE: Option<Duration> = Some(Duration::from_secs(60 * 60));
     const NAME: &'static str = "DETECTIONS";
     const SUBJECT: &'static str = "pipeline.detection.jobs";

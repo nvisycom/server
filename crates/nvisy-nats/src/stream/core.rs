@@ -22,6 +22,10 @@ pub trait EventStream: 'static {
     /// Stream name used in NATS JetStream.
     const NAME: &'static str;
 
+    /// Human-readable description recorded on the stream, shown to operators
+    /// (e.g. in `nats stream info`).
+    const DESCRIPTION: &'static str;
+
     /// Subject pattern for publishing/subscribing to this stream.
     const SUBJECT: &'static str;
 
@@ -50,6 +54,18 @@ pub trait EventStream: 'static {
 /// which runs first.
 const DEFAULT_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// The subjects `S` binds: the exact [`SUBJECT`](EventStream::SUBJECT) that
+/// [`publish`](super::EventPublisher::publish) uses, plus the `SUBJECT.>`
+/// wildcard for the sub-subjects [`publish_to`](super::EventPublisher::publish_to)
+/// appends. The stream and the consumer filter must both cover these, or a
+/// published message the stream does not capture never gets a JetStream ack.
+///
+/// `SUBJECT.>` alone would not match a bare `publish` (the `>` requires a token
+/// after the dot), so the exact subject is listed too.
+pub(super) fn subjects<S: EventStream>() -> Vec<String> {
+    vec![S::SUBJECT.to_string(), format!("{}.>", S::SUBJECT)]
+}
+
 /// Ensures the stream backing `S` exists, creating it with `S`'s retention if
 /// not. Idempotent: an existing stream is left as-is.
 pub(super) async fn ensure_stream<S: EventStream>(jetstream: &Context) -> Result<()> {
@@ -68,8 +84,8 @@ pub(super) async fn ensure_stream<S: EventStream>(jetstream: &Context) -> Result
     jetstream
         .create_stream(stream::Config {
             name: S::NAME.to_string(),
-            description: Some(format!("Type-safe stream: {}", S::NAME)),
-            subjects: vec![format!("{}.>", S::NAME)],
+            description: Some(S::DESCRIPTION.to_string()),
+            subjects: subjects::<S>(),
             max_age,
             ..Default::default()
         })

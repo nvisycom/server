@@ -1,6 +1,6 @@
 //! Connection request types.
 
-use nvisy_file_service::providers::Provider;
+use nvisy_file_service::provider::Provider;
 use nvisy_postgres::types::{ConnectionId, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -84,7 +84,7 @@ pub struct OAuthStartPathParams {
 /// Request payload for starting a cloud file-service OAuth authorization.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct StartCloudFilesOAuth {
+pub struct StartFileServiceOAuth {
     /// Human-readable name for the connection to be created on success.
     #[validate(length(min = 1, max = 255), custom(function = "validate_non_blank"))]
     pub display_name: String,

@@ -5,7 +5,7 @@
 pub mod client;
 mod error;
 pub mod oauth;
-pub mod providers;
+pub mod provider;
 
 pub use client::{ConnectedFileService, FileService, OAuthApps};
 pub use error::{Error, ErrorKind, Result};

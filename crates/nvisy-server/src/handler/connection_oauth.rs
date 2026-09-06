@@ -20,13 +20,14 @@
 use std::str::FromStr;
 
 use aide::axum::ApiRouter;
-use aide::axum::routing::{get_with, post_with};
+use aide::axum::routing::post_with;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Redirect;
+use axum::routing::get;
 use nvisy_file_service::FileService;
-use nvisy_file_service::providers::{ConnectionSettings, FileServiceConfig, Provider};
+use nvisy_file_service::provider::{ConnectionSettings, FileServiceConfig, Provider};
 use nvisy_nats::NatsClient;
 use nvisy_nats::kv::{OAuthStateBucket as OAuthStateKvBucket, OAuthStateKey};
 use nvisy_postgres::model::{NewWorkspaceConnection, NewWorkspaceConnectionSchedule};
@@ -40,7 +41,7 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, Query, SecurityContext, ValidateJson,
     WorkspaceContext,
 };
-use crate::handler::request::{OAuthCallbackQuery, OAuthStartPathParams, StartCloudFilesOAuth};
+use crate::handler::request::{OAuthCallbackQuery, OAuthStartPathParams, StartFileServiceOAuth};
 use crate::handler::response::ErrorResponse;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
@@ -98,7 +99,7 @@ async fn start_oauth(
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<OAuthStartPathParams>,
-    ValidateJson(request): ValidateJson<StartCloudFilesOAuth>,
+    ValidateJson(request): ValidateJson<StartFileServiceOAuth>,
 ) -> Result<(StatusCode, Json<OAuthStartResponse>)> {
     tracing::debug!(target: TRACING_TARGET, "Starting cloud file OAuth");
 
@@ -223,7 +224,7 @@ async fn complete_callback(
         tokens,
         root: flow.root,
     };
-    let config = ConnectionConfig::CloudFiles(FileServiceConfig::new(flow.provider, settings));
+    let config = ConnectionConfig::FileService(FileServiceConfig::new(flow.provider, settings));
     let provider = config.provider_id().to_owned();
     let provider_type = config.provider_type();
     let encrypted_data = crypto.encrypt_json(flow.workspace_id, &config)?;
@@ -287,16 +288,6 @@ fn redirect_to_frontend(base: Option<&str>, status: &str) -> Redirect {
     }
 }
 
-fn oauth_callback_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Cloud file OAuth callback")
-        .description(
-            "The redirect target the cloud file provider calls after the user grants access. \
-             Exchanges the authorization code for tokens, creates the connection, and redirects \
-             the browser back to the frontend with the outcome.",
-        )
-        .response::<303, ()>()
-}
-
 /// Returns the authenticated cloud file OAuth routes: starting an
 /// authorization is workspace-scoped and requires `ManageConnections`.
 pub fn private_routes() -> ApiRouter<ServiceState> {
@@ -313,10 +304,9 @@ pub fn private_routes() -> ApiRouter<ServiceState> {
 /// unauthenticated. Its security rests on the single-use, unguessable CSRF state
 /// it consumes.
 pub fn public_routes() -> ApiRouter<ServiceState> {
-    ApiRouter::new()
-        .api_route(
-            "/connections/oauth/callback/",
-            get_with(oauth_callback, oauth_callback_docs),
-        )
-        .with_path_items(|item| item.tag("Connections"))
+    // A plain axum `route` (not aide's `api_route`), so the callback is absent
+    // from the OpenAPI spec entirely. It is a provider-driven browser redirect,
+    // never a request an SDK/webapp client issues, so it has no place in the
+    // generated client and no reason to appear in the API contract.
+    ApiRouter::new().route("/connections/oauth/callback/", get(oauth_callback))
 }

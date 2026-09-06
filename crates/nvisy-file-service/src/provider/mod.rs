@@ -9,16 +9,24 @@
 mod box_provider;
 mod drive;
 mod dropbox;
-mod http;
 mod onedrive;
 
+use futures::TryStreamExt;
+use reqwest::Response;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::EnumIter;
 
-use crate::client::FileServiceClient;
+use crate::client::{ByteStream, FileServiceClient};
+use crate::error::Error;
 use crate::oauth::{OAuthProvider, OAuthTokens};
+
+/// Adapts a response body into the provider-neutral [`ByteStream`], mapping any
+/// stream error into the crate error type. Used by every provider's download.
+fn response_stream(response: Response) -> ByteStream {
+    Box::pin(response.bytes_stream().map_err(Error::from))
+}
 
 /// A supported cloud file-service provider.
 ///

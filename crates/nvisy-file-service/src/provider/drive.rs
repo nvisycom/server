@@ -15,7 +15,7 @@ use futures::stream::{self, StreamExt};
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::Deserialize;
 
-use super::http::response_stream;
+use super::response_stream;
 use crate::client::{ByteStream, FileEntry, FileServiceClient};
 use crate::error::{Error, Result};
 use crate::oauth::OAuthProvider;

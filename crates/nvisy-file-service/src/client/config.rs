@@ -43,12 +43,22 @@ macro_rules! provider_app_config {
         }
 
         impl $name {
-            /// The [`OAuthApp`], present only when all three values are set.
+            /// The [`OAuthApp`], present only when all three values are set to a
+            /// non-empty string. An empty value (e.g. `GOOGLE_DRIVE_CLIENT_ID=`
+            /// in an env file) counts as unset, so a placeholder line does not
+            /// mark the provider as configured.
             fn to_app(&self) -> Option<OAuthApp> {
+                let non_empty = |value: &Option<String>| {
+                    value
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_owned)
+                };
                 Some(OAuthApp {
-                    client_id: self.client_id.clone()?,
-                    client_secret: self.client_secret.clone()?,
-                    redirect_uri: self.redirect_uri.clone()?,
+                    client_id: non_empty(&self.client_id)?,
+                    client_secret: non_empty(&self.client_secret)?,
+                    redirect_uri: non_empty(&self.redirect_uri)?,
                 })
             }
         }
@@ -58,30 +68,42 @@ macro_rules! provider_app_config {
 provider_app_config!(
     /// Google Drive OAuth app credentials.
     GoogleDriveConfig,
-    "google-drive-client-id", "GOOGLE_DRIVE_CLIENT_ID",
-    "google-drive-client-secret", "GOOGLE_DRIVE_CLIENT_SECRET",
-    "google-drive-redirect-uri", "GOOGLE_DRIVE_REDIRECT_URI"
+    "google-drive-client-id",
+    "GOOGLE_DRIVE_CLIENT_ID",
+    "google-drive-client-secret",
+    "GOOGLE_DRIVE_CLIENT_SECRET",
+    "google-drive-redirect-uri",
+    "GOOGLE_DRIVE_REDIRECT_URI"
 );
 provider_app_config!(
     /// Dropbox OAuth app credentials.
     DropboxConfig,
-    "dropbox-client-id", "DROPBOX_CLIENT_ID",
-    "dropbox-client-secret", "DROPBOX_CLIENT_SECRET",
-    "dropbox-redirect-uri", "DROPBOX_REDIRECT_URI"
+    "dropbox-client-id",
+    "DROPBOX_CLIENT_ID",
+    "dropbox-client-secret",
+    "DROPBOX_CLIENT_SECRET",
+    "dropbox-redirect-uri",
+    "DROPBOX_REDIRECT_URI"
 );
 provider_app_config!(
     /// OneDrive OAuth app credentials.
     OneDriveConfig,
-    "onedrive-client-id", "ONEDRIVE_CLIENT_ID",
-    "onedrive-client-secret", "ONEDRIVE_CLIENT_SECRET",
-    "onedrive-redirect-uri", "ONEDRIVE_REDIRECT_URI"
+    "onedrive-client-id",
+    "ONEDRIVE_CLIENT_ID",
+    "onedrive-client-secret",
+    "ONEDRIVE_CLIENT_SECRET",
+    "onedrive-redirect-uri",
+    "ONEDRIVE_REDIRECT_URI"
 );
 provider_app_config!(
     /// Box OAuth app credentials.
     BoxConfig,
-    "box-client-id", "BOX_CLIENT_ID",
-    "box-client-secret", "BOX_CLIENT_SECRET",
-    "box-redirect-uri", "BOX_REDIRECT_URI"
+    "box-client-id",
+    "BOX_CLIENT_ID",
+    "box-client-secret",
+    "BOX_CLIENT_SECRET",
+    "box-redirect-uri",
+    "BOX_REDIRECT_URI"
 );
 
 /// Deployment configuration for the cloud file-service OAuth apps: one struct per
@@ -124,5 +146,42 @@ impl OAuthAppsConfig {
     /// [`FileService::new`]).
     pub fn build(self) -> crate::Result<FileService> {
         FileService::new(self.into_apps())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_is_unset_when_any_value_is_empty_or_missing() {
+        let config = OAuthAppsConfig {
+            // Fully set (non-empty) -> configured.
+            google_drive: GoogleDriveConfig {
+                client_id: Some("id".to_owned()),
+                client_secret: Some("secret".to_owned()),
+                redirect_uri: Some("https://example.com/callback".to_owned()),
+            },
+            // All present but empty/blank (as an env file's `KEY=` yields) -> unset.
+            dropbox: DropboxConfig {
+                client_id: Some(String::new()),
+                client_secret: Some("   ".to_owned()),
+                redirect_uri: Some(String::new()),
+            },
+            // Partially set (missing secret) -> unset.
+            onedrive: OneDriveConfig {
+                client_id: Some("id".to_owned()),
+                client_secret: None,
+                redirect_uri: Some("https://example.com/callback".to_owned()),
+            },
+            // All None -> unset.
+            box_app: BoxConfig::default(),
+        };
+
+        let apps = config.into_apps();
+        assert!(apps.google_drive.is_some());
+        assert!(apps.dropbox.is_none());
+        assert!(apps.onedrive.is_none());
+        assert!(apps.box_app.is_none());
     }
 }

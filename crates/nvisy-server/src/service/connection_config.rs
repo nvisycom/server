@@ -7,9 +7,9 @@
 //! `{ "provider": "google_drive", ... }`). Capability crates own their provider
 //! configs; this type only composes them.
 
-use nvisy_file_service::providers::FileServiceConfig;
+use nvisy_file_service::provider::FileServiceConfig;
 use nvisy_inference::providers::LlmConfig;
-use nvisy_object_store::providers::StorageConfig;
+use nvisy_object_store::provider::StorageConfig;
 use nvisy_postgres::types::ProviderType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -23,8 +23,8 @@ use serde::{Deserialize, Serialize};
 pub enum ConnectionConfig {
     /// An object-storage connection (s3, azure, gcs) — sync-capable.
     ObjectStore(StorageConfig),
-    /// A cloud file-service connection (google_drive) — sync-capable.
-    CloudFiles(FileServiceConfig),
+    /// A file-service connection (google_drive, dropbox, ...) — sync-capable.
+    FileService(FileServiceConfig),
     /// An LLM inference connection (openai, ollama, anthropic).
     Inference(LlmConfig),
 }
@@ -36,7 +36,7 @@ impl ConnectionConfig {
     pub fn provider_id(&self) -> &str {
         match self {
             Self::ObjectStore(config) => config.provider_id(),
-            Self::CloudFiles(config) => config.provider_id(),
+            Self::FileService(config) => config.provider_id(),
             Self::Inference(config) => config.provider_id(),
         }
     }
@@ -47,7 +47,7 @@ impl ConnectionConfig {
     pub fn provider_type(&self) -> ProviderType {
         match self {
             Self::ObjectStore(_) => ProviderType::ObjectStore,
-            Self::CloudFiles(_) => ProviderType::CloudFiles,
+            Self::FileService(_) => ProviderType::FileService,
             Self::Inference(_) => ProviderType::LanguageModel,
         }
     }
@@ -57,6 +57,6 @@ impl ConnectionConfig {
     /// configuration and syncs apply.
     #[must_use]
     pub fn supports_sync(&self) -> bool {
-        matches!(self, Self::ObjectStore(_) | Self::CloudFiles(_))
+        matches!(self, Self::ObjectStore(_) | Self::FileService(_))
     }
 }

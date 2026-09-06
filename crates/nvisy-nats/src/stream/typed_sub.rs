@@ -50,7 +50,10 @@ impl<S: EventStream> EventSubscriber<S> {
             durable_name: Some(S::CONSUMER_NAME.to_owned()),
             description: Some(format!("Consumer for stream {}", S::NAME)),
             ack_policy: consumer::AckPolicy::Explicit,
-            filter_subject: format!("{}.>", S::NAME),
+            // Match the same subjects the stream binds and the publisher uses;
+            // `filter_subjects` (not the single `filter_subject`) covers both the
+            // exact subject and its `.>` sub-subjects.
+            filter_subjects: super::core::subjects::<S>(),
             ..Default::default()
         };
         if let Some(ack_wait) = S::ACK_WAIT {

@@ -19,7 +19,7 @@ use super::apps::OAuthApps;
 use super::connected::ConnectedFileService;
 use crate::error::{Error, ErrorKind, Result};
 use crate::oauth::{OAuthClient, OAuthTokens};
-use crate::providers::{FileServiceConfig, Provider};
+use crate::provider::{FileServiceConfig, Provider};
 
 /// Tracing target for cloud file-service operations.
 const TRACING_TARGET: &str = "nvisy_file_service::client";
@@ -66,6 +66,14 @@ impl FileService {
             .build()
             .map_err(|err| Error::connection("failed to build HTTP client").with_source(err))?;
         Ok(Self { http, apps })
+    }
+
+    /// Whether the host has configured an OAuth app for `provider`, and so
+    /// whether it can be connected. Lets callers surface availability without
+    /// attempting a flow that would fail.
+    #[must_use]
+    pub fn is_configured(&self, provider: Provider) -> bool {
+        self.apps.for_provider(provider).is_some()
     }
 
     /// An [`OAuthClient`] for `provider`, resolving its configured app, or an
