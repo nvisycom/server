@@ -10,12 +10,14 @@
 //! root folder, if set, scopes the listing (`'<root>' in parents`) and the
 //! parent of exported files.
 
-use futures::TryStreamExt;
+use bytes::Bytes;
+use futures::stream::{self, StreamExt};
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::Deserialize;
 
+use super::http::response_stream;
 use crate::client::{ByteStream, FileEntry, FileServiceClient};
-use crate::error::{Error, ErrorKind, kind_for_status};
+use crate::error::{Error, Result};
 use crate::oauth::OAuthProvider;
 
 /// Provider identifier stored in the connection's `provider` column.
@@ -103,22 +105,19 @@ fn is_google_native(mime_type: Option<&str>) -> bool {
 
 #[async_trait::async_trait]
 impl FileServiceClient for DriveClient {
-    async fn verify(&self) -> Result<(), Error> {
+    async fn verify(&self) -> Result<()> {
         // Fetch the lightweight `about` resource: reachable and authorized iff
         // it returns, without listing or transferring any file.
-        let url = format!("{API_BASE}/about?fields=user(emailAddress)");
         self.http
-            .get(url)
+            .get(format!("{API_BASE}/about?fields=user(emailAddress)"))
             .bearer_auth(&self.access_token)
             .send()
-            .await
-            .map_err(|err| Error::connection("Drive request failed").with_source(err))?
-            .error_for_status()
-            .map(|_| ())
-            .map_err(map_reqwest_status)
+            .await?
+            .error_for_status()?;
+        Ok(())
     }
 
-    async fn list(&self) -> Result<Vec<FileEntry>, Error> {
+    async fn list(&self) -> Result<Vec<FileEntry>> {
         // Files whose parent is the configured root (or the user's root), not
         // trashed, and not folders.
         let parent = self.root_folder_id.as_deref().unwrap_or("root");
@@ -142,16 +141,7 @@ impl FileServiceClient for DriveClient {
                 request = request.query(&[("pageToken", token.as_str())]);
             }
 
-            let response = request
-                .send()
-                .await
-                .map_err(|err| Error::runtime("Drive list request failed").with_source(err))?
-                .error_for_status()
-                .map_err(map_reqwest_status)?;
-            let page: FileList = response
-                .json()
-                .await
-                .map_err(|err| Error::runtime("invalid Drive list response").with_source(err))?;
+            let page: FileList = request.send().await?.error_for_status()?.json().await?;
 
             entries.extend(
                 page.files
@@ -171,36 +161,26 @@ impl FileServiceClient for DriveClient {
         Ok(entries)
     }
 
-    async fn get_stream(&self, id: &str) -> Result<ByteStream, Error> {
+    async fn get_stream(&self, id: &str) -> Result<ByteStream> {
         // Percent-encode the id into the path segment defensively; Drive ids are
         // normally URL-safe, but a stored key must never alter the request URL.
         let id = utf8_percent_encode(id, NON_ALPHANUMERIC);
-        let url = format!("{API_BASE}/files/{id}?alt=media");
         let response = self
             .http
-            .get(url)
+            .get(format!("{API_BASE}/files/{id}?alt=media"))
             .bearer_auth(&self.access_token)
             .send()
-            .await
-            .map_err(|err| Error::runtime("Drive download request failed").with_source(err))?
-            .error_for_status()
-            .map_err(map_reqwest_status)?;
-
-        let stream = response
-            .bytes_stream()
-            .map_err(|err| Error::runtime("Drive download stream failed").with_source(err));
-        Ok(Box::pin(stream))
+            .await?
+            .error_for_status()?;
+        Ok(response_stream(response))
     }
 
-    async fn put_stream(
-        &self,
-        name: &str,
-        content_type: &str,
-        body: ByteStream,
-    ) -> Result<(), Error> {
-        // Multipart upload (drive.file scope): a JSON metadata part naming the
-        // file (and its parent folder, if the connection is folder-scoped),
-        // followed by the streamed content. The created file is app-owned.
+    async fn put_stream(&self, name: &str, content_type: &str, body: ByteStream) -> Result<()> {
+        // Drive's uploadType=multipart requires a `multipart/related` body (not
+        // form-data): a JSON metadata part first, then the media part. reqwest's
+        // multipart::Form only emits form-data, so build the related body by hand
+        // and stream the media through it. The created file is app-owned
+        // (drive.file scope), scoped to the connection's folder if set.
         let mut metadata = serde_json::json!({ "name": name });
         if let Some(parent) = &self.root_folder_id {
             metadata["parents"] = serde_json::json!([parent]);
@@ -208,33 +188,31 @@ impl FileServiceClient for DriveClient {
         let metadata = serde_json::to_vec(&metadata)
             .map_err(|err| Error::runtime("failed to encode upload metadata").with_source(err))?;
 
-        let metadata_part = reqwest::multipart::Part::bytes(metadata)
-            .mime_str("application/json; charset=UTF-8")
-            .map_err(|err| Error::runtime("invalid metadata part").with_source(err))?;
-        let content_part = reqwest::multipart::Part::stream(reqwest::Body::wrap_stream(body))
-            .mime_str(content_type)
-            .map_err(|err| Error::runtime("invalid content type").with_source(err))?;
-        let form = reqwest::multipart::Form::new()
-            .part("metadata", metadata_part)
-            .part("file", content_part);
+        let boundary = format!("nvisy-{}", uuid::Uuid::new_v4().simple());
+        let mut preamble = Vec::new();
+        preamble.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        preamble.extend_from_slice(b"Content-Type: application/json; charset=UTF-8\r\n\r\n");
+        preamble.extend_from_slice(&metadata);
+        preamble.extend_from_slice(format!("\r\n--{boundary}\r\n").as_bytes());
+        preamble.extend_from_slice(format!("Content-Type: {content_type}\r\n\r\n").as_bytes());
+        let epilogue = format!("\r\n--{boundary}--\r\n").into_bytes();
+
+        // preamble bytes -> streamed media -> closing boundary, all one stream.
+        let related = stream::once(async { Ok(Bytes::from(preamble)) })
+            .chain(body)
+            .chain(stream::once(async { Ok(Bytes::from(epilogue)) }));
 
         self.http
             .post(format!("{UPLOAD_BASE}/files?uploadType=multipart"))
             .bearer_auth(&self.access_token)
-            .multipart(form)
+            .header(
+                "Content-Type",
+                format!("multipart/related; boundary={boundary}"),
+            )
+            .body(reqwest::Body::wrap_stream(related))
             .send()
-            .await
-            .map_err(|err| Error::runtime("Drive upload request failed").with_source(err))?
-            .error_for_status()
-            .map(|_| ())
-            .map_err(map_reqwest_status)
+            .await?
+            .error_for_status()?;
+        Ok(())
     }
-}
-
-/// Maps a reqwest status error into a classified [`Error`].
-fn map_reqwest_status(err: reqwest::Error) -> Error {
-    let kind = err
-        .status()
-        .map_or(ErrorKind::Runtime, |s| kind_for_status(s.as_u16()));
-    Error::new(kind, "Drive returned an error").with_source(err)
 }

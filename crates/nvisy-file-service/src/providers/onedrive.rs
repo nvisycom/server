@@ -5,11 +5,11 @@
 //! drops the bearer header on the cross-host hop, as the target requires). The
 //! `common` tenant supports both personal and work/school accounts.
 
-use futures::TryStreamExt;
 use serde::Deserialize;
 
+use super::http::response_stream;
 use crate::client::{ByteStream, FileEntry, FileServiceClient};
-use crate::error::{Error, ErrorKind, kind_for_status};
+use crate::error::Result;
 use crate::oauth::OAuthProvider;
 
 /// Provider identifier stored in the connection's `provider` column.
@@ -90,19 +90,17 @@ impl DriveItem {
 
 #[async_trait::async_trait]
 impl FileServiceClient for OneDriveClient {
-    async fn verify(&self) -> Result<(), Error> {
+    async fn verify(&self) -> Result<()> {
         self.http
             .get(format!("{API_BASE}/me/drive"))
             .bearer_auth(&self.access_token)
             .send()
-            .await
-            .map_err(|err| Error::connection("OneDrive request failed").with_source(err))?
-            .error_for_status()
-            .map(|_| ())
-            .map_err(map_reqwest_status)
+            .await?
+            .error_for_status()?;
+        Ok(())
     }
 
-    async fn list(&self) -> Result<Vec<FileEntry>, Error> {
+    async fn list(&self) -> Result<Vec<FileEntry>> {
         // The first page URL addresses the configured folder's children, or the
         // drive root's; subsequent pages follow the absolute @odata.nextLink.
         let mut next = Some(match &self.root_folder_id {
@@ -117,13 +115,10 @@ impl FileServiceClient for OneDriveClient {
                 .get(url)
                 .bearer_auth(&self.access_token)
                 .send()
-                .await
-                .map_err(|err| Error::runtime("OneDrive list request failed").with_source(err))?
-                .error_for_status()
-                .map_err(map_reqwest_status)?
+                .await?
+                .error_for_status()?
                 .json()
-                .await
-                .map_err(|err| Error::runtime("invalid OneDrive list response").with_source(err))?;
+                .await?;
 
             entries.extend(
                 page.value
@@ -139,7 +134,7 @@ impl FileServiceClient for OneDriveClient {
         Ok(entries)
     }
 
-    async fn get_stream(&self, id: &str) -> Result<ByteStream, Error> {
+    async fn get_stream(&self, id: &str) -> Result<ByteStream> {
         // /content answers 302 to a pre-authenticated URL; reqwest follows it and
         // drops the bearer header on the cross-host hop (the target rejects it).
         let response = self
@@ -147,23 +142,12 @@ impl FileServiceClient for OneDriveClient {
             .get(format!("{API_BASE}/me/drive/items/{id}/content"))
             .bearer_auth(&self.access_token)
             .send()
-            .await
-            .map_err(|err| Error::runtime("OneDrive download request failed").with_source(err))?
-            .error_for_status()
-            .map_err(map_reqwest_status)?;
-
-        let stream = response
-            .bytes_stream()
-            .map_err(|err| Error::runtime("OneDrive download stream failed").with_source(err));
-        Ok(Box::pin(stream))
+            .await?
+            .error_for_status()?;
+        Ok(response_stream(response))
     }
 
-    async fn put_stream(
-        &self,
-        name: &str,
-        content_type: &str,
-        body: ByteStream,
-    ) -> Result<(), Error> {
+    async fn put_stream(&self, name: &str, content_type: &str, body: ByteStream) -> Result<()> {
         // Simple PUT upload of a new file into the configured folder (or root),
         // addressed by parent id and file name.
         let url = match &self.root_folder_id {
@@ -176,18 +160,8 @@ impl FileServiceClient for OneDriveClient {
             .header("Content-Type", content_type)
             .body(reqwest::Body::wrap_stream(body))
             .send()
-            .await
-            .map_err(|err| Error::runtime("OneDrive upload request failed").with_source(err))?
-            .error_for_status()
-            .map(|_| ())
-            .map_err(map_reqwest_status)
+            .await?
+            .error_for_status()?;
+        Ok(())
     }
-}
-
-/// Maps a reqwest status error into a classified [`Error`].
-fn map_reqwest_status(err: reqwest::Error) -> Error {
-    let kind = err
-        .status()
-        .map_or(ErrorKind::Runtime, |s| kind_for_status(s.as_u16()));
-    Error::new(kind, "OneDrive returned an error").with_source(err)
 }

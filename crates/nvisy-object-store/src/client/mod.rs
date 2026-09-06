@@ -21,9 +21,11 @@ use crate::error::{Error, ErrorKind};
 
 mod get_output;
 mod put_output;
+mod service;
 
 pub use get_output::GetOutput;
 pub use put_output::PutOutput;
+pub use service::ExternalObjectStore;
 
 /// Maximum number of in-flight multipart part uploads, bounding memory and
 /// concurrent requests during a streaming [`put_multipart`](ObjectStoreClient::put_multipart).
@@ -258,6 +260,16 @@ impl ObjectStoreClient {
                     return Err(e);
                 }
             }
+        }
+
+        // Drain all in-flight parts first, so a part error here aborts the upload
+        // rather than leaking parts. `finish` also waits internally, but consumes
+        // the writer, leaving nothing to abort if that wait fails; doing it here
+        // on `&mut writer` keeps the writer available to abort. `finish`'s own
+        // `complete` step already aborts on failure.
+        if let Err(e) = writer.wait_for_capacity(0).await {
+            let _ = writer.abort().await;
+            return Err(Error::from(e));
         }
 
         writer.finish().await.map(Into::into).map_err(Error::from)

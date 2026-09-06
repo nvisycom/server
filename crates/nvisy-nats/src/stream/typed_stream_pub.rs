@@ -10,9 +10,9 @@ use tokio::sync::Semaphore;
 
 use crate::{Error, Result, TRACING_TARGET_STREAM};
 
-/// Inner data for StreamPublisher
+/// Inner data for TypedStreamPublisher
 #[derive(Debug)]
-struct StreamPublisherInner {
+struct TypedStreamPublisherInner {
     jetstream: Context,
     stream_name: String,
 }
@@ -23,12 +23,12 @@ struct StreamPublisherInner {
 /// serializable data type T, ensuring compile-time type safety for all publish
 /// operations. The type parameter prevents mixing different message types.
 #[derive(Debug, Clone)]
-pub struct StreamPublisher<T> {
-    inner: Arc<StreamPublisherInner>,
+pub struct TypedStreamPublisher<T> {
+    inner: Arc<TypedStreamPublisherInner>,
     _marker: PhantomData<T>,
 }
 
-impl<T> StreamPublisher<T>
+impl<T> TypedStreamPublisher<T>
 where
     T: Serialize + Send + Sync + 'static,
 {
@@ -70,7 +70,7 @@ where
         }
 
         Ok(Self {
-            inner: Arc::new(StreamPublisherInner {
+            inner: Arc::new(TypedStreamPublisherInner {
                 jetstream: jetstream.clone(),
                 stream_name: stream_name.to_string(),
             }),

@@ -19,6 +19,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_file_service::CloudFileService;
 use nvisy_inference::Error as InferenceError;
 use nvisy_postgres::model::{
     NewWorkspaceConnection, NewWorkspaceConnectionSchedule, UpdateWorkspaceConnection,
@@ -46,8 +47,8 @@ use crate::handler::response::{
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
-    CloudFileService, ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin,
-    ExternalObjectStore, ServiceState, StandardCronSchedule, WorkspaceEvent,
+    ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin, ExternalObjectStore,
+    ServiceState, StandardCronSchedule, WorkspaceEvent, persist_refreshed_tokens,
 };
 
 /// Tracing target for workspace connection operations.
@@ -579,14 +580,14 @@ async fn verify_connection(
                 // A refresh during verification produces fresh tokens; persist
                 // them so the renewed credentials are not thrown away.
                 if let Some(refreshed) = connected.refreshed {
-                    let config = ConnectionConfig::CloudFiles(refreshed);
-                    let encrypted_data = crypto.encrypt_json(workspace.id, &config)?;
-                    let update = UpdateWorkspaceConnection {
-                        encrypted_data: Some(encrypted_data),
-                        ..Default::default()
-                    };
-                    conn.update_workspace_connection(connection.id, update)
-                        .await?;
+                    persist_refreshed_tokens(
+                        &mut conn,
+                        &crypto,
+                        workspace.id,
+                        connection.id,
+                        refreshed.tokens().clone(),
+                    )
+                    .await?;
                 }
                 match connected.client.verify().await {
                     Ok(()) => {

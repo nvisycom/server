@@ -12,14 +12,14 @@ use std::sync::{Arc, Mutex};
 
 use futures::TryStreamExt;
 use futures::stream::{self, StreamExt};
-use nvisy_file_service::providers::FileServiceConfig;
+use nvisy_file_service::CloudFileService;
+use nvisy_file_service::oauth::OAuthTokens;
 use nvisy_postgres::model::{
-    NewWorkspaceConnectionSync, NewWorkspaceFile, UpdateWorkspaceConnection, WorkspaceConnection,
-    WorkspaceConnectionSync, WorkspaceFile,
+    NewWorkspaceConnectionSync, NewWorkspaceFile, WorkspaceConnection, WorkspaceConnectionSync,
+    WorkspaceFile,
 };
 use nvisy_postgres::query::{
-    WorkspaceConnectionRepository, WorkspaceConnectionSyncRepository, WorkspaceFileRepository,
-    WorkspaceRepository,
+    WorkspaceConnectionSyncRepository, WorkspaceFileRepository, WorkspaceRepository,
 };
 use nvisy_postgres::types::{FileKind, SyncDeletionPolicy};
 use nvisy_postgres::{AsyncConnection, PgConn};
@@ -35,8 +35,8 @@ use super::object_source::ObjectStoreSource;
 use crate::extract::SecurityContext;
 use crate::handler::{ErrorKind, Result};
 use crate::service::{
-    CloudFileService, ConnectionConfig, ConnectionRef, EventEmitter, EventOrigin,
-    ExternalObjectStore, HashingReader, Infra, Measurements, WorkspaceEvent,
+    ConnectionConfig, ConnectionRef, EventEmitter, EventOrigin, ExternalObjectStore, HashingReader,
+    Infra, Measurements, WorkspaceEvent, persist_refreshed_tokens,
 };
 
 /// Tracing target for connection sync operations.
@@ -133,7 +133,8 @@ impl ConnectionSyncService {
             ConnectionConfig::CloudFiles(config) => {
                 let connected = self.cloud.connect(config).await?;
                 if let Some(refreshed) = connected.refreshed {
-                    self.persist_refreshed_tokens(connection, refreshed).await?;
+                    self.persist_refreshed_tokens(connection, refreshed.tokens().clone())
+                        .await?;
                 }
                 Ok(Arc::new(CloudFileSource(connected.client)))
             }
@@ -143,25 +144,23 @@ impl ConnectionSyncService {
         }
     }
 
-    /// Re-encrypts a connection's config after an OAuth refresh and writes it
-    /// back, so the renewed access and refresh tokens survive to the next sync.
+    /// Persists refreshed OAuth tokens onto the connection's current stored
+    /// config (merge-under-read), delegating to the shared helper so a concurrent
+    /// config edit is never clobbered.
     async fn persist_refreshed_tokens(
         &self,
         connection: &WorkspaceConnection,
-        refreshed: FileServiceConfig,
+        new_tokens: OAuthTokens,
     ) -> Result<()> {
-        let config = ConnectionConfig::CloudFiles(refreshed);
-        let encrypted_data = self
-            .infra
-            .crypto
-            .encrypt_json(connection.workspace_id, &config)?;
-        let update = UpdateWorkspaceConnection {
-            encrypted_data: Some(encrypted_data),
-            ..Default::default()
-        };
         let mut conn = self.infra.postgres.get_connection().await?;
-        conn.update_workspace_connection(connection.id, update)
-            .await?;
+        persist_refreshed_tokens(
+            &mut conn,
+            &self.infra.crypto,
+            connection.workspace_id,
+            connection.id,
+            new_tokens,
+        )
+        .await?;
         tracing::debug!(
             target: TRACING_TARGET,
             connection_id = %connection.id,

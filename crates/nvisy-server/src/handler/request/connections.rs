@@ -1,11 +1,21 @@
 //! Connection request types.
 
+use nvisy_file_service::providers::Provider;
 use nvisy_postgres::types::{ConnectionId, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use validator::Validate;
+use validator::{Validate, ValidationError};
 
 use crate::service::ConnectionConfig;
+
+/// Rejects a value that is empty once trimmed, matching the database's
+/// non-empty-trimmed constraint on connection display names.
+fn validate_non_blank(value: &str) -> Result<(), ValidationError> {
+    if value.trim().is_empty() {
+        return Err(ValidationError::new("blank"));
+    }
+    Ok(())
+}
 
 /// Path parameters for connection operations.
 ///
@@ -60,28 +70,15 @@ pub struct CreateConnection {
     pub sync: Option<SyncScheduleInput>,
 }
 
-/// A cloud file-service provider that connects over OAuth.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum CloudFilesProvider {
-    /// Google Drive.
-    GoogleDrive,
-    /// Dropbox.
-    Dropbox,
-    /// OneDrive (Microsoft Graph).
-    OneDrive,
-    /// Box.
-    Box,
-}
-
 /// Path parameters for the OAuth start endpoint: which cloud file provider to
-/// begin authorizing.
+/// begin authorizing. The provider is the crate's [`Provider`], so the API and
+/// stored config name each provider identically.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthStartPathParams {
     /// The cloud file provider to connect.
-    pub provider: CloudFilesProvider,
+    pub provider: Provider,
 }
 
 /// Request payload for starting a cloud file-service OAuth authorization.
@@ -89,7 +86,7 @@ pub struct OAuthStartPathParams {
 #[serde(rename_all = "camelCase")]
 pub struct StartCloudFilesOAuth {
     /// Human-readable name for the connection to be created on success.
-    #[validate(length(min = 1, max = 255))]
+    #[validate(length(min = 1, max = 255), custom(function = "validate_non_blank"))]
     pub display_name: String,
     /// Where to scope the sync: a folder id (Drive, OneDrive, Box) or a folder
     /// path (Dropbox). Omit to use the account root.
@@ -99,13 +96,21 @@ pub struct StartCloudFilesOAuth {
 }
 
 /// Query parameters the provider appends when redirecting to the OAuth callback.
+///
+/// On success the provider sends `code` + `state`; on denial it sends `error`
+/// (and `state`) with no `code`, so `code` is optional and the handler treats a
+/// missing code or a present error as a failed authorization.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthCallbackQuery {
-    /// The authorization code to exchange for tokens.
-    pub code: String,
+    /// The authorization code to exchange for tokens; absent on a denial.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
     /// The opaque CSRF state echoed back; must match a pending authorization.
     pub state: String,
+    /// The provider's error code when the user denied or the flow failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Request payload for updating an existing workspace connection.

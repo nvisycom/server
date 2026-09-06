@@ -10,7 +10,6 @@
 use std::time::Duration;
 
 use elide_pipeline::RasterMode;
-use nvisy_nats::stream::DetectionStream;
 use nvisy_postgres::model::{UpdateWorkspaceDetection, WorkspaceDetection, WorkspacePipeline};
 use nvisy_postgres::query::{
     EventOutboxRepository, WorkspaceDetectionRepository, WorkspaceFileRepository,
@@ -21,7 +20,7 @@ use nvisy_postgres::{AsyncConnection, DieselError, Error as PgError};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::job::DetectionJob;
+use super::job::{DetectionJob, DetectionStream};
 use super::service::DetectionQueue;
 use super::support::{
     FailDetection, FailOutcome, extract_detection_usage, fail_detection, resolve_policies,
@@ -104,7 +103,7 @@ impl DetectionWorker {
         let subscriber = self
             .infra
             .nats
-            .event_subscriber::<DetectionJob, DetectionStream>()
+            .event_subscriber::<DetectionStream>()
             .await?;
         let mut stream = subscriber.subscribe().await?;
 

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use jiff::{Span, Timestamp};
-use nvisy_nats::kv::{LockKey, SchedulerLocksBucket};
+use nvisy_nats::kv::{SchedulerLockKey, SchedulerLocksBucket};
 use nvisy_nats::stream::{ConnectionSyncStream, EventPublisher, EventSubscriber};
 use nvisy_postgres::model::{
     NewWorkspaceConnectionSync, WorkspaceConnection, WorkspaceConnectionSync,
@@ -31,7 +31,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{ConnectionSyncService, StandardCronSchedule, TransferRequest};
-use crate::handler::Result;
+use crate::handler::{ErrorKind, Result};
 use crate::service::{ConnectionConfig, Infra, Worker};
 
 /// Tracing target for the connection sync worker.
@@ -72,8 +72,10 @@ fn first_attempt() -> i32 {
     1
 }
 
-type JobPublisher = EventPublisher<ConnectionSyncJob, ConnectionSyncStream>;
-type JobSubscriber = EventSubscriber<ConnectionSyncJob, ConnectionSyncStream>;
+/// The connection-sync JetStream stream, carrying [`ConnectionSyncJob`] payloads.
+type SyncStream = ConnectionSyncStream<ConnectionSyncJob>;
+type JobPublisher = EventPublisher<SyncStream>;
+type JobSubscriber = EventSubscriber<SyncStream>;
 
 /// Background worker driving scheduled connection syncs.
 pub struct ConnectionSyncWorker {
@@ -164,12 +166,8 @@ impl ConnectionSyncWorker {
         // instance's tick phase. The bucket TTL reclaims old period keys. Segments
         // are joined with `.`, which NATS KV keys allow (`[-/_=.a-zA-Z0-9]`).
         let period = now.as_second() / TICK_INTERVAL.as_secs() as i64;
-        let lock_key = LockKey::from(format!("{SCHEDULER_LOCK_KEY}.{period}").as_str());
-        let locks = self
-            .infra
-            .nats
-            .kv_store::<LockKey, u64, SchedulerLocksBucket>()
-            .await?;
+        let lock_key = SchedulerLockKey::from(format!("{SCHEDULER_LOCK_KEY}.{period}"));
+        let locks = self.infra.nats.kv_store::<SchedulerLocksBucket>().await?;
         let acquired = locks.create(&lock_key, &1).await?;
         if !acquired {
             tracing::debug!(target: TRACING_TARGET, "Another instance owns this scheduler period");
@@ -306,9 +304,15 @@ impl ConnectionSyncWorker {
         let connection_id = connection.id;
         let request = match self.begin_run(connection, job.attempt).await {
             Ok(request) => request,
+            // A lost race on the one-active-run index is benign and expected
+            // (at-least-once delivery); anything else — a decrypt failure or a
+            // mis-scheduled non-sync connection — is a real fault worth surfacing.
+            Err(err) if err.kind() == ErrorKind::Conflict => {
+                tracing::debug!(target: TRACING_TARGET, connection_id = %connection_id, "Skipping scheduled run: already active");
+                return;
+            }
             Err(err) => {
-                // A concurrent run beat us to the unique index; treat as benign.
-                tracing::debug!(target: TRACING_TARGET, connection_id = %connection_id, error = %err, "Skipping scheduled run: could not open (likely already active)");
+                tracing::warn!(target: TRACING_TARGET, connection_id = %connection_id, error = %err, "Failed to open scheduled run");
                 return;
             }
         };
@@ -432,7 +436,7 @@ impl ConnectionSyncWorker {
             &connection.encrypted_data,
         )?;
         if !config.supports_sync() {
-            return Err(crate::handler::ErrorKind::InternalServerError
+            return Err(ErrorKind::InternalServerError
                 .with_message("scheduled sync for a non-sync connection"));
         }
 

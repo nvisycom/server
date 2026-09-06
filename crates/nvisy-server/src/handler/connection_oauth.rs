@@ -17,16 +17,18 @@
 //! `state` would defeat PKCE), so the flow state is stored rather than encoded in
 //! the redirect. It is ephemeral, single-use, and TTL-expired.
 
+use std::str::FromStr;
+
 use aide::axum::ApiRouter;
 use aide::axum::routing::{get_with, post_with};
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Redirect;
-use nvisy_file_service::oauth::{self, OAuthApp, OAuthProvider};
-use nvisy_file_service::providers::{self, FileServiceConfig};
+use nvisy_file_service::CloudFileService;
+use nvisy_file_service::providers::{ConnectionSettings, FileServiceConfig, Provider};
 use nvisy_nats::NatsClient;
-use nvisy_nats::kv::{OAuthStateBucket, OAuthStateKey};
+use nvisy_nats::kv::{OAuthStateBucket as OAuthStateKvBucket, OAuthStateKey};
 use nvisy_postgres::model::{NewWorkspaceConnection, NewWorkspaceConnectionSchedule};
 use nvisy_postgres::query::{WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository};
 use nvisy_postgres::types::{SyncDeletionPolicy, SyncMode};
@@ -38,13 +40,11 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, Query, SecurityContext, ValidateJson,
     WorkspaceContext,
 };
-use crate::handler::request::{
-    CloudFilesProvider, OAuthCallbackQuery, OAuthStartPathParams, StartCloudFilesOAuth,
-};
+use crate::handler::request::{OAuthCallbackQuery, OAuthStartPathParams, StartCloudFilesOAuth};
 use crate::handler::response::ErrorResponse;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
-    CloudFileService, ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin,
+    CloudFilesRedirect, ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin,
     ServiceState, WorkspaceEvent,
 };
 
@@ -52,7 +52,7 @@ use crate::service::{
 const TRACING_TARGET: &str = "nvisy_server::handler::connection_oauth";
 
 /// The stashed state of an in-flight OAuth authorization, held between `start`
-/// and `callback`. Stored in NATS KV keyed by the CSRF state token.
+/// and `callback` in the [`OAuthStateBucket`]. Keyed by the CSRF state token.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct OAuthFlowState {
     /// Workspace the connection will be created in.
@@ -60,7 +60,7 @@ struct OAuthFlowState {
     /// Account that started the flow; the connection is attributed to it.
     account_id: Uuid,
     /// The provider being connected.
-    provider: CloudFilesProvider,
+    provider: Provider,
     /// Display name for the connection to create.
     display_name: String,
     /// Optional sync root (folder id or path) to scope the sync to.
@@ -69,52 +69,17 @@ struct OAuthFlowState {
     pkce_verifier: String,
 }
 
+/// The OAuth-state bucket pinned to this server's flow-state value. The bucket's
+/// static config (name, TTL, key) lives in the NATS layer; this alias fixes the
+/// value type once so call sites need only name the bucket.
+type OAuthStateBucket = OAuthStateKvBucket<OAuthFlowState>;
+
 /// The response to a successful authorization start: where to send the user.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthStartResponse {
     /// The provider authorize URL the client should redirect the user to.
     pub authorize_url: String,
-}
-
-/// The OAuth endpoints and scopes for a cloud file provider.
-fn oauth_provider(provider: CloudFilesProvider) -> OAuthProvider {
-    match provider {
-        CloudFilesProvider::GoogleDrive => providers::drive_oauth(),
-        CloudFilesProvider::Dropbox => providers::dropbox_oauth(),
-        CloudFilesProvider::OneDrive => providers::onedrive_oauth(),
-        CloudFilesProvider::Box => providers::box_oauth(),
-    }
-}
-
-/// The configured OAuth app for a provider, or an error when the deployment has
-/// not configured one.
-fn app_for(cloud: &CloudFileService, provider: CloudFilesProvider) -> Result<&OAuthApp> {
-    let apps = cloud.apps();
-    let app = match provider {
-        CloudFilesProvider::GoogleDrive => apps.google_drive.as_ref(),
-        CloudFilesProvider::Dropbox => apps.dropbox.as_ref(),
-        CloudFilesProvider::OneDrive => apps.onedrive.as_ref(),
-        CloudFilesProvider::Box => apps.box_app.as_ref(),
-    };
-    app.ok_or_else(|| {
-        ErrorKind::BadRequest.with_message("This cloud file provider is not configured")
-    })
-}
-
-/// Builds the typed [`FileServiceConfig`] for a provider from freshly obtained
-/// tokens and the chosen sync root.
-fn config_for(
-    provider: CloudFilesProvider,
-    tokens: oauth::OAuthTokens,
-    root: Option<String>,
-) -> FileServiceConfig {
-    match provider {
-        CloudFilesProvider::GoogleDrive => FileServiceConfig::GoogleDrive { tokens, root },
-        CloudFilesProvider::Dropbox => FileServiceConfig::Dropbox { tokens, root },
-        CloudFilesProvider::OneDrive => FileServiceConfig::OneDrive { tokens, root },
-        CloudFilesProvider::Box => FileServiceConfig::Box { tokens, root },
-    }
 }
 
 /// Starts a cloud file-service OAuth authorization.
@@ -144,10 +109,7 @@ async fn start_oauth(
     drop(conn);
 
     let provider = path_params.provider;
-    let app = app_for(&cloud, provider)?;
-    let oauth_provider = oauth_provider(provider);
-
-    let authorization = oauth::begin_authorization(&oauth_provider, app)?;
+    let authorization = cloud.oauth_client(provider)?.begin_authorization()?;
 
     let flow = OAuthFlowState {
         workspace_id: workspace.id,
@@ -157,9 +119,7 @@ async fn start_oauth(
         root: request.root,
         pkce_verifier: authorization.pkce_verifier,
     };
-    let store = nats
-        .kv_store::<OAuthStateKey, OAuthFlowState, OAuthStateBucket>()
-        .await?;
+    let store = nats.kv_store::<OAuthStateBucket>().await?;
     store
         .put(&OAuthStateKey(authorization.csrf_state), &flow)
         .await?;
@@ -192,6 +152,7 @@ async fn oauth_callback(
     State(nats): State<NatsClient>,
     State(crypto): State<CryptoService>,
     State(cloud): State<CloudFileService>,
+    State(redirect): State<CloudFilesRedirect>,
     security: SecurityContext,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> Redirect {
@@ -214,7 +175,7 @@ async fn oauth_callback(
             "error"
         }
     };
-    redirect_to_frontend(cloud.apps().post_auth_redirect_uri.as_deref(), status)
+    redirect_to_frontend(redirect.0.as_deref(), status)
 }
 
 /// Runs the callback's work: consume the pending authorization, exchange the
@@ -227,32 +188,42 @@ async fn complete_callback(
     security: &SecurityContext,
     query: OAuthCallbackQuery,
 ) -> Result<Uuid> {
+    // Validate the state before touching the store so a malformed value maps to
+    // a clean BadRequest rather than a KV error.
+    let key = OAuthStateKey::from_str(&query.state)
+        .map_err(|_| ErrorKind::BadRequest.with_message("Invalid authorization state"))?;
+
     // Consume the pending authorization single-use: read then delete, so a
-    // replayed callback finds nothing. A missing entry means an unknown, expired,
-    // or already-used state.
-    let store = nats
-        .kv_store::<OAuthStateKey, OAuthFlowState, OAuthStateBucket>()
-        .await?;
-    let key = OAuthStateKey(query.state);
+    // replayed callback finds nothing and a denial still cleans up its state. A
+    // missing entry means an unknown, expired, or already-used state.
+    let store = nats.kv_store::<OAuthStateBucket>().await?;
     let flow = store
         .get_value(&key)
         .await?
         .ok_or_else(|| ErrorKind::BadRequest.with_message("Invalid or expired authorization"))?;
     store.delete(&key).await?;
 
-    let app = app_for(cloud, flow.provider)?;
-    let oauth_provider = oauth_provider(flow.provider);
+    // A denial (or any provider error) arrives with `error` and no `code`; the
+    // state is now consumed, so reject after cleanup.
+    if let Some(error) = query.error {
+        return Err(ErrorKind::BadRequest
+            .with_message("Authorization was denied")
+            .with_context(error));
+    }
+    let code = query
+        .code
+        .ok_or_else(|| ErrorKind::BadRequest.with_message("Authorization callback missing code"))?;
 
-    let tokens = oauth::exchange_code(
-        &oauth_provider,
-        app,
-        cloud.http(),
-        query.code,
-        flow.pkce_verifier,
-    )
-    .await?;
+    let tokens = cloud
+        .oauth_client(flow.provider)?
+        .exchange_code(code, flow.pkce_verifier)
+        .await?;
 
-    let config = ConnectionConfig::CloudFiles(config_for(flow.provider, tokens, flow.root));
+    let settings = ConnectionSettings {
+        tokens,
+        root: flow.root,
+    };
+    let config = ConnectionConfig::CloudFiles(FileServiceConfig::new(flow.provider, settings));
     let provider = config.provider_id().to_owned();
     let provider_type = config.provider_type();
     let encrypted_data = crypto.encrypt_json(flow.workspace_id, &config)?;

@@ -6,37 +6,22 @@ use std::time::{Duration, SystemTime};
 
 use async_nats::jetstream::{self, kv};
 use futures::StreamExt;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use super::{KvBucket, KvKey};
+use super::core::KvBucket;
 use crate::{Error, Result, TRACING_TARGET_KV};
 
 /// Type-safe NATS KV store wrapper.
 ///
-/// This store is generic over:
-/// - `K`: The key type (determines prefix)
-/// - `V`: The value type to store (must be serializable)
-/// - `B`: The bucket configuration (determines name, description, TTL)
+/// Generic only over the bucket `B`, which fixes the key type ([`KvBucket::Key`])
+/// and value type ([`KvBucket::Value`]) as well as the name, description, and TTL.
 #[derive(Clone)]
-pub struct KvStore<K, V, B>
-where
-    K: KvKey,
-    V: Serialize + DeserializeOwned + Send + Sync + 'static,
-    B: KvBucket,
-{
+pub struct KvStore<B: KvBucket> {
     store: kv::Store,
-    _key: PhantomData<K>,
-    _value: PhantomData<V>,
     _bucket: PhantomData<B>,
 }
 
-impl<K, V, B> KvStore<K, V, B>
-where
-    K: KvKey,
-    V: Serialize + DeserializeOwned + Send + Sync + 'static,
-    B: KvBucket,
-{
+impl<B: KvBucket> KvStore<B> {
     /// Create or get a KV bucket using the bucket configuration.
     #[tracing::instrument(skip(jetstream), target = TRACING_TARGET_KV)]
     pub(crate) async fn new(jetstream: &jetstream::Context) -> Result<Self> {
@@ -78,8 +63,6 @@ where
 
         Ok(Self {
             store,
-            _key: PhantomData,
-            _value: PhantomData,
             _bucket: PhantomData,
         })
     }
@@ -92,7 +75,7 @@ where
 
     /// Put a value into the store.
     #[tracing::instrument(skip(self, value), target = TRACING_TARGET_KV)]
-    pub async fn put(&self, key: &K, value: &V) -> Result<KvEntry> {
+    pub async fn put(&self, key: &B::Key, value: &B::Value) -> Result<KvEntry> {
         let key_str = key.to_string();
         let json = serde_json::to_vec(value)?;
         let size = json.len();
@@ -124,7 +107,7 @@ where
     /// locks / leader election: combined with a bucket TTL, exactly one caller
     /// wins the create and the entry auto-expires if the winner dies.
     #[tracing::instrument(skip(self, value), target = TRACING_TARGET_KV)]
-    pub async fn create(&self, key: &K, value: &V) -> Result<bool> {
+    pub async fn create(&self, key: &B::Key, value: &B::Value) -> Result<bool> {
         use async_nats::jetstream::kv::CreateErrorKind;
 
         let key_str = key.to_string();
@@ -142,7 +125,7 @@ where
 
     /// Get a value from the store.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
-    pub async fn get(&self, key: &K) -> Result<Option<KvValue<V>>> {
+    pub async fn get(&self, key: &B::Key) -> Result<Option<KvValue<B::Value>>> {
         let key_str = key.to_string();
         match self.store.entry(&key_str).await {
             Ok(Some(entry)) => {
@@ -177,13 +160,13 @@ where
 
     /// Get a value, returning just the data.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
-    pub async fn get_value(&self, key: &K) -> Result<Option<V>> {
+    pub async fn get_value(&self, key: &B::Key) -> Result<Option<B::Value>> {
         Ok(self.get(key).await?.map(|kv| kv.value))
     }
 
     /// Delete a key from the store.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
-    pub async fn delete(&self, key: &K) -> Result<()> {
+    pub async fn delete(&self, key: &B::Key) -> Result<()> {
         let key_str = key.to_string();
         self.store
             .purge(&key_str)
@@ -200,7 +183,7 @@ where
 
     /// Check if a key exists in the store.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
-    pub async fn exists(&self, key: &K) -> Result<bool> {
+    pub async fn exists(&self, key: &B::Key) -> Result<bool> {
         let key_str = key.to_string();
         match self.store.get(&key_str).await {
             Ok(Some(_)) => Ok(true),
@@ -211,7 +194,7 @@ where
 
     /// Touches a key to reset its TTL by re-putting the same value.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
-    pub async fn touch(&self, key: &K) -> Result<KvEntry> {
+    pub async fn touch(&self, key: &B::Key) -> Result<KvEntry> {
         let kv_value = self
             .get(key)
             .await?
@@ -222,7 +205,7 @@ where
 
     /// Get all keys in the bucket with the expected prefix.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
-    pub async fn keys(&self) -> Result<Vec<K>> {
+    pub async fn keys(&self) -> Result<Vec<B::Key>> {
         let mut keys = Vec::new();
         let mut key_stream = self
             .store
@@ -233,7 +216,7 @@ where
         while let Some(key_result) = key_stream.next().await {
             match key_result {
                 Ok(key_str) => {
-                    if let Ok(key) = key_str.parse::<K>() {
+                    if let Ok(key) = key_str.parse::<B::Key>() {
                         keys.push(key);
                     }
                 }
@@ -275,7 +258,7 @@ where
 
     /// Update a value only if the revision matches (optimistic concurrency).
     #[tracing::instrument(skip(self, value), target = TRACING_TARGET_KV)]
-    pub async fn update(&self, key: &K, value: &V, revision: u64) -> Result<KvEntry> {
+    pub async fn update(&self, key: &B::Key, value: &B::Value, revision: u64) -> Result<KvEntry> {
         let key_str = key.to_string();
         let json = serde_json::to_vec(value)?;
         let size = json.len();
@@ -303,11 +286,11 @@ where
 
     /// Get or compute a value using the cache-aside pattern.
     #[tracing::instrument(skip(self, compute_fn), target = TRACING_TARGET_KV)]
-    pub async fn get_or_compute<F, Fut>(&self, key: &K, compute_fn: F) -> Result<V>
+    pub async fn get_or_compute<F, Fut>(&self, key: &B::Key, compute_fn: F) -> Result<B::Value>
     where
         F: FnOnce() -> Fut + Send,
-        Fut: Future<Output = Result<V>> + Send,
-        V: Clone,
+        Fut: Future<Output = Result<B::Value>> + Send,
+        B::Value: Clone,
     {
         if let Some(existing) = self.get_value(key).await? {
             return Ok(existing);

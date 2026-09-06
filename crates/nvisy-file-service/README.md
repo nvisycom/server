@@ -6,13 +6,12 @@ OAuth-based cloud file-service providers for the Nvisy platform.
 
 ## Overview
 
-Connects a workspace to a tenant's consumer file service — Google Drive
-today, with Dropbox, OneDrive, and Box to follow — behind a single
-`FileServiceClient`. It owns the OAuth2 authorization-code flow (with
-refresh), driven through the platform's shared `reqwest` client, and the
-per-provider REST calls to list and stream files in and out. Sibling to
-`nvisy-object-store`, which covers object stores (S3, Azure, GCS) with
-static credentials.
+Connects a workspace to a tenant's consumer file service — Google Drive,
+Dropbox, OneDrive, and Box — behind a single `FileServiceClient`. It owns
+the OAuth2 authorization-code flow (with refresh), driven through a shared
+`reqwest` client, and the per-provider REST calls to list and stream files
+in and out. Sibling to `nvisy-object-store`, which covers object stores
+(S3, Azure, GCS) with static credentials.
 
 ## Documentation
 

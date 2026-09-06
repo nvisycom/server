@@ -2,6 +2,9 @@
 
 use std::time::Duration;
 
+/// A result whose error is the crate [`Error`].
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
 /// Classification of a file-service failure, so callers can branch without
 /// matching on messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,13 +105,25 @@ impl Error {
 
 /// Maps an HTTP status into the corresponding [`ErrorKind`] for a failed
 /// provider request.
-#[must_use]
-pub fn kind_for_status(status: u16) -> ErrorKind {
+fn kind_for_status(status: u16) -> ErrorKind {
     match status {
         401 => ErrorKind::Unauthenticated,
         403 => ErrorKind::PermissionDenied,
         404 => ErrorKind::NotFound,
         400 | 405..=422 => ErrorKind::BadRequest,
         _ => ErrorKind::Runtime,
+    }
+}
+
+impl From<reqwest::Error> for Error {
+    /// Classifies a reqwest failure: a response status maps to the matching
+    /// kind, while a transport failure with no status (DNS, TCP/TLS, timeout) is
+    /// a [`Connection`](ErrorKind::Connection) error.
+    fn from(err: reqwest::Error) -> Self {
+        let kind = match err.status() {
+            Some(status) => kind_for_status(status.as_u16()),
+            None => ErrorKind::Connection,
+        };
+        Self::new(kind, "cloud file provider request failed").with_source(err)
     }
 }

@@ -69,7 +69,10 @@ impl Client for GcsProvider {
         }
 
         if let Some(endpoint) = &creds.endpoint {
-            builder = builder.with_url(endpoint);
+            // `with_base_url` sets a custom service endpoint (e.g. a fake-gcs
+            // server); `with_url` instead parses a `gs://bucket/path` object URL,
+            // which is not what an endpoint override is.
+            builder = builder.with_base_url(endpoint);
         }
 
         let store = builder

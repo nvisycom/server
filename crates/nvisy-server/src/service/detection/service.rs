@@ -6,11 +6,11 @@
 //! create-detection handler so the handler stays thin and the NATS wiring lives in
 //! one place.
 
-use nvisy_nats::stream::{BroadcastStream, DetectionStream};
+use nvisy_nats::stream::BroadcastStream;
 use nvisy_postgres::types::DetectionStatus;
 use uuid::Uuid;
 
-use super::job::{DetectionJob, DetectionStatusEvent, detection_subject};
+use super::job::{DetectionJob, DetectionStatusEvent, DetectionStream, detection_subject};
 use crate::handler::Result;
 use crate::service::Infra;
 
@@ -32,11 +32,7 @@ impl DetectionQueue {
     /// Enqueues a detection's analysis onto the work-queue for the worker to pick
     /// up.
     pub async fn enqueue(&self, job: DetectionJob) -> Result<()> {
-        let publisher = self
-            .infra
-            .nats
-            .event_publisher::<DetectionJob, DetectionStream>()
-            .await?;
+        let publisher = self.infra.nats.event_publisher::<DetectionStream>().await?;
         publisher.publish(&job).await?;
         Ok(())
     }

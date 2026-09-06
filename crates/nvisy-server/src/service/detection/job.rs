@@ -6,6 +6,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// The detection JetStream work-queue, carrying [`DetectionJob`] payloads.
+pub type DetectionStream = nvisy_nats::stream::DetectionStream<DetectionJob>;
+
 /// A queued request to run a detection.
 ///
 /// Published to the `DetectionStream` work-queue by the create-detection handler

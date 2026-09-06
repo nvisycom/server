@@ -6,11 +6,11 @@
 //! the per-call argument for transfers in a `Dropbox-API-Arg` header whose JSON
 //! must be ASCII-safe. Files are addressed by a stable `id:...` key.
 
-use futures::TryStreamExt;
 use serde::Deserialize;
 
+use super::http::response_stream;
 use crate::client::{ByteStream, FileEntry, FileServiceClient};
-use crate::error::{Error, ErrorKind, kind_for_status};
+use crate::error::Result;
 use crate::oauth::OAuthProvider;
 
 /// Provider identifier stored in the connection's `provider` column.
@@ -100,20 +100,18 @@ fn api_arg(value: &serde_json::Value) -> String {
 
 #[async_trait::async_trait]
 impl FileServiceClient for DropboxClient {
-    async fn verify(&self) -> Result<(), Error> {
+    async fn verify(&self) -> Result<()> {
         // get_current_account is the idiomatic whoami; it takes an empty body.
         self.http
             .post(format!("{API_BASE}/users/get_current_account"))
             .bearer_auth(&self.access_token)
             .send()
-            .await
-            .map_err(|err| Error::connection("Dropbox request failed").with_source(err))?
-            .error_for_status()
-            .map(|_| ())
-            .map_err(map_reqwest_status)
+            .await?
+            .error_for_status()?;
+        Ok(())
     }
 
-    async fn list(&self) -> Result<Vec<FileEntry>, Error> {
+    async fn list(&self) -> Result<Vec<FileEntry>> {
         // The root is the empty string; a configured folder uses a leading slash.
         let path = self.root_path.clone().unwrap_or_default();
         let mut entries = Vec::new();
@@ -124,13 +122,10 @@ impl FileServiceClient for DropboxClient {
             .bearer_auth(&self.access_token)
             .json(&serde_json::json!({ "path": path, "recursive": false }))
             .send()
-            .await
-            .map_err(|err| Error::runtime("Dropbox list request failed").with_source(err))?
-            .error_for_status()
-            .map_err(map_reqwest_status)?
+            .await?
+            .error_for_status()?
             .json()
-            .await
-            .map_err(|err| Error::runtime("invalid Dropbox list response").with_source(err))?;
+            .await?;
 
         loop {
             entries.extend(collect_files(&page.entries));
@@ -143,18 +138,15 @@ impl FileServiceClient for DropboxClient {
                 .bearer_auth(&self.access_token)
                 .json(&serde_json::json!({ "cursor": page.cursor }))
                 .send()
-                .await
-                .map_err(|err| Error::runtime("Dropbox list request failed").with_source(err))?
-                .error_for_status()
-                .map_err(map_reqwest_status)?
+                .await?
+                .error_for_status()?
                 .json()
-                .await
-                .map_err(|err| Error::runtime("invalid Dropbox list response").with_source(err))?;
+                .await?;
         }
         Ok(entries)
     }
 
-    async fn get_stream(&self, id: &str) -> Result<ByteStream, Error> {
+    async fn get_stream(&self, id: &str) -> Result<ByteStream> {
         let arg = api_arg(&serde_json::json!({ "path": id }));
         let response = self
             .http
@@ -162,23 +154,12 @@ impl FileServiceClient for DropboxClient {
             .bearer_auth(&self.access_token)
             .header("Dropbox-API-Arg", arg)
             .send()
-            .await
-            .map_err(|err| Error::runtime("Dropbox download request failed").with_source(err))?
-            .error_for_status()
-            .map_err(map_reqwest_status)?;
-
-        let stream = response
-            .bytes_stream()
-            .map_err(|err| Error::runtime("Dropbox download stream failed").with_source(err));
-        Ok(Box::pin(stream))
+            .await?
+            .error_for_status()?;
+        Ok(response_stream(response))
     }
 
-    async fn put_stream(
-        &self,
-        name: &str,
-        _content_type: &str,
-        body: ByteStream,
-    ) -> Result<(), Error> {
+    async fn put_stream(&self, name: &str, _content_type: &str, body: ByteStream) -> Result<()> {
         // Upload into the configured root (or account root), keeping the file
         // name; autorename avoids clobbering an existing name.
         let root = self.root_path.as_deref().unwrap_or("");
@@ -196,11 +177,9 @@ impl FileServiceClient for DropboxClient {
             .header("Content-Type", "application/octet-stream")
             .body(reqwest::Body::wrap_stream(body))
             .send()
-            .await
-            .map_err(|err| Error::runtime("Dropbox upload request failed").with_source(err))?
-            .error_for_status()
-            .map(|_| ())
-            .map_err(map_reqwest_status)
+            .await?
+            .error_for_status()?;
+        Ok(())
     }
 }
 
@@ -216,12 +195,4 @@ fn collect_files(entries: &[Entry]) -> Vec<FileEntry> {
             })
         })
         .collect()
-}
-
-/// Maps a reqwest status error into a classified [`Error`].
-fn map_reqwest_status(err: reqwest::Error) -> Error {
-    let kind = err
-        .status()
-        .map_or(ErrorKind::Runtime, |s| kind_for_status(s.as_u16()));
-    Error::new(kind, "Dropbox returned an error").with_source(err)
 }

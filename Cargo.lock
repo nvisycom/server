@@ -6742,15 +6742,22 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "clap",
  "futures",
  "http 1.5.0",
+ "jiff",
  "oauth2",
  "percent-encoding",
  "reqwest 0.13.4",
+ "reqwest-middleware",
+ "reqwest-retry",
+ "reqwest-tracing",
  "schemars 1.2.2",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -6779,14 +6786,12 @@ dependencies = [
  "derive_more",
  "futures",
  "humantime",
- "jiff",
  "nvisy-core",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -6897,7 +6902,6 @@ dependencies = [
  "nvisy-webhook",
  "pin-project-lite",
  "rand 0.10.2",
- "reqwest 0.13.4",
  "schemars 1.2.2",
  "serde",
  "serde_json",

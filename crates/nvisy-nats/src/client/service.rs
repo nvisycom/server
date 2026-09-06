@@ -34,15 +34,14 @@ use std::time::{Duration, Instant};
 
 use async_nats::connection::State;
 use async_nats::{Client, ConnectOptions, jetstream};
+use nvisy_core::health::{ComponentHealth, HealthCheck};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::time::timeout;
 
-use super::nats_config::NatsConfig;
-use crate::kv::{
-    ApiToken, ApiTokensBucket, ChatHistoryBucket, KvBucket, KvKey, KvStore, SessionKey, TokenKey,
-};
-use crate::stream::{BroadcastStream, EventPublisher, EventStream, EventSubscriber, WebhookStream};
+use super::config::NatsConfig;
+use crate::kv::{KvBucket, KvStore};
+use crate::stream::{BroadcastStream, EventPublisher, EventStream, EventSubscriber};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
 
 /// NATS client wrapper with connection management.
@@ -76,6 +75,11 @@ impl NatsClient {
         // Set connection timeout if specified
         if let Some(timeout) = config.nats_connect_timeout {
             connect_opts = connect_opts.connection_timeout(timeout);
+        }
+
+        // Set the request-reply timeout if specified (overrides async-nats' 10s default).
+        if let Some(timeout) = config.nats_request_timeout {
+            connect_opts = connect_opts.request_timeout(Some(timeout));
         }
 
         // Set reconnection options
@@ -163,56 +167,17 @@ impl NatsClient {
 
 // Key-value store getters
 impl NatsClient {
-    /// Get or create a KV store for the specified key, value, and bucket types.
+    /// Get or create the KV store for a bucket. The bucket fixes the key and
+    /// value types, so it is the only type argument.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn kv_store<K, V, B>(&self) -> Result<KvStore<K, V, B>>
-    where
-        K: KvKey,
-        V: Serialize + DeserializeOwned + Send + Sync + 'static,
-        B: KvBucket,
-    {
+    pub async fn kv_store<B: KvBucket>(&self) -> Result<KvStore<B>> {
         KvStore::new(&self.inner.jetstream).await
     }
 
-    /// Get or create a KV store with custom TTL.
+    /// Get or create the KV store for a bucket with a custom TTL.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn kv_store_with_ttl<K, V, B>(&self, ttl: Duration) -> Result<KvStore<K, V, B>>
-    where
-        K: KvKey,
-        V: Serialize + DeserializeOwned + Send + Sync + 'static,
-        B: KvBucket,
-    {
+    pub async fn kv_store_with_ttl<B: KvBucket>(&self, ttl: Duration) -> Result<KvStore<B>> {
         KvStore::with_ttl(&self.inner.jetstream, ttl).await
-    }
-
-    /// Get or create an API token store.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn api_token_store(
-        &self,
-        ttl: Duration,
-    ) -> Result<KvStore<TokenKey, ApiToken, ApiTokensBucket>> {
-        self.kv_store_with_ttl(ttl).await
-    }
-
-    /// Get or create a chat history store with default TTL.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn chat_history_store<V>(&self) -> Result<KvStore<SessionKey, V, ChatHistoryBucket>>
-    where
-        V: Serialize + DeserializeOwned + Send + Sync + 'static,
-    {
-        self.kv_store().await
-    }
-
-    /// Get or create a chat history store with custom TTL.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn chat_history_store_with_ttl<V>(
-        &self,
-        ttl: Duration,
-    ) -> Result<KvStore<SessionKey, V, ChatHistoryBucket>>
-    where
-        V: Serialize + DeserializeOwned + Send + Sync + 'static,
-    {
-        self.kv_store_with_ttl(ttl).await
     }
 }
 
@@ -220,40 +185,14 @@ impl NatsClient {
 impl NatsClient {
     /// Create an event publisher for the specified stream type.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn event_publisher<T, S>(&self) -> Result<EventPublisher<T, S>>
-    where
-        T: Serialize + Send + Sync + 'static,
-        S: EventStream,
-    {
+    pub async fn event_publisher<S: EventStream>(&self) -> Result<EventPublisher<S>> {
         EventPublisher::new(&self.inner.jetstream).await
     }
 
     /// Create an event subscriber for the specified stream type.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn event_subscriber<T, S>(&self) -> Result<EventSubscriber<T, S>>
-    where
-        T: DeserializeOwned + Send + Sync + 'static,
-        S: EventStream,
-    {
+    pub async fn event_subscriber<S: EventStream>(&self) -> Result<EventSubscriber<S>> {
         EventSubscriber::new(&self.inner.jetstream).await
-    }
-
-    /// Create a webhook publisher.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn webhook_publisher<T>(&self) -> Result<EventPublisher<T, WebhookStream>>
-    where
-        T: Serialize + Send + Sync + 'static,
-    {
-        self.event_publisher().await
-    }
-
-    /// Create a webhook subscriber.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn webhook_subscriber<T>(&self) -> Result<EventSubscriber<T, WebhookStream>>
-    where
-        T: DeserializeOwned + Send + Sync + 'static,
-    {
-        self.event_subscriber().await
     }
 }
 
@@ -300,5 +239,38 @@ impl NatsClient {
             .map_err(|e| Error::Connection(Box::new(e)))?;
 
         Ok(BroadcastStream::new(subscriber))
+    }
+}
+
+/// Component name reported for the NATS health check.
+const HEALTH_COMPONENT_NAME: &str = "nats";
+
+#[async_trait::async_trait]
+impl HealthCheck for NatsClient {
+    /// Probes NATS by checking the connection state, then pinging the server.
+    async fn check_health(&self) -> ComponentHealth {
+        if !self.is_connected() {
+            tracing::warn!(target: TRACING_TARGET_CONNECTION, "NATS is not connected");
+            return ComponentHealth::unhealthy(HEALTH_COMPONENT_NAME);
+        }
+
+        match self.ping().await {
+            Ok(latency) => {
+                tracing::debug!(
+                    target: TRACING_TARGET_CONNECTION,
+                    ping_ms = latency.as_millis(),
+                    "NATS health check passed"
+                );
+                ComponentHealth::healthy(HEALTH_COMPONENT_NAME)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target: TRACING_TARGET_CONNECTION,
+                    error = %e,
+                    "NATS health check failed"
+                );
+                ComponentHealth::unhealthy(HEALTH_COMPONENT_NAME)
+            }
+        }
     }
 }

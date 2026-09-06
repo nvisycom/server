@@ -10,11 +10,11 @@
 //! flow already returns and stores the rotated token, so no special handling is
 //! needed here.
 
-use futures::TryStreamExt;
 use serde::Deserialize;
 
+use super::http::response_stream;
 use crate::client::{ByteStream, FileEntry, FileServiceClient};
-use crate::error::{Error, ErrorKind, kind_for_status};
+use crate::error::Result;
 use crate::oauth::OAuthProvider;
 
 /// Provider identifier stored in the connection's `provider` column.
@@ -91,19 +91,17 @@ struct Item {
 
 #[async_trait::async_trait]
 impl FileServiceClient for BoxClient {
-    async fn verify(&self) -> Result<(), Error> {
+    async fn verify(&self) -> Result<()> {
         self.http
             .get(format!("{API_BASE}/users/me"))
             .bearer_auth(&self.access_token)
             .send()
-            .await
-            .map_err(|err| Error::connection("Box request failed").with_source(err))?
-            .error_for_status()
-            .map(|_| ())
-            .map_err(map_reqwest_status)
+            .await?
+            .error_for_status()?;
+        Ok(())
     }
 
-    async fn list(&self) -> Result<Vec<FileEntry>, Error> {
+    async fn list(&self) -> Result<Vec<FileEntry>> {
         let folder = self.root_folder_id.as_deref().unwrap_or(ROOT_FOLDER_ID);
         let mut entries = Vec::new();
         let mut offset = 0u32;
@@ -119,13 +117,10 @@ impl FileServiceClient for BoxClient {
                     ("offset", &offset.to_string()),
                 ])
                 .send()
-                .await
-                .map_err(|err| Error::runtime("Box list request failed").with_source(err))?
-                .error_for_status()
-                .map_err(map_reqwest_status)?
+                .await?
+                .error_for_status()?
                 .json()
-                .await
-                .map_err(|err| Error::runtime("invalid Box list response").with_source(err))?;
+                .await?;
 
             entries.extend(
                 page.entries
@@ -145,7 +140,7 @@ impl FileServiceClient for BoxClient {
         Ok(entries)
     }
 
-    async fn get_stream(&self, id: &str) -> Result<ByteStream, Error> {
+    async fn get_stream(&self, id: &str) -> Result<ByteStream> {
         // /content answers 302 to a temporary dl.boxcloud.com URL; reqwest
         // follows it to the bytes.
         let response = self
@@ -153,23 +148,12 @@ impl FileServiceClient for BoxClient {
             .get(format!("{API_BASE}/files/{id}/content"))
             .bearer_auth(&self.access_token)
             .send()
-            .await
-            .map_err(|err| Error::runtime("Box download request failed").with_source(err))?
-            .error_for_status()
-            .map_err(map_reqwest_status)?;
-
-        let stream = response
-            .bytes_stream()
-            .map_err(|err| Error::runtime("Box download stream failed").with_source(err));
-        Ok(Box::pin(stream))
+            .await?
+            .error_for_status()?;
+        Ok(response_stream(response))
     }
 
-    async fn put_stream(
-        &self,
-        name: &str,
-        _content_type: &str,
-        body: ByteStream,
-    ) -> Result<(), Error> {
+    async fn put_stream(&self, name: &str, _content_type: &str, body: ByteStream) -> Result<()> {
         // Multipart upload: the `attributes` JSON part MUST precede the `file`
         // part, or Box rejects it with metadata_after_file_contents.
         let parent = self.root_folder_id.as_deref().unwrap_or(ROOT_FOLDER_ID);
@@ -187,18 +171,8 @@ impl FileServiceClient for BoxClient {
             .bearer_auth(&self.access_token)
             .multipart(form)
             .send()
-            .await
-            .map_err(|err| Error::runtime("Box upload request failed").with_source(err))?
-            .error_for_status()
-            .map(|_| ())
-            .map_err(map_reqwest_status)
+            .await?
+            .error_for_status()?;
+        Ok(())
     }
-}
-
-/// Maps a reqwest status error into a classified [`Error`].
-fn map_reqwest_status(err: reqwest::Error) -> Error {
-    let kind = err
-        .status()
-        .map_or(ErrorKind::Runtime, |s| kind_for_status(s.as_u16()));
-    Error::new(kind, "Box returned an error").with_source(err)
 }

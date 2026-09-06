@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use nvisy_nats::stream::{EventStream, EventSubscriber, TypedMessage, WebhookStream};
+use nvisy_nats::stream::{EventStream, EventSubscriber, TypedMessage};
 use nvisy_postgres::PgConn;
 use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
@@ -16,12 +16,12 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 use uuid::Uuid;
 
-use super::WebhookJob;
+use super::{WebhookJob, WebhookStream};
 use crate::service::{Infra, Worker};
 use crate::{Error, Result};
 
 /// Type alias for webhook subscriber.
-type WebhookSubscriber = EventSubscriber<WebhookJob, WebhookStream>;
+type WebhookSubscriber = EventSubscriber<WebhookStream>;
 
 /// Tracing target for webhook worker operations.
 const TRACING_TARGET: &str = "nvisy_server::worker::webhook";
@@ -137,7 +137,8 @@ impl WebhookDeliveryWorker {
 
     /// Internal run loop.
     async fn run_inner(&self, cancel: CancellationToken) -> Result<()> {
-        let subscriber: WebhookSubscriber = self.infra.nats.webhook_subscriber().await?;
+        let subscriber: WebhookSubscriber =
+            self.infra.nats.event_subscriber::<WebhookStream>().await?;
 
         let mut stream = subscriber.subscribe().await?;
 

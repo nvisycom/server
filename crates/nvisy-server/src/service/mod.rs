@@ -8,12 +8,12 @@ mod crypto;
 mod detection;
 mod engine;
 mod event;
-mod external_object_store;
 mod file_reaper;
 mod health;
 mod infra;
 mod notification;
 mod password;
+mod persist_oauth;
 mod run_blob_store;
 mod session_keys;
 mod sync;
@@ -24,7 +24,9 @@ mod worker;
 use std::sync::Arc;
 
 use nvisy_core::health::HealthCheck;
+use nvisy_file_service::CloudFileService;
 use nvisy_nats::{NatsClient, NatsConfig};
+pub use nvisy_object_store::client::ExternalObjectStore;
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use nvisy_s3::BlobStore;
 pub use nvisy_s3::S3Config;
@@ -34,9 +36,7 @@ use tokio_util::sync::CancellationToken;
 use crate::middleware::UploadConfig;
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::chat::{ChatService, TurnLocation};
-pub use crate::service::cloud_file_service::{
-    CloudFileService, CloudFilesConfig, ConnectedFileService, OAuthApps,
-};
+pub use crate::service::cloud_file_service::{CloudFilesConfig, CloudFilesRedirect};
 pub use crate::service::connection_config::ConnectionConfig;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
@@ -50,12 +50,12 @@ pub use crate::service::event::{
     ConnectionRef, DetectionRef, EventEmitter, EventOrigin, EventOutboxDrainer, FileRef, InviteRef,
     MemberRef, PipelineRef, PolicyRef, WebhookRef, WorkspaceEvent, WorkspaceRef, event_outbox_row,
 };
-pub use crate::service::external_object_store::ExternalObjectStore;
 pub use crate::service::file_reaper::FileReaper;
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::infra::Infra;
 pub use crate::service::notification::{NotificationEmitter, UnreadCountEvent};
 pub use crate::service::password::PasswordService;
+pub use crate::service::persist_oauth::persist_refreshed_tokens;
 pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
 pub use crate::service::sync::{
@@ -95,6 +95,8 @@ pub struct ServiceState {
     // External services:
     pub webhook: WebhookService,
     pub cloud_files: CloudFileService,
+    /// Frontend URL the cloud file OAuth callback redirects to when done.
+    pub cloud_files_redirect: Option<String>,
 
     // Redaction engine:
     pub engine: EngineService,
@@ -148,9 +150,9 @@ impl ServiceState {
 
         // The stateful sync singleton composes the stateless emitters/object
         // service from the same `Infra` their `FromRef` impls use. The cloud
-        // file service holds the shared HTTP client and OAuth app credentials.
-        let cloud_files =
-            CloudFileService::new(reqwest::Client::new(), cloud_files_config.into_apps());
+        // file service (HTTP client + OAuth apps) is built by the crate; the
+        // post-auth redirect is a host-side concern kept alongside it.
+        let (cloud_files, cloud_files_redirect) = cloud_files_config.build();
         let connection_sync = ConnectionSyncService::new(
             infra.clone(),
             ExternalObjectStore::new(),
@@ -163,6 +165,7 @@ impl ServiceState {
             shutdown: CancellationToken::new(),
             webhook: webhook_service,
             cloud_files,
+            cloud_files_redirect,
             engine,
             connection_sync,
             health_cache: HealthCache::new(&health_config, health_checkers),
@@ -335,5 +338,12 @@ impl axum::extract::FromRef<ServiceState> for ExternalObjectStore {
 impl axum::extract::FromRef<ServiceState> for CloudFileService {
     fn from_ref(state: &ServiceState) -> Self {
         state.cloud_files.clone()
+    }
+}
+
+// The OAuth callback's post-auth redirect, cloned from the stored setting.
+impl axum::extract::FromRef<ServiceState> for CloudFilesRedirect {
+    fn from_ref(state: &ServiceState) -> Self {
+        CloudFilesRedirect(state.cloud_files_redirect.clone())
     }
 }

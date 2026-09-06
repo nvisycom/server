@@ -1,15 +1,15 @@
-//! Object-store access.
+//! The dependency-injected entry point for external object-store access.
 //!
-//! Bridges stored workspace connections to the [`nvisy_object_store`] providers: a
-//! connection carries an encrypted, typed [`StorageConfig`](nvisy_object_store::providers::StorageConfig),
-//! which [`ExternalObjectStore`] turns into a connected client at runtime. The sync
-//! orchestration built on top lives in the [`sync`](crate::service::sync) module.
+//! Bridges stored workspace connections to the [`providers`](crate::providers): a
+//! connection carries an encrypted, typed
+//! [`StorageConfig`](crate::providers::StorageConfig), which [`ExternalObjectStore`]
+//! turns into a connected [`ObjectStoreClient`] at runtime.
 
-use nvisy_object_store::client::ObjectStoreClient;
-use nvisy_object_store::providers::{self, StorageConfig};
+use crate::client::ObjectStoreClient;
+use crate::providers::{self, StorageConfig};
 
 /// Tracing target for object storage operations.
-const TRACING_TARGET: &str = "nvisy_server::service::external_object_store";
+const TRACING_TARGET: &str = "nvisy_object_store::client";
 
 /// Connects workspace connections to their object storage backends.
 ///
@@ -31,10 +31,7 @@ impl ExternalObjectStore {
     ///
     /// Returns an error if the backend rejects the credentials.
     #[tracing::instrument(name = "object.connect", skip_all, fields(provider = %config.provider_id()))]
-    pub async fn connect(
-        &self,
-        config: &StorageConfig,
-    ) -> Result<ObjectStoreClient, nvisy_object_store::Error> {
+    pub async fn connect(&self, config: &StorageConfig) -> Result<ObjectStoreClient, crate::Error> {
         tracing::debug!(target: TRACING_TARGET, "Connecting to object store");
         providers::connect(config).await
     }

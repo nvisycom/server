@@ -34,6 +34,7 @@ cli = [
     "nvisy-s3/cli",
     "nvisy-postgres/cli",
     "nvisy-nats/cli",
+    "nvisy-file-service/cli",
 ]
 
 [dependencies]
@@ -71,9 +72,6 @@ axum-client-ip = { workspace = true, features = [] }
 axum-extra = { workspace = true, features = ["typed-header", "attachment", "query"] }
 tower = { workspace = true, features = [] }
 tower-http = { workspace = true, features = [] }
-
-# HTTP client (cloud file-service OAuth + provider requests)
-reqwest = { workspace = true, features = [] }
 
 # OpenAPI/Documentation
 aide = { workspace = true, features = ["axum", "axum-query", "axum-extra-query", "axum-form", "axum-json", "axum-multipart", "axum-extra", "bytes", "http"] }

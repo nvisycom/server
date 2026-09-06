@@ -1,14 +1,17 @@
 //! Typed cloud file-service configuration and provider dispatch.
+//!
+//! [`Provider`] is the single enum of supported providers; it owns each
+//! provider's identity, OAuth endpoints, and client construction, so no caller
+//! re-derives per-provider facts. [`FileServiceConfig`] pairs a provider with its
+//! [`ConnectionSettings`] (OAuth tokens + sync root) and is what a connection
+//! stores, encrypted.
 
 mod box_provider;
 mod drive;
 mod dropbox;
+mod http;
 mod onedrive;
 
-pub use box_provider::{BoxClient, PROVIDER_ID as BOX, oauth_provider as box_oauth};
-pub use drive::{DriveClient, PROVIDER_ID as GOOGLE_DRIVE, oauth_provider as drive_oauth};
-pub use dropbox::{DropboxClient, PROVIDER_ID as DROPBOX, oauth_provider as dropbox_oauth};
-pub use onedrive::{OneDriveClient, PROVIDER_ID as ONEDRIVE, oauth_provider as onedrive_oauth};
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -16,121 +19,124 @@ use serde::{Deserialize, Serialize};
 use crate::client::FileServiceClient;
 use crate::oauth::{OAuthProvider, OAuthTokens};
 
-/// A fully-typed cloud file-service connection configuration.
+/// A supported cloud file-service provider.
 ///
-/// The `provider` tag selects the variant and its credential shape. Serialization
-/// exists only to persist the config (including OAuth tokens) encrypted at rest,
-/// never to return it in API responses.
-///
-/// Every provider carries its OAuth `tokens` plus an optional `root` that scopes
-/// the sync: a folder id for Drive, OneDrive, and Box, or a folder path for
-/// Dropbox. `None` means the account root.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+/// The serialized form (snake_case) is the `provider` tag stored on a connection
+/// and used in the API, so every provider name lives in exactly one place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(tag = "provider", rename_all_fields = "camelCase")]
-pub enum FileServiceConfig {
+#[serde(rename_all = "snake_case")]
+pub enum Provider {
     /// Google Drive.
-    #[serde(rename = "google_drive")]
-    GoogleDrive {
-        /// The OAuth token set for this connection.
-        tokens: OAuthTokens,
-        /// Drive folder id to scope the sync to; `None` uses the user's root.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        root: Option<String>,
-    },
+    GoogleDrive,
     /// Dropbox.
-    #[serde(rename = "dropbox")]
-    Dropbox {
-        /// The OAuth token set for this connection.
-        tokens: OAuthTokens,
-        /// Dropbox folder path to scope the sync to; `None` uses the root.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        root: Option<String>,
-    },
+    Dropbox,
     /// OneDrive (Microsoft Graph).
-    #[serde(rename = "onedrive")]
-    OneDrive {
-        /// The OAuth token set for this connection.
-        tokens: OAuthTokens,
-        /// Drive item id of the folder to scope the sync to; `None` uses root.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        root: Option<String>,
-    },
+    OneDrive,
     /// Box.
-    #[serde(rename = "box")]
-    Box {
-        /// The OAuth token set for this connection.
-        tokens: OAuthTokens,
-        /// Box folder id to scope the sync to; `None` uses the account root.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        root: Option<String>,
-    },
+    Box,
 }
 
-impl FileServiceConfig {
-    /// The provider identifier for this config, matching the serialized
-    /// `provider` tag and the connection's stored `provider` column.
+impl Provider {
+    /// The stable identifier stored in the connection's `provider` column and
+    /// matching the serialized tag.
     #[must_use]
-    pub fn provider_id(&self) -> &'static str {
+    pub fn id(self) -> &'static str {
         match self {
-            Self::GoogleDrive { .. } => GOOGLE_DRIVE,
-            Self::Dropbox { .. } => DROPBOX,
-            Self::OneDrive { .. } => ONEDRIVE,
-            Self::Box { .. } => BOX,
+            Self::GoogleDrive => drive::PROVIDER_ID,
+            Self::Dropbox => dropbox::PROVIDER_ID,
+            Self::OneDrive => onedrive::PROVIDER_ID,
+            Self::Box => box_provider::PROVIDER_ID,
         }
     }
 
-    /// The OAuth endpoints and scopes for this config's provider.
+    /// The OAuth endpoints and scopes for this provider.
     #[must_use]
-    pub fn oauth_provider(&self) -> OAuthProvider {
+    pub fn oauth_provider(self) -> OAuthProvider {
         match self {
-            Self::GoogleDrive { .. } => drive_oauth(),
-            Self::Dropbox { .. } => dropbox_oauth(),
-            Self::OneDrive { .. } => onedrive_oauth(),
-            Self::Box { .. } => box_oauth(),
+            Self::GoogleDrive => drive::oauth_provider(),
+            Self::Dropbox => dropbox::oauth_provider(),
+            Self::OneDrive => onedrive::oauth_provider(),
+            Self::Box => box_provider::oauth_provider(),
         }
+    }
+
+    /// Builds a connected client for this provider from a valid `access_token`.
+    fn connect(
+        self,
+        http: reqwest::Client,
+        access_token: String,
+        root: Option<String>,
+    ) -> Box<dyn FileServiceClient> {
+        match self {
+            Self::GoogleDrive => Box::new(drive::DriveClient::new(http, access_token, root)),
+            Self::Dropbox => Box::new(dropbox::DropboxClient::new(http, access_token, root)),
+            Self::OneDrive => Box::new(onedrive::OneDriveClient::new(http, access_token, root)),
+            Self::Box => Box::new(box_provider::BoxClient::new(http, access_token, root)),
+        }
+    }
+}
+
+/// The per-connection settings shared by every provider: the OAuth token set and
+/// an optional sync root (a folder id for Drive, OneDrive, and Box, or a folder
+/// path for Dropbox). `None` means the account root.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionSettings {
+    /// The OAuth token set for this connection.
+    pub tokens: OAuthTokens,
+    /// The folder (id or path) to scope the sync to; `None` uses the root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
+}
+
+/// A fully-typed cloud file-service connection configuration: a provider and its
+/// settings. Serialized (flat: `{ "provider": ..., "tokens": ..., "root": ... }`)
+/// only to persist the config encrypted at rest, never returned in API responses.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct FileServiceConfig {
+    /// Which provider backs this connection.
+    pub provider: Provider,
+    /// The connection's tokens and sync root.
+    #[serde(flatten)]
+    pub settings: ConnectionSettings,
+}
+
+impl FileServiceConfig {
+    /// Creates a config for `provider` with the given settings.
+    #[must_use]
+    pub fn new(provider: Provider, settings: ConnectionSettings) -> Self {
+        Self { provider, settings }
+    }
+
+    /// The provider identifier for this config, matching the stored `provider`
+    /// column and the serialized tag.
+    #[must_use]
+    pub fn provider_id(&self) -> &'static str {
+        self.provider.id()
     }
 
     /// The stored OAuth tokens for this connection.
     #[must_use]
     pub fn tokens(&self) -> &OAuthTokens {
-        match self {
-            Self::GoogleDrive { tokens, .. }
-            | Self::Dropbox { tokens, .. }
-            | Self::OneDrive { tokens, .. }
-            | Self::Box { tokens, .. } => tokens,
-        }
+        &self.settings.tokens
     }
 
     /// Replaces the stored OAuth tokens (after a refresh).
     pub fn set_tokens(&mut self, new_tokens: OAuthTokens) {
-        match self {
-            Self::GoogleDrive { tokens, .. }
-            | Self::Dropbox { tokens, .. }
-            | Self::OneDrive { tokens, .. }
-            | Self::Box { tokens, .. } => *tokens = new_tokens,
-        }
+        self.settings.tokens = new_tokens;
     }
 
-    /// Builds a connected client from this config and a valid `access_token`,
-    /// using the shared `http` client for provider requests.
+    /// Builds a connected client from this config and a valid `access_token`.
     #[must_use]
     pub fn connect(
         &self,
         http: reqwest::Client,
         access_token: String,
     ) -> Box<dyn FileServiceClient> {
-        match self {
-            Self::GoogleDrive { root, .. } => {
-                Box::new(DriveClient::new(http, access_token, root.clone()))
-            }
-            Self::Dropbox { root, .. } => {
-                Box::new(DropboxClient::new(http, access_token, root.clone()))
-            }
-            Self::OneDrive { root, .. } => {
-                Box::new(OneDriveClient::new(http, access_token, root.clone()))
-            }
-            Self::Box { root, .. } => Box::new(BoxClient::new(http, access_token, root.clone())),
-        }
+        self.provider
+            .connect(http, access_token, self.settings.root.clone())
     }
 }
