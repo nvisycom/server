@@ -60,6 +60,54 @@ pub struct CreateConnection {
     pub sync: Option<SyncScheduleInput>,
 }
 
+/// A cloud file-service provider that connects over OAuth.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CloudFilesProvider {
+    /// Google Drive.
+    GoogleDrive,
+    /// Dropbox.
+    Dropbox,
+    /// OneDrive (Microsoft Graph).
+    OneDrive,
+    /// Box.
+    Box,
+}
+
+/// Path parameters for the OAuth start endpoint: which cloud file provider to
+/// begin authorizing.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthStartPathParams {
+    /// The cloud file provider to connect.
+    pub provider: CloudFilesProvider,
+}
+
+/// Request payload for starting a cloud file-service OAuth authorization.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct StartCloudFilesOAuth {
+    /// Human-readable name for the connection to be created on success.
+    #[validate(length(min = 1, max = 255))]
+    pub display_name: String,
+    /// Where to scope the sync: a folder id (Drive, OneDrive, Box) or a folder
+    /// path (Dropbox). Omit to use the account root.
+    #[validate(length(min = 1, max = 255))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
+}
+
+/// Query parameters the provider appends when redirecting to the OAuth callback.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthCallbackQuery {
+    /// The authorization code to exchange for tokens.
+    pub code: String,
+    /// The opaque CSRF state echoed back; must match a pending authorization.
+    pub state: String,
+}
+
 /// Request payload for updating an existing workspace connection.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]

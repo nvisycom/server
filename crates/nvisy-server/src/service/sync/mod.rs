@@ -7,12 +7,15 @@
 //! when a cron-scheduled connection is due.
 
 mod bridge;
+mod cloud_source;
 mod cron_schedule;
+mod file_source;
+mod object_source;
 mod service;
 mod worker;
 
 pub use cron_schedule::StandardCronSchedule;
-pub use service::ConnectionSyncService;
+pub use service::{ConnectionSyncService, TransferRequest};
 pub use worker::{ConnectionSyncJob, ConnectionSyncWorker};
 
 /// Default number of objects imported concurrently per sync. Kept well below the

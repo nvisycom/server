@@ -18,7 +18,6 @@ use std::time::Duration;
 use jiff::{Span, Timestamp};
 use nvisy_nats::kv::{LockKey, SchedulerLocksBucket};
 use nvisy_nats::stream::{ConnectionSyncStream, EventPublisher, EventSubscriber};
-use nvisy_object::providers::StorageConfig;
 use nvisy_postgres::model::{
     NewWorkspaceConnectionSync, WorkspaceConnection, WorkspaceConnectionSync,
 };
@@ -26,12 +25,12 @@ use nvisy_postgres::query::{
     ScheduledConnection, WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
     WorkspaceConnectionSyncRepository,
 };
-use nvisy_postgres::types::{SyncDeletionPolicy, SyncStatus, SyncTriggerType};
+use nvisy_postgres::types::{SyncStatus, SyncTriggerType};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::{ConnectionSyncService, StandardCronSchedule};
+use super::{ConnectionSyncService, StandardCronSchedule, TransferRequest};
 use crate::handler::Result;
 use crate::service::{ConnectionConfig, Infra, Worker};
 
@@ -304,31 +303,21 @@ impl ConnectionSyncWorker {
             }
         }
 
-        let (config, deletion_policy, run_id) = match self.begin_run(&connection, job.attempt).await
-        {
-            Ok(started) => started,
+        let connection_id = connection.id;
+        let request = match self.begin_run(connection, job.attempt).await {
+            Ok(request) => request,
             Err(err) => {
                 // A concurrent run beat us to the unique index; treat as benign.
-                tracing::debug!(target: TRACING_TARGET, connection_id = %connection.id, error = %err, "Skipping scheduled run: could not open (likely already active)");
+                tracing::debug!(target: TRACING_TARGET, connection_id = %connection_id, error = %err, "Skipping scheduled run: could not open (likely already active)");
                 return;
             }
         };
 
-        // Scheduled syncs are import-only; imported files are attributed to the
-        // connection's creator. Runs through the shared transfer path.
-        let account_id = connection.account_id;
-        let connection_id = connection.id;
-        let workspace_id = connection.workspace_id;
-        self.sync
-            .run_transfer(
-                run_id,
-                connection,
-                config,
-                deletion_policy,
-                account_id,
-                None,
-            )
-            .await;
+        // Capture the identifiers needed after the transfer takes ownership of
+        // the request (and its connection). Runs through the shared transfer path.
+        let run_id = request.run_id;
+        let workspace_id = request.connection.workspace_id;
+        self.sync.run_transfer(request).await;
 
         self.maybe_retry(workspace_id, connection_id, run_id, job.attempt, cancel)
             .await;
@@ -433,22 +422,19 @@ impl ConnectionSyncWorker {
     /// connection at the given attempt number.
     async fn begin_run(
         &self,
-        connection: &WorkspaceConnection,
+        connection: WorkspaceConnection,
         attempt: i32,
-    ) -> Result<(StorageConfig, SyncDeletionPolicy, Uuid)> {
-        // Scheduled syncs are object-store imports; a non-storage config here
-        // would be a scheduling bug (only sync-capable connections are enqueued).
-        let config = match self
-            .infra
-            .crypto
-            .decrypt_json::<ConnectionConfig>(connection.workspace_id, &connection.encrypted_data)?
-        {
-            ConnectionConfig::ObjectStore(config) => config,
-            ConnectionConfig::Inference(_) => {
-                return Err(crate::handler::ErrorKind::InternalServerError
-                    .with_message("scheduled sync for a non-sync connection"));
-            }
-        };
+    ) -> Result<TransferRequest> {
+        // Only sync-capable connections are enqueued; a non-sync config here
+        // would be a scheduling bug.
+        let config = self.infra.crypto.decrypt_json::<ConnectionConfig>(
+            connection.workspace_id,
+            &connection.encrypted_data,
+        )?;
+        if !config.supports_sync() {
+            return Err(crate::handler::ErrorKind::InternalServerError
+                .with_message("scheduled sync for a non-sync connection"));
+        }
 
         let mut conn = self.infra.postgres.get_connection().await?;
         let deletion_policy = conn
@@ -456,10 +442,11 @@ impl ConnectionSyncWorker {
             .await?
             .map(|schedule| schedule.deletion_policy)
             .unwrap_or_default();
+        // A scheduled run is attributed to whoever created the connection.
+        let account_id = connection.account_id;
         let new_run = NewWorkspaceConnectionSync {
             connection_id: connection.id,
-            // A scheduled run is attributed to whoever created the connection.
-            account_id: connection.account_id,
+            account_id,
             trigger_type: Some(SyncTriggerType::Scheduled),
             status: Some(SyncStatus::Running),
             records_synced: Some(0),
@@ -467,7 +454,18 @@ impl ConnectionSyncWorker {
             metadata: None,
         };
         // Create the run and record its start event atomically.
-        let run = self.sync.create_run(&mut conn, new_run, connection).await?;
-        Ok((config, deletion_policy, run.id))
+        let run = self
+            .sync
+            .create_run(&mut conn, new_run, &connection)
+            .await?;
+        // Scheduled syncs are import-only.
+        Ok(TransferRequest {
+            run_id: run.id,
+            connection,
+            config,
+            deletion_policy,
+            account_id,
+            export: None,
+        })
     }
 }

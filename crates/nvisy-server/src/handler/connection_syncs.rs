@@ -11,7 +11,6 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_object::providers::StorageConfig;
 use nvisy_postgres::model::{NewWorkspaceConnectionSync, WorkspaceConnection};
 use nvisy_postgres::query::{
     WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
@@ -31,7 +30,9 @@ use crate::handler::request::{
 use crate::handler::response::{ConnectionSync, ConnectionSyncsPage, ErrorResponse, Page};
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{ConnectionConfig, ConnectionSyncService, CryptoService, ServiceState};
+use crate::service::{
+    ConnectionConfig, ConnectionSyncService, CryptoService, ServiceState, TransferRequest,
+};
 
 /// Tracing target for connection sync operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::connection_syncs";
@@ -108,14 +109,12 @@ async fn sync_connection(
         SyncMode::Import => None,
     };
 
-    // The stored config is a storage config for any sync-capable connection.
-    let config = match crypto.decrypt_json(workspace.id, &connection.encrypted_data)? {
-        ConnectionConfig::ObjectStore(config) => config,
-        ConnectionConfig::Inference(_) => {
-            return Err(ErrorKind::BadRequest.with_message("Connection does not support syncing"));
-        }
-    };
-    let config: StorageConfig = config;
+    // Any sync-capable connection carries a config the transfer path can drive;
+    // reject one that does not support sync before opening a run.
+    let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
+    if !config.supports_sync() {
+        return Err(ErrorKind::BadRequest.with_message("Connection does not support syncing"));
+    }
 
     let new_run = NewWorkspaceConnectionSync {
         connection_id: connection.id,
@@ -139,14 +138,14 @@ async fn sync_connection(
     let deletion_policy = schedule.deletion_policy;
     tokio::spawn(async move {
         connection_sync
-            .run_transfer(
+            .run_transfer(TransferRequest {
                 run_id,
                 connection,
                 config,
                 deletion_policy,
                 account_id,
                 export,
-            )
+            })
             .await;
     });
 

@@ -6,7 +6,7 @@
 //! Cli
 //! ├── server: ServerConfig         # Host, port, TLS, shutdown
 //! ├── middleware: MiddlewareArgs    # CORS, OpenAPI, recovery/timeouts
-//! ├── service: ServiceArgs          # Postgres, NATS, S3, crypto, session keys, engine, health, sync, uploads
+//! ├── service: ServiceArgs          # Postgres, NATS, S3, crypto, session keys, engine, health, sync, cloud files, uploads
 //! └── reqwest: ReqwestConfig        # HTTP client for webhook delivery
 //! ```
 //!

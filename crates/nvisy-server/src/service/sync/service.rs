@@ -10,15 +10,16 @@ use std::path::Path as StdPath;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
+use futures::TryStreamExt;
 use futures::stream::{self, StreamExt};
-use nvisy_object::client::ObjectStoreClient;
-use nvisy_object::providers::StorageConfig;
+use nvisy_file_service::providers::FileServiceConfig;
 use nvisy_postgres::model::{
-    NewWorkspaceConnectionSync, NewWorkspaceFile, WorkspaceConnection, WorkspaceConnectionSync,
-    WorkspaceFile,
+    NewWorkspaceConnectionSync, NewWorkspaceFile, UpdateWorkspaceConnection, WorkspaceConnection,
+    WorkspaceConnectionSync, WorkspaceFile,
 };
 use nvisy_postgres::query::{
-    WorkspaceConnectionSyncRepository, WorkspaceFileRepository, WorkspaceRepository,
+    WorkspaceConnectionRepository, WorkspaceConnectionSyncRepository, WorkspaceFileRepository,
+    WorkspaceRepository,
 };
 use nvisy_postgres::types::{FileKind, SyncDeletionPolicy};
 use nvisy_postgres::{AsyncConnection, PgConn};
@@ -28,11 +29,14 @@ use uuid::Uuid;
 
 use super::SyncConfig;
 use super::bridge::{reader_to_stream, stream_to_reader};
+use super::cloud_source::CloudFileSource;
+use super::file_source::{ByteStream, FileSource, SourceEntry};
+use super::object_source::ObjectStoreSource;
 use crate::extract::SecurityContext;
 use crate::handler::{ErrorKind, Result};
 use crate::service::{
-    ConnectionRef, EventEmitter, EventOrigin, ExternalObjectStore, HashingReader, Infra,
-    Measurements, WorkspaceEvent,
+    CloudFileService, ConnectionConfig, ConnectionRef, EventEmitter, EventOrigin,
+    ExternalObjectStore, HashingReader, Infra, Measurements, WorkspaceEvent,
 };
 
 /// Tracing target for connection sync operations.
@@ -45,6 +49,24 @@ const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60
 enum Outcome {
     Finished(Result<u64>),
     Cancelled,
+}
+
+/// The inputs to [`ConnectionSyncService::run_transfer`]: the run to execute,
+/// the connection and its decrypted config, and which direction to move.
+pub struct TransferRequest {
+    /// The persisted run this transfer executes.
+    pub run_id: Uuid,
+    /// The connection being synced.
+    pub connection: WorkspaceConnection,
+    /// The connection's decrypted config, used to connect the file source.
+    pub config: ConnectionConfig,
+    /// How to reconcile source deletions (import only).
+    pub deletion_policy: SyncDeletionPolicy,
+    /// The account the run is attributed to.
+    pub account_id: Uuid,
+    /// Direction: `None` imports all new entries; `Some((file, key))` exports one
+    /// file to `key`.
+    pub export: Option<(WorkspaceFile, String)>,
 }
 
 /// The inputs to [`ConnectionSyncService::finish_run`]: the run to finalize, the
@@ -64,6 +86,7 @@ struct FinishRun {
 pub struct ConnectionSyncService {
     infra: Infra,
     object: ExternalObjectStore,
+    cloud: CloudFileService,
     /// Maximum objects imported concurrently within a single sync.
     import_concurrency: usize,
     // Cancellation tokens for transfers running in this process, keyed by run id.
@@ -75,13 +98,76 @@ pub struct ConnectionSyncService {
 
 impl ConnectionSyncService {
     /// Creates a new [`ConnectionSyncService`].
-    pub fn new(infra: Infra, object: ExternalObjectStore, config: SyncConfig) -> Self {
+    pub fn new(
+        infra: Infra,
+        object: ExternalObjectStore,
+        cloud: CloudFileService,
+        config: SyncConfig,
+    ) -> Self {
         Self {
             infra,
             object,
+            cloud,
             import_concurrency: config.import_concurrency.max(1),
             running: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Connects to the file source described by a typed connection config,
+    /// dispatching to the provider family that backs it. Only sync-capable
+    /// configs resolve; a non-sync config (an LLM connection) is rejected.
+    ///
+    /// For a cloud file service, the OAuth token is refreshed if expired and the
+    /// refreshed config is persisted back to `connection` so the next sync starts
+    /// from fresh tokens.
+    async fn connect_file_source(
+        &self,
+        connection: &WorkspaceConnection,
+        config: &ConnectionConfig,
+    ) -> Result<Arc<dyn FileSource>> {
+        match config {
+            ConnectionConfig::ObjectStore(config) => {
+                let client = self.object.connect(config).await?;
+                Ok(Arc::new(ObjectStoreSource(client)))
+            }
+            ConnectionConfig::CloudFiles(config) => {
+                let connected = self.cloud.connect(config).await?;
+                if let Some(refreshed) = connected.refreshed {
+                    self.persist_refreshed_tokens(connection, refreshed).await?;
+                }
+                Ok(Arc::new(CloudFileSource(connected.client)))
+            }
+            ConnectionConfig::Inference(_) => {
+                Err(ErrorKind::BadRequest.with_message("Connection does not support sync"))
+            }
+        }
+    }
+
+    /// Re-encrypts a connection's config after an OAuth refresh and writes it
+    /// back, so the renewed access and refresh tokens survive to the next sync.
+    async fn persist_refreshed_tokens(
+        &self,
+        connection: &WorkspaceConnection,
+        refreshed: FileServiceConfig,
+    ) -> Result<()> {
+        let config = ConnectionConfig::CloudFiles(refreshed);
+        let encrypted_data = self
+            .infra
+            .crypto
+            .encrypt_json(connection.workspace_id, &config)?;
+        let update = UpdateWorkspaceConnection {
+            encrypted_data: Some(encrypted_data),
+            ..Default::default()
+        };
+        let mut conn = self.infra.postgres.get_connection().await?;
+        conn.update_workspace_connection(connection.id, update)
+            .await?;
+        tracing::debug!(
+            target: TRACING_TARGET,
+            connection_id = %connection.id,
+            "Persisted refreshed cloud file OAuth tokens",
+        );
+        Ok(())
     }
 
     /// Creates a sync run row and records its `ConnectionSyncStarted` event in one
@@ -144,22 +230,24 @@ impl ConnectionSyncService {
     pub async fn import_new(
         &self,
         connection: &WorkspaceConnection,
-        config: &StorageConfig,
+        config: &ConnectionConfig,
         deletion_policy: SyncDeletionPolicy,
         account_id: Uuid,
     ) -> Result<u64> {
         tracing::debug!(target: TRACING_TARGET, "Importing new objects from connection");
 
-        let client = self.object.connect(config).await?;
+        let source = self.connect_file_source(connection, config).await?;
 
-        // List the source once; keys are already scoped to the connection's root
-        // path by the provider's PrefixStore. The listing is reused both to
-        // import new objects and to detect ones that have been deleted.
-        let objects = client.list("").await?;
-        let remote_keys: HashSet<String> = objects
-            .iter()
-            .map(|o| o.location.as_ref().to_owned())
+        // List the source once; entries are already scoped to the connection's
+        // root by the provider. The listing is reused both to import new entries
+        // and to detect ones that have been deleted. Entries are keyed by the
+        // provider's key (an object path, or a file service's file id).
+        let entries = source.list().await?;
+        let entries_by_key: HashMap<String, SourceEntry> = entries
+            .into_iter()
+            .map(|entry| (entry.key.clone(), entry))
             .collect();
+        let remote_keys: HashSet<String> = entries_by_key.keys().cloned().collect();
 
         let mut conn = self.infra.postgres.get_connection().await?;
         let already_imported: HashSet<String> = conn
@@ -190,26 +278,26 @@ impl ConnectionSyncService {
         // capture shared references (only `key` is per-task).
         // Collect the keys to import into owned values first, so each task's
         // future captures no borrow of `remote_keys`.
-        let to_import: Vec<String> = remote_keys
+        let to_import: Vec<SourceEntry> = remote_keys
             .iter()
             .filter(|key| !already_imported.contains(*key))
-            .cloned()
+            .filter_map(|key| entries_by_key.get(key).cloned())
             .collect();
         let imported = stream::iter(to_import)
-            .map(|key| {
-                // `ObjectStoreClient` is an `Arc` handle, so cloning per task is
+            .map(|entry| {
+                // The file source is an `Arc` handle, so cloning per task is
                 // cheap and keeps each future free of borrowed locals.
-                let client = client.clone();
+                let source = source.clone();
                 async move {
                     match self
-                        .import_one(&client, connection, account_id, &key, expires_at)
+                        .import_one(source.as_ref(), connection, account_id, &entry, expires_at)
                         .await
                     {
                         Ok(_) => 1u64,
                         Err(err) => {
                             tracing::warn!(
                                 target: TRACING_TARGET,
-                                key = %key, error = %err,
+                                key = %entry.key, error = %err,
                                 "Skipping object that failed to import",
                             );
                             0
@@ -316,15 +404,15 @@ impl ConnectionSyncService {
     /// orphaned.
     async fn import_one(
         &self,
-        client: &ObjectStoreClient,
+        source: &dyn FileSource,
         connection: &WorkspaceConnection,
         account_id: Uuid,
-        remote_key: &str,
+        entry: &SourceEntry,
         expires_at: Option<jiff::Timestamp>,
     ) -> Result<WorkspaceFile> {
         // Stream external bytes -> hash+measure -> encrypt -> files store.
-        let source = client.get_stream(remote_key).await?;
-        let (measured, measurements) = HashingReader::new(stream_to_reader(source));
+        let bytes = source.get_stream(&entry.key).await?;
+        let (measured, measurements) = HashingReader::new(stream_to_reader(bytes));
         let ciphertext = Box::pin(
             self.infra
                 .crypto
@@ -340,7 +428,7 @@ impl ConnectionSyncService {
             .record_imported_file(
                 connection,
                 account_id,
-                remote_key,
+                entry,
                 &file_key,
                 &measurements,
                 expires_at,
@@ -368,14 +456,17 @@ impl ConnectionSyncService {
         &self,
         connection: &WorkspaceConnection,
         account_id: Uuid,
-        remote_key: &str,
+        entry: &SourceEntry,
         file_key: &FileKey,
         measurements: &Measurements,
         expires_at: Option<jiff::Timestamp>,
     ) -> Result<WorkspaceFile> {
         let mut conn = self.infra.postgres.get_connection().await?;
-        let filename = object_basename(remote_key);
-        let extension = object_extension(remote_key);
+        // The display name and extension come from the entry's name; the
+        // import-origin key (recorded below) is the entry's provider key, which
+        // for a file service is an opaque id rather than a path.
+        let filename = object_basename(&entry.name);
+        let extension = object_extension(&entry.name);
 
         let new_file = NewWorkspaceFile {
             workspace_id: connection.workspace_id,
@@ -392,7 +483,7 @@ impl ConnectionSyncService {
             ..Default::default()
         };
         Ok(conn
-            .record_imported_file(new_file, connection.id, remote_key.to_owned())
+            .record_imported_file(new_file, connection.id, entry.key.clone())
             .await?)
     }
 
@@ -409,13 +500,13 @@ impl ConnectionSyncService {
     pub async fn export_file(
         &self,
         connection: &WorkspaceConnection,
-        config: &StorageConfig,
+        config: &ConnectionConfig,
         file: &WorkspaceFile,
         remote_key: &str,
     ) -> Result<()> {
         tracing::debug!(target: TRACING_TARGET, "Exporting file to connection");
 
-        let client = self.object.connect(config).await?;
+        let source = self.connect_file_source(connection, config).await?;
 
         let file_key = FileKey::from_str(&file.storage_path).map_err(|err| {
             ErrorKind::InternalServerError
@@ -426,16 +517,20 @@ impl ConnectionSyncService {
             ErrorKind::InternalServerError.with_message("File content is missing from storage")
         })?;
 
-        // Stored ciphertext reader -> decrypt -> external multipart upload.
+        // Stored ciphertext reader -> decrypt -> external streaming upload.
         let plaintext = Box::pin(
             self.infra
                 .crypto
                 .decrypt_reader(connection.workspace_id, stored.into_reader()),
         );
-        let body = reader_to_stream(plaintext);
+        let body: ByteStream = Box::pin(reader_to_stream(plaintext).map_err(|err| {
+            ErrorKind::InternalServerError
+                .with_message("Failed to read stored file for export")
+                .with_context(err.to_string())
+        }));
         let content_type = mime_from_extension(&file.file_extension);
-        client
-            .put_multipart(remote_key, Some(content_type.as_str()), body)
+        source
+            .put_stream(remote_key, content_type.as_str(), body)
             .await?;
 
         tracing::debug!(target: TRACING_TARGET, "File exported");
@@ -453,29 +548,31 @@ impl ConnectionSyncService {
     /// scheduled worker.
     ///
     /// [`cancel_local`]: Self::cancel_local
-    pub async fn run_transfer(
-        &self,
-        run_id: Uuid,
-        connection: WorkspaceConnection,
-        config: StorageConfig,
-        deletion_policy: SyncDeletionPolicy,
-        account_id: Uuid,
-        export: Option<(WorkspaceFile, String)>,
-    ) {
+    pub async fn run_transfer(&self, request: TransferRequest) {
+        // Copy the scalar identifiers needed after the transfer task takes
+        // ownership of the request below (for the cancel registry and the
+        // terminal event).
+        let run_id = request.run_id;
+        let account_id = request.account_id;
+        let workspace_id = request.connection.workspace_id;
+        let connection_id = request.connection.id;
+        let connection_name = request.connection.display_name.clone();
+
         let token = CancellationToken::new();
         self.running
             .lock()
             .expect("sync cancel registry poisoned")
             .insert(run_id, token.clone());
 
-        // Capture the connection's identity for the terminal event before the
-        // transfer task takes ownership of `connection`.
-        let workspace_id = connection.workspace_id;
-        let connection_id = connection.id;
-        let connection_name = connection.display_name.clone();
-
         let transfer = self.clone();
         let mut work = tokio::spawn(async move {
+            let TransferRequest {
+                connection,
+                config,
+                deletion_policy,
+                export,
+                ..
+            } = request;
             match export {
                 None => {
                     transfer

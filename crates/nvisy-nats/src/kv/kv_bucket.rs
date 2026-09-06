@@ -52,6 +52,20 @@ impl KvBucket for SchedulerLocksBucket {
     const TTL: Option<Duration> = Some(Duration::from_secs(5 * 60));
 }
 
+/// Bucket for in-flight OAuth authorization state (CSRF token + PKCE verifier),
+/// held between starting an authorization and its callback.
+///
+/// Entries are short-lived: a user completes the provider consent screen within
+/// minutes, and an abandoned flow's state should not linger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct OAuthStateBucket;
+
+impl KvBucket for OAuthStateBucket {
+    const DESCRIPTION: &'static str = "In-flight OAuth authorization state";
+    const NAME: &'static str = "oauth_state";
+    const TTL: Option<Duration> = Some(Duration::from_secs(10 * 60)); // 10 minutes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

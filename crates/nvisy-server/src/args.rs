@@ -17,7 +17,8 @@ use nvisy_webhook::WebhookService;
 use crate::Result;
 use crate::middleware::UploadConfig;
 use crate::service::{
-    CryptoConfig, EngineConfig, HealthConfig, S3Config, ServiceState, SessionKeysConfig, SyncConfig,
+    CloudFilesConfig, CryptoConfig, EngineConfig, HealthConfig, S3Config, ServiceState,
+    SessionKeysConfig, SyncConfig,
 };
 
 /// Tracing target for configuration echoes emitted by the config aggregates.
@@ -63,6 +64,10 @@ pub struct ServiceArgs {
     /// Connection sync configuration.
     #[cfg_attr(feature = "cli", clap(flatten))]
     pub sync: SyncConfig,
+
+    /// Cloud file-service OAuth app configuration.
+    #[cfg_attr(feature = "cli", clap(flatten))]
+    pub cloud_files: CloudFilesConfig,
 
     /// Request body size limits (server-wide hard caps).
     #[cfg_attr(feature = "cli", clap(flatten))]
@@ -110,6 +115,7 @@ impl ServiceState {
             args.engine,
             args.health,
             args.sync,
+            args.cloud_files,
             webhook,
             args.upload,
             args.s3,

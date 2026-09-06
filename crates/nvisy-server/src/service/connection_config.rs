@@ -1,13 +1,15 @@
 //! Connection provider configuration spanning every capability.
 //!
 //! A connection's stored config is one of the capability configs — object
-//! storage or LLM inference. The outer enum is untagged, so on the wire it is
-//! flat: the inner config's own `provider` tag is the sole discriminator
-//! (`{ "provider": "s3", ... }`, `{ "provider": "openai", ... }`). Capability
-//! crates own their provider configs; this type only composes them.
+//! storage, LLM inference, or a cloud file service. The outer enum is untagged,
+//! so on the wire it is flat: the inner config's own `provider` tag is the sole
+//! discriminator (`{ "provider": "s3", ... }`, `{ "provider": "openai", ... }`,
+//! `{ "provider": "google_drive", ... }`). Capability crates own their provider
+//! configs; this type only composes them.
 
+use nvisy_file_service::providers::FileServiceConfig;
 use nvisy_inference::providers::LlmConfig;
-use nvisy_object::providers::StorageConfig;
+use nvisy_object_store::providers::StorageConfig;
 use nvisy_postgres::types::ProviderType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -21,6 +23,8 @@ use serde::{Deserialize, Serialize};
 pub enum ConnectionConfig {
     /// An object-storage connection (s3, azure, gcs) — sync-capable.
     ObjectStore(StorageConfig),
+    /// A cloud file-service connection (google_drive) — sync-capable.
+    CloudFiles(FileServiceConfig),
     /// An LLM inference connection (openai, ollama, anthropic).
     Inference(LlmConfig),
 }
@@ -32,6 +36,7 @@ impl ConnectionConfig {
     pub fn provider_id(&self) -> &str {
         match self {
             Self::ObjectStore(config) => config.provider_id(),
+            Self::CloudFiles(config) => config.provider_id(),
             Self::Inference(config) => config.provider_id(),
         }
     }
@@ -42,15 +47,16 @@ impl ConnectionConfig {
     pub fn provider_type(&self) -> ProviderType {
         match self {
             Self::ObjectStore(_) => ProviderType::ObjectStore,
+            Self::CloudFiles(_) => ProviderType::CloudFiles,
             Self::Inference(_) => ProviderType::LanguageModel,
         }
     }
 
-    /// Whether this connection has the sync capability (object stores do; LLM
-    /// connections do not). Determines whether sync configuration and syncs
-    /// apply.
+    /// Whether this connection has the sync capability (object stores and cloud
+    /// file services do; LLM connections do not). Determines whether sync
+    /// configuration and syncs apply.
     #[must_use]
     pub fn supports_sync(&self) -> bool {
-        matches!(self, Self::ObjectStore(_))
+        matches!(self, Self::ObjectStore(_) | Self::CloudFiles(_))
     }
 }

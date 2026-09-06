@@ -2,6 +2,7 @@
 
 mod crypto_error;
 mod engine_error;
+mod file_service_error;
 mod http_error;
 mod inference_error;
 mod nats_error;

@@ -46,8 +46,8 @@ use crate::handler::response::{
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
-    ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin, ExternalObjectStore,
-    ServiceState, StandardCronSchedule, WorkspaceEvent,
+    CloudFileService, ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin,
+    ExternalObjectStore, ServiceState, StandardCronSchedule, WorkspaceEvent,
 };
 
 /// Tracing target for workspace connection operations.
@@ -533,6 +533,7 @@ async fn verify_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(object): State<ExternalObjectStore>,
+    State(cloud): State<CloudFileService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionPathParams>,
@@ -571,6 +572,36 @@ async fn verify_connection(
             Err(err) => {
                 tracing::warn!(target: TRACING_TARGET, error = %err, "Connection setup failed");
                 ConnectionVerification::unreachable(err.kind().reason())
+            }
+        },
+        ConnectionConfig::CloudFiles(config) => match cloud.connect(&config).await {
+            Ok(connected) => {
+                // A refresh during verification produces fresh tokens; persist
+                // them so the renewed credentials are not thrown away.
+                if let Some(refreshed) = connected.refreshed {
+                    let config = ConnectionConfig::CloudFiles(refreshed);
+                    let encrypted_data = crypto.encrypt_json(workspace.id, &config)?;
+                    let update = UpdateWorkspaceConnection {
+                        encrypted_data: Some(encrypted_data),
+                        ..Default::default()
+                    };
+                    conn.update_workspace_connection(connection.id, update)
+                        .await?;
+                }
+                match connected.client.verify().await {
+                    Ok(()) => {
+                        tracing::info!(target: TRACING_TARGET, "Connection verified");
+                        ConnectionVerification::reachable()
+                    }
+                    Err(err) => {
+                        tracing::warn!(target: TRACING_TARGET, error = %err, "Connection unreachable");
+                        ConnectionVerification::unreachable(err.kind().reason())
+                    }
+                }
+            }
+            Err(err) => {
+                tracing::warn!(target: TRACING_TARGET, error = %err, "Connection setup failed");
+                ConnectionVerification::unreachable("credentials rejected or provider unreachable")
             }
         },
         ConnectionConfig::Inference(config) => match config.validate().await {

@@ -1,12 +1,12 @@
 //! Object-store access.
 //!
-//! Bridges stored workspace connections to the [`nvisy_object`] providers: a
-//! connection carries an encrypted, typed [`StorageConfig`](nvisy_object::providers::StorageConfig),
+//! Bridges stored workspace connections to the [`nvisy_object_store`] providers: a
+//! connection carries an encrypted, typed [`StorageConfig`](nvisy_object_store::providers::StorageConfig),
 //! which [`ExternalObjectStore`] turns into a connected client at runtime. The sync
 //! orchestration built on top lives in the [`sync`](crate::service::sync) module.
 
-use nvisy_object::client::ObjectStoreClient;
-use nvisy_object::providers::{self, StorageConfig};
+use nvisy_object_store::client::ObjectStoreClient;
+use nvisy_object_store::providers::{self, StorageConfig};
 
 /// Tracing target for object storage operations.
 const TRACING_TARGET: &str = "nvisy_server::service::external_object_store";
@@ -34,7 +34,7 @@ impl ExternalObjectStore {
     pub async fn connect(
         &self,
         config: &StorageConfig,
-    ) -> Result<ObjectStoreClient, nvisy_object::Error> {
+    ) -> Result<ObjectStoreClient, nvisy_object_store::Error> {
         tracing::debug!(target: TRACING_TARGET, "Connecting to object store");
         providers::connect(config).await
     }

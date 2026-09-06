@@ -1,39 +1,34 @@
-//! Adapters between object-store byte streams and `AsyncRead`.
+//! Adapters between provider byte streams and `AsyncRead`.
 //!
-//! The object store yields `Stream<Item = Result<Bytes, _>>` while the NATS
-//! object store consumes and produces `AsyncRead`. These helpers convert
-//! between the two so an object can be piped end to end without buffering the
-//! whole body in memory.
+//! A [`FileSource`](super::file_source::FileSource) yields
+//! `Stream<Item = Result<Bytes, _>>` while the first-party blob store consumes
+//! and produces `AsyncRead`. These helpers convert between the two so an object
+//! can be piped end to end without buffering the whole body in memory.
 
 use std::io;
 
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
-use nvisy_object::Error as ObjectError;
 use tokio::io::AsyncRead;
 use tokio_util::io::{ReaderStream, StreamReader};
 
-/// Adapts a byte stream from the object store into an [`AsyncRead`].
+/// Adapts a byte stream into an [`AsyncRead`].
 ///
-/// Stream errors surface as [`io::Error`], as required by [`StreamReader`].
-pub fn stream_to_reader<S>(stream: S) -> impl AsyncRead + Unpin + Send
+/// Stream errors surface as [`io::Error`], as required by [`StreamReader`]. The
+/// stream's error type only needs to be convertible into a boxed error.
+pub fn stream_to_reader<S, E>(stream: S) -> impl AsyncRead + Unpin + Send
 where
-    S: Stream<Item = Result<Bytes, ObjectError>> + Unpin + Send,
+    S: Stream<Item = Result<Bytes, E>> + Unpin + Send,
+    E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     StreamReader::new(stream.map_err(io::Error::other))
 }
 
-/// Adapts an [`AsyncRead`] into a byte stream the object store can upload.
-///
-/// I/O errors surface as an object-store [`ObjectError`], as required by the
-/// multipart upload API.
-pub fn reader_to_stream<R>(
-    reader: R,
-) -> impl Stream<Item = Result<Bytes, ObjectError>> + Unpin + Send
+/// Adapts an [`AsyncRead`] into a byte stream of `Bytes`, surfacing read errors
+/// as [`io::Error`]. Callers map that into their own error type as needed.
+pub fn reader_to_stream<R>(reader: R) -> impl Stream<Item = Result<Bytes, io::Error>> + Unpin + Send
 where
     R: AsyncRead + Unpin + Send,
 {
-    // The reader is the decrypt pipeline over stored bytes, so an error here is
-    // a read/decrypt failure of the source object rather than a store fault.
-    ReaderStream::new(reader).map_err(|e| ObjectError::runtime(e, "source-read"))
+    ReaderStream::new(reader)
 }

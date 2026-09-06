@@ -2,6 +2,7 @@
 
 mod avatar;
 mod chat;
+mod cloud_file_service;
 mod connection_config;
 mod crypto;
 mod detection;
@@ -33,6 +34,9 @@ use tokio_util::sync::CancellationToken;
 use crate::middleware::UploadConfig;
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::chat::{ChatService, TurnLocation};
+pub use crate::service::cloud_file_service::{
+    CloudFileService, CloudFilesConfig, ConnectedFileService, OAuthApps,
+};
 pub use crate::service::connection_config::ConnectionConfig;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
@@ -56,7 +60,7 @@ pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
 pub use crate::service::sync::{
     ConnectionSyncJob, ConnectionSyncService, ConnectionSyncWorker, DEFAULT_IMPORT_CONCURRENCY,
-    StandardCronSchedule, SyncConfig,
+    StandardCronSchedule, SyncConfig, TransferRequest,
 };
 pub use crate::service::user_agent::UserAgentParser;
 pub use crate::service::webhook::{WebhookDeliveryWorker, WebhookEmitter};
@@ -90,6 +94,7 @@ pub struct ServiceState {
 
     // External services:
     pub webhook: WebhookService,
+    pub cloud_files: CloudFileService,
 
     // Redaction engine:
     pub engine: EngineService,
@@ -119,6 +124,7 @@ impl ServiceState {
         engine_config: EngineConfig,
         health_config: HealthConfig,
         sync_config: SyncConfig,
+        cloud_files_config: CloudFilesConfig,
         webhook_service: WebhookService,
         upload_config: UploadConfig,
         s3_config: S3Config,
@@ -141,14 +147,22 @@ impl ServiceState {
         ];
 
         // The stateful sync singleton composes the stateless emitters/object
-        // service from the same `Infra` their `FromRef` impls use.
-        let connection_sync =
-            ConnectionSyncService::new(infra.clone(), ExternalObjectStore::new(), sync_config);
+        // service from the same `Infra` their `FromRef` impls use. The cloud
+        // file service holds the shared HTTP client and OAuth app credentials.
+        let cloud_files =
+            CloudFileService::new(reqwest::Client::new(), cloud_files_config.into_apps());
+        let connection_sync = ConnectionSyncService::new(
+            infra.clone(),
+            ExternalObjectStore::new(),
+            cloud_files.clone(),
+            sync_config,
+        );
 
         let service_state = Self {
             infra,
             shutdown: CancellationToken::new(),
             webhook: webhook_service,
+            cloud_files,
             engine,
             connection_sync,
             health_cache: HealthCache::new(&health_config, health_checkers),
@@ -313,5 +327,13 @@ impl_di_compose!(
 impl axum::extract::FromRef<ServiceState> for ExternalObjectStore {
     fn from_ref(_state: &ServiceState) -> Self {
         ExternalObjectStore::new()
+    }
+}
+
+// `CloudFileService` holds the shared HTTP client and OAuth apps, so it is
+// cloned from the stored instance rather than reconstructed.
+impl axum::extract::FromRef<ServiceState> for CloudFileService {
+    fn from_ref(state: &ServiceState) -> Self {
+        state.cloud_files.clone()
     }
 }

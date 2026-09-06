@@ -94,6 +94,34 @@ impl From<&str> for LockKey {
     }
 }
 
+/// The CSRF-state key for an in-flight OAuth authorization. The value is the
+/// opaque state token the provider echoes back to the callback; NATS KV keys
+/// allow the URL-safe characters an OAuth state uses.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct OAuthStateKey(pub String);
+
+impl KvKey for OAuthStateKey {}
+
+impl fmt::Display for OAuthStateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl FromStr for OAuthStateKey {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.to_owned()))
+    }
+}
+
+impl From<&str> for OAuthStateKey {
+    fn from(s: &str) -> Self {
+        Self(s.to_owned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -26,6 +26,8 @@ mod kv_key;
 mod kv_store;
 
 pub use api_token::{ApiToken, ApiTokenType};
-pub use kv_bucket::{ApiTokensBucket, ChatHistoryBucket, KvBucket, SchedulerLocksBucket};
-pub use kv_key::{KvKey, LockKey, SessionKey, TokenKey};
+pub use kv_bucket::{
+    ApiTokensBucket, ChatHistoryBucket, KvBucket, OAuthStateBucket, SchedulerLocksBucket,
+};
+pub use kv_key::{KvKey, LockKey, OAuthStateKey, SessionKey, TokenKey};
 pub use kv_store::{KvEntry, KvStore, KvValue};
