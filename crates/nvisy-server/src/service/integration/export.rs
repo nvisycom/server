@@ -80,7 +80,7 @@ impl Exporter {
         };
         let exported = self
             .export_files(connection, config, files, EXPORT_PREFIX_SELECTED)
-            .await;
+            .await?;
 
         tracing::debug!(target: TRACING_TARGET, exported, "Selected export complete");
         Ok(exported)
@@ -111,7 +111,7 @@ impl Exporter {
         };
         let exported = self
             .export_files(connection, config, pending, EXPORT_PREFIX_REDACTED)
-            .await;
+            .await?;
 
         tracing::debug!(target: TRACING_TARGET, exported, "Redacted export complete");
         Ok(exported)
@@ -124,26 +124,17 @@ impl Exporter {
     /// and skipped rather than aborting the run. Returns the number exported.
     ///
     /// The provider source is connected once for the whole batch (validating the
-    /// endpoint and refreshing an OAuth token at most once), not per file; a
-    /// connect failure skips the batch.
+    /// endpoint and refreshing an OAuth token at most once), not per file. A
+    /// connect failure is a batch-wide fault and is propagated, so the run is
+    /// recorded as failed rather than silently reporting zero exports.
     async fn export_files(
         &self,
         connection: &WorkspaceConnection,
         config: &ConnectionConfig,
         files: Vec<WorkspaceFile>,
         object_prefix: &str,
-    ) -> u64 {
-        let source = match self.connector.file_source(connection, config).await {
-            Ok(source) => source,
-            Err(err) => {
-                tracing::warn!(
-                    target: TRACING_TARGET,
-                    connection_id = %connection.id, error = %err,
-                    "Skipping export: failed to connect to the provider",
-                );
-                return 0;
-            }
-        };
+    ) -> Result<u64> {
+        let source = self.connector.file_source(connection, config).await?;
         let object_store = matches!(config, ConnectionConfig::ObjectStore(_));
 
         let mut exported = 0u64;
@@ -163,7 +154,7 @@ impl Exporter {
                 }
             }
         }
-        exported
+        Ok(exported)
     }
 
     /// Exports one stored workspace file to `remote_key` on an already-connected
