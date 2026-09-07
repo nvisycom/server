@@ -17,8 +17,8 @@ use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, Result as 
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, SecurityContext, ValidateJson,
-    WorkspaceContext,
+    Authorized, CreatePipelines, DeletePipelines, Json, Path, Query, SecurityContext,
+    UpdatePipelines, ValidateJson, ViewPipelines,
 };
 use crate::handler::request::{
     CreatePipeline, CursorPagination, PipelineFilter, PipelinePathParams, PipelineReferences,
@@ -39,27 +39,24 @@ const TRACING_TARGET: &str = "nvisy_server::handler::pipelines";
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn create_pipeline(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<CreatePipelines>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreatePipeline>,
 ) -> Result<(StatusCode, Json<Pipeline>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating pipeline");
 
+    let workspace = authz.workspace;
+    let account_id = authz.account_id;
     let mut conn = pg_client.get_connection().await?;
 
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::CreatePipelines)
-        .await?;
-
     let (new_pipeline, references) = request
-        .into_parts(workspace.id, auth_state.account_id)
+        .into_parts(workspace.id, account_id)
         .map_err(serialize_error)?;
 
     let policy_ids = resolve_references(&mut conn, workspace.id, &references).await?;
@@ -71,7 +68,7 @@ async fn create_pipeline(
             conn.emit_event(
                 EventOrigin {
                     workspace_id: workspace.id,
-                    account_id: auth_state.account_id,
+                    account_id,
                     security: &security,
                 },
                 WorkspaceEvent::PipelineCreated(PipelineRef {
@@ -85,7 +82,7 @@ async fn create_pipeline(
         .await?;
 
     // The creator is the authenticated caller; resolve their handle directly.
-    let creator = resolve_account_ref(&mut conn, auth_state.account_id).await?;
+    let creator = resolve_account_ref(&mut conn, account_id).await?;
 
     // The references were just written from the request, so build the response
     // from its slugs directly instead of reading the join table back.
@@ -117,24 +114,20 @@ fn create_pipeline_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn list_pipelines(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewPipelines>,
     Query(pagination): Query<CursorPagination>,
     Query(filter): Query<PipelineFilter>,
 ) -> Result<(StatusCode, Json<Page<PipelineSummary>>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing pipelines");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
-        .await?;
 
     let page = conn
         .cursor_list_workspace_pipelines(
@@ -170,24 +163,20 @@ fn list_pipelines_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         pipeline_slug = %path_params.pipeline_slug,
     )
 )]
 async fn get_pipeline(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewPipelines>,
     Path(path_params): Path<PipelinePathParams>,
 ) -> Result<(StatusCode, Json<Pipeline>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting pipeline");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPipelines)
-        .await?;
 
     let found = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
     let pipeline = found.item;
@@ -218,26 +207,23 @@ fn get_pipeline_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         pipeline_slug = %path_params.pipeline_slug,
     )
 )]
 async fn update_pipeline(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<UpdatePipelines>,
     Path(path_params): Path<PipelinePathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdatePipeline>,
 ) -> Result<(StatusCode, Json<Pipeline>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating pipeline");
 
+    let workspace = authz.workspace;
+    let account_id = authz.account_id;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::UpdatePipelines)
-        .await?;
 
     // Confirm the pipeline exists in this workspace before mutating.
     let found = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
@@ -302,7 +288,7 @@ async fn update_pipeline(
             conn.emit_event(
                 EventOrigin {
                     workspace_id: workspace.id,
-                    account_id: auth_state.account_id,
+                    account_id,
                     security: &security,
                 },
                 WorkspaceEvent::PipelineUpdated(PipelineRef {
@@ -347,25 +333,22 @@ fn update_pipeline_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         pipeline_slug = %path_params.pipeline_slug,
     )
 )]
 async fn delete_pipeline(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<DeletePipelines>,
     Path(path_params): Path<PipelinePathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting pipeline");
 
+    let workspace = authz.workspace;
+    let account_id = authz.account_id;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::DeletePipelines)
-        .await?;
 
     // Confirm the pipeline exists in this workspace before deleting.
     let existing = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug)
@@ -381,7 +364,7 @@ async fn delete_pipeline(
         conn.emit_event(
             EventOrigin {
                 workspace_id: workspace.id,
-                account_id: auth_state.account_id,
+                account_id,
                 security: &security,
             },
             WorkspaceEvent::PipelineDeleted(PipelineRef {

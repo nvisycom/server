@@ -23,8 +23,8 @@ use nvisy_postgres::{AsyncConnection, Error as PgError, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, SecurityContext, ValidateJson,
-    WorkspaceContext,
+    AuthState, Authorized, InviteMembers, Json, Path, Query, SecurityContext, ValidateJson,
+    ViewMembers, WorkspaceContext,
 };
 use crate::handler::request::{
     CreateInvite, CursorPagination, GenerateInviteCode, InviteCodePathParams, InvitePathParams,
@@ -168,31 +168,28 @@ pub async fn create_invite(
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         invited_role = ?request.invited_role,
     )
 )]
 async fn send_invite(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<InviteMembers>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateInvite>,
 ) -> Result<(StatusCode, Json<InviteSent>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace invitation");
 
+    let account_id = authz.account_id;
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::InviteMembers)
-        .await?;
 
     match create_invite(
         &mut conn,
         workspace.id,
         &workspace.slug,
-        auth_state.account_id,
+        account_id,
         &security,
         &request,
     )
@@ -235,24 +232,20 @@ fn send_invite_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn list_invites(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewMembers>,
     Query(query): Query<ListInvites>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<InvitesPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace invitations");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewMembers)
-        .await?;
 
     let page = conn
         .cursor_list_workspace_invites(
@@ -292,25 +285,22 @@ fn list_invites_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         invite_id = %path_params.invite_id,
     )
 )]
 async fn cancel_invite(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<InviteMembers>,
     security: SecurityContext,
     Path(path_params): Path<InvitePathParams>,
 ) -> Result<StatusCode> {
     tracing::info!(target: TRACING_TARGET, "Cancelling workspace invitation");
 
+    let account_id = authz.account_id;
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::InviteMembers)
-        .await?;
 
     // Confirm the invite exists in this workspace before cancelling.
     let invite = find_invite(&mut conn, workspace.id, path_params.invite_id).await?;
@@ -318,12 +308,12 @@ async fn cancel_invite(
     // Cancel the invite and record the event in one transaction, so the event is
     // never lost, nor recorded for a cancel that rolled back.
     conn.transaction(async |conn| {
-        conn.cancel_workspace_invite(path_params.invite_id, auth_state.account_id)
+        conn.cancel_workspace_invite(path_params.invite_id, account_id)
             .await?;
         conn.emit_event(
             EventOrigin {
                 workspace_id: workspace.id,
-                account_id: auth_state.account_id,
+                account_id,
                 security: &security,
             },
             WorkspaceEvent::InviteCanceled(InviteRef {
@@ -463,27 +453,24 @@ fn reply_to_invite_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         invited_role = ?request.invited_role,
     )
 )]
 async fn generate_invite_code(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<InviteMembers>,
     ValidateJson(request): ValidateJson<GenerateInviteCode>,
 ) -> Result<(StatusCode, Json<InviteCode>)> {
     tracing::info!(target: TRACING_TARGET, "Generating invite code");
 
+    let account_id = authz.account_id;
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
 
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::InviteMembers)
-        .await?;
-
     let workspace_invite = conn
-        .create_workspace_invite(request.into_model(workspace.id, auth_state.account_id))
+        .create_workspace_invite(request.into_model(workspace.id, account_id))
         .await?;
 
     tracing::info!(

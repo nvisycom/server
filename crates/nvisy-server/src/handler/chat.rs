@@ -18,9 +18,7 @@ use nvisy_postgres::query::{AppendSessionUpdate, ChatMessageRepository, ChatSess
 use nvisy_postgres::types::ChatRole;
 use tokio_util::sync::CancellationToken;
 
-use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
-};
+use crate::extract::{Authorized, Json, Path, Query, UseChat, ValidateJson};
 use crate::handler::request::{
     ChatSessionPathParams, CreateChatSession, CursorPagination, SendChatMessage,
 };
@@ -44,22 +42,20 @@ const DEFAULT_TITLE: &str = "New chat";
 const MAX_REPLY_BYTES: usize = 96 * 1024;
 
 /// Creates a new chat session in the workspace.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id, workspace_id = %workspace.id))]
+#[tracing::instrument(skip_all, fields(account_id = %authz.account_id, workspace_id = %authz.workspace.id))]
 async fn create_session(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<UseChat>,
     ValidateJson(request): ValidateJson<CreateChatSession>,
 ) -> Result<(StatusCode, Json<ChatSession>)> {
+    let account_id = authz.account_id;
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::UseChat)
-        .await?;
 
     let session = conn
         .create_chat_session(NewChatSession {
             workspace_id: workspace.id,
-            account_id: auth_state.account_id,
+            account_id,
             title: request.title.unwrap_or_else(|| DEFAULT_TITLE.to_owned()),
         })
         .await?;
@@ -77,17 +73,14 @@ fn create_session_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Lists the workspace's chat sessions, most recently active first.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id, workspace_id = %workspace.id))]
+#[tracing::instrument(skip_all, fields(account_id = %authz.account_id, workspace_id = %authz.workspace.id))]
 async fn list_sessions(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<UseChat>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<ChatSessionsPage>)> {
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::UseChat)
-        .await?;
 
     let page = conn
         .list_chat_sessions(workspace.id, pagination.into())
@@ -106,18 +99,15 @@ fn list_sessions_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Returns a session's messages in chronological order.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id, workspace_id = %workspace.id, session_id = %path_params.session_id))]
+#[tracing::instrument(skip_all, fields(account_id = %authz.account_id, workspace_id = %authz.workspace.id, session_id = %path_params.session_id))]
 async fn list_messages(
     State(pg_client): State<PgClient>,
     State(chat): State<ChatService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<UseChat>,
     Path(path_params): Path<ChatSessionPathParams>,
 ) -> Result<(StatusCode, Json<Vec<ChatMessage>>)> {
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::UseChat)
-        .await?;
 
     // Scope the session to the workspace before reading its messages.
     conn.find_chat_session_in_workspace(workspace.id, path_params.session_id)
@@ -143,17 +133,14 @@ fn list_messages_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Deletes a chat session.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id, workspace_id = %workspace.id, session_id = %path_params.session_id))]
+#[tracing::instrument(skip_all, fields(account_id = %authz.account_id, workspace_id = %authz.workspace.id, session_id = %path_params.session_id))]
 async fn delete_session(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<UseChat>,
     Path(path_params): Path<ChatSessionPathParams>,
 ) -> Result<StatusCode> {
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::UseChat)
-        .await?;
 
     let deleted = conn
         .delete_chat_session(workspace.id, path_params.session_id)
@@ -183,23 +170,19 @@ fn delete_session_docs(op: TransformOperation) -> TransformOperation {
 /// Authenticated with a Bearer token; browsers should consume it via a `fetch`
 /// stream rather than the native `EventSource`, which cannot send an
 /// `Authorization` header.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id, workspace_id = %workspace.id, session_id = %path_params.session_id))]
+#[tracing::instrument(skip_all, fields(account_id = %authz.account_id, workspace_id = %authz.workspace.id, session_id = %path_params.session_id))]
 async fn send_message(
     State(pg_client): State<PgClient>,
     State(chat): State<ChatService>,
     State(shutdown): State<CancellationToken>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<UseChat>,
     Path(path_params): Path<ChatSessionPathParams>,
     ValidateJson(request): ValidateJson<SendChatMessage>,
 ) -> Result<SseResponse<ChatToken>> {
     let session_id = path_params.session_id;
-    let workspace_id = workspace.id;
+    let workspace_id = authz.workspace.id;
 
     let mut conn = pg_client.get_connection().await?;
-    auth_state
-        .authorize_workspace(&mut conn, workspace_id, Permission::UseChat)
-        .await?;
 
     // Scope the session to the workspace before writing to it.
     let session = conn

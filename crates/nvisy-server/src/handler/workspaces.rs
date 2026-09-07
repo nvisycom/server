@@ -17,8 +17,8 @@ use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Avatar, Json, Permission, Query, SecurityContext, ValidateJson,
-    WorkspaceContext,
+    AuthState, Authorized, Avatar, DeleteWorkspace, Json, Query, SecurityContext,
+    UpdateWorkspace as UpdateWorkspacePerm, ValidateJson, ViewWorkspace, WorkspaceContext,
 };
 use crate::handler::request::{
     CreateWorkspace, CursorPagination, UpdateNotificationSettings, UpdateWorkspace,
@@ -180,20 +180,18 @@ fn list_workspaces_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn read_workspace(
     State(pg_client): State<PgClient>,
     State(upload): State<UploadConfig>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewWorkspace>,
 ) -> Result<(StatusCode, Json<Workspace>)> {
+    let workspace = authz.workspace;
+    let member = authz.member;
     let mut conn = pg_client.get_connection().await?;
-    let member = auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWorkspace)
-        .await?;
 
     let creator = find_workspace_creator(&mut conn, workspace.slug.as_str()).await?;
 
@@ -222,24 +220,23 @@ fn read_workspace_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn update_workspace(
     State(pg_client): State<PgClient>,
     State(upload): State<UploadConfig>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<UpdateWorkspacePerm>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWorkspace>,
 ) -> Result<(StatusCode, Json<Workspace>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace");
 
+    let account_id = authz.account_id;
+    let workspace = authz.workspace;
+    let member = authz.member;
     let mut conn = pg_client.get_connection().await?;
-    let member = auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::UpdateWorkspace)
-        .await?;
 
     // Capture the new retention so, if settings changed, we can backfill the
     // precomputed `expires_at` on existing files for this workspace.
@@ -261,7 +258,7 @@ async fn update_workspace(
             conn.emit_event(
                 EventOrigin {
                     workspace_id,
-                    account_id: auth_state.account_id,
+                    account_id,
                     security: &security,
                 },
                 WorkspaceEvent::WorkspaceUpdated(WorkspaceRef {
@@ -305,22 +302,20 @@ fn update_workspace_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn delete_workspace(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<DeleteWorkspace>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace");
 
+    let account_id = authz.account_id;
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::DeleteWorkspace)
-        .await?;
 
     // Soft-delete the workspace and record the deletion event in one transaction,
     // so the event is never lost, nor recorded for a delete that rolled back.
@@ -329,7 +324,7 @@ async fn delete_workspace(
         conn.emit_event(
             EventOrigin {
                 workspace_id: workspace.id,
-                account_id: auth_state.account_id,
+                account_id,
                 security: &security,
             },
             WorkspaceEvent::WorkspaceDeleted(WorkspaceRef {
@@ -460,27 +455,18 @@ async fn find_workspace_creator(conn: &mut PgConn, slug: &str) -> Result<Account
 ///
 /// The image is normalized to WebP and stored; the workspace's `avatar_url` is
 /// set to its serve path. Requires `UpdateWorkspace`.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id, workspace_id = %workspace.id))]
+#[tracing::instrument(skip_all, fields(account_id = %authz.account_id, workspace_id = %authz.workspace.id))]
 async fn upload_workspace_avatar(
-    State(pg_client): State<PgClient>,
     State(avatar): State<AvatarService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<UpdateWorkspacePerm>,
     Avatar(bytes): Avatar,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Uploading workspace avatar");
 
-    // Authorize under a scoped connection, then release it: `set_workspace_avatar`
+    // Authorization is enforced by the `Authorized` extractor. `set_workspace_avatar`
     // does image processing and a NATS put (and acquires its own connection for
-    // the DB update), so holding this one across it would pin two pooled
-    // connections for the whole upload.
-    {
-        let mut conn = pg_client.get_connection().await?;
-        auth_state
-            .authorize_workspace(&mut conn, workspace.id, Permission::UpdateWorkspace)
-            .await?;
-    }
-
+    // the DB update).
+    let workspace = authz.workspace;
     avatar.set_workspace_avatar(workspace.id, bytes).await?;
 
     tracing::info!(target: TRACING_TARGET, "Workspace avatar set");
@@ -498,20 +484,14 @@ fn upload_workspace_avatar_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Removes a workspace's avatar. Requires `UpdateWorkspace`.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id, workspace_id = %workspace.id))]
+#[tracing::instrument(skip_all, fields(account_id = %authz.account_id, workspace_id = %authz.workspace.id))]
 async fn delete_workspace_avatar(
-    State(pg_client): State<PgClient>,
     State(avatar): State<AvatarService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<UpdateWorkspacePerm>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace avatar");
 
-    let mut conn = pg_client.get_connection().await?;
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::UpdateWorkspace)
-        .await?;
-
+    let workspace = authz.workspace;
     avatar.delete_workspace_avatar(workspace.id).await?;
     tracing::info!(target: TRACING_TARGET, "Workspace avatar deleted");
     Ok(StatusCode::NO_CONTENT)

@@ -18,7 +18,7 @@ use nvisy_postgres::query::WorkspaceActivityRepository;
 use nvisy_postgres::types::WithAccountRef;
 use serde::Serialize;
 
-use crate::extract::{AuthProvider, AuthState, Json, Permission, Query, WorkspaceContext};
+use crate::extract::{Authorized, Json, Query, ViewActivity};
 use crate::handler::request::{
     ActivityExportOptions, ActivityFilterQuery, CursorPagination, DateWindow, ExportFormat,
     MAX_EXPORT_ROWS,
@@ -107,25 +107,21 @@ impl ActivityExportRow {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn list_activities(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewActivity>,
     Query(filter_query): Query<ActivityFilterQuery>,
     Query(window): Query<DateWindow>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<ActivitiesPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace activities");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewActivity)
-        .await?;
 
     let actor = resolve_actor(&mut conn, filter_query.actor.as_ref()).await?;
 
@@ -175,24 +171,21 @@ fn list_activities_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn export_activities(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewActivity>,
     Query(filter_query): Query<ActivityFilterQuery>,
     Query(window_query): Query<DateWindow>,
     Query(export_query): Query<ActivityExportOptions>,
 ) -> Result<(StatusCode, HeaderMap, Body)> {
     tracing::debug!(target: TRACING_TARGET, "Exporting workspace activities");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewActivity)
-        .await?;
 
     let window = window_query.resolve()?;
 

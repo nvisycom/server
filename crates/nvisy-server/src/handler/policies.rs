@@ -18,8 +18,7 @@ use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, SecurityContext, ValidateJson,
-    WorkspaceContext,
+    Authorized, Json, ManagePolicies, Path, Query, SecurityContext, ValidateJson, ViewPolicies,
 };
 use crate::handler::request::{CreatePolicy, CursorPagination, PolicyPathParams, UpdatePolicy};
 use crate::handler::response::{ErrorResponse, PoliciesPage, Policy, PolicySummary};
@@ -40,25 +39,22 @@ const TRACING_TARGET: &str = "nvisy_server::handler::policies";
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn create_policy(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ManagePolicies>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreatePolicy>,
 ) -> Result<(StatusCode, Json<Policy>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace policy");
 
+    let workspace = authz.workspace;
+    let account_id = authz.account_id;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ManagePolicies)
-        .await?;
 
     // Resolve the body (inline or a built-in template). `into_definition` mints a
     // fresh id and stamps the template origin (server-owned).
@@ -74,7 +70,7 @@ async fn create_policy(
 
     let new_policy = NewWorkspacePolicy {
         workspace_id: workspace.id,
-        account_id: auth_state.account_id,
+        account_id,
         slug: request.slug,
         display_name,
         description,
@@ -90,7 +86,7 @@ async fn create_policy(
             conn.emit_event(
                 EventOrigin {
                     workspace_id: workspace.id,
-                    account_id: auth_state.account_id,
+                    account_id,
                     security: &security,
                 },
                 WorkspaceEvent::PolicyCreated(PolicyRef {
@@ -106,7 +102,7 @@ async fn create_policy(
     tracing::info!(target: TRACING_TARGET, policy_slug = %policy.slug, "Policy created");
 
     // The creator is the authenticated caller; resolve their handle directly.
-    let creator = resolve_account_ref(&mut conn, auth_state.account_id).await?;
+    let creator = resolve_account_ref(&mut conn, account_id).await?;
 
     let response = Policy::from_model(policy, workspace.slug, creator, &crypto)?;
 
@@ -126,23 +122,19 @@ fn create_policy_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn list_policies(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewPolicies>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<PoliciesPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace policies");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPolicies)
-        .await?;
 
     let page = conn
         .cursor_list_workspace_policies(workspace.id, pagination.into())
@@ -175,25 +167,21 @@ fn list_policies_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         policy_slug = %path_params.policy_slug,
     )
 )]
 async fn read_policy(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewPolicies>,
     Path(path_params): Path<PolicyPathParams>,
 ) -> Result<(StatusCode, Json<Policy>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace policy");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewPolicies)
-        .await?;
 
     let found = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
 
@@ -226,27 +214,24 @@ fn read_policy_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         policy_slug = %path_params.policy_slug,
     )
 )]
 async fn update_policy(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ManagePolicies>,
     Path(path_params): Path<PolicyPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdatePolicy>,
 ) -> Result<(StatusCode, Json<Policy>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace policy");
 
+    let workspace = authz.workspace;
+    let account_id = authz.account_id;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ManagePolicies)
-        .await?;
 
     // Confirm the policy exists in this workspace before mutating.
     let existing = find_policy(&mut conn, workspace.id, &path_params.policy_slug)
@@ -283,7 +268,7 @@ async fn update_policy(
         conn.emit_event(
             EventOrigin {
                 workspace_id: workspace.id,
-                account_id: auth_state.account_id,
+                account_id,
                 security: &security,
             },
             WorkspaceEvent::PolicyUpdated(PolicyRef {
@@ -319,25 +304,22 @@ fn update_policy_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         policy_slug = %path_params.policy_slug,
     )
 )]
 async fn delete_policy(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ManagePolicies>,
     Path(path_params): Path<PolicyPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace policy");
 
+    let workspace = authz.workspace;
+    let account_id = authz.account_id;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ManagePolicies)
-        .await?;
 
     // Confirm the policy exists in this workspace before deleting.
     let existing = find_policy(&mut conn, workspace.id, &path_params.policy_slug)
@@ -353,7 +335,7 @@ async fn delete_policy(
         conn.emit_event(
             EventOrigin {
                 workspace_id: workspace.id,
-                account_id: auth_state.account_id,
+                account_id,
                 security: &security,
             },
             WorkspaceEvent::PolicyDeleted(PolicyRef {

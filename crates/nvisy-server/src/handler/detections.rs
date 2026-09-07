@@ -26,8 +26,8 @@ use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, IdempotencyKey, Json, Path, Permission, Query, SecurityContext,
-    ValidateJson, WorkspaceContext,
+    Authorized, IdempotencyKey, Json, Path, Query, RunDetections, RunRedactions, SecurityContext,
+    ValidateJson, ViewDetections,
 };
 use crate::handler::request::{
     CreateDetection, CursorPagination, DetectionPathParams, PipelineDefinition,
@@ -52,16 +52,15 @@ const TRACING_TARGET: &str = "nvisy_server::handler::detections";
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         pipeline_slug = %path_params.pipeline_slug,
     )
 )]
 async fn create_detection(
     State(pg_client): State<PgClient>,
     State(detection): State<DetectionQueue>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<RunDetections>,
     Path(path_params): Path<PipelinePathParams>,
     IdempotencyKey(idempotency_key): IdempotencyKey,
     security: SecurityContext,
@@ -69,11 +68,8 @@ async fn create_detection(
 ) -> Result<(StatusCode, Json<Detection>)> {
     tracing::debug!(target: TRACING_TARGET, "Starting detection");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::RunDetections)
-        .await?;
 
     let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
@@ -139,7 +135,7 @@ async fn create_detection(
     let new_detection = NewWorkspaceDetection {
         pipeline_id: pipeline.id,
         input_file_id: file.id,
-        account_id: auth_state.account_id,
+        account_id: authz.account_id,
         status: Some(DetectionStatus::Pending),
         idempotency_key: idempotency_key.clone(),
         ..Default::default()
@@ -158,7 +154,7 @@ async fn create_detection(
             conn.emit_event(
                 EventOrigin {
                     workspace_id: workspace.id,
-                    account_id: auth_state.account_id,
+                    account_id: authz.account_id,
                     security: &security,
                 },
                 WorkspaceEvent::DetectionStarted(DetectionRef {
@@ -235,26 +231,22 @@ fn create_detection_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         pipeline_slug = %path_params.pipeline_slug,
     )
 )]
 async fn list_pipeline_detections(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewDetections>,
     Path(path_params): Path<PipelinePathParams>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<PipelineDetectionsQuery>,
 ) -> Result<(StatusCode, Json<DetectionsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing pipeline detections");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewDetections)
-        .await?;
 
     let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
@@ -302,24 +294,20 @@ fn list_pipeline_detections_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn list_workspace_detections(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewDetections>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<WorkspaceDetectionsQuery>,
 ) -> Result<(StatusCode, Json<DetectionsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace detections");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewDetections)
-        .await?;
 
     let page = conn
         .cursor_list_workspace_detections(workspace.id, pagination.into(), &query.into())
@@ -364,24 +352,20 @@ fn list_workspace_detections_docs(op: TransformOperation) -> TransformOperation 
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         detection_id = %path_params.detection_id,
     )
 )]
 async fn get_detection(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewDetections>,
     Path(path_params): Path<DetectionPathParams>,
 ) -> Result<(StatusCode, Json<Detection>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting detection");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewDetections)
-        .await?;
 
     let (detection, pipeline) =
         find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
@@ -430,25 +414,22 @@ fn get_detection_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         detection_id = %path_params.detection_id,
     )
 )]
 async fn stream_detection_events(
     State(pg_client): State<PgClient>,
     State(detection): State<DetectionQueue>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewDetections>,
     Path(path_params): Path<DetectionPathParams>,
 ) -> Result<SseResponse<DetectionStatusEvent>> {
     tracing::debug!(target: TRACING_TARGET, "Opening detection status stream");
 
+    let workspace = authz.workspace;
     let detection_id = path_params.detection_id.as_uuid();
     let mut conn = pg_client.get_connection().await?;
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewDetections)
-        .await?;
 
     // Subscribe BEFORE reading the current status: core-NATS broadcasts are not
     // replayed, so a terminal status published between the read and the
@@ -560,8 +541,8 @@ fn status_event(event: &DetectionStatusEvent) -> Event {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         detection_id = %path_params.detection_id,
     )
 )]
@@ -570,13 +551,14 @@ async fn redact_detection(
     State(blob): State<RunBlobStore>,
     State(crypto): State<CryptoService>,
     State(engine): State<EngineService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<RunRedactions>,
     Path(path_params): Path<DetectionPathParams>,
     security: SecurityContext,
     Json(request): Json<RedactDetection>,
 ) -> Result<(StatusCode, Json<RedactionResult>)> {
     tracing::debug!(target: TRACING_TARGET, "Redacting detection");
+
+    let workspace = authz.workspace;
 
     // Phase 1: the pre-flight DB work under one connection, then release it.
     // Holding a pooled connection across the audit load, redaction inference, and
@@ -585,10 +567,6 @@ async fn redact_detection(
     // the audit file row is resolved here; its bytes are loaded in phase 2.
     let (detection, pipeline, file, audit_file, policies) = {
         let mut conn = pg_client.get_connection().await?;
-
-        auth_state
-            .authorize_workspace(&mut conn, workspace.id, Permission::RunRedactions)
-            .await?;
 
         let (detection, pipeline) =
             find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
@@ -661,14 +639,14 @@ async fn redact_detection(
             &file,
             &pipeline,
             &retention,
-            auth_state.account_id,
+            authz.account_id,
             redacted.bytes,
         )
         .await?;
     // Staging the review audit after the output means a failure here would strand
     // the already-written output object (no row to reclaim it); discard it first.
     let staged_review = match blob
-        .stage_review_audit(&pipeline, &retention, auth_state.account_id, &reviewed)
+        .stage_review_audit(&pipeline, &retention, authz.account_id, &reviewed)
         .await
     {
         Ok(staged) => staged,
@@ -688,7 +666,7 @@ async fn redact_detection(
             let redaction = conn
                 .create_redaction(NewWorkspaceRedaction {
                     detection_id: detection.id,
-                    account_id: auth_state.account_id,
+                    account_id: authz.account_id,
                     review_file_id: Some(review_file.id),
                     output_file_id: Some(output_file.id),
                 })
@@ -696,7 +674,7 @@ async fn redact_detection(
             conn.emit_event(
                 EventOrigin {
                     workspace_id: workspace.id,
-                    account_id: auth_state.account_id,
+                    account_id: authz.account_id,
                     security: &security,
                 },
                 WorkspaceEvent::RedactionCreated {
