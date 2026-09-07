@@ -5,8 +5,10 @@
 //! drops the bearer header on the cross-host hop, as the target requires). The
 //! `common` tenant supports both personal and work/school accounts.
 
-use super::{encode_path_segment, response_stream};
-use crate::client::{ByteStream, FileServiceClient};
+use reqwest::header::CONTENT_LENGTH;
+
+use super::{ProviderRequest, encode_path_segment, response_stream};
+use crate::client::{ByteStream, FileServiceClient, FileUpload};
 use crate::error::Result;
 use crate::oauth::OAuthProvider;
 
@@ -70,9 +72,8 @@ impl FileServiceClient for OneDriveClient {
         self.http
             .get(format!("{API_BASE}/me/drive"))
             .bearer_auth(&self.access_token)
-            .send()
-            .await?
-            .error_for_status()?;
+            .send_checked(PROVIDER_ID)
+            .await?;
         Ok(())
     }
 
@@ -86,16 +87,22 @@ impl FileServiceClient for OneDriveClient {
             .http
             .get(format!("{API_BASE}/me/drive/items/{id}/content"))
             .bearer_auth(&self.access_token)
-            .send()
-            .await?
-            .error_for_status()?;
+            .send_checked(PROVIDER_ID)
+            .await?;
         Ok(response_stream(response))
     }
 
-    async fn put_stream(&self, name: &str, content_type: &str, body: ByteStream) -> Result<()> {
+    async fn put_stream(&self, upload: FileUpload<'_>) -> Result<()> {
+        let FileUpload {
+            name,
+            content_type,
+            content_length,
+            body,
+        } = upload;
         // Simple PUT upload of a new file into the configured folder (or root),
         // addressed by parent id and file name. Both are encoded into the path so
-        // a `?`, `#`, or `/` in the name cannot retarget the request URL.
+        // a `?`, `#`, or `/` in the name cannot retarget the request URL. The body
+        // is streamed with an explicit length (the whole body is the file's bytes).
         let name = encode_path_segment(name);
         let url = match &self.root_folder_id {
             Some(id) => {
@@ -108,10 +115,10 @@ impl FileServiceClient for OneDriveClient {
             .put(url)
             .bearer_auth(&self.access_token)
             .header("Content-Type", content_type)
+            .header(CONTENT_LENGTH, content_length)
             .body(reqwest::Body::wrap_stream(body))
-            .send()
-            .await?
-            .error_for_status()?;
+            .send_checked(PROVIDER_ID)
+            .await?;
         Ok(())
     }
 }

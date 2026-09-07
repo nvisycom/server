@@ -86,6 +86,23 @@ impl ConnectionVerification {
     }
 }
 
+/// A short-lived provider OAuth access token for a browser file picker.
+///
+/// Carries only the access token and its expiry — never the refresh token, which
+/// stays server-side. The token is minted from the connection's stored
+/// credentials and is short-lived (the provider's access-token lifetime), so the
+/// browser holds a narrow, expiring credential rather than a durable one.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PickerToken {
+    /// The provider OAuth access token to hand to the browser picker.
+    pub access_token: String,
+    /// Unix seconds at which the access token expires, if the provider reports
+    /// it. `None` means the provider did not return an expiry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<i64>,
+}
+
 impl Connection {
     /// Creates a response from a database model and its creator.
     pub fn from_model(

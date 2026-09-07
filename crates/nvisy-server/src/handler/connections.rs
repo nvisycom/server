@@ -18,7 +18,8 @@ use std::collections::HashMap;
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::header::CACHE_CONTROL;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use nvisy_core::net::EndpointPolicy;
 use nvisy_file_service::FileService;
 use nvisy_inference::Error as InferenceError;
@@ -35,15 +36,15 @@ use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, SecurityContext, ValidateJson,
-    WorkspaceContext,
+    Authorized, Json, ManageConnections, Path, Query, RunConnectionSyncs, SecurityContext,
+    ValidateJson, ViewConnections,
 };
 use crate::handler::request::{
     ConnectionPathParams, ConnectionsQuery, CreateConnection, CursorPagination, SyncScheduleInput,
     UpdateConnection,
 };
 use crate::handler::response::{
-    Connection, ConnectionVerification, ConnectionsPage, ErrorResponse,
+    Connection, ConnectionVerification, ConnectionsPage, ErrorResponse, PickerToken,
 };
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
@@ -62,26 +63,23 @@ const TRACING_TARGET: &str = "nvisy_server::handler::connections";
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn create_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(endpoint_policy): State<EndpointPolicy>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ManageConnections>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateConnection>,
 ) -> Result<(StatusCode, Json<Connection>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace connection");
 
+    let account_id = authz.account_id;
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
-        .await?;
 
     // Reject a disallowed custom endpoint under the deployment policy before the
     // config is ever stored (SSRF / cleartext-credential guard).
@@ -106,7 +104,7 @@ async fn create_connection(
 
     let new_connection = NewWorkspaceConnection {
         workspace_id: workspace.id,
-        account_id: auth_state.account_id,
+        account_id,
         display_name: request.display_name,
         provider,
         provider_type,
@@ -141,7 +139,7 @@ async fn create_connection(
             conn.emit_event(
                 EventOrigin {
                     workspace_id: workspace.id,
-                    account_id: auth_state.account_id,
+                    account_id,
                     security: &security,
                 },
                 WorkspaceEvent::ConnectionCreated(ConnectionRef {
@@ -163,7 +161,7 @@ async fn create_connection(
 
     // The creator is the authenticated caller, and a fresh connection has no
     // sync runs yet, so last-synced is `None`.
-    let creator = resolve_account_ref(&mut conn, auth_state.account_id).await?;
+    let creator = resolve_account_ref(&mut conn, account_id).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -197,24 +195,20 @@ fn create_connection_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn list_connections(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewConnections>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<ConnectionsQuery>,
 ) -> Result<(StatusCode, Json<ConnectionsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace connections");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
-        .await?;
 
     let page = conn
         .cursor_list_workspace_connections(workspace.id, pagination.into(), &query.provider)
@@ -279,24 +273,20 @@ fn list_connections_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
 async fn read_connection(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewConnections>,
     Path(path_params): Path<ConnectionPathParams>,
 ) -> Result<(StatusCode, Json<Connection>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace connection");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
-        .await?;
 
     let (found, schedule, last_synced) =
         find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
@@ -330,8 +320,8 @@ fn read_connection_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -339,19 +329,16 @@ async fn update_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(endpoint_policy): State<EndpointPolicy>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ManageConnections>,
     Path(path_params): Path<ConnectionPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateConnection>,
 ) -> Result<(StatusCode, Json<Connection>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace connection");
 
+    let account_id = authz.account_id;
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
-        .await?;
 
     // Reject a disallowed custom endpoint on the replacement config before store.
     if let Some(config) = &request.config {
@@ -455,7 +442,7 @@ async fn update_connection(
         conn.emit_event(
             EventOrigin {
                 workspace_id: workspace.id,
-                account_id: auth_state.account_id,
+                account_id,
                 security: &security,
             },
             WorkspaceEvent::ConnectionUpdated(ConnectionRef {
@@ -501,25 +488,22 @@ fn update_connection_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
 async fn delete_connection(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ManageConnections>,
     Path(path_params): Path<ConnectionPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace connection");
 
+    let account_id = authz.account_id;
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
-        .await?;
 
     let existing = find_connection(&mut conn, workspace.id, path_params.connection_id)
         .await?
@@ -533,7 +517,7 @@ async fn delete_connection(
         conn.emit_event(
             EventOrigin {
                 workspace_id: workspace.id,
-                account_id: auth_state.account_id,
+                account_id,
                 security: &security,
             },
             WorkspaceEvent::ConnectionDeleted(ConnectionRef {
@@ -570,8 +554,8 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -580,20 +564,18 @@ async fn verify_connection(
     State(crypto): State<CryptoService>,
     State(object): State<ExternalObjectStore>,
     State(cloud): State<FileService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewConnections>,
     Path(path_params): Path<ConnectionPathParams>,
 ) -> Result<(StatusCode, Json<ConnectionVerification>)> {
     tracing::debug!(target: TRACING_TARGET, "Verifying workspace connection");
+
+    let workspace = authz.workspace;
 
     // Do the DB work up front, then release the connection before the provider
     // I/O below. `connect`/`verify` reach external services with no total
     // timeout, so holding a pooled connection across them could exhaust the pool.
     let connection = {
         let mut conn = pg_client.get_connection().await?;
-        auth_state
-            .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
-            .await?;
         find_connection(&mut conn, workspace.id, path_params.connection_id)
             .await?
             .0
@@ -686,6 +668,104 @@ fn verify_connection_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
+/// Mints a short-lived provider OAuth access token for a browser file picker.
+///
+/// The native pickers (Google Picker, the OneDrive and Box file pickers) run in
+/// the browser and need a provider access token to do so. Refresh tokens stay
+/// server-side, so this returns only a short-lived access token (refreshing it
+/// from the stored credentials if the current one has expired, and persisting
+/// the refreshed set) with `Cache-Control: no-store`. Rejects a non-file-service
+/// connection, and a Dropbox connection (its Chooser uses a public app key, not a
+/// user token). Requires `RunConnectionSyncs` permission, matching the import it
+/// precedes.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
+        connection_id = %path_params.connection_id,
+    )
+)]
+async fn mint_picker_token(
+    State(pg_client): State<PgClient>,
+    State(crypto): State<CryptoService>,
+    State(cloud): State<FileService>,
+    authz: Authorized<RunConnectionSyncs>,
+    Path(path_params): Path<ConnectionPathParams>,
+) -> Result<(StatusCode, HeaderMap, Json<PickerToken>)> {
+    tracing::debug!(target: TRACING_TARGET, "Minting picker token");
+
+    let workspace = authz.workspace;
+
+    // Do the DB work up front, then release the connection before the provider
+    // token refresh below (which reaches the provider with no total timeout).
+    let connection = {
+        let mut conn = pg_client.get_connection().await?;
+        find_connection(&mut conn, workspace.id, path_params.connection_id)
+            .await?
+            .0
+            .item
+    };
+
+    if !connection.is_active {
+        return Err(ErrorKind::BadRequest.with_message("Connection is not active"));
+    }
+
+    let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
+    let ConnectionConfig::FileService(config) = config else {
+        return Err(ErrorKind::BadRequest
+            .with_message("Picker tokens are only available for file services"));
+    };
+    if !config.provider.picker_needs_user_token() {
+        return Err(ErrorKind::BadRequest.with_message(
+            "This provider's picker uses a client-side app key, not a server token",
+        ));
+    }
+
+    // Mint the access token, refreshing (and persisting) if the stored one has
+    // expired. The refresh token never leaves the server; only the short-lived
+    // access token and its expiry are returned.
+    let (access_token, refreshed) = cloud.ensure_fresh(&config).await?;
+    let expires_at = match &refreshed {
+        Some(refreshed) => refreshed.tokens().expires_at,
+        None => config.tokens().expires_at,
+    };
+    if let Some(refreshed) = refreshed {
+        let mut conn = pg_client.get_connection().await?;
+        persist_refreshed_tokens(
+            &mut conn,
+            &crypto,
+            workspace.id,
+            connection.id,
+            refreshed.tokens().clone(),
+        )
+        .await?;
+    }
+
+    // The response carries a bearer credential; keep it out of any cache.
+    let mut headers = HeaderMap::new();
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+
+    let token = PickerToken {
+        access_token,
+        expires_at,
+    };
+    Ok((StatusCode::OK, headers, Json(token)))
+}
+
+fn mint_picker_token_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Mint picker token")
+        .description(
+            "Returns a short-lived provider access token for a browser file picker (file \
+             services with a token-based picker only). The refresh token is never returned.",
+        )
+        .response::<200, Json<PickerToken>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Validates a sync-schedule input: the cron expression, when present, must be
 /// valid. Either direction may be scheduled — an import pulls the listing, an
 /// export pushes redacted outputs.
@@ -744,6 +824,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/workspaces/{workspaceSlug}/connections/{connectionId}/verify/",
             post_with(verify_connection, verify_connection_docs),
+        )
+        .api_route(
+            "/workspaces/{workspaceSlug}/connections/{connectionId}/picker-token/",
+            post_with(mint_picker_token, mint_picker_token_docs),
         )
         .with_path_items(|item| item.tag("Connections"))
 }

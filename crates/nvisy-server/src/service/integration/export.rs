@@ -18,7 +18,7 @@ use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
 use super::connector::Connector;
-use super::file_source::{ByteStream, FileSource};
+use super::file_source::{ByteStream, FileSource, FileUpload};
 use super::naming::{export_key, mime_from_extension};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{ConnectionConfig, Infra};
@@ -198,8 +198,16 @@ impl Exporter {
                 .with_context(err.to_string())
         }));
         let content_type = mime_from_extension(&file.file_extension);
+        // `file_size_bytes` is the plaintext size (measured on import before
+        // encryption), which is exactly what the decrypted body streams out — the
+        // Content-Length a provider like Dropbox requires up front.
         source
-            .put_stream(remote_key, content_type.as_str(), body)
+            .put_stream(FileUpload {
+                key: remote_key,
+                content_type: content_type.as_str(),
+                content_length: file.file_size_bytes.max(0) as u64,
+                body,
+            })
             .await?;
 
         // Record the export (upsert) so both manual and scheduled paths dedupe:

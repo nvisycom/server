@@ -45,8 +45,26 @@ pub trait FileSource: Send + Sync {
     /// Streams one entry's bytes without buffering the whole entry in memory.
     async fn get_stream(&self, key: &str) -> Result<ByteStream>;
 
-    /// Uploads `body` to `key`, streaming it to the provider.
-    async fn put_stream(&self, key: &str, content_type: &str, body: ByteStream) -> Result<()>;
+    /// Uploads a file to `upload.key`, streaming its body to the provider.
+    async fn put_stream(&self, upload: FileUpload<'_>) -> Result<()>;
+}
+
+/// A streamed upload to a [`FileSource`]: the destination key, content type,
+/// exact byte length, and body.
+///
+/// `content_length` must equal the bytes `body` yields; a file service that
+/// needs the length up front (Dropbox) sets it as the request `Content-Length`,
+/// while an object store streams via multipart and ignores it.
+#[must_use]
+pub struct FileUpload<'a> {
+    /// The destination key: an object path, or a file service's new file name.
+    pub key: &'a str,
+    /// The MIME type of the content.
+    pub content_type: &'a str,
+    /// The exact number of bytes `body` yields.
+    pub content_length: u64,
+    /// The file's bytes, streamed to the provider.
+    pub body: ByteStream,
 }
 
 /// A [`FileSource`] over an object store (S3/Azure/GCS).
@@ -81,7 +99,15 @@ impl FileSource for ObjectStoreSource {
         Ok(Box::pin(stream.map_err(Into::into)))
     }
 
-    async fn put_stream(&self, key: &str, content_type: &str, body: ByteStream) -> Result<()> {
+    async fn put_stream(&self, upload: FileUpload<'_>) -> Result<()> {
+        // Object stores stream via multipart, which frames its own parts, so the
+        // known length is unused here.
+        let FileUpload {
+            key,
+            content_type,
+            body,
+            ..
+        } = upload;
         // The multipart API wants an object-store-error stream; the body carries
         // the server error type, so map each item back at the boundary.
         let body = body.map_err(|err| ObjectError::runtime(err, "source-read"));
@@ -104,13 +130,26 @@ impl FileSource for FileServiceSource {
         Ok(Box::pin(stream.map_err(Into::into)))
     }
 
-    async fn put_stream(&self, key: &str, content_type: &str, body: ByteStream) -> Result<()> {
+    async fn put_stream(&self, upload: FileUpload<'_>) -> Result<()> {
         // A file service creates a new file named by `key`; the caller passes the
         // desired file name as the key for an export.
+        let FileUpload {
+            key,
+            content_type,
+            content_length,
+            body,
+        } = upload;
         let body = body.map_err(|err| {
             nvisy_file_service::Error::runtime(format!("export stream failed: {err}"))
         });
-        self.0.put_stream(key, content_type, Box::pin(body)).await?;
+        self.0
+            .put_stream(nvisy_file_service::client::FileUpload {
+                name: key,
+                content_type,
+                content_length,
+                body: Box::pin(body),
+            })
+            .await?;
         Ok(())
     }
 }

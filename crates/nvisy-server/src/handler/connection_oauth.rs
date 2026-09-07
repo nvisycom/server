@@ -38,8 +38,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, SecurityContext, ValidateJson,
-    WorkspaceContext,
+    Authorized, Json, ManageConnections, Path, Query, SecurityContext, ValidateJson,
 };
 use crate::handler::request::{OAuthCallbackQuery, OAuthStartPathParams, StartFileServiceOAuth};
 use crate::handler::response::ErrorResponse;
@@ -58,6 +57,9 @@ const TRACING_TARGET: &str = "nvisy_server::handler::connection_oauth";
 struct OAuthFlowState {
     /// Workspace the connection will be created in.
     workspace_id: Uuid,
+    /// The workspace's slug, carried so the post-auth redirect can substitute a
+    /// `{workspaceSlug}` placeholder without a lookup in the callback.
+    workspace_slug: String,
     /// Account that started the flow; the connection is attributed to it.
     account_id: Uuid,
     /// The provider being connected.
@@ -75,6 +77,13 @@ struct OAuthFlowState {
 /// value type once so call sites need only name the bucket.
 type OAuthStateBucket = OAuthStateKvBucket<OAuthFlowState>;
 
+/// The result of a completed OAuth callback: the connection that was created and
+/// the workspace it belongs to (used to build the post-auth redirect).
+struct CallbackOutcome {
+    connection_id: Uuid,
+    workspace_slug: String,
+}
+
 /// The response to a successful authorization start: where to send the user.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -87,34 +96,27 @@ pub struct OAuthStartResponse {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         provider = ?path_params.provider,
     )
 )]
 async fn start_oauth(
-    State(pg_client): State<PgClient>,
     State(nats): State<NatsClient>,
     State(cloud): State<FileService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ManageConnections>,
     Path(path_params): Path<OAuthStartPathParams>,
     ValidateJson(request): ValidateJson<StartFileServiceOAuth>,
 ) -> Result<(StatusCode, Json<OAuthStartResponse>)> {
     tracing::debug!(target: TRACING_TARGET, "Starting cloud file OAuth");
 
-    let mut conn = pg_client.get_connection().await?;
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
-        .await?;
-    drop(conn);
-
     let provider = path_params.provider;
     let authorization = cloud.oauth_client(provider)?.begin_authorization()?;
 
     let flow = OAuthFlowState {
-        workspace_id: workspace.id,
-        account_id: auth_state.account_id,
+        workspace_id: authz.workspace.id,
+        workspace_slug: authz.workspace.slug.to_string(),
+        account_id: authz.account_id,
         provider,
         display_name: request.display_name,
         root: request.root,
@@ -162,25 +164,26 @@ async fn oauth_callback(
     // The callback is a top-level browser navigation, so its outcome is conveyed
     // by a redirect back to the frontend rather than a response body.
     let outcome = complete_callback(&pg_client, &nats, &crypto, &cloud, &security, query).await;
-    let status = match outcome {
-        Ok(connection_id) => {
+    let (status, workspace_slug) = match outcome {
+        Ok(outcome) => {
             tracing::info!(
                 target: TRACING_TARGET,
-                connection_id = %connection_id,
+                connection_id = %outcome.connection_id,
                 "Cloud file connection created via OAuth",
             );
-            "success"
+            ("success", Some(outcome.workspace_slug))
         }
         Err(err) => {
             tracing::warn!(target: TRACING_TARGET, error = %err, "Cloud file OAuth failed");
-            "error"
+            ("error", None)
         }
     };
-    redirect_to_frontend(redirect.0.as_deref(), status)
+    redirect_to_frontend(redirect.0.as_deref(), status, workspace_slug.as_deref())
 }
 
 /// Runs the callback's work: consume the pending authorization, exchange the
-/// code, and create the connection. Returns the new connection id on success.
+/// code, and create the connection. Returns the new connection id and the
+/// workspace slug (for the post-auth redirect) on success.
 async fn complete_callback(
     pg_client: &PgClient,
     nats: &NatsClient,
@@ -188,7 +191,7 @@ async fn complete_callback(
     cloud: &FileService,
     security: &SecurityContext,
     query: OAuthCallbackQuery,
-) -> Result<Uuid> {
+) -> Result<CallbackOutcome> {
     // Validate the state before touching the store so a malformed value maps to
     // a clean BadRequest rather than a KV error.
     let key = OAuthStateKey::from_str(&query.state)
@@ -273,14 +276,30 @@ async fn complete_callback(
         })
         .await?;
 
-    Ok(connection_id)
+    Ok(CallbackOutcome {
+        connection_id,
+        workspace_slug: flow.workspace_slug,
+    })
 }
 
-/// Redirects the browser back to the frontend with the flow's outcome. Falls
-/// back to a self-describing data page when no frontend URL is configured.
-fn redirect_to_frontend(base: Option<&str>, status: &str) -> Redirect {
+/// Redirects the browser back to the frontend with the flow's outcome.
+///
+/// A `{workspaceSlug}` placeholder in the configured base is substituted with
+/// `workspace_slug` when known (i.e. on success), so a base like
+/// `https://app/w/{workspaceSlug}/integrations` lands on the workspace's page.
+/// The outcome is appended as a `connection=success|error` query. Falls back to a
+/// self-describing data page when no frontend URL is configured.
+fn redirect_to_frontend(
+    base: Option<&str>,
+    status: &str,
+    workspace_slug: Option<&str>,
+) -> Redirect {
     match base {
         Some(base) => {
+            let base = match workspace_slug {
+                Some(slug) => base.replace("{workspaceSlug}", slug),
+                None => base.to_owned(),
+            };
             let separator = if base.contains('?') { '&' } else { '?' };
             Redirect::to(&format!("{base}{separator}connection={status}"))
         }

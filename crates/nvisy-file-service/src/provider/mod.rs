@@ -20,13 +20,60 @@ use serde::{Deserialize, Serialize};
 use strum::EnumIter;
 
 use crate::client::{ByteStream, FileServiceClient};
-use crate::error::Error;
+use crate::error::{Error, Result, kind_for_status};
 use crate::oauth::{OAuthProvider, OAuthTokens};
+
+/// Tracing target for provider requests.
+const TRACING_TARGET: &str = "nvisy_file_service::provider";
 
 /// Adapts a response body into the provider-neutral [`ByteStream`], mapping any
 /// stream error into the crate error type. Used by every provider's download.
 fn response_stream(response: Response) -> ByteStream {
     Box::pin(response.bytes_stream().map_err(Error::from))
+}
+
+/// Sends a provider request and checks its status in one step, surfacing the
+/// provider's own error body — the single place every provider request goes
+/// through so a failure is legible rather than an opaque status.
+#[async_trait::async_trait]
+trait ProviderRequest {
+    /// Sends the request; on a non-2xx, reads and logs the provider's response
+    /// body and returns an error carrying a bounded prefix of it, classified by
+    /// status. On success, returns the [`Response`] for the caller to consume
+    /// (JSON, byte stream, or discard).
+    ///
+    /// `reqwest`'s own `error_for_status` drops the body, but providers (Dropbox
+    /// especially) put the actual reason there, so a bare status is useless for
+    /// diagnosis. `provider` labels the log and error for the failing provider.
+    async fn send_checked(self, provider: &str) -> Result<Response>;
+}
+
+#[async_trait::async_trait]
+impl ProviderRequest for reqwest::RequestBuilder {
+    async fn send_checked(self, provider: &str) -> Result<Response> {
+        let response = self.send().await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(response);
+        }
+        // The body may be large; log it in full but surface only a bounded prefix.
+        let body = response.text().await.unwrap_or_default();
+        tracing::warn!(
+            target: TRACING_TARGET,
+            %provider, status = status.as_u16(), body = %body,
+            "Provider request failed",
+        );
+        let detail: String = body.trim().chars().take(300).collect();
+        let message = if detail.is_empty() {
+            format!(
+                "[{provider}] request failed with status {}",
+                status.as_u16()
+            )
+        } else {
+            format!("[{provider}] {detail}")
+        };
+        Err(Error::new(kind_for_status(status.as_u16()), message))
+    }
 }
 
 /// Percent-encodes a provider file id or name for safe interpolation into a
@@ -80,6 +127,21 @@ impl Provider {
             Self::Dropbox => dropbox::oauth_provider(),
             Self::OneDrive => onedrive::oauth_provider(),
             Self::Box => box_provider::oauth_provider(),
+        }
+    }
+
+    /// Whether this provider's browser file picker consumes a user OAuth access
+    /// token minted by the server.
+    ///
+    /// Google Picker, the OneDrive file picker, and the Box picker each take a
+    /// user access token. Dropbox's Chooser is keyed by a public app key instead,
+    /// so it needs no server-minted token — a picker-token request for Dropbox is
+    /// meaningless and should be rejected.
+    #[must_use]
+    pub fn picker_needs_user_token(self) -> bool {
+        match self {
+            Self::GoogleDrive | Self::OneDrive | Self::Box => true,
+            Self::Dropbox => false,
         }
     }
 

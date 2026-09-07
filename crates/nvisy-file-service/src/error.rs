@@ -105,7 +105,7 @@ impl Error {
 
 /// Maps an HTTP status into the corresponding [`ErrorKind`] for a failed
 /// provider request.
-fn kind_for_status(status: u16) -> ErrorKind {
+pub(crate) fn kind_for_status(status: u16) -> ErrorKind {
     match status {
         401 => ErrorKind::Unauthenticated,
         403 => ErrorKind::PermissionDenied,

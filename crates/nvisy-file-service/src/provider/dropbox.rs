@@ -6,8 +6,10 @@
 //! the per-call argument for transfers in a `Dropbox-API-Arg` header whose JSON
 //! must be ASCII-safe. Files are addressed by a stable `id:...` key.
 
-use super::response_stream;
-use crate::client::{ByteStream, FileServiceClient};
+use reqwest::header::CONTENT_LENGTH;
+
+use super::{ProviderRequest, response_stream};
+use crate::client::{ByteStream, FileServiceClient, FileUpload};
 use crate::error::Result;
 use crate::oauth::OAuthProvider;
 
@@ -101,9 +103,8 @@ impl FileServiceClient for DropboxClient {
         self.http
             .post(format!("{API_BASE}/users/get_current_account"))
             .bearer_auth(&self.access_token)
-            .send()
-            .await?
-            .error_for_status()?;
+            .send_checked(PROVIDER_ID)
+            .await?;
         Ok(())
     }
 
@@ -114,13 +115,18 @@ impl FileServiceClient for DropboxClient {
             .post(format!("{CONTENT_BASE}/files/download"))
             .bearer_auth(&self.access_token)
             .header("Dropbox-API-Arg", arg)
-            .send()
-            .await?
-            .error_for_status()?;
+            .send_checked(PROVIDER_ID)
+            .await?;
         Ok(response_stream(response))
     }
 
-    async fn put_stream(&self, name: &str, _content_type: &str, body: ByteStream) -> Result<()> {
+    async fn put_stream(&self, upload: FileUpload<'_>) -> Result<()> {
+        let FileUpload {
+            name,
+            content_length,
+            body,
+            ..
+        } = upload;
         // Upload into the configured root (or account root), keeping the file
         // name; autorename avoids clobbering an existing name.
         let root = self.root_path.as_deref().unwrap_or("");
@@ -131,15 +137,19 @@ impl FileServiceClient for DropboxClient {
             "autorename": true,
         }));
 
+        // Dropbox's `files/upload` rejects a chunked request body: it needs a
+        // known Content-Length. The body is streamed (not buffered), so set the
+        // length explicitly from the caller's known size. Simple upload is capped
+        // at 150 MiB by Dropbox; larger files would need an upload session.
         self.http
             .post(format!("{CONTENT_BASE}/files/upload"))
             .bearer_auth(&self.access_token)
             .header("Dropbox-API-Arg", arg)
             .header("Content-Type", "application/octet-stream")
+            .header(CONTENT_LENGTH, content_length)
             .body(reqwest::Body::wrap_stream(body))
-            .send()
-            .await?
-            .error_for_status()?;
+            .send_checked(PROVIDER_ID)
+            .await?;
         Ok(())
     }
 }
