@@ -31,6 +31,7 @@ default = []
 cli = [
     "dep:clap",
     "dep:humantime",
+    "nvisy-core/cli",
     "nvisy-s3/cli",
     "nvisy-postgres/cli",
     "nvisy-nats/cli",

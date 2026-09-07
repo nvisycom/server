@@ -4,7 +4,7 @@
 
 mod client;
 mod error;
-pub mod providers;
+pub mod provider;
 
-pub use client::{ChatTurn, InferenceClient, Role, TokenStream, verify};
-pub use error::Error;
+pub use client::{ChatTurn, InferenceClient, LlmConfig, Role, TokenStream};
+pub use error::{Error, Result};

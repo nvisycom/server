@@ -6,10 +6,8 @@
 //! the per-call argument for transfers in a `Dropbox-API-Arg` header whose JSON
 //! must be ASCII-safe. Files are addressed by a stable `id:...` key.
 
-use serde::Deserialize;
-
 use super::response_stream;
-use crate::client::{ByteStream, FileEntry, FileServiceClient};
+use crate::client::{ByteStream, FileServiceClient};
 use crate::error::Result;
 use crate::oauth::OAuthProvider;
 
@@ -46,39 +44,37 @@ pub fn oauth_provider() -> OAuthProvider {
 pub struct DropboxClient {
     http: reqwest::Client,
     access_token: String,
-    /// The folder path to import from; `None` (or empty) is the account root.
+    /// The folder path new exports are written into; `None` (or empty) is the
+    /// account root.
     root_path: Option<String>,
 }
 
 impl DropboxClient {
     /// Creates a client from an already-valid access token.
+    ///
+    /// The user-supplied `root_path` is normalized to Dropbox's path contract:
+    /// the account root is the empty string, and a folder must begin with `/`
+    /// and carry no trailing slash. This makes a user-entered `Team/Reports`
+    /// behave the same as `/Team/Reports/`.
     pub fn new(http: reqwest::Client, access_token: String, root_path: Option<String>) -> Self {
         Self {
             http,
             access_token,
-            root_path,
+            root_path: normalize_root(root_path),
         }
     }
 }
 
-/// One page of a `files/list_folder` response.
-#[derive(Debug, Deserialize)]
-struct ListFolderPage {
-    entries: Vec<Entry>,
-    cursor: String,
-    has_more: bool,
-}
-
-/// A single entry in a Dropbox listing.
-#[derive(Debug, Deserialize)]
-struct Entry {
-    /// `file`, `folder`, or `deleted`.
-    #[serde(rename = ".tag")]
-    tag: String,
-    name: String,
-    /// Stable `id:...` identifier; absent on `deleted` tombstones.
-    #[serde(default)]
-    id: Option<String>,
+/// Normalizes a configured Dropbox root into a valid path: `None`/blank becomes
+/// the account root (`None`), otherwise a single leading slash and no trailing
+/// slash.
+fn normalize_root(root_path: Option<String>) -> Option<String> {
+    let trimmed = root_path?.trim().trim_matches('/').to_owned();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(format!("/{trimmed}"))
+    }
 }
 
 /// Serializes a `Dropbox-API-Arg` value with all non-ASCII bytes escaped as
@@ -109,41 +105,6 @@ impl FileServiceClient for DropboxClient {
             .await?
             .error_for_status()?;
         Ok(())
-    }
-
-    async fn list(&self) -> Result<Vec<FileEntry>> {
-        // The root is the empty string; a configured folder uses a leading slash.
-        let path = self.root_path.clone().unwrap_or_default();
-        let mut entries = Vec::new();
-
-        let mut page: ListFolderPage = self
-            .http
-            .post(format!("{API_BASE}/files/list_folder"))
-            .bearer_auth(&self.access_token)
-            .json(&serde_json::json!({ "path": path, "recursive": false }))
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-
-        loop {
-            entries.extend(collect_files(&page.entries));
-            if !page.has_more {
-                break;
-            }
-            page = self
-                .http
-                .post(format!("{API_BASE}/files/list_folder/continue"))
-                .bearer_auth(&self.access_token)
-                .json(&serde_json::json!({ "cursor": page.cursor }))
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
-        }
-        Ok(entries)
     }
 
     async fn get_stream(&self, id: &str) -> Result<ByteStream> {
@@ -181,18 +142,4 @@ impl FileServiceClient for DropboxClient {
             .error_for_status()?;
         Ok(())
     }
-}
-
-/// Maps a listing's entries to importable file entries, keyed by stable id.
-fn collect_files(entries: &[Entry]) -> Vec<FileEntry> {
-    entries
-        .iter()
-        .filter(|e| e.tag == "file")
-        .filter_map(|e| {
-            e.id.clone().map(|id| FileEntry {
-                id,
-                name: e.name.clone(),
-            })
-        })
-        .collect()
 }

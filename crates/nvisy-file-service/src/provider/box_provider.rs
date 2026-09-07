@@ -10,10 +10,8 @@
 //! flow already returns and stores the rotated token, so no special handling is
 //! needed here.
 
-use serde::Deserialize;
-
-use super::response_stream;
-use crate::client::{ByteStream, FileEntry, FileServiceClient};
+use super::{encode_path_segment, response_stream};
+use crate::client::{ByteStream, FileServiceClient};
 use crate::error::Result;
 use crate::oauth::OAuthProvider;
 
@@ -30,8 +28,6 @@ const API_BASE: &str = "https://api.box.com/2.0";
 const UPLOAD_BASE: &str = "https://upload.box.com/api/2.0";
 /// The root folder id.
 const ROOT_FOLDER_ID: &str = "0";
-/// Listing page size.
-const PAGE_LIMIT: u32 = 1000;
 
 /// The OAuth endpoints for Box. Scopes are configured on the app, not requested
 /// in the authorize URL, so none are listed here.
@@ -49,7 +45,8 @@ pub fn oauth_provider() -> OAuthProvider {
 pub struct BoxClient {
     http: reqwest::Client,
     access_token: String,
-    /// The folder id to import from; `None` is the account root (`"0"`).
+    /// The folder id that new exports are created in; `None` is the account root
+    /// (`"0"`).
     root_folder_id: Option<String>,
 }
 
@@ -68,27 +65,6 @@ impl BoxClient {
     }
 }
 
-/// One page of a folder-items listing.
-#[derive(Debug, Deserialize)]
-struct ItemsPage {
-    entries: Vec<Item>,
-    #[serde(default)]
-    total_count: u32,
-    #[serde(default)]
-    offset: u32,
-    #[serde(default)]
-    limit: u32,
-}
-
-/// A single folder item; `type` distinguishes a file from a folder.
-#[derive(Debug, Deserialize)]
-struct Item {
-    #[serde(rename = "type")]
-    kind: String,
-    id: String,
-    name: String,
-}
-
 #[async_trait::async_trait]
 impl FileServiceClient for BoxClient {
     async fn verify(&self) -> Result<()> {
@@ -101,48 +77,11 @@ impl FileServiceClient for BoxClient {
         Ok(())
     }
 
-    async fn list(&self) -> Result<Vec<FileEntry>> {
-        let folder = self.root_folder_id.as_deref().unwrap_or(ROOT_FOLDER_ID);
-        let mut entries = Vec::new();
-        let mut offset = 0u32;
-
-        loop {
-            let page: ItemsPage = self
-                .http
-                .get(format!("{API_BASE}/folders/{folder}/items"))
-                .bearer_auth(&self.access_token)
-                .query(&[
-                    ("fields", "id,name,type"),
-                    ("limit", &PAGE_LIMIT.to_string()),
-                    ("offset", &offset.to_string()),
-                ])
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
-
-            entries.extend(
-                page.entries
-                    .iter()
-                    .filter(|i| i.kind == "file")
-                    .map(|i| FileEntry {
-                        id: i.id.clone(),
-                        name: i.name.clone(),
-                    }),
-            );
-
-            offset = page.offset + page.limit;
-            if offset >= page.total_count {
-                break;
-            }
-        }
-        Ok(entries)
-    }
-
     async fn get_stream(&self, id: &str) -> Result<ByteStream> {
         // /content answers 302 to a temporary dl.boxcloud.com URL; reqwest
-        // follows it to the bytes.
+        // follows it to the bytes. Encode the id into the path so a stored key
+        // cannot alter the request URL.
+        let id = encode_path_segment(id);
         let response = self
             .http
             .get(format!("{API_BASE}/files/{id}/content"))

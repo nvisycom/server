@@ -8,6 +8,7 @@ use std::ops::Deref;
 
 pub use azure::{AzureCredentials, AzureProvider};
 pub use gcs::{GcsCredentials, GcsProvider};
+use nvisy_core::net::EndpointPolicy;
 use object_store::prefix::PrefixStore;
 pub use s3::{S3Credentials, S3Provider};
 #[cfg(feature = "schema")]
@@ -82,62 +83,33 @@ impl StorageConfig {
             | Self::Gcs { root_path, .. } => root_path.as_deref(),
         }
     }
-}
 
-/// Validates a caller-supplied custom endpoint and reports whether plaintext
-/// HTTP is permitted for it.
-///
-/// Custom endpoints are attacker-influenced (a workspace member with connection
-/// management sets them), and provider builders send authenticated requests to
-/// whatever host is given. To bound the SSRF/credential-leak surface:
-///
-/// - only `http`/`https` schemes are accepted;
-/// - plaintext `http` is allowed only for loopback hosts (local emulators such
-///   as Azurite, MinIO, or a fake GCS server), never for a remote host, so
-///   credentials are not sent unencrypted over the network.
-///
-/// Returns `Ok(true)` when the provider builder should enable HTTP (loopback
-/// `http`), `Ok(false)` for `https`, and an error for anything else.
-fn endpoint_allow_http(endpoint: &str, label: &str) -> Result<bool, Error> {
-    let reject = |msg: &str| Error::connection(format!("{msg}: {endpoint}"), label);
-
-    let (scheme, rest) = endpoint
-        .split_once("://")
-        .ok_or_else(|| reject("endpoint must be an http(s) URL"))?;
-
-    match scheme {
-        "https" => Ok(false),
-        "http" => {
-            let host = rest
-                .split(['/', '?', '#'])
-                .next()
-                .unwrap_or(rest)
-                .rsplit_once('@')
-                .map_or(rest, |(_creds, hostport)| hostport);
-            // Strip the optional port; keep IPv6 literals (`[::1]:80`) intact.
-            let host = match host.strip_prefix('[') {
-                Some(after) => after.split_once(']').map_or(host, |(h, _)| h),
-                None => host.split_once(':').map_or(host, |(h, _)| h),
-            };
-            if is_loopback_host(host) {
-                Ok(true)
-            } else {
-                Err(reject(
-                    "plaintext http endpoints are only allowed for loopback hosts",
-                ))
-            }
+    /// The caller-supplied custom endpoint, if any. This is the URL the policy
+    /// must validate before the config is stored or connected.
+    #[must_use]
+    pub fn endpoint(&self) -> Option<&str> {
+        match self {
+            Self::S3 { credentials, .. } => credentials.endpoint.as_deref(),
+            Self::Azure { credentials, .. } => credentials.endpoint.as_deref(),
+            Self::Gcs { credentials, .. } => credentials.endpoint.as_deref(),
         }
-        _ => Err(reject("endpoint scheme must be http or https")),
     }
 }
 
-/// Whether `host` names the local loopback interface (a local emulator).
-fn is_loopback_host(host: &str) -> bool {
-    host.eq_ignore_ascii_case("localhost")
-        || host == "::1"
-        || host
-            .parse::<std::net::IpAddr>()
-            .is_ok_and(|ip| ip.is_loopback())
+/// Validates a caller-supplied custom endpoint under the deployment's
+/// [`EndpointPolicy`] and reports whether the provider builder should enable
+/// plaintext HTTP for it (only ever for a loopback emulator under a permissive
+/// policy). Maps a rejection to the crate error, tagged with the provider.
+async fn endpoint_allow_http(
+    policy: EndpointPolicy,
+    endpoint: &str,
+    label: &str,
+) -> Result<bool, Error> {
+    let decision = policy
+        .validate_endpoint(endpoint)
+        .await
+        .map_err(|err| Error::connection(err.to_string(), label))?;
+    Ok(decision.allow_http)
 }
 
 /// Scopes a client's keys under `root_path` when one is set, so callers address
@@ -161,8 +133,12 @@ pub trait Client: Deref<Target = ObjectStoreClient> + Send + Sync + 'static {
     /// Unique identifier (e.g. `s3`, `azure`).
     const ID: &str;
 
-    /// Create a connected client from credentials.
-    fn connect(creds: &Self::Credentials) -> impl Future<Output = Result<Self, Error>> + Send
+    /// Create a connected client from credentials, validating any custom
+    /// endpoint under `policy`.
+    fn connect(
+        creds: &Self::Credentials,
+        policy: EndpointPolicy,
+    ) -> impl Future<Output = Result<Self, Error>> + Send
     where
         Self: Sized;
 }
@@ -171,14 +147,22 @@ pub trait Client: Deref<Target = ObjectStoreClient> + Send + Sync + 'static {
 /// shared [`ObjectStoreClient`] regardless of which provider backs it.
 ///
 /// The config's variant selects the provider, so there is no runtime provider
-/// string to validate; the client is scoped under the config's root path.
-pub async fn connect(config: &StorageConfig) -> Result<ObjectStoreClient, Error> {
+/// string to validate; a custom endpoint is validated under `policy`, and the
+/// client is scoped under the config's root path.
+pub async fn connect(
+    config: &StorageConfig,
+    policy: EndpointPolicy,
+) -> Result<ObjectStoreClient, Error> {
     let client = match config {
-        StorageConfig::S3 { credentials, .. } => connect_client::<S3Provider>(credentials).await,
-        StorageConfig::Azure { credentials, .. } => {
-            connect_client::<AzureProvider>(credentials).await
+        StorageConfig::S3 { credentials, .. } => {
+            connect_client::<S3Provider>(credentials, policy).await
         }
-        StorageConfig::Gcs { credentials, .. } => connect_client::<GcsProvider>(credentials).await,
+        StorageConfig::Azure { credentials, .. } => {
+            connect_client::<AzureProvider>(credentials, policy).await
+        }
+        StorageConfig::Gcs { credentials, .. } => {
+            connect_client::<GcsProvider>(credentials, policy).await
+        }
     }?;
     Ok(with_root_path(client, config.root_path()))
 }
@@ -186,8 +170,9 @@ pub async fn connect(config: &StorageConfig) -> Result<ObjectStoreClient, Error>
 /// Connects a specific provider and unwraps it to the shared client type.
 async fn connect_client<C: Client>(
     credentials: &C::Credentials,
+    policy: EndpointPolicy,
 ) -> Result<ObjectStoreClient, Error> {
-    Ok((*C::connect(credentials).await?).clone())
+    Ok((*C::connect(credentials, policy).await?).clone())
 }
 
 /// Renders a secret field for [`Debug`]: `<set>` when present, `<unset>` when
@@ -203,41 +188,7 @@ fn redact(value: Option<&str>) -> &'static str {
 mod tests {
     use serde_json::json;
 
-    use super::{StorageConfig, connect, endpoint_allow_http};
-
-    #[test]
-    fn endpoint_https_disallows_http() {
-        assert!(!endpoint_allow_http("https://s3.example.com", "s3").unwrap());
-    }
-
-    #[test]
-    fn endpoint_http_allowed_only_for_loopback() {
-        for ep in [
-            "http://localhost:9000",
-            "http://127.0.0.1:10000/devstoreaccount1",
-            "http://[::1]:4443",
-        ] {
-            assert!(endpoint_allow_http(ep, "s3").unwrap(), "{ep}");
-        }
-    }
-
-    #[test]
-    fn endpoint_http_rejected_for_remote() {
-        for ep in [
-            "http://s3.example.com",
-            "http://169.254.169.254/latest/meta-data/",
-            "http://evil.internal:9000",
-        ] {
-            assert!(endpoint_allow_http(ep, "s3").is_err(), "{ep}");
-        }
-    }
-
-    #[test]
-    fn endpoint_rejects_bad_scheme() {
-        assert!(endpoint_allow_http("ftp://host/x", "s3").is_err());
-        assert!(endpoint_allow_http("s3.example.com", "s3").is_err());
-        assert!(endpoint_allow_http("file:///etc/passwd", "s3").is_err());
-    }
+    use super::{EndpointPolicy, StorageConfig, connect};
 
     #[tokio::test]
     async fn deserializes_provider_tagged_config() {
@@ -276,7 +227,7 @@ mod tests {
             )
             .unwrap(),
         };
-        assert!(connect(&config).await.is_ok());
+        assert!(connect(&config, EndpointPolicy::default()).await.is_ok());
     }
 
     #[tokio::test]

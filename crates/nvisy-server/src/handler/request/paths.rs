@@ -1,6 +1,6 @@
 //! Path parameter types for HTTP handlers.
 
-use nvisy_postgres::types::{DetectionId, Handle, RedactionId, WebhookId};
+use nvisy_postgres::types::{ConnectionId, DetectionId, Handle, RedactionId, WebhookId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -39,6 +39,17 @@ pub struct InviteCodePathParams {
 pub struct WorkspaceFilePathParams {
     /// Unique identifier of the file.
     pub file_id: Uuid,
+}
+
+/// Path parameters for exporting a file to a connection.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FileExportPathParams {
+    /// Unique identifier of the file to export.
+    pub file_id: Uuid,
+    /// Opaque identifier of the connection to export it to.
+    pub connection_id: ConnectionId,
 }
 
 /// Path parameters for webhook operations.

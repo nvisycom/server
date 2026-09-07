@@ -3,6 +3,7 @@
 use std::fmt;
 
 use derive_more::Deref;
+use nvisy_core::net::EndpointPolicy;
 use object_store::gcp::GoogleCloudStorageBuilder;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
@@ -57,7 +58,7 @@ impl Client for GcsProvider {
 
     const ID: &str = "gcs";
 
-    async fn connect(creds: &Self::Credentials) -> Result<Self, Error> {
+    async fn connect(creds: &Self::Credentials, policy: EndpointPolicy) -> Result<Self, Error> {
         let mut builder = GoogleCloudStorageBuilder::new().with_bucket_name(&creds.bucket);
 
         if let Some(path) = &creds.service_account_path {
@@ -71,7 +72,7 @@ impl Client for GcsProvider {
         if let Some(endpoint) = &creds.endpoint {
             // Validate the custom endpoint: only http(s), and plaintext http only
             // for a local emulator (e.g. a fake-gcs server).
-            super::endpoint_allow_http(endpoint, Self::ID)?;
+            super::endpoint_allow_http(policy, endpoint, Self::ID).await?;
             // `with_base_url` sets a custom service endpoint (e.g. a fake-gcs
             // server); `with_url` instead parses a `gs://bucket/path` object URL,
             // which is not what an endpoint override is.

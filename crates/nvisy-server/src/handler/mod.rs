@@ -213,8 +213,8 @@ mod test {
     use crate::handler::{CustomRoutes, routes};
     use crate::middleware::UploadConfig;
     use crate::service::{
-        CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig, S3Config, ServiceState,
-        SessionKeysConfig, SyncConfig,
+        CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig, IntegrationConfig,
+        S3Config, ServiceState, SessionKeysConfig,
     };
 
     /// Builds the service sub-configs from the environment for integration tests.
@@ -272,7 +272,7 @@ mod test {
             crypto,
             EngineConfig::default(),
             HealthConfig::default(),
-            SyncConfig::default(),
+            IntegrationConfig::default(),
             FileConnectorsConfig::default(),
             webhook_service,
             UploadConfig::default(),

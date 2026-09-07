@@ -6,7 +6,7 @@ use std::task::{Context, Poll};
 use futures::Stream;
 use futures::stream::{BoxStream, StreamExt};
 
-use crate::error::Error;
+use crate::error::Result;
 
 /// A stream of the assistant's response as text deltas.
 ///
@@ -18,18 +18,18 @@ use crate::error::Error;
 /// Poll it with the [`Stream`] API ([`futures::StreamExt`]).
 #[must_use = "a token stream does nothing unless polled"]
 pub struct TokenStream {
-    inner: BoxStream<'static, Result<String, Error>>,
+    inner: BoxStream<'static, Result<String>>,
 }
 
 impl TokenStream {
     /// Wraps an owned delta stream.
-    pub(crate) fn new(inner: BoxStream<'static, Result<String, Error>>) -> Self {
+    pub(crate) fn new(inner: BoxStream<'static, Result<String>>) -> Self {
         Self { inner }
     }
 }
 
 impl Stream for TokenStream {
-    type Item = Result<String, Error>;
+    type Item = Result<String>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.inner.poll_next_unpin(cx)

@@ -303,10 +303,22 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
 
+    workspace_file_exports (file_id, connection_id) {
+        file_id -> Uuid,
+        connection_id -> Uuid,
+        remote_key -> Text,
+        exported_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
     workspace_file_imports (file_id) {
         file_id -> Uuid,
         connection_id -> Uuid,
         source_key -> Text,
+        imported_at -> Timestamptz,
     }
 }
 
@@ -498,6 +510,8 @@ diesel::joinable!(workspace_detection_jobs -> workspace_detections (detection_id
 diesel::joinable!(workspace_detection_usage -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detections -> accounts (account_id));
 diesel::joinable!(workspace_detections -> workspace_pipelines (pipeline_id));
+diesel::joinable!(workspace_file_exports -> workspace_connections (connection_id));
+diesel::joinable!(workspace_file_exports -> workspace_files (file_id));
 diesel::joinable!(workspace_file_imports -> workspace_connections (connection_id));
 diesel::joinable!(workspace_file_imports -> workspace_files (file_id));
 diesel::joinable!(workspace_files -> accounts (account_id));
@@ -529,6 +543,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_detection_jobs,
     workspace_detection_usage,
     workspace_detections,
+    workspace_file_exports,
     workspace_file_imports,
     workspace_files,
     workspace_invites,

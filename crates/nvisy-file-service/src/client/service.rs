@@ -3,9 +3,10 @@
 //! [`FileService`] holds the shared HTTP client and the configured OAuth
 //! apps, and turns a stored [`FileServiceConfig`] into a connected provider
 //! client, refreshing the OAuth token when expired. [`FileServiceClient`] is the
-//! provider-neutral surface the sync engine drives (list, stream a file's bytes,
-//! upload a stream), mirroring the object-store client so the server can wrap
-//! both behind one abstraction.
+//! provider-neutral surface the sync engine drives: verify the connection,
+//! stream a file's bytes, and upload a stream. Files to import are chosen through
+//! the frontend picker, which hands the backend their ids, so the client does not
+//! enumerate the account.
 //!
 //! Token *persistence* is the caller's responsibility: a refresh returns the
 //! updated config via [`ConnectedFileService::refreshed`] for the caller to store.
@@ -136,17 +137,6 @@ impl FileService {
     }
 }
 
-/// One file listed in a service, addressed by the provider's file identifier.
-#[derive(Debug, Clone)]
-pub struct FileEntry {
-    /// The provider's identifier for this file, used by `get_stream`. For a file
-    /// service this is an opaque id, not a path.
-    pub id: String,
-    /// The file's human-readable name, used to derive the imported file's
-    /// display name and extension.
-    pub name: String,
-}
-
 /// A byte stream, the shape both directions of a transfer move data in.
 pub type ByteStream = BoxStream<'static, Result<Bytes>>;
 
@@ -157,11 +147,8 @@ pub trait FileServiceClient: Send + Sync {
     /// without transferring any file.
     async fn verify(&self) -> Result<()>;
 
-    /// Lists the files available for import, already scoped to the connection's
-    /// configured root folder.
-    async fn list(&self) -> Result<Vec<FileEntry>>;
-
-    /// Streams one file's bytes without buffering the whole file in memory.
+    /// Streams one file's bytes without buffering the whole file in memory. The
+    /// `id` is a provider file id, as chosen through the picker.
     async fn get_stream(&self, id: &str) -> Result<ByteStream>;
 
     /// Uploads `body` as a new file named `name`, streaming it to the provider.

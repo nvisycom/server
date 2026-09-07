@@ -1,9 +1,10 @@
 //! Error types for LLM inference operations.
 
-use thiserror::Error;
+/// A result whose error is the crate [`Error`].
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// An error building or validating an LLM provider client.
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
     /// The client could not be constructed from the config (e.g. an invalid

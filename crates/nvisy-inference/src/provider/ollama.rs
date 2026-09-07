@@ -8,7 +8,7 @@ use rig::client::Nothing;
 use rig::providers::ollama;
 
 use super::{Client, OllamaCredentials};
-use crate::error::Error;
+use crate::error::{Error, Result};
 
 /// Ollama-backed inference client.
 #[derive(Deref)]
@@ -19,7 +19,7 @@ impl Client for OllamaProvider {
 
     const ID: &str = "ollama";
 
-    fn connect(_credentials: &Self::Credentials, base_url: Option<&str>) -> Result<Self, Error> {
+    fn connect(_credentials: &Self::Credentials, base_url: Option<&str>) -> Result<Self> {
         let mut builder = ollama::Client::builder().api_key(Nothing);
         if let Some(base) = base_url {
             builder = builder.base_url(base);

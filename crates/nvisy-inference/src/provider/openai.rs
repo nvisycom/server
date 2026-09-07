@@ -4,33 +4,22 @@
 
 use derive_more::Deref;
 use rig::providers::openai;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 
 use super::Client;
-use crate::error::Error;
-
-/// OpenAI API credentials.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct OpenAiCredentials {
-    /// OpenAI API key.
-    pub api_key: String,
-}
+use crate::error::{Error, Result};
 
 /// OpenAI-backed inference client.
 #[derive(Deref)]
 pub struct OpenAiProvider(openai::Client);
 
 impl Client for OpenAiProvider {
-    type Credentials = OpenAiCredentials;
+    /// The OpenAI API key.
+    type Credentials = str;
 
     const ID: &str = "openai";
 
-    fn connect(credentials: &Self::Credentials, base_url: Option<&str>) -> Result<Self, Error> {
-        let mut builder = openai::Client::builder().api_key(&credentials.api_key);
+    fn connect(api_key: &Self::Credentials, base_url: Option<&str>) -> Result<Self> {
+        let mut builder = openai::Client::builder().api_key(api_key);
         if let Some(base) = base_url {
             builder = builder.base_url(base);
         }

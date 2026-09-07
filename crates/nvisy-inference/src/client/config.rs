@@ -1,22 +1,14 @@
-//! Config type and inference providers.
+//! The typed LLM inference connection configuration.
 
-mod anthropic;
-mod ollama;
-mod openai;
-
-use std::ops::Deref;
-
-pub use anthropic::{AnthropicCredentials, AnthropicProvider};
-pub use ollama::OllamaProvider;
-pub use openai::{OpenAiCredentials, OpenAiProvider};
-use rig::client::verify::VerifyClient;
-use rig::client::{AgentClientExt, CompletionClient};
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::client::{self, InferenceClient};
-use crate::error::Error;
+use super::InferenceClient;
+use crate::error::Result;
+use crate::provider::{
+    AnthropicProvider, Client, OllamaCredentials, OllamaProvider, OpenAiProvider,
+};
 
 /// A fully-typed LLM inference connection configuration.
 ///
@@ -31,8 +23,8 @@ pub enum LlmConfig {
     /// OpenAI (or an OpenAI-compatible endpoint).
     #[serde(rename = "openai")]
     OpenAi {
-        /// OpenAI credentials.
-        credentials: OpenAiCredentials,
+        /// OpenAI API key.
+        api_key: String,
         /// Override the API base URL (for Azure OpenAI or a proxy). Optional.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         base_url: Option<String>,
@@ -52,8 +44,8 @@ pub enum LlmConfig {
     /// Anthropic (Claude).
     #[serde(rename = "anthropic")]
     Anthropic {
-        /// Anthropic credentials.
-        credentials: AnthropicCredentials,
+        /// Anthropic API key.
+        api_key: String,
         /// Override the API base URL. Optional.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         base_url: Option<String>,
@@ -87,36 +79,40 @@ impl LlmConfig {
         }
     }
 
+    /// The caller-supplied base URL, if any. This is the endpoint the deployment
+    /// policy must validate before the config is stored: OpenAI/Anthropic accept
+    /// an optional override, and Ollama is always a caller-supplied URL.
+    #[must_use]
+    pub fn base_url(&self) -> Option<&str> {
+        match self {
+            Self::OpenAi { base_url, .. } | Self::Anthropic { base_url, .. } => base_url.as_deref(),
+            Self::Ollama { base_url, .. } => Some(base_url),
+        }
+    }
+
     /// Validates this config by building its provider client and verifying the
     /// credentials against the provider.
     ///
     /// Used by the connection test endpoint. Returns `Ok(())` when the provider
-    /// accepts the credentials, or an [`Error`] describing the build or
-    /// verification failure.
-    pub async fn validate(&self) -> Result<(), Error> {
+    /// accepts the credentials, or an [`Error`](crate::Error) describing the
+    /// build or verification failure.
+    pub async fn validate(&self) -> Result<()> {
         match self {
             Self::OpenAi {
-                credentials,
-                base_url,
-                ..
-            } => client::verify(&*OpenAiProvider::connect(credentials, base_url.as_deref())?).await,
+                api_key, base_url, ..
+            } => {
+                let provider = OpenAiProvider::connect(api_key, base_url.as_deref())?;
+                provider.verify().await
+            }
             Self::Ollama { base_url, .. } => {
-                client::verify(&*OllamaProvider::connect(
-                    &OllamaCredentials,
-                    Some(base_url),
-                )?)
-                .await
+                let provider = OllamaProvider::connect(&OllamaCredentials, Some(base_url))?;
+                provider.verify().await
             }
             Self::Anthropic {
-                credentials,
-                base_url,
-                ..
+                api_key, base_url, ..
             } => {
-                client::verify(&*AnthropicProvider::connect(
-                    credentials,
-                    base_url.as_deref(),
-                )?)
-                .await
+                let provider = AnthropicProvider::connect(api_key, base_url.as_deref())?;
+                provider.verify().await
             }
         }
     }
@@ -125,57 +121,19 @@ impl LlmConfig {
     ///
     /// `model` overrides the configured [`default_model`](Self::default_model);
     /// if neither is set, the provider's own default applies.
-    pub fn connect(&self, model: Option<&str>) -> Result<InferenceClient, Error> {
+    pub fn connect(&self, model: Option<&str>) -> Result<InferenceClient> {
         let model = model.or_else(|| self.default_model()).unwrap_or_default();
         let client = match self {
             Self::OpenAi {
-                credentials,
-                base_url,
-                ..
-            } => OpenAiProvider::connect(credentials, base_url.as_deref())?.model(model),
+                api_key, base_url, ..
+            } => OpenAiProvider::connect(api_key, base_url.as_deref())?.model(model),
             Self::Ollama { base_url, .. } => {
                 OllamaProvider::connect(&OllamaCredentials, Some(base_url))?.model(model)
             }
             Self::Anthropic {
-                credentials,
-                base_url,
-                ..
-            } => AnthropicProvider::connect(credentials, base_url.as_deref())?.model(model),
+                api_key, base_url, ..
+            } => AnthropicProvider::connect(api_key, base_url.as_deref())?.model(model),
         };
         Ok(client)
     }
 }
-
-/// An inference provider that builds a verifiable, prompt-capable client from
-/// typed credentials.
-///
-/// Each provider is a newtype wrapping its rig client, which derefs to that
-/// client. `client::verify` runs against it to check credentials, and `model`
-/// turns it into a provider-agnostic `InferenceClient`.
-pub trait Client:
-    Deref<Target: Sized + VerifyClient + CompletionClient<CompletionModel: 'static>>
-    + Send
-    + Sync
-    + 'static
-{
-    /// Strongly-typed credentials for this provider.
-    type Credentials: Send + Sync;
-
-    /// Unique identifier (e.g. `openai`, `anthropic`).
-    const ID: &str;
-
-    /// Build a client from credentials and an optional base-URL override.
-    fn connect(credentials: &Self::Credentials, base_url: Option<&str>) -> Result<Self, Error>
-    where
-        Self: Sized;
-
-    /// Turn this provider client into a provider-agnostic [`InferenceClient`]
-    /// bound to `model`.
-    fn model(&self, model: &str) -> InferenceClient {
-        InferenceClient::new(AgentClientExt::agent(&**self, model).build())
-    }
-}
-
-/// Keyless credentials for Ollama, which is typically unauthenticated.
-#[derive(Debug, Clone, Copy)]
-pub struct OllamaCredentials;

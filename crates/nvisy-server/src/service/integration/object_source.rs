@@ -15,9 +15,11 @@ use crate::handler::Result;
 /// Wraps an [`ObjectStoreClient`] as a [`FileSource`].
 pub struct ObjectStoreSource(pub ObjectStoreClient);
 
-#[async_trait::async_trait]
-impl FileSource for ObjectStoreSource {
-    async fn list(&self) -> Result<Vec<SourceEntry>> {
+impl ObjectStoreSource {
+    /// Lists every object under the connection's root, for a whole-listing
+    /// import. Object-store only: file services import through the picker, so
+    /// this is inherent rather than part of [`FileSource`].
+    pub async fn list(&self) -> Result<Vec<SourceEntry>> {
         let objects = self.0.list("").await?;
         Ok(objects
             .into_iter()
@@ -30,7 +32,10 @@ impl FileSource for ObjectStoreSource {
             })
             .collect())
     }
+}
 
+#[async_trait::async_trait]
+impl FileSource for ObjectStoreSource {
     async fn get_stream(&self, key: &str) -> Result<ByteStream> {
         let stream = self.0.get_stream(key).await?;
         Ok(Box::pin(stream.map_err(Into::into)))

@@ -13,15 +13,17 @@ use crate::types::{
 };
 use crate::{Error, PgConnection, Result, schema};
 
-/// A sync-scheduled connection paired with its cron expression, as returned by
-/// [`WorkspaceConnectionRepository::list_scheduled_connections`]. The cron is
-/// non-optional: the query only lists connections whose schedule has one.
+/// A sync-scheduled connection paired with its cron expression and direction, as
+/// returned by [`WorkspaceConnectionRepository::list_scheduled_connections`]. The
+/// cron is non-optional: the query only lists connections whose schedule has one.
 #[derive(Debug, Clone, Queryable)]
 pub struct ScheduledConnection {
     /// The connection due for scheduling.
     pub connection: WorkspaceConnection,
     /// The connection's cron expression.
     pub schedule_cron: String,
+    /// The direction the scheduled sync runs in (import or export).
+    pub sync_mode: SyncMode,
 }
 
 /// Repository for workspace connection database operations.
@@ -292,19 +294,20 @@ impl WorkspaceConnectionRepository for PgConnection {
         use schema::workspace_connection_schedule as sched;
         use schema::workspace_connections::{self, dsl};
 
-        // Sync config lives in the schedule satellite; join it to find active,
-        // import-mode connections with a cron schedule. The `schedule_cron IS NOT
-        // NULL` filter makes the column non-null for this query, so the worker
-        // gets the cron without re-reading the schedule row.
+        // Sync config lives in the schedule satellite; join it to find every
+        // active connection with a cron schedule, in either direction. The
+        // `schedule_cron IS NOT NULL` filter makes the column non-null for this
+        // query, so the worker gets the cron and direction without re-reading the
+        // schedule row.
         let connections = workspace_connections::table
             .inner_join(sched::table.on(sched::connection_id.eq(dsl::id)))
             .filter(sched::schedule_cron.is_not_null())
-            .filter(sched::sync_mode.eq(SyncMode::Import))
             .filter(dsl::is_active.eq(true))
             .filter(dsl::deleted_at.is_null())
             .select((
                 WorkspaceConnection::as_select(),
                 sched::schedule_cron.assume_not_null(),
+                sched::sync_mode,
             ))
             .load::<ScheduledConnection>(self)
             .await

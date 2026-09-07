@@ -4,8 +4,8 @@
 //! [`nvisy_file_service`] crate ([`OAuthAppsConfig`], [`FileService`]). This
 //! module adds only what is host-specific: [`FileConnectorsConfig`] flattens the
 //! crate's config and adds the post-authorization redirect. Writing refreshed
-//! tokens back through Postgres lives in
-//! [`persist_oauth`](crate::service::persist_oauth).
+//! tokens back through Postgres lives in this module's `persist_oauth` sibling
+//! ([`persist_refreshed_tokens`](super::persist_refreshed_tokens)).
 
 use nvisy_file_service::FileService;
 use nvisy_file_service::client::OAuthAppsConfig;

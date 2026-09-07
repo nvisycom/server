@@ -6732,8 +6732,12 @@ name = "nvisy-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "clap",
  "schemars 1.2.2",
  "serde",
+ "thiserror 2.0.20",
+ "tokio",
+ "url",
 ]
 
 [[package]]
@@ -6802,6 +6806,7 @@ dependencies = [
  "bytes",
  "derive_more",
  "futures",
+ "nvisy-core",
  "object_store 0.14.1",
  "schemars 1.2.2",
  "serde",

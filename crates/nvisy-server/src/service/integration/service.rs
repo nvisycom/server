@@ -27,7 +27,6 @@ use nvisy_s3::{Bucket, FileKey};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::SyncConfig;
 use super::bridge::{reader_to_stream, stream_to_reader};
 use super::cloud_source::CloudFileSource;
 use super::file_source::{ByteStream, FileSource, SourceEntry};
@@ -51,8 +50,38 @@ enum Outcome {
     Cancelled,
 }
 
-/// The inputs to [`ConnectionSyncService::run_transfer`]: the run to execute,
-/// the connection and its decrypted config, and which direction to move.
+/// What a transfer moves, and in which direction.
+pub enum TransferKind {
+    /// Import every not-yet-imported entry from the connection's listing,
+    /// reconciling source deletions per `deletion_policy`. Used by scheduled
+    /// object-store syncs.
+    ImportAll {
+        /// How to reconcile entries that vanished from the source.
+        deletion_policy: SyncDeletionPolicy,
+    },
+    /// Import a caller-selected set of provider files, skipping the listing.
+    /// Used by the file-service picker; already-imported ids are skipped. Each
+    /// entry carries the provider id and the display name the picker returned.
+    ImportSelected {
+        /// The provider files to import (id + name), as returned by the picker.
+        entries: Vec<SourceEntry>,
+    },
+    /// Export one stored workspace file back to the connection as a new file
+    /// named `remote_key`.
+    Export {
+        /// The stored file to export. Boxed to keep the enum small, since the
+        /// other variants carry only ids.
+        file: Box<WorkspaceFile>,
+        /// The name of the new file created on the provider.
+        remote_key: String,
+    },
+    /// Export every redacted output in the connection's workspace that has not
+    /// yet been exported to this connection. Used by scheduled export syncs.
+    ExportRedacted,
+}
+
+/// The inputs to [`ConnectionSyncService::run_transfer`]: the run to execute, the
+/// connection and its decrypted config, and what to move.
 pub struct TransferRequest {
     /// The persisted run this transfer executes.
     pub run_id: Uuid,
@@ -60,13 +89,10 @@ pub struct TransferRequest {
     pub connection: WorkspaceConnection,
     /// The connection's decrypted config, used to connect the file source.
     pub config: ConnectionConfig,
-    /// How to reconcile source deletions (import only).
-    pub deletion_policy: SyncDeletionPolicy,
     /// The account the run is attributed to.
     pub account_id: Uuid,
-    /// Direction: `None` imports all new entries; `Some((file, key))` exports one
-    /// file to `key`.
-    pub export: Option<(WorkspaceFile, String)>,
+    /// What the transfer moves, and in which direction.
+    pub kind: TransferKind,
 }
 
 /// The inputs to [`ConnectionSyncService::finish_run`]: the run to finalize, the
@@ -97,25 +123,27 @@ pub struct ConnectionSyncService {
 }
 
 impl ConnectionSyncService {
-    /// Creates a new [`ConnectionSyncService`].
+    /// Creates a new [`ConnectionSyncService`]. `import_concurrency` bounds the
+    /// in-flight imports per sync (see
+    /// [`IntegrationConfig`](crate::service::IntegrationConfig)).
     pub fn new(
         infra: Infra,
         object: ExternalObjectStore,
         cloud: FileService,
-        config: SyncConfig,
+        import_concurrency: usize,
     ) -> Self {
         Self {
             infra,
             object,
             cloud,
-            import_concurrency: config.import_concurrency.max(1),
+            import_concurrency: import_concurrency.max(1),
             running: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     /// Connects to the file source described by a typed connection config,
-    /// dispatching to the provider family that backs it. Only sync-capable
-    /// configs resolve; a non-sync config (an LLM connection) is rejected.
+    /// dispatching to the provider family that backs it. Only transfer-capable
+    /// configs resolve; an inference (LLM) connection is rejected.
     ///
     /// For a cloud file service, the OAuth token is refreshed if expired and the
     /// refreshed config is persisted back to `connection` so the next sync starts
@@ -139,8 +167,22 @@ impl ConnectionSyncService {
                 Ok(Arc::new(CloudFileSource(connected.client)))
             }
             ConnectionConfig::Inference(_) => {
-                Err(ErrorKind::BadRequest.with_message("Connection does not support sync"))
+                Err(ErrorKind::BadRequest.with_message("Connection does not support file transfer"))
             }
+        }
+    }
+
+    /// Connects an object-store source, the only family that supports a
+    /// whole-listing import. A non-object-store config is rejected: the
+    /// listing-based import path is never reached for a file service (it imports
+    /// through the picker) or an LLM connection.
+    async fn connect_object_source(&self, config: &ConnectionConfig) -> Result<ObjectStoreSource> {
+        match config {
+            ConnectionConfig::ObjectStore(config) => {
+                Ok(ObjectStoreSource(self.object.connect(config).await?))
+            }
+            _ => Err(ErrorKind::BadRequest
+                .with_message("Whole-listing import is only supported for object stores")),
         }
     }
 
@@ -235,12 +277,11 @@ impl ConnectionSyncService {
     ) -> Result<u64> {
         tracing::debug!(target: TRACING_TARGET, "Importing new objects from connection");
 
-        let source = self.connect_file_source(connection, config).await?;
+        let source = self.connect_object_source(config).await?;
 
         // List the source once; entries are already scoped to the connection's
-        // root by the provider. The listing is reused both to import new entries
-        // and to detect ones that have been deleted. Entries are keyed by the
-        // provider's key (an object path, or a file service's file id).
+        // root. The listing is reused both to import new objects and to detect
+        // ones that have been deleted. Entries are keyed by the object path.
         let entries = source.list().await?;
         let entries_by_key: HashMap<String, SourceEntry> = entries
             .into_iter()
@@ -248,17 +289,78 @@ impl ConnectionSyncService {
             .collect();
         let remote_keys: HashSet<String> = entries_by_key.keys().cloned().collect();
 
+        let already_imported = self.already_imported_keys(connection).await?;
+
+        // Import the not-yet-imported entries.
+        let to_import: Vec<SourceEntry> = remote_keys
+            .iter()
+            .filter(|key| !already_imported.contains(*key))
+            .filter_map(|key| entries_by_key.get(key).cloned())
+            .collect();
+        let imported = self
+            .import_entries(&source, connection, account_id, to_import)
+            .await?;
+
+        // Reconcile deletions against the full listing (import-all only).
+        self.reconcile_deletions(connection, deletion_policy, &remote_keys)
+            .await;
+
+        tracing::debug!(target: TRACING_TARGET, imported, "Import sync complete");
+        Ok(imported)
+    }
+
+    /// Imports a caller-selected set of provider files (the file-service picker),
+    /// skipping the full listing. Already-imported ids are filtered out so a
+    /// re-selection of the same file is a no-op. Returns the number imported.
+    #[tracing::instrument(
+        name = "sync.import_selected",
+        skip_all,
+        fields(connection_id = %connection.id, selected = entries.len()),
+    )]
+    pub async fn import_selected(
+        &self,
+        connection: &WorkspaceConnection,
+        config: &ConnectionConfig,
+        account_id: Uuid,
+        entries: Vec<SourceEntry>,
+    ) -> Result<u64> {
+        tracing::debug!(target: TRACING_TARGET, "Importing selected files from connection");
+
+        let source = self.connect_file_source(connection, config).await?;
+        let already_imported = self.already_imported_keys(connection).await?;
+
+        // Skip any selection that is already imported (idempotent re-selection).
+        let to_import: Vec<SourceEntry> = entries
+            .into_iter()
+            .filter(|entry| !already_imported.contains(&entry.key))
+            .collect();
+        let imported = self
+            .import_entries(source.as_ref(), connection, account_id, to_import)
+            .await?;
+
+        tracing::debug!(target: TRACING_TARGET, imported, "Selected import complete");
+        Ok(imported)
+    }
+
+    /// The provider keys already imported for `connection`.
+    async fn already_imported_keys(
+        &self,
+        connection: &WorkspaceConnection,
+    ) -> Result<HashSet<String>> {
         let mut conn = self.infra.postgres.get_connection().await?;
-        let already_imported: HashSet<String> = conn
+        Ok(conn
             .imported_keys_for_connection(connection.id)
             .await?
             .into_iter()
-            .collect();
-        // Imported files are original documents; the retention expiry is the same
-        // for every object in this sync, so resolve it once here rather than
-        // re-querying the workspace per file.
-        let expires_at = conn
-            .find_workspace_by_id(connection.workspace_id)
+            .collect())
+    }
+
+    /// Resolves the retention expiry for imported originals once for a whole
+    /// import (the same for every file in it).
+    async fn resolve_import_expiry(&self, workspace_id: Uuid) -> Result<Option<jiff::Timestamp>> {
+        let mut conn = self.infra.postgres.get_connection().await?;
+        Ok(conn
+            .find_workspace_by_id(workspace_id)
             .await?
             .and_then(|workspace| {
                 workspace
@@ -267,51 +369,41 @@ impl ConnectionSyncService {
                     .retention
                     .original_documents
                     .expires_at(jiff::Timestamp::now())
-            });
-        drop(conn);
+            }))
+    }
 
-        // Import the not-yet-imported objects with bounded concurrency: up to
-        // `import_concurrency` fetch/decrypt/store pipelines run at once. A single
-        // bad object is logged and skipped rather than aborting the whole sync.
-        // `client` and `self` are borrowed by every task, so the async blocks
-        // capture shared references (only `key` is per-task).
-        // Collect the keys to import into owned values first, so each task's
-        // future captures no borrow of `remote_keys`.
-        let to_import: Vec<SourceEntry> = remote_keys
-            .iter()
-            .filter(|key| !already_imported.contains(*key))
-            .filter_map(|key| entries_by_key.get(key).cloned())
-            .collect();
-        let imported = stream::iter(to_import)
-            .map(|entry| {
-                // The file source is an `Arc` handle, so cloning per task is
-                // cheap and keeps each future free of borrowed locals.
-                let source = source.clone();
-                async move {
-                    match self
-                        .import_one(source.as_ref(), connection, account_id, &entry, expires_at)
-                        .await
-                    {
-                        Ok(_) => 1u64,
-                        Err(err) => {
-                            tracing::warn!(
-                                target: TRACING_TARGET,
-                                key = %entry.key, error = %err,
-                                "Skipping object that failed to import",
-                            );
-                            0
-                        }
+    /// Runs the fetch → hash → encrypt → store pipeline for `entries` with bounded
+    /// concurrency (up to `import_concurrency` at once). A file that fails is
+    /// logged and skipped rather than aborting the whole import. Returns the count
+    /// actually imported.
+    async fn import_entries(
+        &self,
+        source: &dyn FileSource,
+        connection: &WorkspaceConnection,
+        account_id: Uuid,
+        entries: Vec<SourceEntry>,
+    ) -> Result<u64> {
+        let expires_at = self.resolve_import_expiry(connection.workspace_id).await?;
+        let imported = stream::iter(entries)
+            .map(|entry| async move {
+                match self
+                    .import_one(source, connection, account_id, &entry, expires_at)
+                    .await
+                {
+                    Ok(_) => 1u64,
+                    Err(err) => {
+                        tracing::warn!(
+                            target: TRACING_TARGET,
+                            key = %entry.key, error = %err,
+                            "Skipping file that failed to import",
+                        );
+                        0
                     }
                 }
             })
             .buffer_unordered(self.import_concurrency)
             .fold(0u64, |total, imported| std::future::ready(total + imported))
             .await;
-
-        self.reconcile_deletions(connection, deletion_policy, &remote_keys)
-            .await;
-
-        tracing::debug!(target: TRACING_TARGET, imported, "Import sync complete");
         Ok(imported)
     }
 
@@ -488,9 +580,10 @@ impl ConnectionSyncService {
 
     /// Exports a stored workspace file back out to the connection at `remote_key`.
     ///
-    /// Streams the file's bytes from the files store, decrypts them, and
-    /// uploads them to the external store. `remote_key` is resolved relative to
-    /// the connection's configured root path.
+    /// Streams the file's bytes from the files store, decrypts them, and uploads
+    /// them to the external store. `remote_key` is resolved relative to the
+    /// connection's configured root path. On success the export is recorded so a
+    /// scheduled redacted export never re-pushes a file already exported here.
     #[tracing::instrument(
         name = "sync.export_file",
         skip_all,
@@ -532,7 +625,82 @@ impl ConnectionSyncService {
             .put_stream(remote_key, content_type.as_str(), body)
             .await?;
 
+        // Record the export (upsert) so both manual and scheduled paths dedupe:
+        // a file exported here is not re-pushed by a later scheduled export.
+        self.record_exported_file(file, connection, remote_key)
+            .await?;
+
         tracing::debug!(target: TRACING_TARGET, "File exported");
+        Ok(())
+    }
+
+    /// Exports every redacted output in the connection's workspace that has not
+    /// yet been exported to this connection. Backs scheduled export syncs.
+    ///
+    /// Each redacted file is streamed out via [`export_file`], which records the
+    /// export so a later run does not push it again. A file service creates a new
+    /// provider file named after the output; an object store writes it under a
+    /// `redacted/` prefix so exports never collide with imported originals. A
+    /// single file failing is logged and skipped rather than aborting the run.
+    /// Returns the number of files exported.
+    ///
+    /// [`export_file`]: Self::export_file
+    #[tracing::instrument(
+        name = "sync.export_redacted",
+        skip_all,
+        fields(connection_id = %connection.id),
+    )]
+    pub async fn export_redacted(
+        &self,
+        connection: &WorkspaceConnection,
+        config: &ConnectionConfig,
+    ) -> Result<u64> {
+        tracing::debug!(target: TRACING_TARGET, "Exporting redacted outputs to connection");
+
+        let pending = {
+            let mut conn = self.infra.postgres.get_connection().await?;
+            conn.redacted_files_not_exported(connection.workspace_id, connection.id)
+                .await?
+        };
+
+        // A file service creates a new file by name; an object store overwrites at
+        // the exact path, so redacted outputs are namespaced under `redacted/` to
+        // keep them apart from imported originals.
+        let object_store = matches!(config, ConnectionConfig::ObjectStore(_));
+
+        let mut exported = 0u64;
+        for file in pending {
+            let remote_key = redacted_export_key(&file, object_store);
+            match self
+                .export_file(connection, config, &file, &remote_key)
+                .await
+            {
+                Ok(()) => exported += 1,
+                Err(err) => {
+                    tracing::warn!(
+                        target: TRACING_TARGET,
+                        file_id = %file.id, error = %err,
+                        "Skipping redacted file that failed to export",
+                    );
+                }
+            }
+        }
+
+        tracing::debug!(target: TRACING_TARGET, exported, "Redacted export complete");
+        Ok(exported)
+    }
+
+    /// Records that a file was exported to a connection so a scheduled export
+    /// does not push it again.
+    async fn record_exported_file(
+        &self,
+        file: &WorkspaceFile,
+        connection: &WorkspaceConnection,
+        remote_key: &str,
+    ) -> Result<()> {
+        let mut conn = self.infra.postgres.get_connection().await?;
+        conn.record_exported_file(file.id, connection.id, remote_key.to_owned())
+            .await?;
         Ok(())
     }
 
@@ -540,11 +708,10 @@ impl ConnectionSyncService {
     ///
     /// The transfer runs in an inner task bounded by a fixed timeout: a panic
     /// surfaces as a join error and a hung backend as a timeout, both recorded
-    /// as a failed run rather than leaving it stuck `Running`. `export` selects
-    /// the direction: `None` imports all new objects, `Some((file, key))` pushes
-    /// a file out. A cancel signal (see [`cancel_local`]) aborts the transfer and
-    /// records the run as cancelled. Shared by the manual endpoint and the
-    /// scheduled worker.
+    /// as a failed run rather than leaving it stuck `Running`. The request's
+    /// [`TransferKind`] selects the direction and scope. A cancel signal (see
+    /// [`cancel_local`]) aborts the transfer and records the run as cancelled.
+    /// Shared by the manual endpoint and the scheduled worker.
     ///
     /// [`cancel_local`]: Self::cancel_local
     pub async fn run_transfer(&self, request: TransferRequest) {
@@ -568,20 +735,27 @@ impl ConnectionSyncService {
             let TransferRequest {
                 connection,
                 config,
-                deletion_policy,
-                export,
+                kind,
                 ..
             } = request;
-            match export {
-                None => {
+            match kind {
+                TransferKind::ImportAll { deletion_policy } => {
                     transfer
                         .import_new(&connection, &config, deletion_policy, account_id)
                         .await
                 }
-                Some((file, key)) => transfer
-                    .export_file(&connection, &config, &file, &key)
+                TransferKind::ImportSelected { entries } => {
+                    transfer
+                        .import_selected(&connection, &config, account_id, entries)
+                        .await
+                }
+                TransferKind::Export { file, remote_key } => transfer
+                    .export_file(&connection, &config, &file, &remote_key)
                     .await
                     .map(|()| 1),
+                TransferKind::ExportRedacted => {
+                    transfer.export_redacted(&connection, &config).await
+                }
             }
         });
 
@@ -755,6 +929,20 @@ fn object_extension(key: &str) -> Option<String> {
         .extension()
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase)
+}
+
+/// The remote key a redacted output is exported under.
+///
+/// The base name is the file's display name. For an object store the key is
+/// namespaced under `redacted/` so scheduled exports never overwrite imported
+/// originals; a file service creates a new file from the base name directly.
+fn redacted_export_key(file: &WorkspaceFile, object_store: bool) -> String {
+    let name = object_basename(&file.display_name);
+    if object_store {
+        format!("redacted/{name}")
+    } else {
+        name
+    }
 }
 
 /// Guesses the MIME type for a file extension, falling back to

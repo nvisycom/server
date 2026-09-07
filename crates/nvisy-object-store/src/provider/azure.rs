@@ -3,6 +3,7 @@
 use std::fmt;
 
 use derive_more::Deref;
+use nvisy_core::net::EndpointPolicy;
 use object_store::azure::{MicrosoftAzureBuilder, split_sas};
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
@@ -57,7 +58,7 @@ impl Client for AzureProvider {
 
     const ID: &str = "azure";
 
-    async fn connect(creds: &Self::Credentials) -> Result<Self, Error> {
+    async fn connect(creds: &Self::Credentials, policy: EndpointPolicy) -> Result<Self, Error> {
         let mut builder = MicrosoftAzureBuilder::new()
             .with_container_name(&creds.container)
             .with_account(&creds.account_name);
@@ -74,9 +75,9 @@ impl Client for AzureProvider {
         }
 
         if let Some(endpoint) = &creds.endpoint {
-            // Validate the custom endpoint and enable plaintext HTTP only for a
-            // local emulator (Azurite), never for a remote host.
-            let allow_http = super::endpoint_allow_http(endpoint, Self::ID)?;
+            // Validate the custom endpoint under the deployment policy; enable
+            // plaintext HTTP only for a local emulator (Azurite).
+            let allow_http = super::endpoint_allow_http(policy, endpoint, Self::ID).await?;
             builder = builder.with_endpoint(endpoint.clone());
             if allow_http {
                 builder = builder.with_allow_http(true);

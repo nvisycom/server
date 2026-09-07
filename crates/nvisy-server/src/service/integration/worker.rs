@@ -7,8 +7,9 @@
 //!   lock (leader election for that tick) and enqueues due connections as jobs
 //!   onto the [`ConnectionSyncStream`] work queue.
 //! - **Consumer**: a durable pull consumer drains the work queue; JetStream
-//!   delivers each job to a single instance, which runs the import and records a
-//!   `Scheduled` run.
+//!   delivers each job to a single instance, which runs the sync in its
+//!   scheduled direction (import or redacted export) and records a `Scheduled`
+//!   run.
 //! - **Reaper**: on startup, runs left `Running` by a previous crashed process
 //!   are failed so they do not appear stuck forever.
 
@@ -25,12 +26,12 @@ use nvisy_postgres::query::{
     ScheduledConnection, WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
     WorkspaceConnectionSyncRepository,
 };
-use nvisy_postgres::types::{SyncStatus, SyncTriggerType};
+use nvisy_postgres::types::{SyncMode, SyncStatus, SyncTriggerType};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::{ConnectionSyncService, StandardCronSchedule, TransferRequest};
+use super::{ConnectionSyncService, StandardCronSchedule, TransferKind, TransferRequest};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{ConnectionConfig, Infra, Worker};
 
@@ -60,6 +61,10 @@ pub struct ConnectionSyncJob {
     pub workspace_id: Uuid,
     /// Connection to sync.
     pub connection_id: Uuid,
+    /// The direction the scheduled sync runs in. Defaults to import for jobs
+    /// enqueued before this field existed (scheduling was import-only then).
+    #[serde(default)]
+    pub sync_mode: SyncMode,
     /// 1-based attempt number; a failed run re-enqueues with this incremented,
     /// up to a bounded maximum.
     #[serde(default = "first_attempt")]
@@ -192,6 +197,7 @@ impl ConnectionSyncWorker {
             for ScheduledConnection {
                 connection,
                 schedule_cron,
+                sync_mode,
             } in connections
             {
                 let latest = latest.get(&connection.id);
@@ -204,17 +210,18 @@ impl ConnectionSyncWorker {
                 // re-enqueued every tick; retries are owned by maybe_retry.
                 let last_attempt = latest.map(|run| run.started_at.into());
                 if StandardCronSchedule.is_due(&schedule_cron, last_attempt, now) {
-                    due.push((connection.workspace_id, connection.id));
+                    due.push((connection.workspace_id, connection.id, sync_mode));
                 }
             }
             due
         };
 
         let publisher: JobPublisher = self.infra.nats.event_publisher().await?;
-        for (workspace_id, connection_id) in due {
+        for (workspace_id, connection_id, sync_mode) in due {
             let job = ConnectionSyncJob {
                 workspace_id,
                 connection_id,
+                sync_mode,
                 attempt: 1,
             };
             if let Err(err) = publisher.publish(&job).await {
@@ -245,9 +252,9 @@ impl ConnectionSyncWorker {
                         Ok(Some(mut message)) => {
                             let job = message.payload().clone();
                             // At-least-once: run first, then ack. A crash before
-                            // ack redelivers the job; the import is idempotent
-                            // (already-imported keys are skipped), so a redelivery
-                            // is safe.
+                            // ack redelivers the job; both directions are
+                            // idempotent (already-imported keys and already-
+                            // exported files are skipped), so a redelivery is safe.
                             self.run_job(job, &cancel).await;
                             if let Err(err) = message.ack().await {
                                 tracing::error!(target: TRACING_TARGET, error = %err, "Failed to ack job");
@@ -265,8 +272,8 @@ impl ConnectionSyncWorker {
         Ok(())
     }
 
-    /// Runs one scheduled import job: loads the connection, opens a `Scheduled`
-    /// run, and performs the import.
+    /// Runs one scheduled sync job: loads the connection, opens a `Scheduled`
+    /// run, and performs the sync in its scheduled direction.
     async fn run_job(&self, job: ConnectionSyncJob, cancel: &CancellationToken) {
         let connection = match self.load_connection(&job).await {
             Ok(Some(connection)) => connection,
@@ -302,7 +309,7 @@ impl ConnectionSyncWorker {
         }
 
         let connection_id = connection.id;
-        let request = match self.begin_run(connection, job.attempt).await {
+        let request = match self.begin_run(connection, job.sync_mode, job.attempt).await {
             Ok(request) => request,
             // A lost race on the one-active-run index is benign and expected
             // (at-least-once delivery); anything else — a decrypt failure or a
@@ -323,8 +330,15 @@ impl ConnectionSyncWorker {
         let workspace_id = request.connection.workspace_id;
         self.sync.run_transfer(request).await;
 
-        self.maybe_retry(workspace_id, connection_id, run_id, job.attempt, cancel)
-            .await;
+        self.maybe_retry(
+            workspace_id,
+            connection_id,
+            run_id,
+            job.sync_mode,
+            job.attempt,
+            cancel,
+        )
+        .await;
     }
 
     /// Re-enqueues a scheduled job after a failed run, up to
@@ -340,6 +354,7 @@ impl ConnectionSyncWorker {
         workspace_id: Uuid,
         connection_id: Uuid,
         run_id: Uuid,
+        sync_mode: SyncMode,
         attempt: i32,
         cancel: &CancellationToken,
     ) {
@@ -383,6 +398,7 @@ impl ConnectionSyncWorker {
             let job = ConnectionSyncJob {
                 workspace_id,
                 connection_id,
+                sync_mode,
                 attempt: next_attempt,
             };
             let publisher: JobPublisher = match nats.event_publisher().await {
@@ -424,9 +440,14 @@ impl ConnectionSyncWorker {
 
     /// Decrypts the connection config and opens a `Scheduled` run for the
     /// connection at the given attempt number.
+    ///
+    /// The schedule's [`SyncMode`] selects the direction: import pulls the whole
+    /// listing (reconciling deletions per the schedule's policy); export pushes
+    /// every redacted output not yet exported to the connection.
     async fn begin_run(
         &self,
         connection: WorkspaceConnection,
+        sync_mode: SyncMode,
         attempt: i32,
     ) -> Result<TransferRequest> {
         // Only sync-capable connections are enqueued; a non-sync config here
@@ -435,17 +456,22 @@ impl ConnectionSyncWorker {
             connection.workspace_id,
             &connection.encrypted_data,
         )?;
-        if !config.supports_sync() {
+        if !config.supports_transfer() {
             return Err(ErrorKind::InternalServerError
                 .with_message("scheduled sync for a non-sync connection"));
         }
 
         let mut conn = self.infra.postgres.get_connection().await?;
-        let deletion_policy = conn
-            .find_connection_schedule(connection.id)
-            .await?
-            .map(|schedule| schedule.deletion_policy)
-            .unwrap_or_default();
+        let kind = if sync_mode.is_export() {
+            TransferKind::ExportRedacted
+        } else {
+            let deletion_policy = conn
+                .find_connection_schedule(connection.id)
+                .await?
+                .map(|schedule| schedule.deletion_policy)
+                .unwrap_or_default();
+            TransferKind::ImportAll { deletion_policy }
+        };
         // A scheduled run is attributed to whoever created the connection.
         let account_id = connection.account_id;
         let new_run = NewWorkspaceConnectionSync {
@@ -462,14 +488,12 @@ impl ConnectionSyncWorker {
             .sync
             .create_run(&mut conn, new_run, &connection)
             .await?;
-        // Scheduled syncs are import-only.
         Ok(TransferRequest {
             run_id: run.id,
             connection,
             config,
-            deletion_policy,
             account_id,
-            export: None,
+            kind,
         })
     }
 }

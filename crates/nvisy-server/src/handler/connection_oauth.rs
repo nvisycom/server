@@ -240,10 +240,12 @@ async fn complete_callback(
         metadata: None,
     };
 
-    // Insert the connection, its import schedule (a cloud file service is
-    // sync-capable, so the schedule row marks the capability), and the outbox
-    // event atomically, mirroring the ordinary create path. The requester's
-    // security context comes from the callback request itself.
+    // Insert the connection, its schedule row, and the outbox event atomically,
+    // mirroring the ordinary create path. A cloud file service is on-demand (no
+    // cron), so the schedule carries no cron; the row marks transfer capability
+    // and holds default settings. Its direction is driven per endpoint — the picker
+    // for import, an explicit request for export. The requester's security
+    // context comes from the callback request itself.
     let mut conn = pg_client.get_connection().await?;
     let connection_id = conn
         .transaction(async |conn| {

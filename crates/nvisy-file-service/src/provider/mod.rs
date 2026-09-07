@@ -12,6 +12,7 @@ mod dropbox;
 mod onedrive;
 
 use futures::TryStreamExt;
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use reqwest::Response;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
@@ -26,6 +27,18 @@ use crate::oauth::{OAuthProvider, OAuthTokens};
 /// stream error into the crate error type. Used by every provider's download.
 fn response_stream(response: Response) -> ByteStream {
     Box::pin(response.bytes_stream().map_err(Error::from))
+}
+
+/// Percent-encodes a provider file id or name for safe interpolation into a
+/// request URL path segment.
+///
+/// A stored key or a user-chosen export name must never alter the request URL:
+/// an unencoded `?`, `#`, `/`, or space would silently retarget the request.
+/// Encodes conservatively (every non-alphanumeric byte), which is always valid
+/// inside a path segment. Every provider that puts an id/name in the URL path
+/// routes it through this.
+fn encode_path_segment(segment: &str) -> String {
+    utf8_percent_encode(segment, NON_ALPHANUMERIC).to_string()
 }
 
 /// A supported cloud file-service provider.
@@ -87,15 +100,17 @@ impl Provider {
 }
 
 /// The per-connection settings shared by every provider: the OAuth token set and
-/// an optional sync root (a folder id for Drive, OneDrive, and Box, or a folder
-/// path for Dropbox). `None` means the account root.
+/// an optional export root (a folder id for Drive, OneDrive, and Box, or a folder
+/// path for Dropbox) that new exports are written into. `None` means the account
+/// root.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSettings {
     /// The OAuth token set for this connection.
     pub tokens: OAuthTokens,
-    /// The folder (id or path) to scope the sync to; `None` uses the root.
+    /// The folder (id or path) new exports are written into; `None` uses the
+    /// account root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
 }

@@ -5,10 +5,8 @@
 //! drops the bearer header on the cross-host hop, as the target requires). The
 //! `common` tenant supports both personal and work/school accounts.
 
-use serde::Deserialize;
-
-use super::response_stream;
-use crate::client::{ByteStream, FileEntry, FileServiceClient};
+use super::{encode_path_segment, response_stream};
+use crate::client::{ByteStream, FileServiceClient};
 use crate::error::Result;
 use crate::oauth::OAuthProvider;
 
@@ -31,7 +29,7 @@ pub fn oauth_provider() -> OAuthProvider {
     OAuthProvider {
         auth_url: AUTH_URL.to_owned(),
         token_url: TOKEN_URL.to_owned(),
-        // Files.ReadWrite covers list/download/upload; offline_access yields the
+        // Files.ReadWrite covers download and upload; offline_access yields the
         // refresh token; User.Read enables the cheap /me verify.
         scopes: vec![
             "Files.ReadWrite".to_owned(),
@@ -46,7 +44,8 @@ pub fn oauth_provider() -> OAuthProvider {
 pub struct OneDriveClient {
     http: reqwest::Client,
     access_token: String,
-    /// The drive item id of the folder to import from; `None` is the drive root.
+    /// The drive item id of the folder new exports are created in; `None` is the
+    /// drive root.
     root_folder_id: Option<String>,
 }
 
@@ -65,32 +64,6 @@ impl OneDriveClient {
     }
 }
 
-/// One page of a `children` listing.
-#[derive(Debug, Deserialize)]
-struct ChildrenPage {
-    value: Vec<DriveItem>,
-    #[serde(default, rename = "@odata.nextLink")]
-    next_link: Option<String>,
-}
-
-/// A single drive item; the `folder`/`file` facet distinguishes a container.
-#[derive(Debug, Deserialize)]
-struct DriveItem {
-    id: String,
-    name: String,
-    #[serde(default)]
-    folder: Option<serde_json::Value>,
-    #[serde(default)]
-    package: Option<serde_json::Value>,
-}
-
-impl DriveItem {
-    /// Whether this item is a container (folder or package), not a file.
-    fn is_container(&self) -> bool {
-        self.folder.is_some() || self.package.is_some()
-    }
-}
-
 #[async_trait::async_trait]
 impl FileServiceClient for OneDriveClient {
     async fn verify(&self) -> Result<()> {
@@ -103,43 +76,12 @@ impl FileServiceClient for OneDriveClient {
         Ok(())
     }
 
-    async fn list(&self) -> Result<Vec<FileEntry>> {
-        // The first page URL addresses the configured folder's children, or the
-        // drive root's; subsequent pages follow the absolute @odata.nextLink.
-        let mut next = Some(match &self.root_folder_id {
-            Some(id) => format!("{API_BASE}/me/drive/items/{id}/children"),
-            None => format!("{API_BASE}/me/drive/root/children"),
-        });
-        let mut entries = Vec::new();
-
-        while let Some(url) = next {
-            let page: ChildrenPage = self
-                .http
-                .get(url)
-                .bearer_auth(&self.access_token)
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
-
-            entries.extend(
-                page.value
-                    .into_iter()
-                    .filter(|i| !i.is_container())
-                    .map(|i| FileEntry {
-                        id: i.id,
-                        name: i.name,
-                    }),
-            );
-            next = page.next_link;
-        }
-        Ok(entries)
-    }
-
     async fn get_stream(&self, id: &str) -> Result<ByteStream> {
         // /content answers 302 to a pre-authenticated URL; reqwest follows it and
         // drops the bearer header on the cross-host hop (the target rejects it).
+        // Encode the id into the path segment so a stored key can never alter the
+        // request URL.
+        let id = encode_path_segment(id);
         let response = self
             .http
             .get(format!("{API_BASE}/me/drive/items/{id}/content"))
@@ -152,9 +94,14 @@ impl FileServiceClient for OneDriveClient {
 
     async fn put_stream(&self, name: &str, content_type: &str, body: ByteStream) -> Result<()> {
         // Simple PUT upload of a new file into the configured folder (or root),
-        // addressed by parent id and file name.
+        // addressed by parent id and file name. Both are encoded into the path so
+        // a `?`, `#`, or `/` in the name cannot retarget the request URL.
+        let name = encode_path_segment(name);
         let url = match &self.root_folder_id {
-            Some(id) => format!("{API_BASE}/me/drive/items/{id}:/{name}:/content"),
+            Some(id) => {
+                let id = encode_path_segment(id);
+                format!("{API_BASE}/me/drive/items/{id}:/{name}:/content")
+            }
             None => format!("{API_BASE}/me/drive/root:/{name}:/content"),
         };
         self.http

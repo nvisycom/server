@@ -19,6 +19,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_core::net::EndpointPolicy;
 use nvisy_file_service::FileService;
 use nvisy_inference::Error as InferenceError;
 use nvisy_postgres::model::{
@@ -68,6 +69,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::connections";
 async fn create_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
+    State(endpoint_policy): State<EndpointPolicy>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     security: SecurityContext,
@@ -81,11 +83,15 @@ async fn create_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    // Sync config applies only to sync-capable providers. Validate the pairing
-    // before any write so a mismatch fails fast.
-    let supports_sync = request.config.supports_sync();
+    // Reject a disallowed custom endpoint under the deployment policy before the
+    // config is ever stored (SSRF / cleartext-credential guard).
+    request.config.validate_endpoints(endpoint_policy).await?;
+
+    // Sync config applies only to transfer-capable providers. Validate the
+    // pairing before any write so a mismatch fails fast.
+    let supports_transfer = request.config.supports_transfer();
     if let Some(sync) = &request.sync {
-        if !supports_sync {
+        if !supports_transfer {
             return Err(ErrorKind::BadRequest
                 .with_message("This provider does not support sync configuration"));
         }
@@ -109,17 +115,17 @@ async fn create_connection(
         metadata: None,
     };
 
-    // Insert the connection, its schedule (if sync-capable), and the outbox event
-    // atomically, so a partial write can never leave a sync-capable connection
-    // without a schedule, nor record — or lose — the event out of step with the
-    // insert.
+    // Insert the connection, its schedule (if transfer-capable), and the outbox
+    // event atomically, so a partial write can never leave a transfer-capable
+    // connection without a schedule, nor record — or lose — the event out of step
+    // with the insert.
     let sync = request.sync.unwrap_or_default();
     let (connection, schedule) = conn
         .transaction(async |conn| {
             let connection = conn.create_workspace_connection(new_connection).await?;
-            // A sync-capable connection gets a schedule row (its presence marks
-            // the capability).
-            let schedule = if supports_sync {
+            // A transfer-capable connection gets a schedule row (its presence
+            // marks the capability).
+            let schedule = if supports_transfer {
                 Some(
                     conn.create_connection_schedule(NewWorkspaceConnectionSchedule {
                         connection_id: connection.id,
@@ -332,6 +338,7 @@ fn read_connection_docs(op: TransformOperation) -> TransformOperation {
 async fn update_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
+    State(endpoint_policy): State<EndpointPolicy>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionPathParams>,
@@ -346,70 +353,87 @@ async fn update_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
+    // Reject a disallowed custom endpoint on the replacement config before store.
+    if let Some(config) = &request.config {
+        config.validate_endpoints(endpoint_policy).await?;
+    }
+
     let existing = find_connection(&mut conn, workspace.id, path_params.connection_id)
         .await?
         .0
         .item;
 
-    // Sync config only applies to sync-capable connections. A connection's
+    // Sync config only applies to transfer-capable connections. A connection's
     // capability is fixed by its provider, which the config replacement (if any)
     // must preserve.
-    let supports_sync = match &request.config {
-        Some(config) => config.supports_sync(),
+    let supports_transfer = match &request.config {
+        Some(config) => config.supports_transfer(),
         None => conn.find_connection_schedule(existing.id).await?.is_some(),
     };
     if let Some(sync) = &request.sync {
-        if !supports_sync {
+        if !supports_transfer {
             return Err(ErrorKind::BadRequest
                 .with_message("This provider does not support sync configuration"));
         }
         validate_sync_input(sync)?;
     }
 
-    // Replacing the config re-derives the provider column and re-encrypts the
-    // blob together, so they stay in lockstep.
-    let (provider, encrypted_data) = match &request.config {
-        Some(config) => (
-            Some(config.provider_id().to_owned()),
-            Some(crypto.encrypt_json(workspace.id, config)?),
-        ),
-        None => (None, None),
-    };
-
-    let update_data = UpdateWorkspaceConnection {
-        display_name: request.display_name,
-        provider,
-        is_active: request.is_active,
-        encrypted_data,
-        ..Default::default()
-    };
-
     // Update the connection, its schedule, and the outbox event atomically so a
-    // partial write can never leave a sync-capable connection without its
+    // partial write can never leave a transfer-capable connection without its
     // schedule, nor record — or lose — the event out of step with the update.
     let connection_id = existing.id;
     // The effective post-update name: the new one if the request set it, else the
     // existing name.
-    let connection_name = update_data
+    let connection_name = request
         .display_name
         .clone()
         .unwrap_or_else(|| existing.display_name.clone());
-    let sync = request.sync;
-    conn.transaction(async |conn| {
+    let crypto = crypto.clone();
+    conn.transaction(async move |conn| {
         // Lock the row first so this update serializes against a concurrent
         // token refresh (persist_refreshed_tokens), preventing a lost update to
         // `encrypted_data`. A row deleted since the pre-transaction read is
         // treated as gone.
-        if conn
+        let Some(current) = conn
             .find_workspace_connection_by_id_for_update(connection_id)
             .await?
-            .is_none()
-        {
+        else {
             return Err(ErrorKind::NotFound.with_message("Connection not found"));
-        }
+        };
+
+        // Re-encrypt the replacement config under the lock. For a file-service
+        // connection, carry the row's *current* OAuth tokens onto the new config:
+        // tokens are never sent by the client (they are not returned by the API),
+        // and a refresh may have updated them since this request was built, so a
+        // blind full-replace would lose them. Replacing the config re-derives the
+        // provider column too, so they stay in lockstep.
+        let (provider, encrypted_data) = match request.config {
+            Some(mut config) => {
+                if let ConnectionConfig::FileService(new) = &mut config {
+                    let stored: ConnectionConfig =
+                        crypto.decrypt_json(workspace.id, &current.encrypted_data)?;
+                    if let ConnectionConfig::FileService(existing) = stored {
+                        new.set_tokens(existing.tokens().clone());
+                    }
+                }
+                (
+                    Some(config.provider_id().to_owned()),
+                    Some(crypto.encrypt_json(workspace.id, &config)?),
+                )
+            }
+            None => (None, None),
+        };
+
+        let update_data = UpdateWorkspaceConnection {
+            display_name: request.display_name,
+            provider,
+            is_active: request.is_active,
+            encrypted_data,
+            ..Default::default()
+        };
         conn.update_workspace_connection(connection_id, update_data)
             .await?;
-        if let Some(sync) = sync {
+        if let Some(sync) = request.sync {
             conn.upsert_connection_schedule(NewWorkspaceConnectionSchedule {
                 connection_id,
                 sync_mode: Some(sync.sync_mode),
