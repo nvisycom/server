@@ -157,10 +157,7 @@ CREATE TABLE workspace_connection_schedule (
     CONSTRAINT workspace_connection_schedule_cron_length CHECK (schedule_cron IS NULL OR length(schedule_cron) BETWEEN 9 AND 100),
 
     -- What an import does when a source object it previously imported is gone.
-    deletion_policy SYNC_DELETION_POLICY    NOT NULL DEFAULT 'ignore',
-
-    -- Scheduled syncs are import-only for now; export is manual.
-    CONSTRAINT workspace_connection_schedule_import_only CHECK (schedule_cron IS NULL OR sync_mode = 'import')
+    deletion_policy SYNC_DELETION_POLICY    NOT NULL DEFAULT 'ignore'
 );
 
 COMMENT ON TABLE workspace_connection_schedule IS 'Sync configuration for sync-capable connections. Its presence marks a connection as sync-capable.';

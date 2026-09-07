@@ -8,22 +8,21 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection};
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, OffsetPagination, ProviderType, SyncMode,
-    WithAccountRef,
+    AccountRefRow, CursorPage, CursorPagination, OffsetPagination, ProviderType, WithAccountRef,
 };
 use crate::{Error, PgConnection, Result, schema};
 
-/// A sync-scheduled connection paired with its cron expression and direction, as
-/// returned by [`WorkspaceConnectionRepository::list_scheduled_connections`]. The
-/// cron is non-optional: the query only lists connections whose schedule has one.
+/// A sync-scheduled connection paired with its cron expression, as returned by
+/// [`WorkspaceConnectionRepository::list_scheduled_connections`]. The cron is
+/// non-optional: the query only lists connections whose schedule has one. The
+/// direction is not carried — the consumer re-reads it from the live schedule
+/// when it opens the run, so a mid-flight direction change is honored.
 #[derive(Debug, Clone, Queryable)]
 pub struct ScheduledConnection {
     /// The connection due for scheduling.
     pub connection: WorkspaceConnection,
     /// The connection's cron expression.
     pub schedule_cron: String,
-    /// The direction the scheduled sync runs in (import or export).
-    pub sync_mode: SyncMode,
 }
 
 /// Repository for workspace connection database operations.
@@ -297,8 +296,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         // Sync config lives in the schedule satellite; join it to find every
         // active connection with a cron schedule, in either direction. The
         // `schedule_cron IS NOT NULL` filter makes the column non-null for this
-        // query, so the worker gets the cron and direction without re-reading the
-        // schedule row.
+        // query, so the worker gets the cron without re-reading the schedule row.
         let connections = workspace_connections::table
             .inner_join(sched::table.on(sched::connection_id.eq(dsl::id)))
             .filter(sched::schedule_cron.is_not_null())
@@ -307,7 +305,6 @@ impl WorkspaceConnectionRepository for PgConnection {
             .select((
                 WorkspaceConnection::as_select(),
                 sched::schedule_cron.assume_not_null(),
-                sched::sync_mode,
             ))
             .load::<ScheduledConnection>(self)
             .await

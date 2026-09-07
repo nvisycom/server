@@ -1,5 +1,7 @@
 //! The typed LLM inference connection configuration.
 
+use std::fmt;
+
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -10,49 +12,68 @@ use crate::provider::{
     AnthropicProvider, Client, OllamaCredentials, OllamaProvider, OpenAiProvider,
 };
 
+/// Configuration for a provider reached with an API key (OpenAI, Anthropic).
+///
+/// The `api_key` is masked in [`Debug`], so neither this struct nor any config
+/// that embeds it leaks the key.
+#[derive(Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct AuthenticatedProvider {
+    /// The provider API key.
+    pub api_key: String,
+    /// Override the API base URL (for a compatible endpoint or a proxy). Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Default model to use when a request does not specify one. Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+}
+
+impl fmt::Debug for AuthenticatedProvider {
+    /// Masks `api_key`; only its presence is shown.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthenticatedProvider")
+            .field("api_key", &"<set>")
+            .field("base_url", &self.base_url)
+            .field("default_model", &self.default_model)
+            .finish()
+    }
+}
+
+/// Configuration for a provider reached without an API key (Ollama), addressed
+/// by a caller-supplied base URL. Carries no secret, so it derives [`Debug`].
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct UnauthenticatedProvider {
+    /// Base URL of the server (e.g. `http://localhost:11434`).
+    pub base_url: String,
+    /// Default model to use when a request does not specify one. Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+}
+
 /// A fully-typed LLM inference connection configuration.
 ///
 /// The `provider` tag selects the variant and thereby the credential shape, so
-/// an OpenAI connection cannot carry Anthropic credentials. Serialization exists
-/// only to persist the config encrypted at rest, never to return it in API
-/// responses.
+/// an OpenAI connection cannot carry Anthropic credentials. The key-bearing
+/// variants hold an [`AuthenticatedProvider`], which masks the key in `Debug`;
+/// serialization exists only to persist the config encrypted at rest, never to
+/// return it in API responses.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(tag = "provider", rename_all_fields = "camelCase")]
+#[serde(tag = "provider")]
 pub enum LlmConfig {
     /// OpenAI (or an OpenAI-compatible endpoint).
     #[serde(rename = "openai")]
-    OpenAi {
-        /// OpenAI API key.
-        api_key: String,
-        /// Override the API base URL (for Azure OpenAI or a proxy). Optional.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        base_url: Option<String>,
-        /// Default model to use when a request does not specify one. Optional.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        default_model: Option<String>,
-    },
+    OpenAi(AuthenticatedProvider),
     /// Ollama, typically self-hosted.
     #[serde(rename = "ollama")]
-    Ollama {
-        /// Base URL of the Ollama server (e.g. `http://localhost:11434`).
-        base_url: String,
-        /// Default model to use when a request does not specify one. Optional.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        default_model: Option<String>,
-    },
+    Ollama(UnauthenticatedProvider),
     /// Anthropic (Claude).
     #[serde(rename = "anthropic")]
-    Anthropic {
-        /// Anthropic API key.
-        api_key: String,
-        /// Override the API base URL. Optional.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        base_url: Option<String>,
-        /// Default model to use when a request does not specify one. Optional.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        default_model: Option<String>,
-    },
+    Anthropic(AuthenticatedProvider),
 }
 
 impl LlmConfig {
@@ -63,9 +84,9 @@ impl LlmConfig {
     #[must_use]
     pub fn provider_id(&self) -> &'static str {
         match self {
-            Self::OpenAi { .. } => OpenAiProvider::ID,
-            Self::Ollama { .. } => OllamaProvider::ID,
-            Self::Anthropic { .. } => AnthropicProvider::ID,
+            Self::OpenAi(_) => OpenAiProvider::ID,
+            Self::Ollama(_) => OllamaProvider::ID,
+            Self::Anthropic(_) => AnthropicProvider::ID,
         }
     }
 
@@ -73,9 +94,8 @@ impl LlmConfig {
     #[must_use]
     pub fn default_model(&self) -> Option<&str> {
         match self {
-            Self::OpenAi { default_model, .. }
-            | Self::Ollama { default_model, .. }
-            | Self::Anthropic { default_model, .. } => default_model.as_deref(),
+            Self::OpenAi(p) | Self::Anthropic(p) => p.default_model.as_deref(),
+            Self::Ollama(p) => p.default_model.as_deref(),
         }
     }
 
@@ -85,8 +105,8 @@ impl LlmConfig {
     #[must_use]
     pub fn base_url(&self) -> Option<&str> {
         match self {
-            Self::OpenAi { base_url, .. } | Self::Anthropic { base_url, .. } => base_url.as_deref(),
-            Self::Ollama { base_url, .. } => Some(base_url),
+            Self::OpenAi(p) | Self::Anthropic(p) => p.base_url.as_deref(),
+            Self::Ollama(p) => Some(&p.base_url),
         }
     }
 
@@ -98,21 +118,20 @@ impl LlmConfig {
     /// build or verification failure.
     pub async fn validate(&self) -> Result<()> {
         match self {
-            Self::OpenAi {
-                api_key, base_url, ..
-            } => {
-                let provider = OpenAiProvider::connect(api_key, base_url.as_deref())?;
-                provider.verify().await
+            Self::OpenAi(p) => {
+                OpenAiProvider::connect(&p.api_key, p.base_url.as_deref())?
+                    .verify()
+                    .await
             }
-            Self::Ollama { base_url, .. } => {
-                let provider = OllamaProvider::connect(&OllamaCredentials, Some(base_url))?;
-                provider.verify().await
+            Self::Ollama(p) => {
+                OllamaProvider::connect(&OllamaCredentials, Some(&p.base_url))?
+                    .verify()
+                    .await
             }
-            Self::Anthropic {
-                api_key, base_url, ..
-            } => {
-                let provider = AnthropicProvider::connect(api_key, base_url.as_deref())?;
-                provider.verify().await
+            Self::Anthropic(p) => {
+                AnthropicProvider::connect(&p.api_key, p.base_url.as_deref())?
+                    .verify()
+                    .await
             }
         }
     }
@@ -124,15 +143,15 @@ impl LlmConfig {
     pub fn connect(&self, model: Option<&str>) -> Result<InferenceClient> {
         let model = model.or_else(|| self.default_model()).unwrap_or_default();
         let client = match self {
-            Self::OpenAi {
-                api_key, base_url, ..
-            } => OpenAiProvider::connect(api_key, base_url.as_deref())?.model(model),
-            Self::Ollama { base_url, .. } => {
-                OllamaProvider::connect(&OllamaCredentials, Some(base_url))?.model(model)
+            Self::OpenAi(p) => {
+                OpenAiProvider::connect(&p.api_key, p.base_url.as_deref())?.model(model)
             }
-            Self::Anthropic {
-                api_key, base_url, ..
-            } => AnthropicProvider::connect(api_key, base_url.as_deref())?.model(model),
+            Self::Ollama(p) => {
+                OllamaProvider::connect(&OllamaCredentials, Some(&p.base_url))?.model(model)
+            }
+            Self::Anthropic(p) => {
+                AnthropicProvider::connect(&p.api_key, p.base_url.as_deref())?.model(model)
+            }
         };
         Ok(client)
     }

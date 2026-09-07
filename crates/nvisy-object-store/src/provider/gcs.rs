@@ -4,6 +4,7 @@ use std::fmt;
 
 use derive_more::Deref;
 use nvisy_core::net::EndpointPolicy;
+use object_store::ClientOptions;
 use object_store::gcp::GoogleCloudStorageBuilder;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
@@ -72,11 +73,16 @@ impl Client for GcsProvider {
         if let Some(endpoint) = &creds.endpoint {
             // Validate the custom endpoint: only http(s), and plaintext http only
             // for a local emulator (e.g. a fake-gcs server).
-            super::endpoint_allow_http(policy, endpoint, Self::ID).await?;
+            let allow_http = super::endpoint_allow_http(policy, endpoint, Self::ID).await?;
             // `with_base_url` sets a custom service endpoint (e.g. a fake-gcs
             // server); `with_url` instead parses a `gs://bucket/path` object URL,
             // which is not what an endpoint override is.
             builder = builder.with_base_url(endpoint);
+            // The GCS builder has no `with_allow_http`; plaintext http for a
+            // permitted loopback emulator is enabled through client options.
+            if allow_http {
+                builder = builder.with_client_options(ClientOptions::new().with_allow_http(true));
+            }
         }
 
         let store = builder

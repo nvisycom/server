@@ -26,12 +26,13 @@ pub(super) fn object_extension(key: &str) -> Option<String> {
 ///
 /// The base name is the file's display name. For an object store the key is
 /// namespaced under `object_prefix` (e.g. `redacted/`) so exports never overwrite
-/// imported originals; a file service creates a new file from the base name
-/// directly, since it never overwrites.
+/// imported originals, and under the file's id so two files that share a display
+/// name do not overwrite each other at the same path. A file service creates a
+/// new file from the base name directly, since it never overwrites.
 pub(super) fn export_key(file: &WorkspaceFile, object_store: bool, object_prefix: &str) -> String {
     let name = object_basename(&file.display_name);
     if object_store {
-        format!("{object_prefix}{name}")
+        format!("{object_prefix}{}/{name}", file.id)
     } else {
         name
     }

@@ -401,20 +401,30 @@ async fn update_connection(
             return Err(ErrorKind::NotFound.with_message("Connection not found"));
         };
 
-        // Re-encrypt the replacement config under the lock. For a file-service
+        // Re-encrypt the replacement config under the lock. A connection's
+        // provider is fixed at creation, so a config replacement must keep the
+        // same provider — changing it would desync the provider/provider_type
+        // columns, the schedule, and (for OAuth) the stored tokens. Reject a
+        // differing provider rather than silently migrate. For a file-service
         // connection, carry the row's *current* OAuth tokens onto the new config:
         // tokens are never sent by the client (they are not returned by the API),
         // and a refresh may have updated them since this request was built, so a
-        // blind full-replace would lose them. Replacing the config re-derives the
-        // provider column too, so they stay in lockstep.
+        // blind full-replace would lose them.
         let (provider, encrypted_data) = match request.config {
             Some(mut config) => {
-                if let ConnectionConfig::FileService(new) = &mut config {
-                    let stored: ConnectionConfig =
-                        crypto.decrypt_json(workspace.id, &current.encrypted_data)?;
-                    if let ConnectionConfig::FileService(existing) = stored {
-                        new.set_tokens(existing.tokens().clone());
-                    }
+                let stored: ConnectionConfig =
+                    crypto.decrypt_json(workspace.id, &current.encrypted_data)?;
+                if config.provider_id() != stored.provider_id() {
+                    return Err(ErrorKind::BadRequest.with_message(
+                        "A connection's provider cannot be changed; delete and recreate instead",
+                    ));
+                }
+                if let (
+                    ConnectionConfig::FileService(new),
+                    ConnectionConfig::FileService(existing),
+                ) = (&mut config, &stored)
+                {
+                    new.set_tokens(existing.tokens().clone());
                 }
                 (
                     Some(config.provider_id().to_owned()),
@@ -676,18 +686,14 @@ fn verify_connection_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Validates a sync-schedule input: a valid cron and, since scheduling is
-/// import-only, no cron on an export connection.
+/// Validates a sync-schedule input: the cron expression, when present, must be
+/// valid. Either direction may be scheduled — an import pulls the listing, an
+/// export pushes redacted outputs.
 fn validate_sync_input(sync: &SyncScheduleInput) -> Result<()> {
-    if let Some(cron) = &sync.schedule_cron {
-        if !StandardCronSchedule.is_valid(cron) {
-            return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
-        }
-        if sync.sync_mode.is_export() {
-            return Err(
-                ErrorKind::BadRequest.with_message("Only import connections can be scheduled")
-            );
-        }
+    if let Some(cron) = &sync.schedule_cron
+        && !StandardCronSchedule.is_valid(cron)
+    {
+        return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
     }
     Ok(())
 }

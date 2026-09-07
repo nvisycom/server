@@ -18,7 +18,7 @@ use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
 use super::connector::Connector;
-use super::file_source::ByteStream;
+use super::file_source::{ByteStream, FileSource};
 use super::naming::{export_key, mime_from_extension};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{ConnectionConfig, Infra};
@@ -122,6 +122,10 @@ impl Exporter {
     /// after the output; an object store writes it under `object_prefix` so
     /// exports never overwrite imported originals. A single file failing is logged
     /// and skipped rather than aborting the run. Returns the number exported.
+    ///
+    /// The provider source is connected once for the whole batch (validating the
+    /// endpoint and refreshing an OAuth token at most once), not per file; a
+    /// connect failure skips the batch.
     async fn export_files(
         &self,
         connection: &WorkspaceConnection,
@@ -129,13 +133,24 @@ impl Exporter {
         files: Vec<WorkspaceFile>,
         object_prefix: &str,
     ) -> u64 {
+        let source = match self.connector.file_source(connection, config).await {
+            Ok(source) => source,
+            Err(err) => {
+                tracing::warn!(
+                    target: TRACING_TARGET,
+                    connection_id = %connection.id, error = %err,
+                    "Skipping export: failed to connect to the provider",
+                );
+                return 0;
+            }
+        };
         let object_store = matches!(config, ConnectionConfig::ObjectStore(_));
 
         let mut exported = 0u64;
         for file in files {
             let remote_key = export_key(&file, object_store, object_prefix);
             match self
-                .export_file(connection, config, &file, &remote_key)
+                .export_one(source.as_ref(), connection, &file, &remote_key)
                 .await
             {
                 Ok(()) => exported += 1,
@@ -151,26 +166,25 @@ impl Exporter {
         exported
     }
 
-    /// Exports a stored workspace file out to the connection at `remote_key`.
+    /// Exports one stored workspace file to `remote_key` on an already-connected
+    /// `source`.
     ///
     /// Streams the file's bytes from the files store, decrypts them, and uploads
     /// them to the external store. On success the export is recorded so a
     /// scheduled redacted export never re-pushes a file already exported here.
     #[tracing::instrument(
-        name = "sync.export_file",
+        name = "sync.export_one",
         skip_all,
         fields(connection_id = %connection.id, file_id = %file.id, key = %remote_key),
     )]
-    async fn export_file(
+    async fn export_one(
         &self,
+        source: &dyn FileSource,
         connection: &WorkspaceConnection,
-        config: &ConnectionConfig,
         file: &WorkspaceFile,
         remote_key: &str,
     ) -> Result<()> {
         tracing::debug!(target: TRACING_TARGET, "Exporting file to connection");
-
-        let source = self.connector.file_source(connection, config).await?;
 
         let file_key = FileKey::from_str(&file.storage_path).map_err(|err| {
             ErrorKind::InternalServerError

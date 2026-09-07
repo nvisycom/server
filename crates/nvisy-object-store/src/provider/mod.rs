@@ -16,7 +16,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::client::ObjectStoreClient;
-use crate::error::Error;
+use crate::error::{Error, ErrorKind};
 
 /// A fully-typed object-store connection configuration.
 ///
@@ -99,16 +99,21 @@ impl StorageConfig {
 /// Validates a caller-supplied custom endpoint under the deployment's
 /// [`EndpointPolicy`] and reports whether the provider builder should enable
 /// plaintext HTTP for it (only ever for a loopback emulator under a permissive
-/// policy). Maps a rejection to the crate error, tagged with the provider.
+/// policy). Maps a rejection to the crate error, tagged with the provider — a
+/// non-routable-address rejection stays `PermissionDenied` (non-retryable),
+/// while a malformed URL or disallowed scheme maps to `Connection`.
 async fn endpoint_allow_http(
     policy: EndpointPolicy,
     endpoint: &str,
     label: &str,
 ) -> Result<bool, Error> {
-    let decision = policy
-        .validate_endpoint(endpoint)
-        .await
-        .map_err(|err| Error::connection(err.to_string(), label))?;
+    let decision = policy.validate_endpoint(endpoint).await.map_err(|err| {
+        let kind = match err.kind() {
+            nvisy_core::ErrorKind::PermissionDenied => ErrorKind::PermissionDenied,
+            _ => ErrorKind::Connection,
+        };
+        Error::new(kind, err.to_string(), label)
+    })?;
     Ok(decision.allow_http)
 }
 

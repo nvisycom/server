@@ -6,5 +6,8 @@ mod client;
 mod error;
 pub mod provider;
 
-pub use client::{ChatTurn, InferenceClient, LlmConfig, Role, TokenStream};
+pub use client::{
+    AuthenticatedProvider, ChatTurn, InferenceClient, LlmConfig, Role, TokenStream,
+    UnauthenticatedProvider,
+};
 pub use error::{Error, Result};
