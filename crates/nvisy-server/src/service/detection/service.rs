@@ -10,23 +10,26 @@ use nvisy_nats::stream::BroadcastStream;
 use nvisy_postgres::types::DetectionStatus;
 use uuid::Uuid;
 
+use super::coordinator::DetectionCoordinator;
 use super::job::{DetectionJob, DetectionStatusEvent, DetectionStream, detection_subject};
 use crate::handler::Result;
 use crate::service::Infra;
 
 /// Enqueues detection jobs and broadcasts detection-status changes.
 ///
-/// Cheaply cloneable (holds the shared [`Infra`] clients, all `Arc`-backed).
+/// Cheaply cloneable (holds the shared [`Infra`] clients and the
+/// [`DetectionCoordinator`], all `Arc`-backed).
 #[derive(Clone)]
 #[must_use = "service does nothing unless you enqueue or broadcast with it"]
 pub struct DetectionQueue {
     infra: Infra,
+    coordinator: DetectionCoordinator,
 }
 
 impl DetectionQueue {
     /// Creates a new [`DetectionQueue`].
-    pub fn new(infra: Infra) -> Self {
-        Self { infra }
+    pub fn new(infra: Infra, coordinator: DetectionCoordinator) -> Self {
+        Self { infra, coordinator }
     }
 
     /// Enqueues a detection's analysis onto the work-queue for the worker to pick
@@ -35,6 +38,15 @@ impl DetectionQueue {
         let publisher = self.infra.nats.event_publisher::<DetectionStream>().await?;
         publisher.publish(&job).await?;
         Ok(())
+    }
+
+    /// Wakes the detection-job outbox drainer so a just-committed job is drained
+    /// immediately instead of waiting for the drainer's next timer tick. Call
+    /// after the transaction that inserted the job row has committed. Best-effort
+    /// and coalescing: the drainer's timer still covers a missed wake (a crash
+    /// between commit and this call, or a job that landed on another instance).
+    pub fn wake_drainer(&self) {
+        self.coordinator.wake();
     }
 
     /// Broadcasts a detection's status change on its core-NATS subject

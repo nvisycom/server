@@ -23,11 +23,12 @@ use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Multipart, Path, Permission, Query, SecurityContext,
-    ValidateJson, WorkspaceContext,
+    AuthProvider, AuthState, Authorized, DeleteFiles, Json, Multipart, Path, Permission, Query,
+    SecurityContext, UpdateFiles, UploadFiles, ValidateJson, ViewFiles, WorkspaceContext,
 };
 use crate::handler::request::{
-    CursorPagination, DeleteFiles, ListFiles, UpdateFile, WorkspaceFilePathParams,
+    CursorPagination, DeleteFiles as DeleteFilesRequest, ListFiles, UpdateFile,
+    WorkspaceFilePathParams,
 };
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
 use crate::handler::utility::{DownloadResponseExt, attachment_headers, resolve_account_ref};
@@ -64,25 +65,21 @@ async fn find_file_with_creator(
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_claims.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn list_files(
     State(pg_client): State<PgClient>,
     State(engine): State<EngineService>,
-    WorkspaceContext(workspace): WorkspaceContext,
-    AuthState(auth_claims): AuthState,
+    authz: Authorized<ViewFiles>,
     Query(files_query): Query<ListFiles>,
     Query(cursor_pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<FilesPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing files");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_claims
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewFiles)
-        .await?;
 
     let filter = files_query.to_filter(&engine).map_err(|err| {
         ErrorKind::BadRequest
@@ -295,8 +292,8 @@ impl FileUploadContext {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_claims.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn upload_file(
@@ -305,14 +302,15 @@ async fn upload_file(
     State(crypto): State<CryptoService>,
     State(engine): State<EngineService>,
     State(upload): State<UploadConfig>,
-    WorkspaceContext(workspace): WorkspaceContext,
-    AuthState(auth_claims): AuthState,
+    authz: Authorized<UploadFiles>,
     security: SecurityContext,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Files>)> {
     tracing::info!(target: TRACING_TARGET, "Uploading files");
 
-    // Do the quick pre-flight DB work under a connection, then release it: auth,
+    let workspace = authz.workspace;
+
+    // Do the quick pre-flight DB work under a connection, then release it:
     // resolve the uploader's identity, and read the workspace's upload settings.
     // Holding a pooled connection across the streaming below would pin it for the
     // whole upload and starve the pool under load, so this scope drops it before
@@ -320,11 +318,7 @@ async fn upload_file(
     let (uploaded_by, expires_at, max_upload_bytes) = {
         let mut conn = pg_client.get_connection().await?;
 
-        auth_claims
-            .authorize_workspace(&mut conn, workspace.id, Permission::UploadFiles)
-            .await?;
-
-        let uploaded_by = resolve_account_ref(&mut conn, auth_claims.account_id).await?;
+        let uploaded_by = resolve_account_ref(&mut conn, authz.account_id).await?;
 
         let settings = workspace.settings.or_default();
         let expires_at = settings
@@ -338,7 +332,7 @@ async fn upload_file(
 
     let ctx = FileUploadContext {
         workspace_id: workspace.id,
-        account_id: auth_claims.account_id,
+        account_id: authz.account_id,
         blobs,
         crypto,
         engine,
@@ -362,7 +356,7 @@ async fn upload_file(
     let mut conn = pg_client.get_connection().await?;
     let origin = EventOrigin {
         workspace_id: workspace.id,
-        account_id: auth_claims.account_id,
+        account_id: authz.account_id,
         security: &security,
     };
     let created = match conn
@@ -425,24 +419,20 @@ fn upload_file_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_claims.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         file_id = %path_params.file_id,
     )
 )]
 async fn read_file(
     State(pg_client): State<PgClient>,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewFiles>,
     Path(path_params): Path<WorkspaceFilePathParams>,
-    AuthState(auth_claims): AuthState,
 ) -> Result<(StatusCode, Json<File>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading file metadata");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_claims
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewFiles)
-        .await?;
 
     let found = find_file_with_creator(&mut conn, workspace.id, path_params.file_id).await?;
 
@@ -471,26 +461,22 @@ fn read_file_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_claims.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         file_id = %path_params.file_id,
     )
 )]
 async fn update_file(
     State(pg_client): State<PgClient>,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<UpdateFiles>,
     Path(path_params): Path<WorkspaceFilePathParams>,
-    AuthState(auth_claims): AuthState,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateFile>,
 ) -> Result<(StatusCode, Json<File>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating file");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_claims
-        .authorize_workspace(&mut conn, workspace.id, Permission::UpdateFiles)
-        .await?;
 
     // Confirm the file exists in this workspace before mutating.
     find_file(&mut conn, workspace.id, path_params.file_id).await?;
@@ -510,7 +496,7 @@ async fn update_file(
         conn.emit_event(
             EventOrigin {
                 workspace_id: workspace.id,
-                account_id: auth_claims.account_id,
+                account_id: authz.account_id,
                 security: &security,
             },
             WorkspaceEvent::FileUpdated(FileRef {
@@ -680,26 +666,22 @@ fn download_file_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_claims.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         file_id = %path_params.file_id,
     )
 )]
 async fn delete_file(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<DeleteFiles>,
     Path(path_params): Path<WorkspaceFilePathParams>,
-    AuthState(auth_claims): AuthState,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting file");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_claims
-        .authorize_workspace(&mut conn, workspace.id, Permission::DeleteFiles)
-        .await?;
 
     // Confirm the file exists in this workspace before deleting.
     let file = find_file(&mut conn, workspace.id, path_params.file_id).await?;
@@ -711,7 +693,7 @@ async fn delete_file(
         conn.emit_event(
             EventOrigin {
                 workspace_id: workspace.id,
-                account_id: auth_claims.account_id,
+                account_id: authz.account_id,
                 security: &security,
             },
             WorkspaceEvent::FileDeleted(FileRef {
@@ -754,26 +736,22 @@ fn delete_file_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_claims.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         requested = request.file_ids.len(),
     )
 )]
 async fn bulk_delete_files(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
-    WorkspaceContext(workspace): WorkspaceContext,
-    AuthState(auth_claims): AuthState,
+    authz: Authorized<DeleteFiles>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<DeleteFiles>,
+    ValidateJson(request): ValidateJson<DeleteFilesRequest>,
 ) -> Result<(StatusCode, Json<response::DeletedFiles>)> {
     tracing::debug!(target: TRACING_TARGET, "Bulk-deleting files");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_claims
-        .authorize_workspace(&mut conn, workspace.id, Permission::DeleteFiles)
-        .await?;
 
     // De-duplicate the requested ids.
     let requested: BTreeSet<Uuid> = request.file_ids.into_iter().collect();
@@ -794,7 +772,7 @@ async fn bulk_delete_files(
                 conn.emit_event(
                     EventOrigin {
                         workspace_id: workspace.id,
-                        account_id: auth_claims.account_id,
+                        account_id: authz.account_id,
                         security: &security,
                     },
                     WorkspaceEvent::FileDeleted(FileRef {

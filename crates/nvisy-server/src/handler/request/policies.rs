@@ -2,7 +2,9 @@
 
 use elide_pipeline::entity::Label;
 use elide_pipeline::policy::redaction::ModalityRedactions;
-use elide_pipeline::policy::{LabelScope, PolicyDefinition, PolicyRule, TemplateOrigin};
+use elide_pipeline::policy::{
+    CustomMatcher, LabelScope, PolicyDefinition, PolicyRule, TemplateOrigin,
+};
 use elide_pipeline::template::PolicyTemplate;
 use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
@@ -46,6 +48,10 @@ pub struct PolicyDraft {
     /// Caller-authored custom label schemas this policy introduces.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom: Vec<Label>,
+    /// How to detect the custom labels this policy introduces. A custom label
+    /// without a matcher is declared but never found.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub matchers: Vec<CustomMatcher>,
     /// Ordered rules. First match wins within this policy.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<PolicyRule>,
@@ -67,6 +73,7 @@ impl PolicyDraft {
             template,
             scopes: self.scopes,
             custom: self.custom,
+            matchers: self.matchers,
             rules: self.rules,
             fallback: self.fallback,
         }

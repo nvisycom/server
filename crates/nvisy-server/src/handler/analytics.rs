@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceAnalyticsRepository;
 
-use crate::extract::{AuthProvider, AuthState, Json, Permission, Query, WorkspaceContext};
+use crate::extract::{Authorized, Json, Query, ViewAnalytics};
 use crate::handler::request::DateWindow;
 use crate::handler::response::{DetectionTimeSeries, ErrorResponse, WorkspaceAnalytics};
 use crate::handler::{Result, ServiceState};
@@ -20,24 +20,19 @@ const TRACING_TARGET: &str = "nvisy_server::handler::analytics";
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn get_analytics(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewAnalytics>,
 ) -> Result<(StatusCode, Json<WorkspaceAnalytics>)> {
     tracing::debug!(target: TRACING_TARGET, "Computing workspace analytics");
 
     let mut conn = pg_client.get_connection().await?;
 
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewAnalytics)
-        .await?;
-
-    let snapshot = conn.snapshot(workspace.id).await?;
+    let snapshot = conn.snapshot(authz.workspace.id).await?;
 
     let analytics = WorkspaceAnalytics::from_snapshot(snapshot);
 
@@ -59,14 +54,13 @@ fn get_analytics_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn get_detection_timeseries(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewAnalytics>,
     Query(window): Query<DateWindow>,
 ) -> Result<(StatusCode, Json<DetectionTimeSeries>)> {
     tracing::debug!(target: TRACING_TARGET, "Computing detection time series");
@@ -75,13 +69,9 @@ async fn get_detection_timeseries(
 
     let mut conn = pg_client.get_connection().await?;
 
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewAnalytics)
-        .await?;
-
     let points = conn
         .detections_by_day(
-            workspace.id,
+            authz.workspace.id,
             window.from_timestamp()?,
             window.to_timestamp()?,
         )

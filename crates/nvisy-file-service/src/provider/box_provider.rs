@@ -10,8 +10,8 @@
 //! flow already returns and stores the rotated token, so no special handling is
 //! needed here.
 
-use super::{encode_path_segment, response_stream};
-use crate::client::{ByteStream, FileServiceClient};
+use super::{ProviderRequest, encode_path_segment, response_stream};
+use crate::client::{ByteStream, FileServiceClient, FileUpload};
 use crate::error::Result;
 use crate::oauth::OAuthProvider;
 
@@ -71,9 +71,8 @@ impl FileServiceClient for BoxClient {
         self.http
             .get(format!("{API_BASE}/users/me"))
             .bearer_auth(&self.access_token)
-            .send()
-            .await?
-            .error_for_status()?;
+            .send_checked(PROVIDER_ID)
+            .await?;
         Ok(())
     }
 
@@ -86,15 +85,17 @@ impl FileServiceClient for BoxClient {
             .http
             .get(format!("{API_BASE}/files/{id}/content"))
             .bearer_auth(&self.access_token)
-            .send()
-            .await?
-            .error_for_status()?;
+            .send_checked(PROVIDER_ID)
+            .await?;
         Ok(response_stream(response))
     }
 
-    async fn put_stream(&self, name: &str, _content_type: &str, body: ByteStream) -> Result<()> {
+    async fn put_stream(&self, upload: FileUpload<'_>) -> Result<()> {
         // Multipart upload: the `attributes` JSON part MUST precede the `file`
         // part, or Box rejects it with metadata_after_file_contents.
+        // `content_length` is the file's size, not the multipart body's, so it is
+        // unused here; reqwest frames the multipart body.
+        let FileUpload { name, body, .. } = upload;
         let parent = self.root_folder_id.as_deref().unwrap_or(ROOT_FOLDER_ID);
         let attributes =
             serde_json::json!({ "name": name, "parent": { "id": parent } }).to_string();
@@ -109,9 +110,8 @@ impl FileServiceClient for BoxClient {
             .post(format!("{UPLOAD_BASE}/files/content"))
             .bearer_auth(&self.access_token)
             .multipart(form)
-            .send()
-            .await?
-            .error_for_status()?;
+            .send_checked(PROVIDER_ID)
+            .await?;
         Ok(())
     }
 }

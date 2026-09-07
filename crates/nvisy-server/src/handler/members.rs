@@ -15,8 +15,8 @@ use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, SecurityContext, ValidateJson,
-    WorkspaceContext,
+    AuthState, Authorized, Json, ManageRoles, Path, Query, RemoveMembers, SecurityContext,
+    ValidateJson, ViewMembers, WorkspaceContext,
 };
 use crate::handler::request::{CursorPagination, ListMembers, MemberPathParams, UpdateMember};
 use crate::handler::response::{ErrorResponse, Member, MembersPage, Page};
@@ -33,24 +33,20 @@ const TRACING_TARGET: &str = "nvisy_server::handler::members";
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn list_members(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewMembers>,
     Query(query): Query<ListMembers>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<MembersPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace members");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewMembers)
-        .await?;
 
     let page = conn
         .cursor_list_workspace_members_with_accounts(
@@ -89,24 +85,20 @@ fn list_members_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         member_id = tracing::field::Empty,
     )
 )]
 async fn get_member(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewMembers>,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<(StatusCode, Json<Member>)> {
     tracing::debug!(target: TRACING_TARGET, "Retrieving workspace member details");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewMembers)
-        .await?;
 
     let member_account_id = resolve_member_account_id(&mut conn, &path_params.username).await?;
     tracing::Span::current().record("member_id", tracing::field::display(member_account_id));
@@ -149,31 +141,28 @@ fn get_member_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         member_id = tracing::field::Empty,
     )
 )]
 async fn delete_member(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<RemoveMembers>,
     Path(path_params): Path<MemberPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Removing workspace member");
 
+    let account_id = authz.account_id;
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::RemoveMembers)
-        .await?;
 
     let member_account_id = resolve_member_account_id(&mut conn, &path_params.username).await?;
     tracing::Span::current().record("member_id", tracing::field::display(member_account_id));
 
     // Prevent self-removal (use leave endpoint instead)
-    if auth_state.account_id == member_account_id {
+    if account_id == member_account_id {
         return Err(ErrorKind::BadRequest
             .with_message("Cannot remove yourself. Use the leave workspace endpoint instead"));
     }
@@ -200,7 +189,7 @@ async fn delete_member(
         conn.emit_event(
             EventOrigin {
                 workspace_id: workspace.id,
-                account_id: auth_state.account_id,
+                account_id,
                 security: &security,
             },
             WorkspaceEvent::MemberDeleted(MemberRef {
@@ -238,33 +227,30 @@ fn delete_member_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         member_id = tracing::field::Empty,
         new_role = ?request.role,
     )
 )]
 async fn update_member(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ManageRoles>,
     Path(path_params): Path<MemberPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateMember>,
 ) -> Result<(StatusCode, Json<Member>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace member role");
 
+    let account_id = authz.account_id;
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ManageRoles)
-        .await?;
 
     let member_account_id = resolve_member_account_id(&mut conn, &path_params.username).await?;
     tracing::Span::current().record("member_id", tracing::field::display(member_account_id));
 
     // Prevent self-role-update
-    if auth_state.account_id == member_account_id {
+    if account_id == member_account_id {
         return Err(ErrorKind::BadRequest
             .with_message("Cannot update your own role")
             .with_context("Ask another owner to update your role"));
@@ -292,7 +278,7 @@ async fn update_member(
         conn.emit_event(
             EventOrigin {
                 workspace_id: workspace.id,
-                account_id: auth_state.account_id,
+                account_id,
                 security: &security,
             },
             WorkspaceEvent::MemberUpdated(MemberRef {

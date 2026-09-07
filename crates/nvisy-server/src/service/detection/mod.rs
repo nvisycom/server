@@ -5,12 +5,14 @@
 //! the request thread. Status changes are broadcast on a core-NATS subject (see
 //! [`detection_subject`]) for SSE watchers and emitted as webhook events.
 
+mod coordinator;
 mod drainer;
 mod job;
 mod service;
 mod support;
 mod worker;
 
+pub use coordinator::DetectionCoordinator;
 pub use drainer::DetectionOutboxDrainer;
 pub use job::{DetectionJob, DetectionStatusEvent, detection_subject};
 pub use service::DetectionQueue;

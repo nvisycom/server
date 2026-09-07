@@ -15,7 +15,7 @@ use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
 use super::detections::find_detection;
-use crate::extract::{AuthProvider, AuthState, Json, Path, Permission, Query, WorkspaceContext};
+use crate::extract::{Authorized, DownloadAudit, Json, Path, Query, ViewDetections};
 use crate::handler::request::{CursorPagination, DetectionPathParams, RedactionPathParams};
 use crate::handler::response::{ErrorResponse, RedactionResult, RedactionsPage};
 use crate::handler::utility::resolve_account_ref;
@@ -29,25 +29,21 @@ const TRACING_TARGET: &str = "nvisy_server::handler::redactions";
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         detection_id = %path_params.detection_id,
     )
 )]
 async fn list_detection_redactions(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewDetections>,
     Path(path_params): Path<DetectionPathParams>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<RedactionsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing detection redactions");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewDetections)
-        .await?;
 
     // Confirm the detection exists in this workspace (404 otherwise) before
     // listing its redactions.
@@ -92,8 +88,8 @@ fn list_detection_redactions_docs(op: TransformOperation) -> TransformOperation 
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         redaction_id = %path_params.redaction_id,
     )
 )]
@@ -101,21 +97,18 @@ async fn get_redaction_review(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<DownloadAudit>,
     Path(path_params): Path<RedactionPathParams>,
 ) -> Result<(StatusCode, Json<Audit>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting redaction review audit");
+
+    let workspace = authz.workspace;
 
     // Resolve the redaction and its review audit file row under a scoped
     // connection, then release it before the object-store load so the pooled
     // connection is not held across the NATS round-trip.
     let review_file = {
         let mut conn = pg_client.get_connection().await?;
-
-        auth_state
-            .authorize_workspace(&mut conn, workspace.id, Permission::DownloadAudit)
-            .await?;
 
         let redaction =
             find_redaction(&mut conn, workspace.id, path_params.redaction_id.as_uuid()).await?;

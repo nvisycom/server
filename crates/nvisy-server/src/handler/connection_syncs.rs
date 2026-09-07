@@ -25,7 +25,7 @@ use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
+    Authorized, Json, Path, Query, RunConnectionSyncs, ValidateJson, ViewConnections,
 };
 use crate::handler::request::{
     ConnectionPathParams, ConnectionSyncPathParams, CursorPagination, ExportFiles, ImportFiles,
@@ -51,8 +51,8 @@ const TRACING_TARGET: &str = "nvisy_server::handler::connection_syncs";
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -60,17 +60,14 @@ async fn sync_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(connection_sync): State<ConnectionSyncService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<RunConnectionSyncs>,
     Path(path_params): Path<ConnectionPathParams>,
 ) -> Result<(StatusCode, Json<ConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Triggering connection sync");
 
+    let account_id = authz.account_id;
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::RunConnectionSyncs)
-        .await?;
 
     let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
@@ -117,7 +114,7 @@ async fn sync_connection(
     let sync = open_run_and_transfer(
         &mut conn,
         &connection_sync,
-        auth_state.account_id,
+        account_id,
         connection,
         config,
         kind,
@@ -152,8 +149,8 @@ fn sync_connection_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -161,18 +158,15 @@ async fn import_files(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(connection_sync): State<ConnectionSyncService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<RunConnectionSyncs>,
     Path(path_params): Path<ConnectionPathParams>,
     ValidateJson(request): ValidateJson<ImportFiles>,
 ) -> Result<(StatusCode, Json<ConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Importing selected files from connection");
 
+    let account_id = authz.account_id;
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::RunConnectionSyncs)
-        .await?;
 
     let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
@@ -208,7 +202,7 @@ async fn import_files(
     let sync = open_run_and_transfer(
         &mut conn,
         &connection_sync,
-        auth_state.account_id,
+        account_id,
         connection,
         config,
         kind,
@@ -242,8 +236,8 @@ fn import_files_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -251,18 +245,15 @@ async fn export_files(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(connection_sync): State<ConnectionSyncService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<RunConnectionSyncs>,
     Path(path_params): Path<ConnectionPathParams>,
     ValidateJson(request): ValidateJson<ExportFiles>,
 ) -> Result<(StatusCode, Json<ConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Exporting selected files to connection");
 
+    let account_id = authz.account_id;
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::RunConnectionSyncs)
-        .await?;
 
     let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
@@ -291,7 +282,7 @@ async fn export_files(
     let sync = open_run_and_transfer(
         &mut conn,
         &connection_sync,
-        auth_state.account_id,
+        account_id,
         connection,
         config,
         kind,
@@ -361,25 +352,21 @@ async fn open_run_and_transfer(
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
 async fn list_connection_syncs(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewConnections>,
     Path(path_params): Path<ConnectionPathParams>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<ConnectionSyncsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing connection syncs");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
-        .await?;
 
     let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
@@ -411,24 +398,20 @@ fn list_connection_syncs_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn list_workspace_syncs(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewConnections>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<WorkspaceSyncsQuery>,
 ) -> Result<(StatusCode, Json<ConnectionSyncsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace syncs");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
-        .await?;
 
     let page = conn
         .cursor_list_workspace_connection_syncs_all(
@@ -462,25 +445,21 @@ fn list_workspace_syncs_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
         sync_id = %path_params.sync_id,
     )
 )]
 async fn read_connection_sync(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewConnections>,
     Path(path_params): Path<ConnectionSyncPathParams>,
 ) -> Result<(StatusCode, Json<ConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading connection sync");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
-        .await?;
 
     // Confirm the connection is in this workspace before exposing its run.
     let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
@@ -518,8 +497,8 @@ fn read_connection_sync_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
         sync_id = %path_params.sync_id,
     )
@@ -527,17 +506,13 @@ fn read_connection_sync_docs(op: TransformOperation) -> TransformOperation {
 async fn cancel_connection_sync(
     State(pg_client): State<PgClient>,
     State(connection_sync): State<ConnectionSyncService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<RunConnectionSyncs>,
     Path(path_params): Path<ConnectionSyncPathParams>,
 ) -> Result<(StatusCode, Json<ConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Cancelling connection sync");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::RunConnectionSyncs)
-        .await?;
 
     let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 

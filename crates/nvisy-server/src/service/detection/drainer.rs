@@ -14,6 +14,7 @@ use nvisy_postgres::query::{DetectionJobOutboxRepository, WorkspaceDetectionRepo
 use nvisy_postgres::types::{DetectionMetadata, DetectionStatus, Json};
 use tokio_util::sync::CancellationToken;
 
+use super::coordinator::DetectionCoordinator;
 use super::job::DetectionJob;
 use super::service::DetectionQueue;
 use crate::handler::{Error, Result};
@@ -56,6 +57,7 @@ const PUBLISH_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct DetectionOutboxDrainer {
     infra: Infra,
     queue: DetectionQueue,
+    coordinator: DetectionCoordinator,
 }
 
 /// The tally of one [`drain_batch`](DetectionOutboxDrainer::drain_batch) pass: of
@@ -78,11 +80,17 @@ impl Worker for DetectionOutboxDrainer {
     async fn run(&self, cancel: CancellationToken) -> Result<()> {
         tracing::info!(target: TRACING_TARGET, "Starting detection-job drainer");
 
+        // The timer is the fallback (and cross-instance/crash safety net); the
+        // wake signal is the fast path so a job enqueued on this instance drains
+        // at once rather than waiting up to TICK_INTERVAL. A wake stored while a
+        // pass runs coalesces into one following pass, and the Postgres claim
+        // keeps a job single-drained no matter how many instances wake.
         let mut ticker = tokio::time::interval(TICK_INTERVAL);
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => break,
                 _ = ticker.tick() => self.tick(&cancel).await,
+                _ = self.coordinator.notified() => self.tick(&cancel).await,
             }
         }
 
@@ -93,10 +101,15 @@ impl Worker for DetectionOutboxDrainer {
 
 impl DetectionOutboxDrainer {
     /// Creates a new [`DetectionOutboxDrainer`].
-    pub fn new(infra: Infra) -> Self {
+    ///
+    /// Shares the [`DetectionCoordinator`] with the enqueue-side
+    /// [`DetectionQueue`] so a job committed on this instance wakes this drainer
+    /// at once.
+    pub fn new(infra: Infra, coordinator: DetectionCoordinator) -> Self {
         Self {
-            queue: DetectionQueue::new(infra.clone()),
+            queue: DetectionQueue::new(infra.clone(), coordinator.clone()),
             infra,
+            coordinator,
         }
     }
 

@@ -140,6 +140,24 @@ impl FileService {
 /// A byte stream, the shape both directions of a transfer move data in.
 pub type ByteStream = BoxStream<'static, Result<Bytes>>;
 
+/// A streamed file upload: the destination name, its content type, the exact
+/// byte length, and the body stream.
+///
+/// `content_length` must equal the number of bytes `body` yields — a provider
+/// that needs the length up front (Dropbox rejects a chunked body) sets it as
+/// the request `Content-Length`, and a mismatch fails the upload.
+#[must_use]
+pub struct FileUpload<'a> {
+    /// The name of the new file to create on the provider.
+    pub name: &'a str,
+    /// The MIME type of the content.
+    pub content_type: &'a str,
+    /// The exact number of bytes `body` yields.
+    pub content_length: u64,
+    /// The file's bytes, streamed to the provider.
+    pub body: ByteStream,
+}
+
 /// Provider-neutral read/write access to a connected file service.
 #[async_trait::async_trait]
 pub trait FileServiceClient: Send + Sync {
@@ -151,6 +169,6 @@ pub trait FileServiceClient: Send + Sync {
     /// `id` is a provider file id, as chosen through the picker.
     async fn get_stream(&self, id: &str) -> Result<ByteStream>;
 
-    /// Uploads `body` as a new file named `name`, streaming it to the provider.
-    async fn put_stream(&self, name: &str, content_type: &str, body: ByteStream) -> Result<()>;
+    /// Uploads a new file, streaming its body to the provider.
+    async fn put_stream(&self, upload: FileUpload<'_>) -> Result<()>;
 }

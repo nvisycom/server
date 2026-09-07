@@ -21,7 +21,9 @@ pub struct FileConnectorsConfig {
 
     /// Frontend URL the OAuth callback redirects the user's browser to once the
     /// flow finishes. The callback appends a `?connection=success` or
-    /// `?connection=error` query. Unset falls back to a minimal in-page result.
+    /// `?connection=error` query. Unset (or blank) falls back to a minimal
+    /// in-page result. Point this at a frontend page, never at the callback
+    /// route itself.
     #[cfg_attr(
         feature = "cli",
         arg(long, env = "FILE_SERVICE_POST_AUTH_REDIRECT_URI")
@@ -36,10 +38,14 @@ impl FileConnectorsConfig {
     ///
     /// Returns an error if the file service's HTTP client cannot be built.
     pub fn build(self) -> crate::Result<(FileService, FileServiceRedirect)> {
-        Ok((
-            self.apps.build()?,
-            FileServiceRedirect(self.post_auth_redirect_uri),
-        ))
+        // A blank env var arrives as `Some("")` (clap's `env` does not treat an
+        // empty value as unset); normalize it to `None` so an unconfigured
+        // redirect falls back to the in-page result rather than producing an
+        // empty, relative redirect that loops back onto the callback route.
+        let redirect = self
+            .post_auth_redirect_uri
+            .filter(|uri| !uri.trim().is_empty());
+        Ok((self.apps.build()?, FileServiceRedirect(redirect)))
     }
 }
 

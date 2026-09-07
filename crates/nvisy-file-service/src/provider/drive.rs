@@ -11,8 +11,8 @@
 use bytes::Bytes;
 use futures::stream::{self, StreamExt};
 
-use super::{encode_path_segment, response_stream};
-use crate::client::{ByteStream, FileServiceClient};
+use super::{ProviderRequest, encode_path_segment, response_stream};
+use crate::client::{ByteStream, FileServiceClient, FileUpload};
 use crate::error::{Error, Result};
 use crate::oauth::OAuthProvider;
 
@@ -81,9 +81,8 @@ impl FileServiceClient for DriveClient {
         self.http
             .get(format!("{API_BASE}/about?fields=user(emailAddress)"))
             .bearer_auth(&self.access_token)
-            .send()
-            .await?
-            .error_for_status()?;
+            .send_checked(PROVIDER_ID)
+            .await?;
         Ok(())
     }
 
@@ -95,13 +94,20 @@ impl FileServiceClient for DriveClient {
             .http
             .get(format!("{API_BASE}/files/{id}?alt=media"))
             .bearer_auth(&self.access_token)
-            .send()
-            .await?
-            .error_for_status()?;
+            .send_checked(PROVIDER_ID)
+            .await?;
         Ok(response_stream(response))
     }
 
-    async fn put_stream(&self, name: &str, content_type: &str, body: ByteStream) -> Result<()> {
+    async fn put_stream(&self, upload: FileUpload<'_>) -> Result<()> {
+        // `content_length` is the file's size, not the multipart body's, so it is
+        // unused here; reqwest frames the chunked multipart body.
+        let FileUpload {
+            name,
+            content_type,
+            body,
+            ..
+        } = upload;
         // Drive's uploadType=multipart requires a `multipart/related` body (not
         // form-data): a JSON metadata part first, then the media part. reqwest's
         // multipart::Form only emits form-data, so build the related body by hand
@@ -136,9 +142,8 @@ impl FileServiceClient for DriveClient {
                 format!("multipart/related; boundary={boundary}"),
             )
             .body(reqwest::Body::wrap_stream(related))
-            .send()
-            .await?
-            .error_for_status()?;
+            .send_checked(PROVIDER_ID)
+            .await?;
         Ok(())
     }
 }

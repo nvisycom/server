@@ -20,8 +20,8 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Json, Path, Permission, Query, SecurityContext, ValidateJson,
-    WorkspaceContext,
+    Authorized, CreateWebhooks, DeleteWebhooks, Json, Path, Query, SecurityContext, TestWebhooks,
+    UpdateWebhooks, ValidateJson, ViewWebhooks,
 };
 use crate::handler::request::{
     CreateWebhook, CursorPagination, TestWebhook, UpdateWebhook as UpdateWebhookRequest,
@@ -45,25 +45,22 @@ const TRACING_TARGET: &str = "nvisy_server::handler::webhooks";
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn create_webhook(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<CreateWebhooks>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateWebhook>,
 ) -> Result<(StatusCode, Json<WebhookCreated>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace webhook");
 
+    let workspace = authz.workspace;
+    let account_id = authz.account_id;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::CreateWebhooks)
-        .await?;
 
     check_webhook_url(&request.url)?;
 
@@ -72,7 +69,7 @@ async fn create_webhook(
     let secret = crypto.generate_secret();
     let encrypted_secret = crypto.encrypt(workspace.id, secret.as_bytes())?;
 
-    let new_webhook = request.into_model(workspace.id, auth_state.account_id, encrypted_secret)?;
+    let new_webhook = request.into_model(workspace.id, account_id, encrypted_secret)?;
 
     // Create the webhook and record the outbox event atomically, so the event is
     // never lost, nor recorded for a create that rolled back.
@@ -82,7 +79,7 @@ async fn create_webhook(
             conn.emit_event(
                 EventOrigin {
                     workspace_id: workspace.id,
-                    account_id: auth_state.account_id,
+                    account_id,
                     security: &security,
                 },
                 WorkspaceEvent::WebhookCreated(WebhookRef {
@@ -102,7 +99,7 @@ async fn create_webhook(
     );
 
     // The creator is the authenticated caller; resolve their handle directly.
-    let creator = resolve_account_ref(&mut conn, auth_state.account_id).await?;
+    let creator = resolve_account_ref(&mut conn, account_id).await?;
 
     // WebhookCreated includes the secret, which is visible only once.
     Ok((
@@ -135,23 +132,19 @@ fn create_webhook_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
     )
 )]
 async fn list_webhooks(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewWebhooks>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<WebhooksPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace webhooks");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWebhooks)
-        .await?;
 
     let page = conn
         .cursor_list_workspace_webhooks(workspace.id, pagination.into())
@@ -185,24 +178,20 @@ fn list_webhooks_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         webhook_id = %path_params.webhook_id,
     )
 )]
 async fn read_webhook(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<ViewWebhooks>,
     Path(path_params): Path<WebhookPathParams>,
 ) -> Result<(StatusCode, Json<Webhook>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace webhook");
 
+    let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewWebhooks)
-        .await?;
 
     let found = find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid()).await?;
 
@@ -233,26 +222,23 @@ fn read_webhook_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         webhook_id = %path_params.webhook_id,
     )
 )]
 async fn update_webhook(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<UpdateWebhooks>,
     Path(path_params): Path<WebhookPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWebhookRequest>,
 ) -> Result<(StatusCode, Json<Webhook>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace webhook");
 
+    let workspace = authz.workspace;
+    let account_id = authz.account_id;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::UpdateWebhooks)
-        .await?;
 
     let existing = find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid())
         .await?
@@ -278,7 +264,7 @@ async fn update_webhook(
         conn.emit_event(
             EventOrigin {
                 workspace_id: workspace.id,
-                account_id: auth_state.account_id,
+                account_id,
                 security: &security,
             },
             WorkspaceEvent::WebhookUpdated(WebhookRef {
@@ -321,25 +307,22 @@ fn update_webhook_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         webhook_id = %path_params.webhook_id,
     )
 )]
 async fn delete_webhook(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<DeleteWebhooks>,
     Path(path_params): Path<WebhookPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace webhook");
 
+    let workspace = authz.workspace;
+    let account_id = authz.account_id;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::DeleteWebhooks)
-        .await?;
 
     let existing = find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid())
         .await?
@@ -352,7 +335,7 @@ async fn delete_webhook(
         conn.emit_event(
             EventOrigin {
                 workspace_id: workspace.id,
-                account_id: auth_state.account_id,
+                account_id,
                 security: &security,
             },
             WorkspaceEvent::WebhookDeleted(WebhookRef {
@@ -386,8 +369,8 @@ fn delete_webhook_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
         webhook_id = %path_params.webhook_id,
     )
 )]
@@ -395,18 +378,15 @@ async fn test_webhook(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(webhook_service): State<WebhookService>,
-    AuthState(auth_state): AuthState,
-    WorkspaceContext(workspace): WorkspaceContext,
+    authz: Authorized<TestWebhooks>,
     Path(path_params): Path<WebhookPathParams>,
     ValidateJson(request): ValidateJson<TestWebhook>,
 ) -> Result<(StatusCode, Json<WebhookResult>)> {
     tracing::debug!(target: TRACING_TARGET, "Testing workspace webhook");
 
+    let workspace = authz.workspace;
+    let account_id = authz.account_id;
     let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::TestWebhooks)
-        .await?;
 
     let webhook = find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid())
         .await?
@@ -428,7 +408,7 @@ async fn test_webhook(
         })?;
 
     let mut context =
-        WebhookContext::test(webhook.id, webhook.workspace_id).with_account(auth_state.account_id);
+        WebhookContext::test(webhook.id, webhook.workspace_id).with_account(account_id);
     if let Some(payload) = request.payload {
         context = context.with_metadata(payload);
     }

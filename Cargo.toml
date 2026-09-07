@@ -27,6 +27,14 @@ repository = "https://github.com/nvisycom/server"
 homepage = "https://github.com/nvisycom/server"
 documentation = "https://docs.rs/nvisy-server"
 
+# Release-optimised build that keeps full debuginfo, for profiling with a
+# sampling profiler (e.g. `samply record --profile profiling`). Optimisations
+# match `release`, so the numbers are representative; the debuginfo lets the
+# profiler resolve inlined Rust frames instead of raw addresses.
+[profile.profiling]
+inherits = "release"
+debug = true
+
 [workspace.dependencies]
 # Default features are disabled for certain dependencies to allow
 # downstream workspaces/crates to selectively enable them as needed.

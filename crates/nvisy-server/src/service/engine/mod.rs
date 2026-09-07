@@ -10,8 +10,12 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use derive_more::Deref;
+use elide_pipeline::file::Document;
+use elide_pipeline::policy::PolicyDefinition;
 use elide_pipeline::{
-    CodecParams, DocumentContext, Engine, ProviderConfig, RasterMode, RequestContext,
+    Analyzed, CodecParams, DocumentContext, Engine, Error as EngineError,
+    ErrorKind as EngineErrorKind, ProviderConfig, RasterMode, RequestContext,
+    Result as EngineResult,
 };
 
 use crate::Result;
@@ -67,6 +71,38 @@ impl EngineService {
     /// Borrows the underlying [`Engine`].
     pub fn engine(&self) -> &Engine {
         &self.engine
+    }
+
+    /// Runs [`analyze`](Engine::analyze) on a blocking thread.
+    ///
+    /// With the default (local) recognizer lineup, `analyze` is CPU-bound: its
+    /// future does regex and language-detection work inline and never yields to
+    /// the runtime, so awaiting it directly pins an async worker thread for the
+    /// whole analysis and starves every other task on that thread — including the
+    /// short DB reads that authorization and other handlers hold a pooled
+    /// connection across, which is how a burst of detections exhausts the
+    /// connection pool. Offloading to the blocking pool keeps that CPU off the
+    /// async workers so the rest of the server keeps scheduling.
+    ///
+    /// The future is driven on the blocking thread with the current Tokio
+    /// runtime's handle, so a model-backed lineup (whose recognizers genuinely
+    /// await network I/O over the runtime's reactor) still makes progress; the
+    /// default local lineup runs to completion on the first poll and never
+    /// touches the reactor. Inputs are moved in by value (the [`Engine`] is
+    /// `Arc`-backed, so the clone is cheap and shares one configured lineup).
+    pub async fn analyze_blocking(
+        &self,
+        document: Document,
+        policies: Vec<PolicyDefinition>,
+        request: RequestContext,
+    ) -> EngineResult<Analyzed> {
+        let engine = self.engine.clone();
+        let handle = tokio::runtime::Handle::current();
+        tokio::task::spawn_blocking(move || {
+            handle.block_on(engine.analyze(document, &policies, &request))
+        })
+        .await
+        .map_err(|err| EngineError::new(EngineErrorKind::Processing, err))?
     }
 
     /// Builds the [`RequestContext`] for one detect run from a pipeline's intent.
