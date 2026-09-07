@@ -7,6 +7,7 @@
 //! detection's core-NATS status subject (for SSE watchers) and emitted as a
 //! webhook event.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use elide_pipeline::RasterMode;
@@ -17,6 +18,7 @@ use nvisy_postgres::query::{
 };
 use nvisy_postgres::types::{DetectionStatus, Json, RasterPolicy, WorkspaceSettings};
 use nvisy_postgres::{AsyncConnection, DieselError, Error as PgError};
+use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -44,12 +46,24 @@ const TRACING_TARGET: &str = "nvisy_server::worker::detection";
 const DETECTION_LEASE: Duration = Duration::from_secs(30 * 60);
 
 /// Background worker that runs pipeline detection off the request thread.
+///
+/// Cheaply cloneable (every field is `Arc`-backed); a clone is handed to each
+/// spawned per-job task so jobs run concurrently against the shared services.
+#[derive(Clone)]
 pub struct DetectionWorker {
     infra: Infra,
     engine: EngineService,
     blob: RunBlobStore,
     detection: DetectionQueue,
+    /// Bounds how many detection jobs run at once, sized to the deployment's
+    /// available parallelism. Detection analysis is CPU-bound under the default
+    /// lineup, so unbounded concurrency would only oversubscribe cores and grow
+    /// per-job latency; the semaphore keeps in-flight jobs near core count.
+    concurrency: Arc<Semaphore>,
 }
+
+/// Fallback concurrency when the runtime cannot report available parallelism.
+const DEFAULT_DETECTION_CONCURRENCY: usize = 4;
 
 impl Worker for DetectionWorker {
     type Output = Result<()>;
@@ -77,17 +91,25 @@ impl Worker for DetectionWorker {
 
 impl DetectionWorker {
     /// Creates a new [`DetectionWorker`].
+    ///
+    /// Concurrency is sized to the deployment's available parallelism (falling
+    /// back to [`DEFAULT_DETECTION_CONCURRENCY`] when the runtime cannot report
+    /// it), so in-flight detections stay near core count.
     pub fn new(
         infra: Infra,
         engine: EngineService,
         blob: RunBlobStore,
         detection: DetectionQueue,
     ) -> Self {
+        let concurrency = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(DEFAULT_DETECTION_CONCURRENCY);
         Self {
             infra,
             engine,
             blob,
             detection,
+            concurrency: Arc::new(Semaphore::new(concurrency)),
         }
     }
 
@@ -108,6 +130,22 @@ impl DetectionWorker {
         let mut stream = subscriber.subscribe().await?;
 
         loop {
+            // Acquire a permit before pulling the next job so no more than
+            // `concurrency` detections are ever in flight; the pull, and thus the
+            // stream's redelivery lease, does not advance while every worker slot
+            // is busy. The semaphore is never closed, so acquire only errors on a
+            // closed semaphore — treat that as fatal for the loop.
+            let permit = tokio::select! {
+                _ = cancel.cancelled() => {
+                    tracing::info!(target: TRACING_TARGET, "Detection worker shutdown requested");
+                    break;
+                }
+                permit = self.concurrency.clone().acquire_owned() => match permit {
+                    Ok(permit) => permit,
+                    Err(_) => break,
+                },
+            };
+
             tokio::select! {
                 _ = cancel.cancelled() => {
                     tracing::info!(target: TRACING_TARGET, "Detection worker shutdown requested");
@@ -117,19 +155,30 @@ impl DetectionWorker {
                     match result {
                         Ok(Some(mut message)) => {
                             let job = message.payload().clone();
-                            let outcome = self.run_job(job).await;
-                            let ack_result = match outcome {
-                                JobOutcome::Done => message.ack().await,
-                                // Transient failure: redeliver instead of dropping
-                                // the job, so the run is eventually settled.
-                                JobOutcome::Retry => message.nack().await,
-                            };
-                            if let Err(err) = ack_result {
-                                tracing::error!(target: TRACING_TARGET, error = %err, ?outcome, "Failed to ack/nack detection job");
-                            }
+                            // Run each job on its own task so a slow detection does
+                            // not block the next pull; the permit is released when
+                            // the task finishes. The worker is cheaply cloneable
+                            // (all services are `Arc`-backed).
+                            let worker = self.clone();
+                            tokio::spawn(async move {
+                                let _permit = permit;
+                                let outcome = worker.run_job(job).await;
+                                let ack_result = match outcome {
+                                    JobOutcome::Done => message.ack().await,
+                                    // Transient failure: redeliver instead of
+                                    // dropping the job, so the run is eventually
+                                    // settled.
+                                    JobOutcome::Retry => message.nack().await,
+                                };
+                                if let Err(err) = ack_result {
+                                    tracing::error!(target: TRACING_TARGET, error = %err, ?outcome, "Failed to ack/nack detection job");
+                                }
+                            });
                         }
-                        Ok(None) => {}
+                        // No job before the timeout: drop the permit and pull again.
+                        Ok(None) => drop(permit),
                         Err(err) => {
+                            drop(permit);
                             tracing::error!(target: TRACING_TARGET, error = %err, "Error receiving detection job");
                             tokio::time::sleep(Duration::from_secs(1)).await;
                         }
@@ -357,9 +406,16 @@ impl DetectionWorker {
         };
 
         // Phase 2: the slow work — document build, analysis inference, and audit
-        // staging — runs with no DB connection held.
+        // staging — runs with no DB connection held. Analysis runs on a blocking
+        // thread (`analyze_blocking`): with the local recognizer lineup it is
+        // CPU-bound and would otherwise pin an async worker thread for the whole
+        // analysis, so keeping it off the async pool lets many detections run at
+        // once without starving the rest of the server.
         let document = self.blob.build_document(&file, detection.id).await?;
-        let analyzed = self.engine.analyze(document, &policies, &request).await?;
+        let analyzed = self
+            .engine
+            .analyze_blocking(document, policies, request)
+            .await?;
         let audit = &analyzed.audit;
 
         // Write the (non-transactional) audit object first, then commit its file

@@ -38,8 +38,8 @@ pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
 pub(crate) use crate::service::detection::resolve_policies;
 pub use crate::service::detection::{
-    DetectionJob, DetectionOutboxDrainer, DetectionQueue, DetectionStatusEvent, DetectionWorker,
-    detection_subject,
+    DetectionCoordinator, DetectionJob, DetectionOutboxDrainer, DetectionQueue,
+    DetectionStatusEvent, DetectionWorker, detection_subject,
 };
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::event::{
@@ -95,6 +95,10 @@ pub struct ServiceState {
 
     // Redaction engine:
     pub engine: EngineService,
+
+    // In-process wake signal from the detection enqueue path to the outbox
+    // drainer, shared by the per-request `DetectionQueue` and the drainer.
+    pub detection: DetectionCoordinator,
 
     // Operational: the app-wide shutdown signal (cancelled once on Ctrl+C/SIGTERM
     // so long-lived handlers and background workers wind down promptly) and the
@@ -166,6 +170,7 @@ impl ServiceState {
             webhook: webhook_service,
             endpoint_policy,
             engine,
+            detection: DetectionCoordinator::new(),
             shutdown: CancellationToken::new(),
             health_cache: HealthCache::new(&health_config, health_checkers),
             password: PasswordService::new(),
@@ -201,7 +206,10 @@ impl ServiceState {
         ));
         workers.spawn(FileReaper::new(self.infra.clone()));
         workers.spawn(EventOutboxDrainer::new(self.infra.clone()));
-        workers.spawn(DetectionOutboxDrainer::new(self.infra.clone()));
+        workers.spawn(DetectionOutboxDrainer::new(
+            self.infra.clone(),
+            self.detection.clone(),
+        ));
         workers.spawn(DetectionWorker::new(
             self.infra.clone(),
             self.engine.clone(),
@@ -311,6 +319,7 @@ impl_di_field!(
     webhook: WebhookService,
     endpoint_policy: EndpointPolicy,
     engine: EngineService,
+    detection: DetectionCoordinator,
     shutdown: CancellationToken,
     health_cache: HealthCache,
     password: PasswordService,
@@ -324,10 +333,18 @@ impl_di_compose!(
     AvatarService => AvatarService::new,
     ChatService => ChatService::new,
     RunBlobStore => RunBlobStore::new,
-    DetectionQueue => DetectionQueue::new,
     WebhookEmitter => WebhookEmitter::new,
     NotificationEmitter => NotificationEmitter::new,
 );
+
+// `DetectionQueue` composes from two singletons — `Infra` and the shared
+// `DetectionCoordinator` — so it needs a hand-written `FromRef` rather than the
+// compose-from-`Infra`-alone macro above.
+impl axum::extract::FromRef<ServiceState> for DetectionQueue {
+    fn from_ref(state: &ServiceState) -> Self {
+        DetectionQueue::new(state.infra.clone(), state.detection.clone())
+    }
+}
 
 // `ExternalObjectStore` holds only the deployment's endpoint policy:
 impl axum::extract::FromRef<ServiceState> for ExternalObjectStore {

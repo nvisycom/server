@@ -102,8 +102,8 @@ run: ## Runs the server with .env loaded (starts Postgres, NATS, and RustFS firs
 	@docker compose -f ./docker/docker-compose.dev.yml up -d --wait postgres nats rustfs
 	@$(call log,Provisioning the blob store bucket...)
 	@docker compose -f ./docker/docker-compose.dev.yml up --exit-code-from rustfs-init rustfs-init
-	@$(call log,Starting server...)
-	@cargo run --features dotenv --bin nvisy-cli
+	@$(call log,Starting server... (output also written to latest.log))
+	@cargo run --features dotenv --bin nvisy-cli 2>&1 | tee latest.log
 
 .PHONY: generate-all
 generate-all: generate-env generate-keys generate-migrations

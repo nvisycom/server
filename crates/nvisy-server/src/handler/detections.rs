@@ -181,6 +181,11 @@ async fn create_detection(
         })
         .await?;
 
+    // Wake the outbox drainer so the job is relayed to the work-queue at once,
+    // rather than waiting for the drainer's next timer tick. The job row is
+    // already committed, so a missed wake only reverts to the timer.
+    detection.wake_drainer();
+
     // Best-effort UI hint; the detection row is authoritative.
     detection
         .broadcast_status(detection_row.id, DetectionStatus::Pending)

@@ -180,10 +180,15 @@ impl PgClient {
 
         let start = Instant::now();
         let conn = self.inner.pool.get().await.map_err(|e| {
+            let status = self.inner.pool.status();
             tracing::error!(
                 target: TRACING_TARGET_CONNECTION,
                 error = %e,
                 elapsed = ?start.elapsed(),
+                pool_size = status.size,
+                pool_available = status.available,
+                pool_waiting = status.waiting,
+                pool_max = status.max_size,
                 "Failed to acquire connection from pool"
             );
             Error::from(e)
@@ -191,9 +196,14 @@ impl PgClient {
 
         let elapsed = start.elapsed();
         if elapsed > Duration::from_millis(100) {
+            let status = self.inner.pool.status();
             tracing::warn!(
                 target: TRACING_TARGET_CONNECTION,
                 elapsed = ?elapsed,
+                pool_size = status.size,
+                pool_available = status.available,
+                pool_waiting = status.waiting,
+                pool_max = status.max_size,
                 "Connection acquisition took longer than expected"
             );
         }
@@ -279,12 +289,36 @@ pub struct PgConn {
     #[deref]
     #[deref_mut]
     conn: PooledConnection,
+    /// When this connection was checked out, for the hold-duration probe on drop.
+    acquired_at: Instant,
 }
+
+/// A hold longer than this logs a warning on drop: a pooled connection kept this
+/// long across `.await`s (slow I/O, inference, another acquire) is what starves
+/// the pool under load. The `Drop` log inherits the current tracing span, so it
+/// names the handler/worker that held it.
+const HOLD_WARN_THRESHOLD: Duration = Duration::from_secs(1);
 
 impl PgConn {
     /// Creates a new connection wrapper from a pooled connection.
     pub fn new(conn: PooledConnection) -> Self {
-        Self { conn }
+        Self {
+            conn,
+            acquired_at: Instant::now(),
+        }
+    }
+}
+
+impl Drop for PgConn {
+    fn drop(&mut self) {
+        let held = self.acquired_at.elapsed();
+        if held > HOLD_WARN_THRESHOLD {
+            tracing::warn!(
+                target: TRACING_TARGET_CONNECTION,
+                held_ms = held.as_millis(),
+                "Pooled connection held longer than expected",
+            );
+        }
     }
 }
 
