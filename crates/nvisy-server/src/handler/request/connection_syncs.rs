@@ -52,13 +52,14 @@ pub struct ImportFiles {
     pub files: Vec<PickedFile>,
 }
 
-/// Request payload to export a workspace file back to a connection. The redacted
-/// output is written as a new provider file, never overwriting the source.
+/// Request payload to export a caller-selected set of workspace files to a
+/// connection. Each is written as a new provider file, never overwriting a
+/// source. Mirrors [`ImportFiles`] on the export side.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct ExportFile {
-    /// The name for the new provider file. Omit to derive it from the workspace
-    /// file's display name.
-    #[validate(length(min = 1, max = 1024))]
-    pub name: Option<String>,
+pub struct ExportFiles {
+    /// The workspace files to export, by id. Files already exported to the
+    /// connection are exported again (a fresh copy).
+    #[validate(length(min = 1, max = 500))]
+    pub file_ids: Vec<Uuid>,
 }

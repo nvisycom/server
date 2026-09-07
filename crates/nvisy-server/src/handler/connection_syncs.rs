@@ -3,9 +3,11 @@
 //! A sync moves files between a workspace's external connection and the internal
 //! file store. Object stores sync by listing: a manual or scheduled trigger
 //! imports every new object or exports every redacted output. File services sync
-//! per file: import through the provider's picker, export one file at a time.
-//! Every trigger opens a [`WorkspaceConnectionSync`] and performs the transfer in
-//! the background; clients poll the sync detail endpoint for completion.
+//! by explicit selection: import the files chosen in the provider's picker,
+//! export a chosen set of workspace files. Import and export are mirror endpoints
+//! — both connection-scoped and taking a batch. Every trigger opens a
+//! [`WorkspaceConnectionSync`] and performs the transfer in the background;
+//! clients poll the sync detail endpoint for completion.
 //!
 //! [`WorkspaceConnectionSync`]: nvisy_postgres::model::WorkspaceConnectionSync
 
@@ -16,7 +18,7 @@ use axum::http::StatusCode;
 use nvisy_postgres::model::{NewWorkspaceConnectionSync, WorkspaceConnection};
 use nvisy_postgres::query::{
     WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
-    WorkspaceConnectionSyncRepository, WorkspaceFileRepository,
+    WorkspaceConnectionSyncRepository,
 };
 use nvisy_postgres::types::{ConnectionId, SyncMode, SyncStatus, SyncTriggerType};
 use nvisy_postgres::{PgClient, PgConn};
@@ -26,8 +28,8 @@ use crate::extract::{
     AuthProvider, AuthState, Json, Path, Permission, Query, ValidateJson, WorkspaceContext,
 };
 use crate::handler::request::{
-    ConnectionPathParams, ConnectionSyncPathParams, CursorPagination, ExportFile,
-    FileExportPathParams, ImportFiles, WorkspaceSyncsQuery,
+    ConnectionPathParams, ConnectionSyncPathParams, CursorPagination, ExportFiles, ImportFiles,
+    WorkspaceSyncsQuery,
 };
 use crate::handler::response::{ConnectionSync, ConnectionSyncsPage, ErrorResponse, Page};
 use crate::handler::utility::resolve_account_ref;
@@ -229,10 +231,12 @@ fn import_files_docs(op: TransformOperation) -> TransformOperation {
         .response::<409, Json<ErrorResponse>>()
 }
 
-/// Exports one workspace file to a connection as a new provider file.
+/// Exports a caller-selected set of workspace files to a connection, each as a
+/// new provider file.
 ///
-/// The redacted output is written as a new file (a file service never overwrites
-/// the source; an object store writes it at the given key). The export runs in
+/// The mirror of the picker import: connection-scoped, taking a batch of file
+/// ids. Each file is written as a new file (a file service never overwrites a
+/// source; an object store writes under an `exports/` prefix). The export runs in
 /// the background — returns `202 Accepted` with the created sync; poll the sync
 /// detail endpoint for completion. Requires `RunConnectionSyncs` permission.
 #[tracing::instrument(
@@ -241,19 +245,18 @@ fn import_files_docs(op: TransformOperation) -> TransformOperation {
         account_id = %auth_state.account_id,
         workspace_id = %workspace.id,
         connection_id = %path_params.connection_id,
-        file_id = %path_params.file_id,
     )
 )]
-async fn export_file(
+async fn export_files(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(connection_sync): State<ConnectionSyncService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
-    Path(path_params): Path<FileExportPathParams>,
-    ValidateJson(request): ValidateJson<ExportFile>,
+    Path(path_params): Path<ConnectionPathParams>,
+    ValidateJson(request): ValidateJson<ExportFiles>,
 ) -> Result<(StatusCode, Json<ConnectionSync>)> {
-    tracing::debug!(target: TRACING_TARGET, "Exporting file to connection");
+    tracing::debug!(target: TRACING_TARGET, "Exporting selected files to connection");
 
     let mut conn = pg_client.get_connection().await?;
 
@@ -276,22 +279,14 @@ async fn export_file(
         return Err(ErrorKind::Conflict.with_message("A sync is already in progress"));
     }
 
-    let file = conn
-        .find_file_in_workspace(workspace.id, path_params.file_id)
-        .await?
-        .ok_or_else(|| Error::not_found("file"))?;
-
     let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
     if !config.supports_transfer() {
         return Err(ErrorKind::BadRequest.with_message("Connection does not support syncing"));
     }
 
-    // The destination name defaults to the file's display name; the transfer
-    // path resolves it to a new provider file (or the given object-store key).
-    let remote_key = request.name.unwrap_or_else(|| file.display_name.clone());
-    let kind = TransferKind::Export {
-        file: Box::new(file),
-        remote_key,
+    // The files are resolved (and missing ids skipped) inside the transfer.
+    let kind = TransferKind::ExportSelected {
+        file_ids: request.file_ids,
     };
     let sync = open_run_and_transfer(
         &mut conn,
@@ -305,11 +300,11 @@ async fn export_file(
     Ok((StatusCode::ACCEPTED, Json(sync)))
 }
 
-fn export_file_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Export file to connection")
+fn export_files_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Export files to connection")
         .description(
-            "Exports one workspace file to the connection as a new provider file. \
-             Returns the created sync; poll it for completion.",
+            "Exports the selected workspace files to the connection, each as a new provider \
+             file. Returns the created sync; poll it for completion.",
         )
         .response::<202, Json<ConnectionSync>>()
         .response::<400, Json<ErrorResponse>>()
@@ -612,8 +607,8 @@ pub fn routes() -> ApiRouter<ServiceState> {
             post_with(import_files, import_files_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/files/{fileId}/export/{connectionId}/",
-            post_with(export_file, export_file_docs),
+            "/workspaces/{workspaceSlug}/connections/{connectionId}/export/",
+            post_with(export_files, export_files_docs),
         )
         .api_route(
             "/workspaces/{workspaceSlug}/connections/{connectionId}/syncs/",

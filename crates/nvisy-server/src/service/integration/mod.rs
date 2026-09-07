@@ -12,19 +12,20 @@
 //! transfers, [`ConnectionSyncWorker`] schedules them, and [`StandardCronSchedule`]
 //! decides when a cron-scheduled connection is due.
 
-mod bridge;
-mod cloud_source;
-mod config;
+mod connection_config;
+mod connector;
 mod connectors;
 mod cron_schedule;
 mod deployment;
+mod export;
 mod file_source;
-mod object_source;
+mod import;
+mod naming;
 mod persist_oauth;
 mod service;
 mod worker;
 
-pub use config::ConnectionConfig;
+pub use connection_config::ConnectionConfig;
 pub use connectors::{FileConnectorsConfig, FileServiceRedirect};
 pub use cron_schedule::StandardCronSchedule;
 pub use deployment::IntegrationConfig;
