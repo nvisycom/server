@@ -3,7 +3,8 @@
 
 use std::time::Duration;
 
-use async_nats::jetstream::{Context, stream};
+use async_nats::jetstream::context::{GetStreamError, GetStreamErrorKind};
+use async_nats::jetstream::{Context, ErrorCode, stream};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -61,6 +62,16 @@ pub(super) fn subjects<S: EventStream>() -> Vec<String> {
     vec![S::SUBJECT.to_string(), format!("{}.>", S::SUBJECT)]
 }
 
+/// Whether a `get_stream` error means the stream simply does not exist yet (as
+/// opposed to a real failure). A missing stream surfaces as a JetStream protocol
+/// error carrying the `STREAM_NOT_FOUND` code, not a dedicated error kind.
+fn is_stream_not_found(err: &GetStreamError) -> bool {
+    matches!(
+        err.kind(),
+        GetStreamErrorKind::JetStream(inner) if inner.error_code() == ErrorCode::STREAM_NOT_FOUND
+    )
+}
+
 /// Ensures the stream backing `S` exists and matches `S`'s current config.
 ///
 /// Creates the stream if absent, and *reconciles* an existing one to `S`'s
@@ -82,15 +93,40 @@ pub(super) async fn ensure_stream<S: EventStream>(jetstream: &Context) -> Result
         max_age_secs = max_age.as_secs(),
         "Ensuring stream config",
     );
-    jetstream
-        .create_or_update_stream(stream::Config {
-            name: S::NAME.to_string(),
-            description: Some(S::DESCRIPTION.to_string()),
-            subjects: subjects::<S>(),
-            max_age,
-            ..Default::default()
-        })
-        .await
-        .map_err(|e| Error::operation("stream_ensure", e.to_string()))?;
+
+    match jetstream.get_stream(S::NAME).await {
+        // The stream exists: reconcile only the fields `EventStream` owns onto its
+        // current config, so anything else set on the server (storage, replicas,
+        // limits, retention policy — whether a JetStream default or an operator's
+        // tuning) is preserved rather than reset. This still repairs the subject
+        // drift a create-only path left broken: a stream created by an earlier
+        // release keeps its old subject filter, so publishing to the current
+        // `SUBJECT` would match no stream.
+        Ok(existing) => {
+            let mut config = existing.cached_info().config.clone();
+            config.description = Some(S::DESCRIPTION.to_string());
+            config.subjects = subjects::<S>();
+            config.max_age = max_age;
+            jetstream
+                .update_stream(&config)
+                .await
+                .map_err(|e| Error::operation("stream_update", e.to_string()))?;
+        }
+        // The stream does not exist yet: create it from the declared config,
+        // leaving every field we do not name at the JetStream default.
+        Err(err) if is_stream_not_found(&err) => {
+            jetstream
+                .create_stream(stream::Config {
+                    name: S::NAME.to_string(),
+                    description: Some(S::DESCRIPTION.to_string()),
+                    subjects: subjects::<S>(),
+                    max_age,
+                    ..Default::default()
+                })
+                .await
+                .map_err(|e| Error::operation("stream_create", e.to_string()))?;
+        }
+        Err(err) => return Err(Error::operation("stream_ensure", err.to_string())),
+    }
     Ok(())
 }

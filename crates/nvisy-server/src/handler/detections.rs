@@ -181,15 +181,19 @@ async fn create_detection(
         })
         .await?;
 
+    // Broadcast `Pending` before waking the drainer, so this instance does not
+    // race its own worker: waking first could let the worker publish `Executing`
+    // ahead of this `Pending` and invert the order a watcher sees. Best-effort UI
+    // hint; the detection row is authoritative, and `stream_detection_events`
+    // still guards against a late `Pending` from another instance's drainer.
+    detection
+        .broadcast_status(detection_row.id, DetectionStatus::Pending)
+        .await;
+
     // Wake the outbox drainer so the job is relayed to the work-queue at once,
     // rather than waiting for the drainer's next timer tick. The job row is
     // already committed, so a missed wake only reverts to the timer.
     detection.wake_drainer();
-
-    // Best-effort UI hint; the detection row is authoritative.
-    detection
-        .broadcast_status(detection_row.id, DetectionStatus::Pending)
-        .await;
 
     tracing::info!(target: TRACING_TARGET, detection_id = %detection_row.id, "Detection queued");
 
@@ -448,6 +452,15 @@ async fn stream_detection_events(
     drop(conn);
 
     let stream = stream! {
+        // Status progression is monotonic (pending -> executing -> terminal), but
+        // its sources are not ordered: this instance broadcasts `Pending` while a
+        // worker (possibly on another instance, woken by another instance's
+        // drainer) broadcasts `Executing`, and the periodic DB re-read can observe
+        // either. Track the furthest phase emitted and drop any event that would
+        // move a watcher backwards, so a late `Pending` after `Executing` is never
+        // forwarded.
+        let mut max_phase = current.phase();
+
         // Emit the current status first: covers the race where analysis settled
         // before the subscription was live (no live event would ever arrive).
         yield status_event(&DetectionStatusEvent { detection_id, status: current });
@@ -457,8 +470,13 @@ async fn stream_detection_events(
 
         loop {
             match tokio::time::timeout(STATUS_POLL_INTERVAL, updates.next()).await {
-                // A live broadcast arrived; forward it and stop once it settles.
+                // A live broadcast arrived; forward it (unless it moves backwards)
+                // and stop once it settles.
                 Ok(Some(event)) => {
+                    if event.status.phase() < max_phase {
+                        continue;
+                    }
+                    max_phase = event.status.phase();
                     let settled = !event.status.is_detecting();
                     yield status_event(&event);
                     if settled {
@@ -468,7 +486,9 @@ async fn stream_detection_events(
                 // The subscription ended; fall back to the DB so the client still
                 // learns the final status.
                 Ok(None) => {
-                    if let Some(status) = reread_detection_status(&pg_client, workspace.id, detection_id).await {
+                    if let Some(status) = reread_detection_status(&pg_client, workspace.id, detection_id).await
+                        && status.phase() >= max_phase
+                    {
                         yield status_event(&DetectionStatusEvent { detection_id, status });
                     }
                     break;
@@ -477,7 +497,10 @@ async fn stream_detection_events(
                 // detection row. This recovers a dropped best-effort broadcast
                 // (core NATS is at-most-once) instead of hanging on keep-alive.
                 Err(_) => {
-                    if let Some(status) = reread_detection_status(&pg_client, workspace.id, detection_id).await {
+                    if let Some(status) = reread_detection_status(&pg_client, workspace.id, detection_id).await
+                        && status.phase() >= max_phase
+                    {
+                        max_phase = status.phase();
                         yield status_event(&DetectionStatusEvent { detection_id, status });
                         if !status.is_detecting() {
                             break;

@@ -19,6 +19,7 @@ use nvisy_postgres::query::{
 use nvisy_postgres::types::{DetectionStatus, Json, RasterPolicy, WorkspaceSettings};
 use nvisy_postgres::{AsyncConnection, DieselError, Error as PgError};
 use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -129,6 +130,12 @@ impl DetectionWorker {
             .await?;
         let mut stream = subscriber.subscribe().await?;
 
+        // In-flight per-job tasks are owned here rather than detached, so shutdown
+        // can wait for them to settle their message (ack/nack) instead of the
+        // worker reporting stopped while a task still runs. `JoinSet` also reaps
+        // finished tasks so the set does not grow unbounded.
+        let mut tasks: JoinSet<()> = JoinSet::new();
+
         loop {
             // Acquire a permit before pulling the next job so no more than
             // `concurrency` detections are ever in flight; the pull, and thus the
@@ -140,6 +147,9 @@ impl DetectionWorker {
                     tracing::info!(target: TRACING_TARGET, "Detection worker shutdown requested");
                     break;
                 }
+                // Reap completed tasks as they finish, so the set stays bounded by
+                // the number actually in flight rather than by all jobs ever run.
+                Some(_) = tasks.join_next() => continue,
                 permit = self.concurrency.clone().acquire_owned() => match permit {
                     Ok(permit) => permit,
                     Err(_) => break,
@@ -156,11 +166,11 @@ impl DetectionWorker {
                         Ok(Some(mut message)) => {
                             let job = message.payload().clone();
                             // Run each job on its own task so a slow detection does
-                            // not block the next pull; the permit is released when
-                            // the task finishes. The worker is cheaply cloneable
-                            // (all services are `Arc`-backed).
+                            // not block the next pull; the permit is moved in and
+                            // released when the task finishes. The worker is cheaply
+                            // cloneable (all services are `Arc`-backed).
                             let worker = self.clone();
-                            tokio::spawn(async move {
+                            tasks.spawn(async move {
                                 let _permit = permit;
                                 let outcome = worker.run_job(job).await;
                                 let ack_result = match outcome {
@@ -185,6 +195,20 @@ impl DetectionWorker {
                     }
                 }
             }
+        }
+
+        // Shutdown: stop pulling new jobs and let the in-flight ones finish so each
+        // settles its message (ack/nack) rather than being abandoned mid-run. The
+        // app-wide shutdown timeout (`WorkerSet::shutdown`) bounds how long this
+        // can take; if it fires, any task still running is aborted and its message
+        // is redelivered, which the claim makes idempotent.
+        if !tasks.is_empty() {
+            tracing::info!(
+                target: TRACING_TARGET,
+                in_flight = tasks.len(),
+                "Draining in-flight detection jobs before stopping",
+            );
+            while tasks.join_next().await.is_some() {}
         }
         Ok(())
     }

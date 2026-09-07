@@ -61,4 +61,21 @@ impl DetectionStatus {
     pub fn is_detecting(self) -> bool {
         matches!(self, DetectionStatus::Pending | DetectionStatus::Executing)
     }
+
+    /// Monotonic rank of this status along the detection lifecycle
+    /// (`pending` -> `executing` -> terminal).
+    ///
+    /// Status only ever moves forward, so comparing ranks lets a consumer drop an
+    /// out-of-order update (e.g. a late `pending` after `executing` from a
+    /// best-effort broadcast) rather than move backwards. Both terminal states
+    /// share the top rank: a detection reaches exactly one, so they never need
+    /// ordering against each other.
+    #[inline]
+    pub fn phase(self) -> u8 {
+        match self {
+            DetectionStatus::Pending => 0,
+            DetectionStatus::Executing => 1,
+            DetectionStatus::Complete | DetectionStatus::Failed => 2,
+        }
+    }
 }
