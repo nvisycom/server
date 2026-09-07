@@ -66,23 +66,25 @@ pub(super) fn subjects<S: EventStream>() -> Vec<String> {
     vec![S::SUBJECT.to_string(), format!("{}.>", S::SUBJECT)]
 }
 
-/// Ensures the stream backing `S` exists, creating it with `S`'s retention if
-/// not. Idempotent: an existing stream is left as-is.
+/// Ensures the stream backing `S` exists and matches `S`'s current config.
+///
+/// Creates the stream if absent, and *reconciles* an existing one to `S`'s
+/// subjects and retention. Reconciling matters because a stream is keyed by name
+/// but its subjects can change across releases: a stream created by an earlier
+/// version keeps its old subject filter, so publishing to the current
+/// [`SUBJECT`](EventStream::SUBJECT) would match no stream and fail. Leaving the
+/// old stream as-is (the previous behavior) let that drift break publishing
+/// silently; updating it in place fixes it without an operator wiping JetStream.
 pub(super) async fn ensure_stream<S: EventStream>(jetstream: &Context) -> Result<()> {
-    if jetstream.get_stream(S::NAME).await.is_ok() {
-        tracing::trace!(target: TRACING_TARGET_STREAM, stream = %S::NAME, "Using existing stream");
-        return Ok(());
-    }
-
     let max_age = S::MAX_AGE.unwrap_or(DEFAULT_MAX_AGE);
     tracing::debug!(
         target: TRACING_TARGET_STREAM,
         stream = %S::NAME,
         max_age_secs = max_age.as_secs(),
-        "Creating new stream"
+        "Ensuring stream config",
     );
     jetstream
-        .create_stream(stream::Config {
+        .create_or_update_stream(stream::Config {
             name: S::NAME.to_string(),
             description: Some(S::DESCRIPTION.to_string()),
             subjects: subjects::<S>(),
@@ -90,6 +92,6 @@ pub(super) async fn ensure_stream<S: EventStream>(jetstream: &Context) -> Result
             ..Default::default()
         })
         .await
-        .map_err(|e| Error::operation("stream_create", e.to_string()))?;
+        .map_err(|e| Error::operation("stream_ensure", e.to_string()))?;
     Ok(())
 }
