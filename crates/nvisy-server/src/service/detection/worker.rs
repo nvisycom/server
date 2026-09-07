@@ -91,11 +91,11 @@ impl Worker for DetectionWorker {
 }
 
 impl DetectionWorker {
-    /// Creates a new [`DetectionWorker`].
+    /// Creates a new `DetectionWorker`.
     ///
     /// Concurrency is sized to the deployment's available parallelism (falling
-    /// back to [`DEFAULT_DETECTION_CONCURRENCY`] when the runtime cannot report
-    /// it), so in-flight detections stay near core count.
+    /// back to a small default when the runtime cannot report it), so in-flight
+    /// detections stay near core count.
     pub fn new(
         infra: Infra,
         engine: EngineService,
