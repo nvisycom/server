@@ -49,11 +49,6 @@ pub trait EventStream: 'static {
     const MAX_DELIVER: Option<i64> = None;
 }
 
-/// Default stream retention when a stream has no `MAX_AGE`, shared by the
-/// publisher and subscriber so both stream-creation paths agree regardless of
-/// which runs first.
-const DEFAULT_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
-
 /// The subjects `S` binds: the exact [`SUBJECT`](EventStream::SUBJECT) that
 /// [`publish`](super::EventPublisher::publish) uses, plus the `SUBJECT.>`
 /// wildcard for the sub-subjects [`publish_to`](super::EventPublisher::publish_to)
@@ -76,7 +71,11 @@ pub(super) fn subjects<S: EventStream>() -> Vec<String> {
 /// old stream as-is (the previous behavior) let that drift break publishing
 /// silently; updating it in place fixes it without an operator wiping JetStream.
 pub(super) async fn ensure_stream<S: EventStream>(jetstream: &Context) -> Result<()> {
-    let max_age = S::MAX_AGE.unwrap_or(DEFAULT_MAX_AGE);
+    // JetStream treats a zero `max_age` as unlimited retention, which is exactly
+    // what `MAX_AGE = None` ("messages should not expire") means. Mapping `None`
+    // to any positive default instead would silently cap a no-expiry stream and
+    // age its retained messages out on the next reconcile.
+    let max_age = S::MAX_AGE.unwrap_or(Duration::ZERO);
     tracing::debug!(
         target: TRACING_TARGET_STREAM,
         stream = %S::NAME,
