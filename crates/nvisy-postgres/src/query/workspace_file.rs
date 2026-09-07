@@ -8,7 +8,10 @@ use diesel_async::RunQueryDsl;
 use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
-use crate::model::{NewWorkspaceFile, NewWorkspaceFileImport, UpdateWorkspaceFile, WorkspaceFile};
+use crate::model::{
+    NewWorkspaceFile, NewWorkspaceFileExport, NewWorkspaceFileImport, UpdateWorkspaceFile,
+    WorkspaceFile,
+};
 use crate::query::search::ilike_contains;
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, DetectionStatus, FileFilter, FileKind, FileSortBy,
@@ -93,6 +96,23 @@ pub trait WorkspaceFileRepository {
         &mut self,
         connection_id: Uuid,
     ) -> impl Future<Output = Result<Vec<String>>> + Send;
+
+    /// Records that `file_id` was exported to `connection_id` under `remote_key`,
+    /// so a scheduled redacted export does not push it again.
+    fn record_exported_file(
+        &mut self,
+        file_id: Uuid,
+        connection_id: Uuid,
+        remote_key: String,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// Returns the live redacted files in `connection`'s workspace that have not
+    /// yet been exported to that connection. Backs scheduled export.
+    fn redacted_files_not_exported(
+        &mut self,
+        workspace_id: Uuid,
+        connection_id: Uuid,
+    ) -> impl Future<Output = Result<Vec<WorkspaceFile>>> + Send;
 
     /// Returns each live file imported from a connection, for deletion
     /// reconciliation (a source key absent from the remote listing identifies a
@@ -332,6 +352,62 @@ impl WorkspaceFileRepository for PgConnection {
             .map_err(Error::from)?;
 
         Ok(keys)
+    }
+
+    async fn record_exported_file(
+        &mut self,
+        file_id: Uuid,
+        connection_id: Uuid,
+        remote_key: String,
+    ) -> Result<()> {
+        use schema::workspace_file_exports;
+
+        diesel::insert_into(workspace_file_exports::table)
+            .values(NewWorkspaceFileExport {
+                file_id,
+                connection_id,
+                remote_key,
+            })
+            .on_conflict((
+                workspace_file_exports::file_id,
+                workspace_file_exports::connection_id,
+            ))
+            .do_update()
+            .set((
+                workspace_file_exports::remote_key
+                    .eq(diesel::upsert::excluded(workspace_file_exports::remote_key)),
+                workspace_file_exports::exported_at.eq(diesel::dsl::now),
+            ))
+            .execute(self)
+            .await
+            .map_err(Error::from)?;
+
+        Ok(())
+    }
+
+    async fn redacted_files_not_exported(
+        &mut self,
+        workspace_id: Uuid,
+        connection_id: Uuid,
+    ) -> Result<Vec<WorkspaceFile>> {
+        use schema::workspace_file_exports;
+        use schema::workspace_files::{self, dsl};
+
+        let exported = workspace_file_exports::table
+            .filter(workspace_file_exports::connection_id.eq(connection_id))
+            .select(workspace_file_exports::file_id);
+
+        let files = workspace_files::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::file_kind.eq(FileKind::Redacted))
+            .filter(dsl::deleted_at.is_null())
+            .filter(dsl::id.ne_all(exported))
+            .select(WorkspaceFile::as_select())
+            .load(self)
+            .await
+            .map_err(Error::from)?;
+
+        Ok(files)
     }
 
     async fn imported_files_for_connection(

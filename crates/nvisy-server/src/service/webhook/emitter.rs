@@ -1,16 +1,16 @@
 //! Webhook event emitter for publishing domain events to NATS.
 
-use nvisy_nats::stream::{EventPublisher, WebhookStream};
+use nvisy_nats::stream::EventPublisher;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
 use nvisy_postgres::types::WebhookEvent;
 use uuid::Uuid;
 
-use super::WebhookJob;
+use super::{WebhookJob, WebhookStream};
 use crate::Result;
 use crate::service::Infra;
 
 /// Type alias for webhook publisher.
-type WebhookPublisher = EventPublisher<WebhookJob, WebhookStream>;
+type WebhookPublisher = EventPublisher<WebhookStream>;
 
 /// Tracing target for webhook event emission.
 const TRACING_TARGET: &str = "nvisy_server::service::webhook";

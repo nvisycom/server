@@ -31,9 +31,11 @@ default = []
 cli = [
     "dep:clap",
     "dep:humantime",
+    "nvisy-core/cli",
     "nvisy-s3/cli",
     "nvisy-postgres/cli",
     "nvisy-nats/cli",
+    "nvisy-file-service/cli",
 ]
 
 [dependencies]
@@ -51,7 +53,8 @@ elide-pipeline = { workspace = true, features = [
 nvisy-core = { workspace = true, features = ["schema"] }
 nvisy-nats = { workspace = true, features = [] }
 nvisy-inference = { workspace = true, features = ["schema"] }
-nvisy-object = { workspace = true, features = ["schema"] }
+nvisy-object-store = { workspace = true, features = ["schema"] }
+nvisy-file-service = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-s3 = { workspace = true, features = [] }
 nvisy-webhook = { workspace = true, features = ["schema"] }

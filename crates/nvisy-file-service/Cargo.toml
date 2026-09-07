@@ -1,0 +1,64 @@
+[package]
+name = "nvisy-file-service"
+description = "OAuth-based cloud file-service providers (Google Drive, ...) for Nvisy"
+readme = "./README.md"
+keywords = ["nvisy", "google-drive", "oauth", "storage"]
+categories = ["filesystem"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+schema = ["dep:schemars"]
+# CLI support: derives clap::Args on config structs so the binary can parse them.
+cli = ["dep:clap"]
+
+[dependencies]
+# CLI
+clap = { workspace = true, features = ["derive", "env"], optional = true }
+
+# Async runtime
+futures = { workspace = true, features = [] }
+
+# HTTP client & middleware
+reqwest = { workspace = true, features = ["json", "query", "stream", "multipart"] }
+reqwest-middleware = { workspace = true, features = [] }
+reqwest-retry = { workspace = true, features = [] }
+reqwest-tracing = { workspace = true, features = [] }
+oauth2 = { workspace = true, features = [] }
+http = { workspace = true, features = [] }
+
+# OpenAPI/Documentation
+schemars = { workspace = true, features = [], optional = true }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = [] }
+
+# Encoding
+percent-encoding = { workspace = true, features = [] }
+
+# Derive macros & utilities
+thiserror = { workspace = true, features = [] }
+async-trait = { workspace = true, features = [] }
+strum = { workspace = true, features = ["derive"] }
+
+# Primitive datatypes
+bytes = { workspace = true, features = [] }
+uuid = { workspace = true, features = ["v4"] }
+jiff = { workspace = true, features = [] }

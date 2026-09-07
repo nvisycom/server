@@ -25,4 +25,9 @@ pub enum ProviderType {
     #[db_rename = "language_model"]
     #[serde(rename = "language_model")]
     LanguageModel,
+
+    /// External file service (google_drive, dropbox, ...).
+    #[db_rename = "file_service"]
+    #[serde(rename = "file_service")]
+    FileService,
 }

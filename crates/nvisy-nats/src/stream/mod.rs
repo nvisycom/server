@@ -4,15 +4,16 @@
 //! publishing and subscribing over a stream configured via [`EventStream`].
 
 mod broadcast_stream;
-mod event_pub;
+mod core;
 mod event_stream;
-mod event_sub;
-mod stream_pub;
-mod stream_sub;
+mod typed_pub;
+mod typed_stream;
+mod typed_sub;
+
+pub use core::EventStream;
 
 pub use broadcast_stream::BroadcastStream;
-pub use event_pub::EventPublisher;
-pub use event_stream::{ConnectionSyncStream, DetectionStream, EventStream, WebhookStream};
-pub use event_sub::EventSubscriber;
-pub use stream_pub::StreamPublisher;
-pub use stream_sub::{StreamSubscriber, TypedBatchStream, TypedMessage, TypedMessageStream};
+pub use event_stream::{ConnectionSyncStream, DetectionStream, WebhookStream};
+pub use typed_pub::EventPublisher;
+pub use typed_stream::{TypedMessage, TypedMessageStream};
+pub use typed_sub::EventSubscriber;

@@ -1,6 +1,7 @@
 -- Revert the connections tables.
 -- Objects are dropped in reverse order of creation.
 
+DROP TABLE IF EXISTS workspace_file_exports;
 DROP TABLE IF EXISTS workspace_file_imports;
 DROP TABLE IF EXISTS workspace_connection_syncs;
 DROP TABLE IF EXISTS workspace_connection_schedule;

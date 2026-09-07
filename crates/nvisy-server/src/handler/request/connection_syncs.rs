@@ -30,19 +30,36 @@ pub struct ConnectionSyncPathParams {
     pub sync_id: Uuid,
 }
 
-/// Request payload to trigger a connection sync.
-///
-/// The direction is determined by the connection's configured `sync_mode`.
-/// - Import connections need no body: the sync fetches every not-yet-imported
-///   object under the connection's root path.
-/// - Export connections push one workspace file (`file_id`) to one object
-///   `key`; both are required for export and ignored for import.
+/// One file the user selected in the provider's picker.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct PickedFile {
+    /// The provider's file identifier (used to fetch the bytes).
+    #[validate(length(min = 1, max = 1024))]
+    pub id: String,
+    /// The file's display name, as the picker reported it.
+    #[validate(length(min = 1, max = 1024))]
+    pub name: String,
+}
+
+/// Request payload to import a caller-selected set of files from a file-service
+/// connection (the provider picker returns id + name per file).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct SyncConnection {
-    /// The workspace file to export (export connections only).
-    pub file_id: Option<Uuid>,
-    /// The destination object key for an export, relative to the root path.
-    #[validate(length(min = 1, max = 1024))]
-    pub key: Option<String>,
+pub struct ImportFiles {
+    /// The files to import. Already-imported files are skipped.
+    #[validate(length(min = 1, max = 500), nested)]
+    pub files: Vec<PickedFile>,
+}
+
+/// Request payload to export a caller-selected set of workspace files to a
+/// connection. Each is written as a new provider file, never overwriting a
+/// source. Mirrors [`ImportFiles`] on the export side.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportFiles {
+    /// The workspace files to export, by id. Files already exported to the
+    /// connection are exported again (a fresh copy).
+    #[validate(length(min = 1, max = 500))]
+    pub file_ids: Vec<Uuid>,
 }

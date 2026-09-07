@@ -9,5 +9,5 @@ mod job;
 mod worker;
 
 pub use emitter::WebhookEmitter;
-pub use job::WebhookJob;
+pub use job::{WebhookJob, WebhookStream};
 pub use worker::WebhookDeliveryWorker;

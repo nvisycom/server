@@ -10,6 +10,7 @@ mod authentication;
 mod avatars;
 mod catalog;
 mod chat;
+mod connection_oauth;
 mod connection_syncs;
 mod connections;
 mod detection_audits;
@@ -88,6 +89,7 @@ fn private_routes(
         .merge(analytics::routes())
         .merge(members::routes())
         .merge(connections::routes())
+        .merge(connection_oauth::private_routes())
         .merge(chat::routes())
         .merge(connection_syncs::routes())
         .merge(files::routes(service_state.upload.max_file_body_bytes))
@@ -132,6 +134,10 @@ fn public_routes(
     // Avatar serving is public so images load directly in an `<img>` tag; it is
     // infrastructure shared by accounts and workspaces, always mounted.
     router = router.merge(avatars::routes());
+
+    // The cloud file OAuth callback is a provider browser redirect with no
+    // Authorization header, so it is public; its single-use CSRF state guards it.
+    router = router.merge(connection_oauth::public_routes());
 
     router
 }
@@ -207,8 +213,8 @@ mod test {
     use crate::handler::{CustomRoutes, routes};
     use crate::middleware::UploadConfig;
     use crate::service::{
-        CryptoConfig, EngineConfig, HealthConfig, S3Config, ServiceState, SessionKeysConfig,
-        SyncConfig,
+        CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig, IntegrationConfig,
+        S3Config, ServiceState, SessionKeysConfig,
     };
 
     /// Builds the service sub-configs from the environment for integration tests.
@@ -266,7 +272,8 @@ mod test {
             crypto,
             EngineConfig::default(),
             HealthConfig::default(),
-            SyncConfig::default(),
+            IntegrationConfig::default(),
+            FileConnectorsConfig::default(),
             webhook_service,
             UploadConfig::default(),
             s3,

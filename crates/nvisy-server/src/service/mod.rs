@@ -2,20 +2,18 @@
 
 mod avatar;
 mod chat;
-mod connection_config;
 mod crypto;
 mod detection;
 mod engine;
 mod event;
-mod external_object_store;
 mod file_reaper;
 mod health;
 mod infra;
+mod integration;
 mod notification;
 mod password;
 mod run_blob_store;
 mod session_keys;
-mod sync;
 mod user_agent;
 mod webhook;
 mod worker;
@@ -23,7 +21,10 @@ mod worker;
 use std::sync::Arc;
 
 use nvisy_core::health::HealthCheck;
+use nvisy_core::net::EndpointPolicy;
+use nvisy_file_service::FileService;
 use nvisy_nats::{NatsClient, NatsConfig};
+pub use nvisy_object_store::client::ExternalObjectStore;
 use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
 use nvisy_s3::BlobStore;
 pub use nvisy_s3::S3Config;
@@ -33,7 +34,6 @@ use tokio_util::sync::CancellationToken;
 use crate::middleware::UploadConfig;
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::chat::{ChatService, TurnLocation};
-pub use crate::service::connection_config::ConnectionConfig;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
 pub(crate) use crate::service::detection::resolve_policies;
@@ -46,18 +46,18 @@ pub use crate::service::event::{
     ConnectionRef, DetectionRef, EventEmitter, EventOrigin, EventOutboxDrainer, FileRef, InviteRef,
     MemberRef, PipelineRef, PolicyRef, WebhookRef, WorkspaceEvent, WorkspaceRef, event_outbox_row,
 };
-pub use crate::service::external_object_store::ExternalObjectStore;
 pub use crate::service::file_reaper::FileReaper;
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::infra::Infra;
+pub use crate::service::integration::{
+    ConnectionConfig, ConnectionSyncJob, ConnectionSyncService, ConnectionSyncWorker,
+    FileConnectorsConfig, FileServiceRedirect, IntegrationConfig, SourceEntry,
+    StandardCronSchedule, TransferKind, TransferRequest, persist_refreshed_tokens,
+};
 pub use crate::service::notification::{NotificationEmitter, UnreadCountEvent};
 pub use crate::service::password::PasswordService;
 pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
-pub use crate::service::sync::{
-    ConnectionSyncJob, ConnectionSyncService, ConnectionSyncWorker, DEFAULT_IMPORT_CONCURRENCY,
-    StandardCronSchedule, SyncConfig,
-};
 pub use crate::service::user_agent::UserAgentParser;
 pub use crate::service::webhook::{WebhookDeliveryWorker, WebhookEmitter};
 pub use crate::service::worker::{Worker, WorkerSet};
@@ -84,18 +84,22 @@ pub struct ServiceState {
     // Shared infrastructure (Postgres, NATS, crypto):
     pub infra: Infra,
 
-    // App-wide shutdown signal: cancelled once on Ctrl+C/SIGTERM so long-lived
-    // handlers (SSE streams) and background workers can wind down promptly.
-    pub shutdown: CancellationToken,
-
-    // External services:
+    // Integrations: external connectors and the sync engine that drives them.
+    pub file_service: FileService,
+    /// Frontend URL the cloud file OAuth callback redirects to when done.
+    pub file_service_redirect: FileServiceRedirect,
+    pub connection_sync: ConnectionSyncService,
     pub webhook: WebhookService,
+    /// How caller-supplied connection endpoints are validated (SSRF posture).
+    pub endpoint_policy: EndpointPolicy,
 
     // Redaction engine:
     pub engine: EngineService,
 
-    // Stateful singletons:
-    pub connection_sync: ConnectionSyncService,
+    // Operational: the app-wide shutdown signal (cancelled once on Ctrl+C/SIGTERM
+    // so long-lived handlers and background workers wind down promptly) and the
+    // cached health snapshot.
+    pub shutdown: CancellationToken,
     pub health_cache: HealthCache,
 
     // Security services:
@@ -118,7 +122,8 @@ impl ServiceState {
         crypto_config: CryptoConfig,
         engine_config: EngineConfig,
         health_config: HealthConfig,
-        sync_config: SyncConfig,
+        integration_config: IntegrationConfig,
+        file_connectors_config: FileConnectorsConfig,
         webhook_service: WebhookService,
         upload_config: UploadConfig,
         s3_config: S3Config,
@@ -141,16 +146,27 @@ impl ServiceState {
         ];
 
         // The stateful sync singleton composes the stateless emitters/object
-        // service from the same `Infra` their `FromRef` impls use.
-        let connection_sync =
-            ConnectionSyncService::new(infra.clone(), ExternalObjectStore::new(), sync_config);
+        // service from the same `Infra` their `FromRef` impls use. The cloud
+        // file service (HTTP client + OAuth apps) is built by the crate; the
+        // post-auth redirect is a host-side concern kept alongside it.
+        let (file_service, file_service_redirect) = file_connectors_config.build()?;
+        let endpoint_policy = integration_config.endpoint_policy;
+        let connection_sync = ConnectionSyncService::new(
+            infra.clone(),
+            ExternalObjectStore::new(endpoint_policy),
+            file_service.clone(),
+            integration_config.import_concurrency,
+        );
 
         let service_state = Self {
             infra,
-            shutdown: CancellationToken::new(),
-            webhook: webhook_service,
-            engine,
+            file_service,
+            file_service_redirect,
             connection_sync,
+            webhook: webhook_service,
+            endpoint_policy,
+            engine,
+            shutdown: CancellationToken::new(),
             health_cache: HealthCache::new(&health_config, health_checkers),
             password: PasswordService::new(),
             session_keys,
@@ -285,13 +301,17 @@ impl_di_infra!(
     blobs: BlobStore,
 );
 
-// Stored fields (external services + stateful singletons + security):
+// Stored fields, in the struct's domain order (infra, integrations, engine,
+// operational, security, limits):
 impl_di_field!(
     infra: Infra,
-    shutdown: CancellationToken,
-    webhook: WebhookService,
-    engine: EngineService,
+    file_service: FileService,
+    file_service_redirect: FileServiceRedirect,
     connection_sync: ConnectionSyncService,
+    webhook: WebhookService,
+    endpoint_policy: EndpointPolicy,
+    engine: EngineService,
+    shutdown: CancellationToken,
     health_cache: HealthCache,
     password: PasswordService,
     session_keys: SessionKeys,
@@ -309,9 +329,9 @@ impl_di_compose!(
     NotificationEmitter => NotificationEmitter::new,
 );
 
-// `ExternalObjectStore` holds nothing at all:
+// `ExternalObjectStore` holds only the deployment's endpoint policy:
 impl axum::extract::FromRef<ServiceState> for ExternalObjectStore {
-    fn from_ref(_state: &ServiceState) -> Self {
-        ExternalObjectStore::new()
+    fn from_ref(state: &ServiceState) -> Self {
+        ExternalObjectStore::new(state.endpoint_policy)
     }
 }

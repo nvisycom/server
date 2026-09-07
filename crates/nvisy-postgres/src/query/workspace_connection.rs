@@ -8,14 +8,15 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection};
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, OffsetPagination, ProviderType, SyncMode,
-    WithAccountRef,
+    AccountRefRow, CursorPage, CursorPagination, OffsetPagination, ProviderType, WithAccountRef,
 };
 use crate::{Error, PgConnection, Result, schema};
 
 /// A sync-scheduled connection paired with its cron expression, as returned by
 /// [`WorkspaceConnectionRepository::list_scheduled_connections`]. The cron is
-/// non-optional: the query only lists connections whose schedule has one.
+/// non-optional: the query only lists connections whose schedule has one. The
+/// direction is not carried — the consumer re-reads it from the live schedule
+/// when it opens the run, so a mid-flight direction change is honored.
 #[derive(Debug, Clone, Queryable)]
 pub struct ScheduledConnection {
     /// The connection due for scheduling.
@@ -37,6 +38,17 @@ pub trait WorkspaceConnectionRepository {
 
     /// Finds a connection by its unique identifier.
     fn find_workspace_connection_by_id(
+        &mut self,
+        connection_id: Uuid,
+    ) -> impl Future<Output = Result<Option<WorkspaceConnection>>> + Send;
+
+    /// Finds a connection by id and takes a row lock (`SELECT ... FOR UPDATE`)
+    /// for the current transaction.
+    ///
+    /// Use this on the read of any read-modify-write of `encrypted_data` (token
+    /// refresh, config replace) so concurrent writers serialize and neither
+    /// overwrites the other from a stale snapshot. Must run inside a transaction.
+    fn find_workspace_connection_by_id_for_update(
         &mut self,
         connection_id: Uuid,
     ) -> impl Future<Output = Result<Option<WorkspaceConnection>>> + Send;
@@ -169,6 +181,25 @@ impl WorkspaceConnectionRepository for PgConnection {
         Ok(connection)
     }
 
+    async fn find_workspace_connection_by_id_for_update(
+        &mut self,
+        connection_id: Uuid,
+    ) -> Result<Option<WorkspaceConnection>> {
+        use schema::workspace_connections::{self, dsl};
+
+        let connection = workspace_connections::table
+            .filter(dsl::id.eq(connection_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspaceConnection::as_select())
+            .for_update()
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)?;
+
+        Ok(connection)
+    }
+
     async fn find_connection_in_workspace(
         &mut self,
         workspace_id: Uuid,
@@ -262,14 +293,13 @@ impl WorkspaceConnectionRepository for PgConnection {
         use schema::workspace_connection_schedule as sched;
         use schema::workspace_connections::{self, dsl};
 
-        // Sync config lives in the schedule satellite; join it to find active,
-        // import-mode connections with a cron schedule. The `schedule_cron IS NOT
-        // NULL` filter makes the column non-null for this query, so the worker
-        // gets the cron without re-reading the schedule row.
+        // Sync config lives in the schedule satellite; join it to find every
+        // active connection with a cron schedule, in either direction. The
+        // `schedule_cron IS NOT NULL` filter makes the column non-null for this
+        // query, so the worker gets the cron without re-reading the schedule row.
         let connections = workspace_connections::table
             .inner_join(sched::table.on(sched::connection_id.eq(dsl::id)))
             .filter(sched::schedule_cron.is_not_null())
-            .filter(sched::sync_mode.eq(SyncMode::Import))
             .filter(dsl::is_active.eq(true))
             .filter(dsl::deleted_at.is_null())
             .select((

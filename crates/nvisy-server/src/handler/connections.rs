@@ -19,6 +19,8 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
+use nvisy_core::net::EndpointPolicy;
+use nvisy_file_service::FileService;
 use nvisy_inference::Error as InferenceError;
 use nvisy_postgres::model::{
     NewWorkspaceConnection, NewWorkspaceConnectionSchedule, UpdateWorkspaceConnection,
@@ -47,7 +49,7 @@ use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{
     ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin, ExternalObjectStore,
-    ServiceState, StandardCronSchedule, WorkspaceEvent,
+    ServiceState, StandardCronSchedule, WorkspaceEvent, persist_refreshed_tokens,
 };
 
 /// Tracing target for workspace connection operations.
@@ -67,6 +69,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::connections";
 async fn create_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
+    State(endpoint_policy): State<EndpointPolicy>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     security: SecurityContext,
@@ -80,11 +83,15 @@ async fn create_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
-    // Sync config applies only to sync-capable providers. Validate the pairing
-    // before any write so a mismatch fails fast.
-    let supports_sync = request.config.supports_sync();
+    // Reject a disallowed custom endpoint under the deployment policy before the
+    // config is ever stored (SSRF / cleartext-credential guard).
+    request.config.validate_endpoints(endpoint_policy).await?;
+
+    // Sync config applies only to transfer-capable providers. Validate the
+    // pairing before any write so a mismatch fails fast.
+    let supports_transfer = request.config.supports_transfer();
     if let Some(sync) = &request.sync {
-        if !supports_sync {
+        if !supports_transfer {
             return Err(ErrorKind::BadRequest
                 .with_message("This provider does not support sync configuration"));
         }
@@ -108,17 +115,17 @@ async fn create_connection(
         metadata: None,
     };
 
-    // Insert the connection, its schedule (if sync-capable), and the outbox event
-    // atomically, so a partial write can never leave a sync-capable connection
-    // without a schedule, nor record — or lose — the event out of step with the
-    // insert.
+    // Insert the connection, its schedule (if transfer-capable), and the outbox
+    // event atomically, so a partial write can never leave a transfer-capable
+    // connection without a schedule, nor record — or lose — the event out of step
+    // with the insert.
     let sync = request.sync.unwrap_or_default();
     let (connection, schedule) = conn
         .transaction(async |conn| {
             let connection = conn.create_workspace_connection(new_connection).await?;
-            // A sync-capable connection gets a schedule row (its presence marks
-            // the capability).
-            let schedule = if supports_sync {
+            // A transfer-capable connection gets a schedule row (its presence
+            // marks the capability).
+            let schedule = if supports_transfer {
                 Some(
                     conn.create_connection_schedule(NewWorkspaceConnectionSchedule {
                         connection_id: connection.id,
@@ -331,6 +338,7 @@ fn read_connection_docs(op: TransformOperation) -> TransformOperation {
 async fn update_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
+    State(endpoint_policy): State<EndpointPolicy>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionPathParams>,
@@ -345,59 +353,97 @@ async fn update_connection(
         .authorize_workspace(&mut conn, workspace.id, Permission::ManageConnections)
         .await?;
 
+    // Reject a disallowed custom endpoint on the replacement config before store.
+    if let Some(config) = &request.config {
+        config.validate_endpoints(endpoint_policy).await?;
+    }
+
     let existing = find_connection(&mut conn, workspace.id, path_params.connection_id)
         .await?
         .0
         .item;
 
-    // Sync config only applies to sync-capable connections. A connection's
+    // Sync config only applies to transfer-capable connections. A connection's
     // capability is fixed by its provider, which the config replacement (if any)
     // must preserve.
-    let supports_sync = match &request.config {
-        Some(config) => config.supports_sync(),
+    let supports_transfer = match &request.config {
+        Some(config) => config.supports_transfer(),
         None => conn.find_connection_schedule(existing.id).await?.is_some(),
     };
     if let Some(sync) = &request.sync {
-        if !supports_sync {
+        if !supports_transfer {
             return Err(ErrorKind::BadRequest
                 .with_message("This provider does not support sync configuration"));
         }
         validate_sync_input(sync)?;
     }
 
-    // Replacing the config re-derives the provider column and re-encrypts the
-    // blob together, so they stay in lockstep.
-    let (provider, encrypted_data) = match &request.config {
-        Some(config) => (
-            Some(config.provider_id().to_owned()),
-            Some(crypto.encrypt_json(workspace.id, config)?),
-        ),
-        None => (None, None),
-    };
-
-    let update_data = UpdateWorkspaceConnection {
-        display_name: request.display_name,
-        provider,
-        is_active: request.is_active,
-        encrypted_data,
-        ..Default::default()
-    };
-
     // Update the connection, its schedule, and the outbox event atomically so a
-    // partial write can never leave a sync-capable connection without its
+    // partial write can never leave a transfer-capable connection without its
     // schedule, nor record — or lose — the event out of step with the update.
     let connection_id = existing.id;
     // The effective post-update name: the new one if the request set it, else the
     // existing name.
-    let connection_name = update_data
+    let connection_name = request
         .display_name
         .clone()
         .unwrap_or_else(|| existing.display_name.clone());
-    let sync = request.sync;
-    conn.transaction(async |conn| {
+    let crypto = crypto.clone();
+    conn.transaction(async move |conn| {
+        // Lock the row first so this update serializes against a concurrent
+        // token refresh (persist_refreshed_tokens), preventing a lost update to
+        // `encrypted_data`. A row deleted since the pre-transaction read is
+        // treated as gone.
+        let Some(current) = conn
+            .find_workspace_connection_by_id_for_update(connection_id)
+            .await?
+        else {
+            return Err(ErrorKind::NotFound.with_message("Connection not found"));
+        };
+
+        // Re-encrypt the replacement config under the lock. A connection's
+        // provider is fixed at creation, so a config replacement must keep the
+        // same provider — changing it would desync the provider/provider_type
+        // columns, the schedule, and (for OAuth) the stored tokens. Reject a
+        // differing provider rather than silently migrate. For a file-service
+        // connection, carry the row's *current* OAuth tokens onto the new config:
+        // tokens are never sent by the client (they are not returned by the API),
+        // and a refresh may have updated them since this request was built, so a
+        // blind full-replace would lose them.
+        let (provider, encrypted_data) = match request.config {
+            Some(mut config) => {
+                let stored: ConnectionConfig =
+                    crypto.decrypt_json(workspace.id, &current.encrypted_data)?;
+                if config.provider_id() != stored.provider_id() {
+                    return Err(ErrorKind::BadRequest.with_message(
+                        "A connection's provider cannot be changed; delete and recreate instead",
+                    ));
+                }
+                if let (
+                    ConnectionConfig::FileService(new),
+                    ConnectionConfig::FileService(existing),
+                ) = (&mut config, &stored)
+                {
+                    new.set_tokens(existing.tokens().clone());
+                }
+                (
+                    Some(config.provider_id().to_owned()),
+                    Some(crypto.encrypt_json(workspace.id, &config)?),
+                )
+            }
+            None => (None, None),
+        };
+
+        let update_data = UpdateWorkspaceConnection {
+            display_name: request.display_name,
+            provider,
+            is_active: request.is_active,
+            encrypted_data,
+            ..Default::default()
+        };
         conn.update_workspace_connection(connection_id, update_data)
             .await?;
-        if let Some(sync) = sync {
+        if let Some(sync) = request.sync {
             conn.upsert_connection_schedule(NewWorkspaceConnectionSchedule {
                 connection_id,
                 sync_mode: Some(sync.sync_mode),
@@ -533,22 +579,26 @@ async fn verify_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(object): State<ExternalObjectStore>,
+    State(cloud): State<FileService>,
     AuthState(auth_state): AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<ConnectionPathParams>,
 ) -> Result<(StatusCode, Json<ConnectionVerification>)> {
     tracing::debug!(target: TRACING_TARGET, "Verifying workspace connection");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    auth_state
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
-        .await?;
-
-    let connection = find_connection(&mut conn, workspace.id, path_params.connection_id)
-        .await?
-        .0
-        .item;
+    // Do the DB work up front, then release the connection before the provider
+    // I/O below. `connect`/`verify` reach external services with no total
+    // timeout, so holding a pooled connection across them could exhaust the pool.
+    let connection = {
+        let mut conn = pg_client.get_connection().await?;
+        auth_state
+            .authorize_workspace(&mut conn, workspace.id, Permission::ViewConnections)
+            .await?;
+        find_connection(&mut conn, workspace.id, path_params.connection_id)
+            .await?
+            .0
+            .item
+    };
 
     let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
 
@@ -571,6 +621,39 @@ async fn verify_connection(
             Err(err) => {
                 tracing::warn!(target: TRACING_TARGET, error = %err, "Connection setup failed");
                 ConnectionVerification::unreachable(err.kind().reason())
+            }
+        },
+        ConnectionConfig::FileService(config) => match cloud.connect(&config).await {
+            Ok(connected) => {
+                // A refresh during verification produces fresh tokens; persist
+                // them so the renewed credentials are not thrown away. Acquire a
+                // connection only for this write and release it before the
+                // provider `verify` I/O below.
+                if let Some(refreshed) = connected.refreshed {
+                    let mut conn = pg_client.get_connection().await?;
+                    persist_refreshed_tokens(
+                        &mut conn,
+                        &crypto,
+                        workspace.id,
+                        connection.id,
+                        refreshed.tokens().clone(),
+                    )
+                    .await?;
+                }
+                match connected.client.verify().await {
+                    Ok(()) => {
+                        tracing::info!(target: TRACING_TARGET, "Connection verified");
+                        ConnectionVerification::reachable()
+                    }
+                    Err(err) => {
+                        tracing::warn!(target: TRACING_TARGET, error = %err, "Connection unreachable");
+                        ConnectionVerification::unreachable(err.kind().reason())
+                    }
+                }
+            }
+            Err(err) => {
+                tracing::warn!(target: TRACING_TARGET, error = %err, "Connection setup failed");
+                ConnectionVerification::unreachable("credentials rejected or provider unreachable")
             }
         },
         ConnectionConfig::Inference(config) => match config.validate().await {
@@ -603,18 +686,14 @@ fn verify_connection_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Validates a sync-schedule input: a valid cron and, since scheduling is
-/// import-only, no cron on an export connection.
+/// Validates a sync-schedule input: the cron expression, when present, must be
+/// valid. Either direction may be scheduled — an import pulls the listing, an
+/// export pushes redacted outputs.
 fn validate_sync_input(sync: &SyncScheduleInput) -> Result<()> {
-    if let Some(cron) = &sync.schedule_cron {
-        if !StandardCronSchedule.is_valid(cron) {
-            return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
-        }
-        if sync.sync_mode.is_export() {
-            return Err(
-                ErrorKind::BadRequest.with_message("Only import connections can be scheduled")
-            );
-        }
+    if let Some(cron) = &sync.schedule_cron
+        && !StandardCronSchedule.is_valid(cron)
+    {
+        return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
     }
     Ok(())
 }

@@ -1,8 +1,7 @@
 //! NATS client connection management and configuration.
 
-mod health;
-mod nats_client;
-mod nats_config;
+mod config;
+mod service;
 
-pub use nats_client::NatsClient;
-pub use nats_config::NatsConfig;
+pub use config::NatsConfig;
+pub use service::NatsClient;

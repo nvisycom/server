@@ -7,7 +7,8 @@ members = [
     "./crates/nvisy-core",
     "./crates/nvisy-nats",
     "./crates/nvisy-inference",
-    "./crates/nvisy-object",
+    "./crates/nvisy-object-store",
+    "./crates/nvisy-file-service",
     "./crates/nvisy-s3",
     "./crates/nvisy-postgres",
     "./crates/nvisy-server",
@@ -39,7 +40,8 @@ elide-pipeline = { git = "https://github.com/nvisycom/elide-runtime", branch = "
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
 nvisy-inference = { path = "./crates/nvisy-inference", version = "0.1.0" }
-nvisy-object = { path = "./crates/nvisy-object", version = "0.1.0" }
+nvisy-object-store = { path = "./crates/nvisy-object-store", version = "0.1.0" }
+nvisy-file-service = { path = "./crates/nvisy-file-service", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }
 nvisy-s3 = { path = "./crates/nvisy-s3", version = "0.1.0" }
 nvisy-server = { path = "./crates/nvisy-server", version = "0.1.0" }
@@ -67,6 +69,10 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 reqwest-middleware = { version = "0.5", features = ["json", "multipart"] }
 reqwest-retry = { version = "0.9", features = [] }
 reqwest-tracing = { version = "0.7", features = [] }
+
+# OAuth2 (auth-code + refresh); no built-in HTTP client, driven via our reqwest
+oauth2 = { version = "5.0", default-features = false }
+http = { version = "1.3", features = [] }
 
 # HTTP server & middleware
 axum = { version = "0.8", features = [] }
@@ -98,6 +104,7 @@ base64 = { version = "0.23", features = [] }
 hex = { version = "0.4", features = [] }
 hipstr = { version = "0.8", features = [] }
 mime_guess = { version = "2.0", features = [] }
+percent-encoding = { version = "2.3", features = [] }
 
 # Randomness
 rand = { version = "0.10.0-rc.6", features = ["serde"] }

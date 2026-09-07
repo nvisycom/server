@@ -29,10 +29,26 @@ default = []
 # manual schema implementations, while keeping the dependency optional
 schema = ["dep:schemars"]
 
+# CLI support: derives clap value/arg types on core config types.
+cli = ["dep:clap"]
+
 [dependencies]
 # Async runtime
 async-trait = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
+
+# CLI
+clap = { workspace = true, features = ["derive"], optional = true }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
 schemars = { workspace = true, optional = true }
+
+# Derive macros & utilities
+thiserror = { workspace = true, features = [] }
+
+# Primitive datatypes
+url = { workspace = true, features = [] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

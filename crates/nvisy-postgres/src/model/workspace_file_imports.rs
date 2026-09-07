@@ -5,6 +5,7 @@
 //! uploaded/generated files have no row here.
 
 use diesel::prelude::*;
+use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_file_imports;
@@ -21,6 +22,8 @@ pub struct WorkspaceFileImport {
     pub connection_id: Uuid,
     /// Remote object key the file was imported from.
     pub source_key: String,
+    /// When the file was imported.
+    pub imported_at: Timestamp,
 }
 
 /// Data for recording a file's import origin.

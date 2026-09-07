@@ -49,7 +49,8 @@ COMMENT ON TYPE SYNC_DELETION_POLICY IS 'How an import reconciles files whose so
 -- (e.g. the workspace's language model) without decrypting its config.
 CREATE TYPE PROVIDER_TYPE AS ENUM (
     'object_store',     -- External object storage (s3, azure, gcs)
-    'language_model'    -- LLM inference (openai, ollama, anthropic)
+    'language_model',   -- LLM inference (openai, ollama, anthropic)
+    'file_service'      -- External file service (google_drive, dropbox, ...)
 );
 
 COMMENT ON TYPE PROVIDER_TYPE IS 'Capability category of a connection provider (object store, language model, ...).';
@@ -132,8 +133,8 @@ COMMENT ON COLUMN workspace_connections.id IS 'Unique connection identifier';
 COMMENT ON COLUMN workspace_connections.workspace_id IS 'Workspace this connection belongs to';
 COMMENT ON COLUMN workspace_connections.account_id IS 'Account that created the connection';
 COMMENT ON COLUMN workspace_connections.display_name IS 'Human-readable connection display name (1-255 chars)';
-COMMENT ON COLUMN workspace_connections.provider IS 'Concrete provider identifier (e.g. s3, azure, gcs, openai, ollama, anthropic)';
-COMMENT ON COLUMN workspace_connections.provider_type IS 'Capability category of the provider (object_store, language_model)';
+COMMENT ON COLUMN workspace_connections.provider IS 'Concrete provider identifier (e.g. s3, azure, gcs, openai, ollama, anthropic, google_drive, dropbox)';
+COMMENT ON COLUMN workspace_connections.provider_type IS 'Capability category of the provider (object_store, language_model, file_service)';
 COMMENT ON COLUMN workspace_connections.encrypted_data IS 'XChaCha20-Poly1305 encrypted JSON: provider config + credentials';
 COMMENT ON COLUMN workspace_connections.is_active IS 'Whether the connection is enabled';
 COMMENT ON COLUMN workspace_connections.metadata IS 'Non-encrypted metadata for filtering/display';
@@ -156,10 +157,7 @@ CREATE TABLE workspace_connection_schedule (
     CONSTRAINT workspace_connection_schedule_cron_length CHECK (schedule_cron IS NULL OR length(schedule_cron) BETWEEN 9 AND 100),
 
     -- What an import does when a source object it previously imported is gone.
-    deletion_policy SYNC_DELETION_POLICY    NOT NULL DEFAULT 'ignore',
-
-    -- Scheduled syncs are import-only for now; export is manual.
-    CONSTRAINT workspace_connection_schedule_import_only CHECK (schedule_cron IS NULL OR sync_mode = 'import')
+    deletion_policy SYNC_DELETION_POLICY    NOT NULL DEFAULT 'ignore'
 );
 
 COMMENT ON TABLE workspace_connection_schedule IS 'Sync configuration for sync-capable connections. Its presence marks a connection as sync-capable.';
@@ -256,6 +254,7 @@ CREATE TABLE workspace_file_imports (
     -- the connection drops the import origin rows (the files themselves remain).
     connection_id   UUID                NOT NULL REFERENCES workspace_connections (id) ON DELETE CASCADE,
     source_key      TEXT                NOT NULL,
+    imported_at     TIMESTAMPTZ         NOT NULL DEFAULT now(),
     CONSTRAINT workspace_file_imports_source_key_length CHECK (length(source_key) BETWEEN 1 AND 1024)
 );
 
@@ -268,3 +267,30 @@ COMMENT ON TABLE workspace_file_imports IS 'Import origin for imported files: th
 COMMENT ON COLUMN workspace_file_imports.file_id IS 'The imported file this origin describes';
 COMMENT ON COLUMN workspace_file_imports.connection_id IS 'Connection the file was imported from';
 COMMENT ON COLUMN workspace_file_imports.source_key IS 'Remote object key the file was imported from';
+COMMENT ON COLUMN workspace_file_imports.imported_at IS 'When the file was imported';
+
+-- Records that a file was exported to a connection, so scheduled export of
+-- redacted outputs stays idempotent (a file already exported to a connection is
+-- not pushed again). A file may be exported to more than one connection, so the
+-- key is (file_id, connection_id) rather than file_id alone.
+CREATE TABLE workspace_file_exports (
+    file_id         UUID                NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
+    connection_id   UUID                NOT NULL REFERENCES workspace_connections (id) ON DELETE CASCADE,
+
+    -- The remote key the file was written to on the provider.
+    remote_key      TEXT                NOT NULL,
+    exported_at     TIMESTAMPTZ         NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (file_id, connection_id),
+    CONSTRAINT workspace_file_exports_remote_key_length CHECK (length(remote_key) BETWEEN 1 AND 1024)
+);
+
+-- Backs the "redacted files not yet exported to this connection" lookup.
+CREATE INDEX workspace_file_exports_connection_idx
+    ON workspace_file_exports (connection_id);
+
+COMMENT ON TABLE workspace_file_exports IS 'Records files exported to a connection: the destination remote key and when.';
+COMMENT ON COLUMN workspace_file_exports.file_id IS 'The workspace file that was exported';
+COMMENT ON COLUMN workspace_file_exports.connection_id IS 'Connection the file was exported to';
+COMMENT ON COLUMN workspace_file_exports.remote_key IS 'Remote key the file was written to on the provider';
+COMMENT ON COLUMN workspace_file_exports.exported_at IS 'When the file was exported';

@@ -1,31 +1,26 @@
 //! NATS Key-Value store operations.
 //!
-//! This module provides type-safe abstractions over NATS KV:
-//! - `KvStore<K, V, B>`: Generic type-safe key-value operations
-//! - `KvKey`: Trait for key types with prefix support
-//! - `KvBucket`: Trait for bucket configuration
+//! The [`KvKey`] and [`KvBucket`] contracts back the generic [`KvStore`], which
+//! is selected by a bucket alone. Concrete buckets and their keys are grouped by
+//! domain (scheduler locks, OAuth state).
 //!
 //! # Example
 //!
 //! ```ignore
-//! // Create a session store
-//! let store: KvStore<SessionKey, MySession, ChatHistoryBucket> =
-//!     nats_client.kv_store().await?;
-//!
-//! // Put a session
-//! let key = SessionKey::from(Uuid::new_v4());
-//! store.put(&key, &session).await?;
-//!
-//! // Get the session back
-//! let session = store.get_value(&key).await?;
+//! // A bucket fixes its key and value types, so the store is selected by the
+//! // bucket alone.
+//! let store = nats_client.kv_store::<MyBucket>().await?;
+//! store.put(&key, &value).await?;
+//! let value = store.get_value(&key).await?;
 //! ```
 
-mod api_token;
-mod kv_bucket;
-mod kv_key;
-mod kv_store;
+mod core;
+mod oauth_bucket;
+mod scheduler_bucket;
+mod typed_store;
 
-pub use api_token::{ApiToken, ApiTokenType};
-pub use kv_bucket::{ApiTokensBucket, ChatHistoryBucket, KvBucket, SchedulerLocksBucket};
-pub use kv_key::{KvKey, LockKey, SessionKey, TokenKey};
-pub use kv_store::{KvEntry, KvStore, KvValue};
+pub use core::{KvBucket, KvKey};
+
+pub use oauth_bucket::{OAuthStateBucket, OAuthStateKey};
+pub use scheduler_bucket::{SchedulerLockKey, SchedulerLocksBucket};
+pub use typed_store::{KvEntry, KvStore, KvValue};

@@ -19,6 +19,7 @@ mod workspace_detection;
 mod workspace_detection_job;
 mod workspace_detection_usage;
 mod workspace_file;
+mod workspace_file_exports;
 mod workspace_file_imports;
 mod workspace_invite;
 mod workspace_member;
@@ -57,6 +58,7 @@ pub use workspace_detection::{
 pub use workspace_detection_job::{NewWorkspaceDetectionJob, WorkspaceDetectionJob};
 pub use workspace_detection_usage::{NewWorkspaceDetectionUsage, WorkspaceDetectionUsage};
 pub use workspace_file::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
+pub use workspace_file_exports::{NewWorkspaceFileExport, WorkspaceFileExport};
 pub use workspace_file_imports::{NewWorkspaceFileImport, WorkspaceFileImport};
 pub use workspace_invite::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
 pub use workspace_member::{NewWorkspaceMember, UpdateWorkspaceMember, WorkspaceMember};
