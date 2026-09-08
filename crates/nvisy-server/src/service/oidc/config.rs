@@ -35,7 +35,7 @@ macro_rules! oidc_provider_config {
         $(#[$meta:meta])*
         $name:ident,
         provider = $provider:expr,
-        default_issuer = $default_issuer:literal,
+        default_issuer = $default_issuer:expr,
         $id_long:literal, $id_env:literal,
         $secret_long:literal, $secret_env:literal,
         $redirect_long:literal, $redirect_env:literal,
@@ -60,7 +60,9 @@ macro_rules! oidc_provider_config {
                 arg(id = $redirect_long, long = $redirect_long, env = $redirect_env)
             )]
             pub redirect_uri: Option<String>,
-            /// OIDC issuer URL (for discovery). Defaults per provider when unset.
+            /// OIDC issuer URL (for discovery). Falls back to the provider's
+            /// default issuer when unset; a provider with no default (e.g.
+            /// Microsoft) requires this to be set explicitly.
             #[cfg_attr(
                 feature = "cli",
                 arg(id = $issuer_long, long = $issuer_long, env = $issuer_env)
@@ -69,13 +71,16 @@ macro_rules! oidc_provider_config {
         }
 
         impl $name {
-            /// The default issuer used when [`issuer`](Self::issuer) is unset.
-            pub const DEFAULT_ISSUER: &'static str = $default_issuer;
+            /// The default issuer used when [`issuer`](Self::issuer) is unset, or
+            /// `None` when the provider has no safe default and requires an
+            /// explicit issuer.
+            pub const DEFAULT_ISSUER: Option<&'static str> = $default_issuer;
 
             /// Resolves to a [`ResolvedOidcProvider`], present only when the client
-            /// id, secret, and redirect URI are all set to non-empty values. A
-            /// blank value (e.g. a bare `GOOGLE_CLIENT_ID=` line) counts as unset.
-            /// The issuer falls back to [`DEFAULT_ISSUER`](Self::DEFAULT_ISSUER).
+            /// id, secret, and redirect URI are all set to non-empty values *and*
+            /// an issuer is available (either supplied or via
+            /// [`DEFAULT_ISSUER`](Self::DEFAULT_ISSUER)). A blank value (e.g. a
+            /// bare `GOOGLE_CLIENT_ID=` line) counts as unset.
             fn resolve(&self) -> Option<ResolvedOidcProvider> {
                 let non_empty = |value: &Option<String>| {
                     value
@@ -90,7 +95,7 @@ macro_rules! oidc_provider_config {
                     client_secret: non_empty(&self.client_secret)?,
                     redirect_uri: non_empty(&self.redirect_uri)?,
                     issuer: non_empty(&self.issuer)
-                        .unwrap_or_else(|| Self::DEFAULT_ISSUER.to_owned()),
+                        .or_else(|| Self::DEFAULT_ISSUER.map(str::to_owned))?,
                 })
             }
         }
@@ -101,7 +106,7 @@ oidc_provider_config!(
     /// Google sign-in credentials.
     GoogleOidcConfig,
     provider = IdentityProvider::Google,
-    default_issuer = "https://accounts.google.com",
+    default_issuer = Some("https://accounts.google.com"),
     "google-client-id",
     "GOOGLE_CLIENT_ID",
     "google-client-secret",
@@ -115,13 +120,16 @@ oidc_provider_config!(
 oidc_provider_config!(
     /// Microsoft (Entra) sign-in credentials.
     ///
-    /// The default issuer is the multi-tenant `common` endpoint, which admits any
-    /// Microsoft work, school, or personal account. A single-organization
-    /// deployment can pin its tenant by setting the issuer to
-    /// `https://login.microsoftonline.com/{tenant-id}/v2.0`.
+    /// Microsoft has **no default issuer** and must be pinned to a single tenant:
+    /// `https://login.microsoftonline.com/{tenant-id}/v2.0`. The multi-tenant
+    /// `common` endpoint is deliberately not a default: its discovery issuer is a
+    /// `{tenantid}` template, not the concrete `iss` Entra stamps into the token
+    /// (the signer's own tenant), so standard `iss` validation cannot be met with
+    /// it; it also admits any tenant and personal accounts, which a deployment
+    /// should opt into explicitly rather than inherit.
     MicrosoftOidcConfig,
     provider = IdentityProvider::Microsoft,
-    default_issuer = "https://login.microsoftonline.com/common/v2.0",
+    default_issuer = None,
     "microsoft-client-id",
     "MICROSOFT_CLIENT_ID",
     "microsoft-client-secret",
@@ -175,14 +183,29 @@ impl OidcConfig {
             .collect()
     }
 
-    /// The configured allowed redirect origins, trimmed and lowercased, with
-    /// blanks dropped.
+    /// The configured allowed redirect origins, canonicalized to the exact form
+    /// [`is_redirect_allowed`] compares against: each entry is parsed as a URL and
+    /// reduced to its tuple origin's ASCII serialization (`scheme://host[:port]`,
+    /// default ports dropped). Blank, unparseable, or opaque-origin entries are
+    /// dropped, since none could ever match a real redirect.
+    ///
+    /// Canonicalizing here (not just lowercasing) means an operator can configure
+    /// `https://App.Example.com:443/` and it still matches a redirect to
+    /// `https://app.example.com` — otherwise the trailing slash or explicit
+    /// default port would make the allow-list silently never match.
+    ///
+    /// [`is_redirect_allowed`]: super::OidcService::is_redirect_allowed
     #[must_use]
     pub fn allowed_redirect_origins(&self) -> Vec<String> {
         self.allowed_redirect_origins
             .iter()
-            .map(|origin| origin.trim().to_ascii_lowercase())
-            .filter(|origin| !origin.is_empty())
+            .filter_map(|origin| {
+                let url = url::Url::parse(origin.trim()).ok()?;
+                let origin = url.origin();
+                origin
+                    .is_tuple()
+                    .then(|| origin.ascii_serialization().to_ascii_lowercase())
+            })
             .collect()
     }
 }
@@ -214,7 +237,33 @@ mod tests {
         let resolved = config.resolved_providers();
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].provider, IdentityProvider::Google);
-        assert_eq!(resolved[0].issuer, GoogleOidcConfig::DEFAULT_ISSUER);
+        assert_eq!(
+            Some(resolved[0].issuer.as_str()),
+            GoogleOidcConfig::DEFAULT_ISSUER
+        );
+    }
+
+    #[test]
+    fn microsoft_requires_an_explicit_issuer() {
+        // No default issuer: fully credentialed but no issuer -> unconfigured.
+        let without_issuer = MicrosoftOidcConfig {
+            client_id: Some("id".to_owned()),
+            client_secret: Some("secret".to_owned()),
+            redirect_uri: Some("https://app/auth/microsoft/callback".to_owned()),
+            issuer: None,
+        };
+        assert!(without_issuer.resolve().is_none());
+
+        // Pinned to a concrete tenant -> resolves with that issuer.
+        let with_issuer = MicrosoftOidcConfig {
+            issuer: Some("https://login.microsoftonline.com/tenant-123/v2.0".to_owned()),
+            ..without_issuer
+        };
+        let resolved = with_issuer.resolve().expect("configured");
+        assert_eq!(
+            resolved.issuer,
+            "https://login.microsoftonline.com/tenant-123/v2.0"
+        );
     }
 
     #[test]
@@ -229,6 +278,32 @@ mod tests {
         assert_eq!(
             resolved.issuer,
             "https://login.microsoftonline.com/tenant-123/v2.0"
+        );
+    }
+
+    #[test]
+    fn allowed_origins_canonicalize_to_the_match_form() {
+        let config = OidcConfig {
+            allowed_redirect_origins: vec![
+                // Mixed case, explicit default port, trailing path -> all reduce
+                // to the same canonical origin.
+                "https://App.Example.com:443/".to_owned(),
+                // A non-default port is preserved.
+                " http://localhost:3000 ".to_owned(),
+                // Blank and unparseable entries are dropped.
+                "   ".to_owned(),
+                "not a url".to_owned(),
+            ],
+            ..Default::default()
+        };
+
+        let origins = config.allowed_redirect_origins();
+        assert_eq!(
+            origins,
+            vec![
+                "https://app.example.com".to_owned(),
+                "http://localhost:3000".to_owned(),
+            ]
         );
     }
 }

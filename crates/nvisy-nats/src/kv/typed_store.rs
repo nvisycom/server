@@ -176,6 +176,8 @@ impl<B: KvBucket> KvStore<B> {
     /// a replay window.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
     pub async fn take(&self, key: &B::Key) -> Result<Option<B::Value>> {
+        use async_nats::jetstream::kv::PurgeErrorKind;
+
         let Some(entry) = self.get(key).await? else {
             return Ok(None);
         };
@@ -187,8 +189,11 @@ impl<B: KvBucket> KvStore<B> {
         {
             Ok(()) => Ok(Some(entry.value)),
             // A concurrent caller consumed it first (the revision moved), so this
-            // caller loses the race and sees nothing to consume.
-            Err(err) => {
+            // caller loses the race and sees nothing to consume. Only a revision
+            // mismatch means "lost the race"; any other failure (network, ack,
+            // publish) is a real error and must propagate — masking it as `None`
+            // would silently leave a single-use token unconsumed and replayable.
+            Err(err) if err.kind() == PurgeErrorKind::WrongLastRevision => {
                 tracing::debug!(
                     target: TRACING_TARGET_KV,
                     key = %key_str,
@@ -197,6 +202,7 @@ impl<B: KvBucket> KvStore<B> {
                 );
                 Ok(None)
             }
+            Err(err) => Err(Error::operation("kv_take", err.to_string())),
         }
     }
 

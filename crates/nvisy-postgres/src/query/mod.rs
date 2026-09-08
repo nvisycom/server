@@ -40,7 +40,7 @@ mod workspace_webhook;
 
 pub use account::AccountRepository;
 pub use account_api_token::AccountApiTokenRepository;
-pub use account_identity::{AccountIdentityRepository, DeleteIdentityOutcome};
+pub use account_identity::{AccountIdentityRepository, DeleteIdentityOutcome, LinkIdentityOutcome};
 pub use account_notification::AccountNotificationRepository;
 pub use analytics::{
     AnalyticsSnapshot, DetectionDayPoint, DetectionDurations, DetectionStatusCount, StorageByKind,

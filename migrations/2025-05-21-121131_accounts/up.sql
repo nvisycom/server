@@ -130,8 +130,10 @@ CREATE TABLE account_identities (
     secret                TEXT           DEFAULT NULL,
 
     -- For an OIDC identity: the provider's stable subject (`sub`) claim, not the
-    -- email (an address can be reassigned within a directory, `sub` cannot). NULL
-    -- for a password identity.
+    -- email (an address can be reassigned within a directory, `sub` cannot). Each
+    -- provider is pinned to a single issuer (Google's, or one Microsoft tenant),
+    -- so `(provider, provider_subject)` is unique on its own. NULL for a password
+    -- identity.
     provider_subject      TEXT           DEFAULT NULL,
 
     -- The email the provider asserted at link time (OIDC), or NULL for a password
@@ -147,11 +149,17 @@ CREATE TABLE account_identities (
     -- carries a subject and no secret. The provider discriminates the two shapes.
     CONSTRAINT account_identities_password_shape CHECK (
         provider <> 'password'
-        OR (secret IS NOT NULL AND length(secret) >= 60 AND provider_subject IS NULL)
+        OR (
+            secret IS NOT NULL AND length(secret) >= 60
+            AND provider_subject IS NULL
+        )
     ),
     CONSTRAINT account_identities_oidc_shape CHECK (
         provider = 'password'
-        OR (provider_subject IS NOT NULL AND provider_subject <> '' AND secret IS NULL)
+        OR (
+            provider_subject IS NOT NULL AND provider_subject <> ''
+            AND secret IS NULL
+        )
     ),
     CONSTRAINT account_identities_updated_after_created CHECK (updated_at >= created_at)
 );
@@ -163,9 +171,10 @@ SELECT setup_updated_at('account_identities');
 CREATE UNIQUE INDEX account_identities_account_provider_unique_idx
     ON account_identities (account_id, provider);
 
--- A provider subject maps to exactly one identity, so a returning OIDC user is
--- resolved by (provider, subject). Password identities carry no subject and are
--- excluded.
+-- A (provider, subject) pair maps to exactly one identity, so a returning OIDC
+-- user is resolved by it. Each provider is pinned to a single issuer, so the
+-- subject is unique within the provider. Password identities carry no subject and
+-- are excluded.
 CREATE UNIQUE INDEX account_identities_provider_subject_unique_idx
     ON account_identities (provider, provider_subject)
     WHERE provider_subject IS NOT NULL;

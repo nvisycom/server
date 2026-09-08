@@ -34,7 +34,7 @@ use aide::axum::routing::get_with;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::Redirect;
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum_extra::headers::UserAgent;
 use jiff::{Span, Timestamp};
@@ -45,9 +45,9 @@ use nvisy_nats::kv::{
 };
 use nvisy_postgres::model::{Account, NewAccount, NewAccountApiToken, NewAccountIdentity};
 use nvisy_postgres::query::{
-    AccountApiTokenRepository, AccountIdentityRepository, AccountRepository,
+    AccountApiTokenRepository, AccountIdentityRepository, AccountRepository, LinkIdentityOutcome,
 };
-use nvisy_postgres::types::{ApiTokenType, Handle, IdentityProvider};
+use nvisy_postgres::types::{ApiTokenType, HANDLE_MAX_LENGTH, Handle, IdentityProvider};
 use nvisy_postgres::{AsyncConnection, Error as PgError, PgClient, PgConn};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -368,7 +368,7 @@ async fn oidc_callback(
     State(ua_parser): State<UserAgentParser>,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     Query(query): Query<OidcCallbackQuery>,
-) -> Redirect {
+) -> Response {
     tracing::debug!(target: TRACING_TARGET, "Completing OIDC callback");
 
     let user_agent = user_agent.to_string();
@@ -424,8 +424,8 @@ impl CallbackOutcome {
         }
     }
 
-    /// Builds the browser redirect back to the frontend for this outcome.
-    fn into_redirect(self, redirect_uri: Option<&str>) -> Redirect {
+    /// Builds the browser response returning to the frontend for this outcome.
+    fn into_redirect(self, redirect_uri: Option<&str>) -> Response {
         match self {
             Self::SignedIn { api_token } => redirect_to_frontend(
                 redirect_uri,
@@ -586,6 +586,19 @@ async fn mint_reauth_proof(nats: &NatsClient, account_id: Uuid) -> Result<String
 /// Linking requires a verified email: an unverified address could be one the
 /// signer does not control, so linking on it would let an attacker attach their
 /// provider identity to someone else's account.
+/// Links an OIDC identity to an existing account, mapping the repository's
+/// race-tolerant [`LinkIdentityOutcome`] to the handler result: a successful or
+/// already-present link is `Ok`, and a provider slot already taken by a
+/// *different* account is a clean 409 rather than a 500.
+async fn link_oidc_identity(conn: &mut PgConn, identity: NewAccountIdentity) -> Result<()> {
+    match conn.link_oidc_identity(identity).await? {
+        LinkIdentityOutcome::Linked | LinkIdentityOutcome::AlreadyLinked => Ok(()),
+        LinkIdentityOutcome::ProviderConflict => Err(ErrorKind::Conflict
+            .with_message("An account already uses a different provider account")
+            .with_resource("account_identity")),
+    }
+}
+
 async fn resolve_account(
     conn: &mut PgConn,
     provider: IdentityProvider,
@@ -650,12 +663,10 @@ async fn resolve_account(
                 .with_resource("account"));
         }
 
-        conn.create_account_identity(NewAccountIdentity::oidc(
-            account.id,
-            provider,
-            identity.subject,
-            Some(email),
-        ))
+        link_oidc_identity(
+            conn,
+            NewAccountIdentity::oidc(account.id, provider, identity.subject, Some(email)),
+        )
         .await?;
         tracing::info!(
             target: TRACING_TARGET,
@@ -668,6 +679,24 @@ async fn resolve_account(
 
     // 3. Provision a new account and its OIDC identity together, so an account
     // never exists without a way to authenticate.
+    //
+    // Only provision on a verified email: the address becomes the new account's
+    // primary (and its future match key for step 2), so an unverified one could
+    // seed an account under an address the signer does not control.
+    if !identity.email_verified {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            provider = ?provider,
+            "Refusing to provision account: provider did not verify the email",
+        );
+        return Err(ErrorKind::BadRequest
+            .with_message(
+                "Sign-in provider did not verify your email address; verify it with the \
+                 provider and try again",
+            )
+            .with_resource("account"));
+    }
+
     let username = derive_unique_username(conn, &email).await?;
     let new_account = NewAccount {
         username,
@@ -734,12 +763,10 @@ async fn link_account(
             .with_resource("account_identity"));
     }
 
-    conn.create_account_identity(NewAccountIdentity::oidc(
-        account_id,
-        provider,
-        identity.subject,
-        identity.email,
-    ))
+    link_oidc_identity(
+        conn,
+        NewAccountIdentity::oidc(account_id, provider, identity.subject, identity.email),
+    )
     .await?;
     tracing::info!(
         target: TRACING_TARGET,
@@ -776,10 +803,17 @@ async fn derive_unique_username(conn: &mut PgConn, email: &str) -> Result<Handle
     if !conn.username_exists(&base).await? {
         return Ok(base);
     }
+    // Widest suffix this loop can append, so we reserve room for the largest
+    // `-{suffix}` up front. Without this, a `base` already at the length limit
+    // would have its suffix truncated straight back off, and every candidate
+    // would collapse to `base` and collide forever.
+    let widest_suffix = MAX_USERNAME_ATTEMPTS.to_string().len();
+    let reserved = HANDLE_MAX_LENGTH.saturating_sub(1 + widest_suffix);
+    let stem = truncate_on_char_boundary(base.as_str(), reserved);
     for suffix in 1..=MAX_USERNAME_ATTEMPTS {
-        // Truncate the base so the suffix keeps the handle within the length
-        // bound, then re-derive to re-validate the combined form.
-        let candidate_text = format!("{}-{suffix}", base.as_str());
+        // The stem already leaves room for the separator and suffix, so the
+        // re-derive validates the combined form without truncating the suffix away.
+        let candidate_text = format!("{stem}-{suffix}");
         if let Some(candidate) = Handle::derive(&candidate_text)
             && !conn.username_exists(&candidate).await?
         {
@@ -790,6 +824,19 @@ async fn derive_unique_username(conn: &mut PgConn, email: &str) -> Result<Handle
     Err(ErrorKind::InternalServerError
         .with_message("Could not allocate a username for the new account")
         .with_resource("account"))
+}
+
+/// Truncates `value` to at most `max` bytes without splitting a UTF-8 character.
+/// A derived [`Handle`] is ASCII, so `max` bytes equal `max` characters here.
+fn truncate_on_char_boundary(value: &str, max: usize) -> &str {
+    if value.len() <= max {
+        return value;
+    }
+    let mut end = max;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
 }
 
 /// The outcome conveyed to the frontend by the callback redirect.
@@ -803,45 +850,49 @@ enum RedirectResult<'a> {
     Token { name: &'a str, value: &'a str },
 }
 
-/// Redirects the browser back to the frontend with the callback outcome.
+/// Returns the browser to the frontend with the callback outcome.
 ///
 /// The `signin=success|error` status goes in the query string. A token (the
 /// session token, or a reauth proof) instead goes in the URL **fragment**
 /// (`#{name}={value}`): a fragment is not sent in the `Referer` header, not
 /// shared when the URL is copied to logs or history sync, and stays client-side
 /// for the frontend's script to read — so a bearer credential never rides in a
-/// place that leaks it. Falls back to a self-describing data page when no
-/// frontend URL is configured. `base` is only ever an allow-listed origin (the
-/// redirect target is validated when the flow starts).
-fn redirect_to_frontend(base: Option<&str>, result: RedirectResult<'_>) -> Redirect {
+/// place that leaks it.
+///
+/// `base` is only ever an allow-listed origin (the redirect target is validated
+/// when the flow starts). When no frontend URL is configured, or the configured
+/// one somehow fails to parse, this renders a minimal self-describing page
+/// instead of redirecting: a `data:` URL cannot be used, since browsers block
+/// top-level navigation to it, and a token must never be placed in one regardless.
+fn redirect_to_frontend(base: Option<&str>, result: RedirectResult<'_>) -> Response {
     let (status, token) = match result {
         RedirectResult::Success => ("success", None),
         RedirectResult::Error => ("error", None),
         RedirectResult::Token { name, value } => ("success", Some((name, value))),
     };
 
-    match base {
-        Some(base) => {
-            let separator = if base.contains('?') { '&' } else { '?' };
-            let mut url = format!("{base}{separator}signin={status}");
-            if let Some((name, value)) = token {
-                // The token goes in the fragment, never the query, so it is not
-                // leaked via Referer, history, or logs.
-                url.push('#');
-                url.push_str(name);
-                url.push('=');
-                url.push_str(&utf8_percent_encode(value));
-            }
-            Redirect::to(&url)
+    // Build the redirect target through the URL parser so the query and fragment
+    // are assembled and encoded correctly, rather than by string concatenation
+    // that could mishandle an existing query or fragment on the base.
+    if let Some(base) = base
+        && let Ok(mut url) = url::Url::parse(base)
+    {
+        url.query_pairs_mut().append_pair("signin", status);
+        match token {
+            // The token goes in the fragment, never the query, so it is not
+            // leaked via Referer, history, or logs. `Url` percent-encodes the
+            // fragment it is given.
+            Some((name, value)) => url.set_fragment(Some(&format!("{name}={value}"))),
+            None => url.set_fragment(None),
         }
-        None => Redirect::to(&format!("data:text/plain,sign-in%20{status}")),
+        return Redirect::to(url.as_str()).into_response();
     }
-}
 
-/// Percent-encodes a token for safe inclusion in a redirect URL fragment.
-fn utf8_percent_encode(value: &str) -> String {
-    use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode as encode};
-    encode(value, NON_ALPHANUMERIC).to_string()
+    // No usable frontend origin: render a minimal in-page result. Never a token —
+    // the only outcomes reaching here carry none, since a token flow requires an
+    // allow-listed redirect to have been validated at start.
+    let body = format!("Sign-in {status}. You can close this window.");
+    (StatusCode::OK, body).into_response()
 }
 
 /// Returns the public OIDC sign-in routes.

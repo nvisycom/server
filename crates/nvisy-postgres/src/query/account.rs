@@ -227,15 +227,39 @@ impl AccountRepository for PgConnection {
 
     async fn delete_account(&mut self, account_id: Uuid) -> Result<Option<Account>> {
         use diesel::dsl::now;
-        use schema::accounts::{self, dsl};
 
-        diesel::update(accounts::table.filter(dsl::id.eq(account_id)))
-            .set(dsl::deleted_at.eq(now))
-            .returning(Account::as_returning())
-            .get_result(self)
-            .await
-            .optional()
-            .map_err(Error::from)
+        use crate::AsyncConnection;
+
+        // Soft-delete the account and hard-delete its identities together. The
+        // account is only tombstoned (its row is retained), so the FK's
+        // ON DELETE CASCADE never fires; removing the identities explicitly frees
+        // their credentials — a dead account should hold none — and releases the
+        // `(provider, issuer, subject)` uniqueness so the person can sign up again
+        // with the same provider.
+        self.transaction(async |conn| {
+            use schema::{account_identities, accounts};
+
+            let account = diesel::update(accounts::table.filter(accounts::id.eq(account_id)))
+                .set(accounts::deleted_at.eq(now))
+                .returning(Account::as_returning())
+                .get_result(conn)
+                .await
+                .optional()
+                .map_err(Error::from)?;
+
+            // Only clear identities when an account was actually tombstoned.
+            if account.is_some() {
+                diesel::delete(
+                    account_identities::table.filter(account_identities::account_id.eq(account_id)),
+                )
+                .execute(conn)
+                .await
+                .map_err(Error::from)?;
+            }
+
+            Ok::<_, Error>(account)
+        })
+        .await
     }
 
     async fn verify_account(&mut self, account_id: Uuid) -> Result<Account> {

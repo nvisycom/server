@@ -15,6 +15,9 @@
 //! a sign-in is infrequent relative to the discovery cost, and re-discovering
 //! avoids serving a stale signing-key set after a provider rotates keys.
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use nvisy_postgres::types::IdentityProvider;
 use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetadata};
 use openidconnect::{
@@ -77,6 +80,8 @@ pub struct OidcAuthorization {
 /// The verified result of a completed OIDC sign-in.
 pub struct OidcIdentity {
     /// The provider's stable subject (`sub`) claim — the identity's durable key.
+    /// Each provider is pinned to a single issuer, so the subject is unique within
+    /// the provider.
     pub subject: String,
     /// The email the provider asserted, if any (and if the scope was granted).
     pub email: Option<String>,
@@ -99,6 +104,11 @@ type DiscoveredClient = CoreClient<
     EndpointMaybeSet,
 >;
 
+/// How long to wait to establish a TCP connection to a provider endpoint.
+const OIDC_HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Overall deadline for a single provider HTTP call (discovery, token exchange).
+const OIDC_HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// Runs OIDC sign-ins for the deployment's configured providers.
 ///
 /// Cheaply cloneable: it holds a shared `reqwest` client and the (small) set of
@@ -106,11 +116,11 @@ type DiscoveredClient = CoreClient<
 #[derive(Clone)]
 pub struct OidcService {
     http: reqwest::Client,
-    providers: std::sync::Arc<Vec<OidcProvider>>,
+    providers: Arc<Vec<OidcProvider>>,
     /// Frontend origins (`scheme://host[:port]`) the sign-in callback may redirect
     /// to. A caller-supplied redirect must match one of these, or it is refused —
     /// so the flow's minted session token cannot be sent to an attacker host.
-    allowed_redirect_origins: std::sync::Arc<Vec<String>>,
+    allowed_redirect_origins: Arc<Vec<String>>,
 }
 
 impl OidcService {
@@ -126,8 +136,13 @@ impl OidcService {
     /// Returns an error if the HTTP client cannot be built or a configured
     /// provider has an invalid issuer or redirect URI.
     pub fn from_config(config: &OidcConfig) -> Result<Self, OidcError> {
+        // Bound the outbound calls to the provider (discovery, token exchange):
+        // an unresponsive or slow provider must not pin a request handler open
+        // indefinitely.
         let http = reqwest::ClientBuilder::new()
             .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(OIDC_HTTP_CONNECT_TIMEOUT)
+            .timeout(OIDC_HTTP_REQUEST_TIMEOUT)
             .build()
             .map_err(|e| OidcError::config("failed to build OIDC HTTP client", e))?;
 
@@ -139,8 +154,8 @@ impl OidcService {
 
         Ok(Self {
             http,
-            providers: std::sync::Arc::new(providers),
-            allowed_redirect_origins: std::sync::Arc::new(config.allowed_redirect_origins()),
+            providers: Arc::new(providers),
+            allowed_redirect_origins: Arc::new(config.allowed_redirect_origins()),
         })
     }
 
@@ -274,10 +289,8 @@ mod tests {
     fn service_with_origins(origins: &[&str]) -> OidcService {
         OidcService {
             http: reqwest::Client::new(),
-            providers: std::sync::Arc::new(Vec::new()),
-            allowed_redirect_origins: std::sync::Arc::new(
-                origins.iter().map(|o| o.to_string()).collect(),
-            ),
+            providers: Arc::new(Vec::new()),
+            allowed_redirect_origins: Arc::new(origins.iter().map(|o| o.to_string()).collect()),
         }
     }
 

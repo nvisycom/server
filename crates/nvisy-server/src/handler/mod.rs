@@ -76,6 +76,7 @@ async fn handler(method: Method, uri: Uri) -> Response {
 /// built-in router is erased to the caller's state type.
 fn private_routes(
     excluded: &HashSet<BuiltinModule>,
+    disable_authentication: bool,
     service_state: ServiceState,
 ) -> ApiRouter<ServiceState> {
     let mut router = ApiRouter::new();
@@ -95,7 +96,6 @@ fn private_routes(
         .merge(members::routes())
         .merge(connections::routes())
         .merge(connection_oauth::private_routes())
-        .merge(auth_oidc::private_routes())
         .merge(chat::routes())
         .merge(connection_syncs::routes())
         .merge(files::routes(service_state.upload.max_file_body_bytes))
@@ -118,6 +118,14 @@ fn private_routes(
     }
     if is_included(BuiltinModule::Webhooks) {
         router = router.merge(webhooks::routes());
+    }
+
+    // OIDC step-up re-authentication lives under the same gate as the OIDC public
+    // routes it depends on: reauth only completes through the shared public
+    // callback, so if authentication is disabled (its public routes gone), this
+    // private route must not be left mounted as a dead end.
+    if !disable_authentication && is_included(BuiltinModule::Authentication) {
+        router = router.merge(auth_oidc::private_routes());
     }
 
     router
@@ -187,7 +195,11 @@ where
     // downstream's private routes. The auth `route_layer`s are applied to the
     // *combined* router, so custom private routes are authenticated too — a
     // `route_layer` only covers routes already present when it runs.
-    let mut private_router = private_routes(&excluded, service_state.clone());
+    let mut private_router = private_routes(
+        &excluded,
+        routes.disable_authentication,
+        service_state.clone(),
+    );
     private_router = routes.map_private_before_middleware(private_router);
     private_router = routes.map_private_after_middleware(private_router);
     let mut private_router: ApiRouter<S> = private_router.with_state(service_state.clone());

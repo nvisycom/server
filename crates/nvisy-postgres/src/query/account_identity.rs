@@ -33,7 +33,8 @@ pub trait AccountIdentityRepository {
     ) -> impl Future<Output = Result<Option<AccountIdentity>>> + Send;
 
     /// Finds the identity a returning OIDC user resolves to, by the provider and
-    /// its stable subject (`sub`) claim.
+    /// its stable subject (`sub`) claim. Each provider is pinned to a single
+    /// issuer, so the subject is unique within the provider.
     fn find_identity_by_subject(
         &mut self,
         provider: IdentityProvider,
@@ -57,6 +58,27 @@ pub trait AccountIdentityRepository {
         secret: String,
     ) -> impl Future<Output = Result<AccountIdentity>> + Send;
 
+    /// Links an OIDC identity to an account, tolerating a concurrent link of the
+    /// *same* provider account.
+    ///
+    /// A caller checks that the account has no identity for this provider before
+    /// linking, but a concurrent callback for the same person can slip an insert
+    /// into that window and trip the `(account_id, provider)` uniqueness. Rather
+    /// than surface that race as an error, this resolves it by what actually
+    /// landed: the same subject means the link is already done ([`AlreadyLinked`]);
+    /// a *different* provider account means the slot is taken ([`ProviderConflict`]).
+    ///
+    /// The `identity` must be an OIDC identity (its `provider_subject` set); a
+    /// password identity is a caller bug and yields [`ProviderConflict`] rather
+    /// than matching.
+    ///
+    /// [`AlreadyLinked`]: LinkIdentityOutcome::AlreadyLinked
+    /// [`ProviderConflict`]: LinkIdentityOutcome::ProviderConflict
+    fn link_oidc_identity(
+        &mut self,
+        identity: NewAccountIdentity,
+    ) -> impl Future<Output = Result<LinkIdentityOutcome>> + Send;
+
     /// Deletes an account's identity for `provider`, but only while it is not the
     /// account's *last* identity — an account must always keep at least one way
     /// to authenticate. The guard is applied in the same statement (a delete
@@ -69,6 +91,20 @@ pub trait AccountIdentityRepository {
         account_id: Uuid,
         provider: IdentityProvider,
     ) -> impl Future<Output = Result<DeleteIdentityOutcome>> + Send;
+}
+
+/// The result of a [`link_oidc_identity`](AccountIdentityRepository::link_oidc_identity)
+/// call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkIdentityOutcome {
+    /// The identity was linked by this call.
+    Linked,
+    /// The account already had this exact identity (same subject), so the link is
+    /// a no-op — a concurrent callback did it first.
+    AlreadyLinked,
+    /// The account already has a *different* identity for this provider; the slot
+    /// is taken and the caller should treat it as a conflict.
+    ProviderConflict,
 }
 
 /// The result of a [`delete_account_identity`](AccountIdentityRepository::delete_account_identity)
@@ -114,6 +150,45 @@ impl AccountIdentityRepository for PgConnection {
             .await
             .optional()
             .map_err(Error::from)
+    }
+
+    async fn link_oidc_identity(
+        &mut self,
+        identity: NewAccountIdentity,
+    ) -> Result<LinkIdentityOutcome> {
+        use crate::types::{AccountIdentityConstraints, ConstraintViolation};
+
+        let account_id = identity.account_id;
+        let provider = identity.provider;
+        let subject = identity.provider_subject.clone();
+
+        match self.create_account_identity(identity).await {
+            Ok(_) => Ok(LinkIdentityOutcome::Linked),
+            // A concurrent callback won the `(account_id, provider)` slot. Whether
+            // that is benign depends on what it linked, so read the winning row
+            // back and compare.
+            Err(err)
+                if matches!(
+                    err.constraint_violation(),
+                    Some(ConstraintViolation::AccountIdentity(
+                        AccountIdentityConstraints::AccountProviderUnique
+                    ))
+                ) =>
+            {
+                let existing = self.find_account_identity(account_id, provider).await?;
+                let same = existing.is_some_and(|row| {
+                    // Only an OIDC identity can match; a password row (subject
+                    // `None`) never equals a link attempt.
+                    row.provider_subject.is_some() && row.provider_subject == subject
+                });
+                Ok(if same {
+                    LinkIdentityOutcome::AlreadyLinked
+                } else {
+                    LinkIdentityOutcome::ProviderConflict
+                })
+            }
+            Err(err) => Err(err),
+        }
     }
 
     async fn find_identity_by_subject(
