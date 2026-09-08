@@ -22,6 +22,10 @@ pub mod sql_types {
     pub struct FileKind;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "identity_provider"))]
+    pub struct IdentityProvider;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "invite_status"))]
     pub struct InviteStatus;
 
@@ -95,6 +99,22 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+    use super::sql_types::IdentityProvider;
+
+    account_identities (id) {
+        id -> Uuid,
+        account_id -> Uuid,
+        provider -> IdentityProvider,
+        secret -> Nullable<Text>,
+        provider_subject -> Nullable<Text>,
+        provider_email -> Nullable<Text>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
     use super::sql_types::NotificationEvent;
 
     account_notifications (id) {
@@ -119,7 +139,6 @@ diesel::table! {
         username -> Text,
         display_name -> Nullable<Text>,
         email_address -> Text,
-        password_hash -> Text,
         avatar_url -> Nullable<Text>,
         timezone -> Text,
         locale -> Text,
@@ -494,6 +513,7 @@ diesel::table! {
 }
 
 diesel::joinable!(account_api_tokens -> accounts (account_id));
+diesel::joinable!(account_identities -> accounts (account_id));
 diesel::joinable!(account_notifications -> accounts (account_id));
 diesel::joinable!(chat_sessions -> accounts (account_id));
 diesel::joinable!(chat_sessions -> workspaces (workspace_id));
@@ -531,6 +551,7 @@ diesel::joinable!(workspaces -> accounts (created_by));
 
 diesel::allow_tables_to_appear_in_same_query!(
     account_api_tokens,
+    account_identities,
     account_notifications,
     accounts,
     chat_messages,

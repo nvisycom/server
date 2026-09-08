@@ -6,6 +6,7 @@
 
 // Account-related enumerations
 pub mod api_token_type;
+pub mod identity_provider;
 pub mod notification_event;
 pub mod outbox_status;
 
@@ -39,6 +40,7 @@ pub use api_token_type::ApiTokenType;
 pub use chat_role::ChatRole;
 pub use detection_status::DetectionStatus;
 pub use file_kind::FileKind;
+pub use identity_provider::IdentityProvider;
 pub use invite_status::InviteStatus;
 pub use notification_event::NotificationEvent;
 pub use outbox_status::OutboxStatus;

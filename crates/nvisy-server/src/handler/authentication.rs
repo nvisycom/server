@@ -10,10 +10,14 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum_extra::headers::UserAgent;
 use jiff::{Span, Timestamp};
-use nvisy_postgres::model::{Account, AccountApiToken, NewAccount, NewAccountApiToken};
-use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
-use nvisy_postgres::types::{ApiTokenType, HasDeletedAt};
-use nvisy_postgres::{JiffTimestamp, PgClient};
+use nvisy_postgres::model::{
+    Account, AccountApiToken, NewAccount, NewAccountApiToken, NewAccountIdentity,
+};
+use nvisy_postgres::query::{
+    AccountApiTokenRepository, AccountIdentityRepository, AccountRepository,
+};
+use nvisy_postgres::types::{ApiTokenType, HasDeletedAt, IdentityProvider};
+use nvisy_postgres::{AsyncConnection, Error as PgError, JiffTimestamp, PgClient};
 
 use super::request::{Login, Signup};
 use super::response::{AuthToken, ErrorResponse};
@@ -29,7 +33,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
 const TRACING_TARGET_CLEANUP: &str = "nvisy_server::handler::authentication::cleanup";
 
 /// Creates a new authentication header.
-fn create_auth_header(
+pub(crate) fn create_auth_header(
     auth_secret_keys: SessionKeys,
     account_model: &Account,
     account_api_token: &AccountApiToken,
@@ -54,16 +58,21 @@ async fn login(
     let mut conn = pg_client.get_connection().await?;
     let account = conn.find_account_by_identifier(&request.identifier).await?;
 
-    // Always perform password hashing to prevent timing attacks
-    let password_valid = match &account {
-        Some(acc) => password
-            .verify(&request.password, &acc.password_hash)
-            .is_ok(),
-        None => {
-            // Perform dummy hash verification to maintain consistent timing
-            // and prevent account enumeration via timing attacks
-            password.verify_dummy(&request.password)
-        }
+    // The password hash lives on the account's password identity, not the account.
+    // An account with no password identity (OIDC-only) cannot log in by password.
+    let password_secret = match &account {
+        Some(acc) => conn
+            .find_account_identity(acc.id, IdentityProvider::Password)
+            .await?
+            .and_then(|identity| identity.secret),
+        None => None,
+    };
+
+    // Always perform a hash verification (a dummy when there is no account or no
+    // password identity) to keep timing constant and prevent account enumeration.
+    let password_valid = match &password_secret {
+        Some(secret) => password.verify(&request.password, secret).is_ok(),
+        None => password.verify_dummy(&request.password),
     };
 
     // Check for login failures and return appropriate errors
@@ -173,13 +182,22 @@ async fn signup(
         username: request.username,
         display_name: request.display_name,
         email_address: request.email_address,
-        password_hash,
         avatar_url: None,
         timezone: None,
         locale: None,
     };
 
-    let account = conn.create_account(new_account).await?;
+    // Create the account and its password identity together: an account must
+    // never exist without a way to authenticate, and the password hash lives on
+    // the identity, not the account.
+    let account = conn
+        .transaction(async |conn| {
+            let account = conn.create_account(new_account).await?;
+            conn.create_account_identity(NewAccountIdentity::password(account.id, password_hash))
+                .await?;
+            Ok::<_, PgError>(account)
+        })
+        .await?;
 
     tracing::info!(
         target: TRACING_TARGET,

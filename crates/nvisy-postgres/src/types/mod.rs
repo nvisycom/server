@@ -13,19 +13,19 @@ mod utilities;
 
 pub use constants::{DEFAULT_RETENTION_DAYS, RECENTLY_SENT_HOURS};
 pub use constraint::{
-    AccountApiTokenConstraints, AccountConstraints, AccountNotificationConstraints,
-    ChatMessageConstraints, ChatSessionConstraints, ConstraintViolation,
-    WorkspaceActivitiesConstraints, WorkspaceConnectionConstraints,
+    AccountApiTokenConstraints, AccountConstraints, AccountIdentityConstraints,
+    AccountNotificationConstraints, ChatMessageConstraints, ChatSessionConstraints,
+    ConstraintViolation, WorkspaceActivitiesConstraints, WorkspaceConnectionConstraints,
     WorkspaceConnectionSyncConstraints, WorkspaceConstraints, WorkspaceDetectionConstraints,
     WorkspaceFileConstraints, WorkspaceInviteConstraints, WorkspaceMemberConstraints,
     WorkspacePipelineConstraints, WorkspacePipelineReferenceConstraints,
     WorkspacePolicyConstraints, WorkspaceWebhookConstraints,
 };
 pub use enums::{
-    ActivityType, ApiTokenType, ChatRole, DetectionStatus, FileKind, InviteStatus,
-    NotificationEvent, OutboxStatus, PipelineStatus, PipelineTriggerType, ProviderType,
-    SyncDeletionPolicy, SyncMode, SyncStatus, SyncTriggerType, WebhookEvent, WebhookStatus,
-    WorkspaceRole,
+    ActivityType, ApiTokenType, ChatRole, DetectionStatus, FileKind, IdentityProvider,
+    InviteStatus, NotificationEvent, OutboxStatus, PipelineStatus, PipelineTriggerType,
+    ProviderType, SyncDeletionPolicy, SyncMode, SyncStatus, SyncTriggerType, WebhookEvent,
+    WebhookStatus, WorkspaceRole,
 };
 pub use filtering::{DetectionFilter, FileFilter, InviteFilter, MemberFilter};
 pub use handle::{HANDLE_MAX_LENGTH, HANDLE_MIN_LENGTH, Handle, HandleError};

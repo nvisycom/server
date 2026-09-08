@@ -16,11 +16,15 @@
 
 mod core;
 mod oauth_bucket;
+mod oidc_bucket;
+mod reauth_bucket;
 mod scheduler_bucket;
 mod typed_store;
 
 pub use core::{KvBucket, KvKey};
 
 pub use oauth_bucket::{OAuthStateBucket, OAuthStateKey};
+pub use oidc_bucket::{OidcStateBucket, OidcStateKey};
+pub use reauth_bucket::{ReauthProofBucket, ReauthProofKey};
 pub use scheduler_bucket::{SchedulerLockKey, SchedulerLocksBucket};
 pub use typed_store::{KvEntry, KvStore, KvValue};

@@ -1,7 +1,8 @@
 //! Account-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    AccountApiTokenConstraints, AccountConstraints, AccountNotificationConstraints,
+    AccountApiTokenConstraints, AccountConstraints, AccountIdentityConstraints,
+    AccountNotificationConstraints,
 };
 
 use crate::handler::{Error, ErrorKind};
@@ -30,12 +31,6 @@ impl From<AccountConstraints> for Error<'static> {
             AccountConstraints::EmailLengthMax => {
                 ErrorKind::BadRequest.with_message("Email address is too long")
             }
-            AccountConstraints::PasswordHashNotEmpty => {
-                ErrorKind::BadRequest.with_message("Password cannot be empty")
-            }
-            AccountConstraints::PasswordHashLengthMin => {
-                ErrorKind::BadRequest.with_message("Password hash is too short")
-            }
             AccountConstraints::TimezoneFormat => {
                 ErrorKind::BadRequest.with_message("Invalid timezone format")
             }
@@ -48,6 +43,25 @@ impl From<AccountConstraints> for Error<'static> {
         };
 
         error.with_resource("account")
+    }
+}
+
+impl From<AccountIdentityConstraints> for Error<'static> {
+    fn from(c: AccountIdentityConstraints) -> Self {
+        let error = match c {
+            // The shape checks and uniqueness on identities guard invariants the
+            // handlers already enforce, so a violation is a server-side bug, not a
+            // client input error, except the subject collision below.
+            AccountIdentityConstraints::PasswordShape
+            | AccountIdentityConstraints::OidcShape
+            | AccountIdentityConstraints::AccountProviderUnique => {
+                ErrorKind::InternalServerError.into_error()
+            }
+            AccountIdentityConstraints::ProviderSubjectUnique => ErrorKind::Conflict
+                .with_message("This identity is already linked to another account"),
+        };
+
+        error.with_resource("account_identity")
     }
 }
 

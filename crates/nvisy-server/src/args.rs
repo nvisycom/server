@@ -17,8 +17,8 @@ use nvisy_webhook::WebhookService;
 use crate::Result;
 use crate::middleware::UploadConfig;
 use crate::service::{
-    CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig, IntegrationConfig, S3Config,
-    ServiceState, SessionKeysConfig,
+    CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig, IntegrationConfig, OidcConfig,
+    S3Config, ServiceState, SessionKeysConfig,
 };
 
 /// Tracing target for configuration echoes emitted by the config aggregates.
@@ -69,6 +69,10 @@ pub struct ServiceArgs {
     #[cfg_attr(feature = "cli", clap(flatten))]
     pub file_service: FileConnectorsConfig,
 
+    /// OIDC sign-in provider configuration (Google, Microsoft).
+    #[cfg_attr(feature = "cli", clap(flatten))]
+    pub oidc: OidcConfig,
+
     /// Request body size limits (server-wide hard caps).
     #[cfg_attr(feature = "cli", clap(flatten))]
     pub upload: UploadConfig,
@@ -116,6 +120,7 @@ impl ServiceState {
             args.health,
             args.integration,
             args.file_service,
+            args.oidc,
             webhook,
             args.upload,
             args.s3,

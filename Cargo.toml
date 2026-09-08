@@ -80,6 +80,9 @@ reqwest-tracing = { version = "0.7", features = [] }
 
 # OAuth2 (auth-code + refresh); no built-in HTTP client, driven via our reqwest
 oauth2 = { version = "5.0", default-features = false }
+# OIDC sign-in (discovery, JWKS, id_token validation); wraps oauth2 5.x. Uses its
+# bundled reqwest+rustls HTTP client for discovery/JWKS/token calls.
+openidconnect = { version = "4.0", default-features = false, features = ["reqwest", "rustls-tls"] }
 http = { version = "1.3", features = [] }
 
 # HTTP server & middleware

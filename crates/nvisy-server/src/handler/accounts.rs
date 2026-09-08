@@ -16,9 +16,8 @@ use uuid::Uuid;
 use super::request::{AccountPathParams, UpdateAccount};
 use super::response::{Account, ErrorResponse, PublicAccount};
 use crate::extract::{AuthState, Avatar, Json, Path, ValidateJson};
-use crate::handler::utility::build_password_user_inputs;
 use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, PasswordService, ServiceState};
+use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState};
 
 /// Tracing target for account operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::accounts";
@@ -116,51 +115,12 @@ fn get_account_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_own_account(
     State(pg_client): State<PgClient>,
-    State(password): State<PasswordService>,
     AuthState(auth_claims): AuthState,
     ValidateJson(request): ValidateJson<UpdateAccount>,
 ) -> Result<(StatusCode, Json<Account>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating account");
 
     let mut conn = pg_client.get_connection().await?;
-    let current_account = find_account(&mut conn, auth_claims.account_id).await?;
-
-    // Validate and hash password if provided
-    let password_hash = match request.password.as_ref() {
-        Some(change) => {
-            // Re-authenticate the change: it must prove knowledge of the current
-            // password, so a hijacked session or CSRF cannot silently reset it
-            // (and lock out the real owner).
-            if password
-                .verify(&change.current_password, &current_account.password_hash)
-                .is_err()
-            {
-                tracing::warn!(target: TRACING_TARGET, "Password change failed: current password incorrect");
-                return Err(ErrorKind::Unauthorized
-                    .with_message("Current password is incorrect")
-                    .with_resource("account"));
-            }
-
-            let new_password = &change.new_password;
-            let username = request
-                .username
-                .as_ref()
-                .unwrap_or(&current_account.username)
-                .as_str();
-            let display_name = request
-                .display_name
-                .as_deref()
-                .or(current_account.display_name.as_deref());
-            let email_address = request
-                .email_address
-                .as_deref()
-                .unwrap_or(&current_account.email_address);
-
-            let user_inputs = build_password_user_inputs(username, display_name, email_address);
-            Some(password.validate_and_hash(new_password, &user_inputs)?)
-        }
-        None => None,
-    };
 
     // Check if email already exists for another account
     if let Some(ref email) = request.email_address
@@ -187,7 +147,7 @@ async fn update_own_account(
     }
 
     let account = conn
-        .update_account(auth_claims.account_id, request.into_model(password_hash))
+        .update_account(auth_claims.account_id, request.into_model())
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Account updated");

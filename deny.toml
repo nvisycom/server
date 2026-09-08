@@ -25,6 +25,13 @@ ignore = [
     # of `image` (image -> exr -> pulp -> paste) with no workspace-level fix;
     # elide ignores the same advisory upstream.
     "RUSTSEC-2024-0436",
+    # Marvin timing sidechannel in `rsa`, pulled in transitively by
+    # `openidconnect` because Google and Microsoft sign OIDC id_tokens with
+    # RS256. Our use is RSA signature *verification* of provider-issued tokens
+    # (public-key only — no private key, and no attacker-chosen-ciphertext
+    # decryption oracle), so the practical exposure is minimal, and no fixed
+    # `rsa` release exists yet. Revisit when `rsa` ships a constant-time fix.
+    "RUSTSEC-2023-0071",
 ]
 
 [licenses]

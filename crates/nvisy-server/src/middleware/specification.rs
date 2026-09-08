@@ -263,8 +263,18 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             ..License::default()
         })
         .tag(Tag {
+            name: "Health".into(),
+            description: Some("Service health checks".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
             name: "Accounts".into(),
             description: Some("Account management and profile operations".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Identities".into(),
+            description: Some("Account sign-in methods: password and linked providers".into()),
             ..Default::default()
         })
         .tag(Tag {
@@ -340,11 +350,6 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
         .tag(Tag {
             name: "Notifications".into(),
             description: Some("Account notification management".into()),
-            ..Default::default()
-        })
-        .tag(Tag {
-            name: "Health".into(),
-            description: Some("Service health checks".into()),
             ..Default::default()
         })
 }

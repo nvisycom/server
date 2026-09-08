@@ -10,6 +10,16 @@ CREATE TYPE API_TOKEN_TYPE AS ENUM (
 
 COMMENT ON TYPE API_TOKEN_TYPE IS 'Client kind an API token was issued to: web, api, or cli.';
 
+-- How an account authenticates. 'password' is a locally-held Argon2 secret; the
+-- rest are external OIDC identity providers keyed by the provider's subject claim.
+CREATE TYPE IDENTITY_PROVIDER AS ENUM (
+    'password',     -- Local password (Argon2 hash)
+    'google',       -- Google (OIDC)
+    'microsoft'     -- Microsoft / Entra ID (OIDC)
+);
+
+COMMENT ON TYPE IDENTITY_PROVIDER IS 'Authentication method for an account identity: local password or an OIDC provider.';
+
 -- Accounts table: one identity per person.
 CREATE TABLE accounts (
     -- Primary identifier
@@ -30,13 +40,10 @@ CREATE TABLE accounts (
     -- Core account information
     display_name          TEXT        DEFAULT NULL,
     email_address         TEXT        NOT NULL,
-    password_hash         TEXT        NOT NULL,
     CONSTRAINT accounts_display_name_length CHECK (display_name IS NULL OR length(trim(display_name)) BETWEEN 2 AND 32),
     CONSTRAINT accounts_display_name_not_empty CHECK (display_name IS NULL OR trim(display_name) <> ''),
     CONSTRAINT accounts_email_format CHECK (is_valid_email(email_address)),
     CONSTRAINT accounts_email_length_max CHECK (length(email_address) <= 254),
-    CONSTRAINT accounts_password_hash_not_empty CHECK (password_hash <> ''),
-    CONSTRAINT accounts_password_hash_length_min CHECK (length(password_hash) >= 60),
 
     -- Optional profile information
     avatar_url            TEXT        DEFAULT NULL,
@@ -97,7 +104,6 @@ COMMENT ON COLUMN accounts.is_suspended IS 'Whether account access is temporaril
 COMMENT ON COLUMN accounts.username IS 'Public handle, unique across accounts (3-32 chars, lowercase, dash-separated)';
 COMMENT ON COLUMN accounts.display_name IS 'Optional human-readable name for display (2-32 chars)';
 COMMENT ON COLUMN accounts.email_address IS 'Primary email for sign-in and contact';
-COMMENT ON COLUMN accounts.password_hash IS 'Argon2 password hash';
 COMMENT ON COLUMN accounts.avatar_url IS 'URL of the profile image';
 COMMENT ON COLUMN accounts.timezone IS 'Preferred timezone for date/time display';
 COMMENT ON COLUMN accounts.locale IS 'Preferred locale for language and formatting';
@@ -105,6 +111,78 @@ COMMENT ON COLUMN accounts.password_changed_at IS 'When the password was last ch
 COMMENT ON COLUMN accounts.created_at IS 'Account creation timestamp';
 COMMENT ON COLUMN accounts.updated_at IS 'Last-modified timestamp (kept current by trigger)';
 COMMENT ON COLUMN accounts.deleted_at IS 'Soft-deletion timestamp; NULL means live';
+
+-- Account identities: one row per way an account can authenticate. An account
+-- has at least one (a password or a linked provider) and may have several (a
+-- password plus one or more OIDC providers). Credentials live here, never on the
+-- account, so authentication methods are decoupled from identity.
+CREATE TABLE account_identities (
+    -- Primary identifier
+    id                    UUID           PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- References
+    account_id            UUID           NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+
+    -- Which authentication method this identity is.
+    provider              IDENTITY_PROVIDER NOT NULL,
+
+    -- For a local password: the Argon2 hash. NULL for an OIDC identity.
+    secret                TEXT           DEFAULT NULL,
+
+    -- For an OIDC identity: the provider's stable subject (`sub`) claim, not the
+    -- email (an address can be reassigned within a directory, `sub` cannot). NULL
+    -- for a password identity.
+    provider_subject      TEXT           DEFAULT NULL,
+
+    -- The email the provider asserted at link time (OIDC), or NULL for a password
+    -- identity. Informational; `accounts.email_address` remains the account's
+    -- primary address.
+    provider_email        TEXT           DEFAULT NULL,
+
+    -- Lifecycle timestamps
+    created_at            TIMESTAMPTZ    NOT NULL DEFAULT current_timestamp,
+    updated_at            TIMESTAMPTZ    NOT NULL DEFAULT current_timestamp,
+
+    -- A password identity carries a secret and no subject; an OIDC identity
+    -- carries a subject and no secret. The provider discriminates the two shapes.
+    CONSTRAINT account_identities_password_shape CHECK (
+        provider <> 'password'
+        OR (secret IS NOT NULL AND length(secret) >= 60 AND provider_subject IS NULL)
+    ),
+    CONSTRAINT account_identities_oidc_shape CHECK (
+        provider = 'password'
+        OR (provider_subject IS NOT NULL AND provider_subject <> '' AND secret IS NULL)
+    ),
+    CONSTRAINT account_identities_updated_after_created CHECK (updated_at >= created_at)
+);
+
+-- Keep updated_at current on every write.
+SELECT setup_updated_at('account_identities');
+
+-- An account has at most one identity per provider (one password, one Google, …).
+CREATE UNIQUE INDEX account_identities_account_provider_unique_idx
+    ON account_identities (account_id, provider);
+
+-- A provider subject maps to exactly one identity, so a returning OIDC user is
+-- resolved by (provider, subject). Password identities carry no subject and are
+-- excluded.
+CREATE UNIQUE INDEX account_identities_provider_subject_unique_idx
+    ON account_identities (provider, provider_subject)
+    WHERE provider_subject IS NOT NULL;
+
+-- All identities for an account, for the login lookup and account settings.
+CREATE INDEX account_identities_account_idx
+    ON account_identities (account_id);
+
+COMMENT ON TABLE account_identities IS 'Authentication methods for an account: a local password and/or linked OIDC providers.';
+COMMENT ON COLUMN account_identities.id IS 'Unique identity identifier';
+COMMENT ON COLUMN account_identities.account_id IS 'Account this identity authenticates';
+COMMENT ON COLUMN account_identities.provider IS 'Authentication method: password or an OIDC provider';
+COMMENT ON COLUMN account_identities.secret IS 'Argon2 password hash for a password identity; NULL for OIDC';
+COMMENT ON COLUMN account_identities.provider_subject IS 'OIDC provider subject (sub) claim; NULL for a password identity';
+COMMENT ON COLUMN account_identities.provider_email IS 'Email the provider asserted at link time; NULL for a password identity';
+COMMENT ON COLUMN account_identities.created_at IS 'Identity creation timestamp';
+COMMENT ON COLUMN account_identities.updated_at IS 'Last-modified timestamp (kept current by trigger)';
 
 -- API tokens table: one row per issued authentication token.
 CREATE TABLE account_api_tokens (

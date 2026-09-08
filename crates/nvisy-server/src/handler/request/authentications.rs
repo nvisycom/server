@@ -73,3 +73,22 @@ pub struct ConfirmPasswordReset {
     #[validate(length(min = 8, max = 128))]
     pub new_password: String,
 }
+
+/// Query parameters the provider appends when redirecting to the OIDC callback.
+///
+/// The callback serves every OIDC flow (sign-in, link, and step-up reauth); the
+/// stashed state selects which. On success the provider sends `code` + `state`;
+/// on denial it sends `error` (and `state`) with no `code`, so `code` is optional
+/// and the handler treats a missing code or a present error as a failed flow.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OidcCallbackQuery {
+    /// The authorization code to exchange for tokens; absent on a denial.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    /// The opaque CSRF state echoed back; must match a pending flow.
+    pub state: String,
+    /// The provider's error code when the user denied or the flow failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}

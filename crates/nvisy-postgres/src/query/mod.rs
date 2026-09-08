@@ -15,6 +15,7 @@
 
 mod account;
 mod account_api_token;
+mod account_identity;
 mod account_notification;
 mod analytics;
 mod chat_message;
@@ -39,6 +40,7 @@ mod workspace_webhook;
 
 pub use account::AccountRepository;
 pub use account_api_token::AccountApiTokenRepository;
+pub use account_identity::{AccountIdentityRepository, DeleteIdentityOutcome};
 pub use account_notification::AccountNotificationRepository;
 pub use analytics::{
     AnalyticsSnapshot, DetectionDayPoint, DetectionDurations, DetectionStatusCount, StorageByKind,

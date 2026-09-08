@@ -37,8 +37,6 @@ pub struct Account {
     pub display_name: Option<String>,
     /// Primary email for authentication and communications (validated format).
     pub email_address: String,
-    /// Securely hashed password (bcrypt recommended, minimum 60 characters).
-    pub password_hash: String,
     /// Optional URL to profile avatar image.
     pub avatar_url: Option<String>,
     /// Timezone identifier (e.g., "America/New_York", "UTC").
@@ -66,8 +64,6 @@ pub struct NewAccount {
     pub display_name: Option<String>,
     /// Primary email for authentication and communications (validated format).
     pub email_address: String,
-    /// Securely hashed password (bcrypt recommended, minimum 60 characters).
-    pub password_hash: String,
     /// Optional URL to profile avatar image.
     pub avatar_url: Option<String>,
     /// Timezone identifier.
@@ -87,8 +83,6 @@ pub struct UpdateAccount {
     pub display_name: Option<Option<String>>,
     /// Primary email for authentication and communications.
     pub email_address: Option<String>,
-    /// Securely hashed password.
-    pub password_hash: Option<String>,
     /// URL to profile avatar image (`Some(None)` clears it).
     pub avatar_url: Option<Option<String>>,
     /// Timezone identifier.

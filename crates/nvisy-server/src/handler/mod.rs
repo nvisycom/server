@@ -6,7 +6,10 @@
 mod accounts;
 mod activities;
 mod analytics;
+mod auth_oidc;
 mod authentication;
+
+pub(crate) use auth_oidc::consume_reauth_proof;
 mod avatars;
 mod catalog;
 mod chat;
@@ -17,6 +20,7 @@ mod detection_audits;
 mod detections;
 mod error;
 mod files;
+mod identities;
 mod invites;
 mod members;
 mod monitors;
@@ -84,12 +88,14 @@ fn private_routes(
     // Always-wired core modules.
     router = router
         .merge(accounts::routes(service_state.clone()))
+        .merge(identities::routes())
         .merge(workspaces::routes())
         .merge(activities::routes())
         .merge(analytics::routes())
         .merge(members::routes())
         .merge(connections::routes())
         .merge(connection_oauth::private_routes())
+        .merge(auth_oidc::private_routes())
         .merge(chat::routes())
         .merge(connection_syncs::routes())
         .merge(files::routes(service_state.upload.max_file_body_bytes))
@@ -127,6 +133,12 @@ fn public_routes(
 
     if !disable_authentication && !excluded.contains(&BuiltinModule::Authentication) {
         router = router.merge(authentication::routes());
+        // OIDC sign-in is an authentication method: it lives under the same
+        // gate, and its public routes (sign-in start + provider callback) need no
+        // session — the caller has none yet and the provider's browser redirect
+        // carries no Authorization header. The authenticated link route is added
+        // to the private routes.
+        router = router.merge(auth_oidc::public_routes());
     }
 
     router = router.merge(monitors::routes());
@@ -214,7 +226,7 @@ mod test {
     use crate::middleware::UploadConfig;
     use crate::service::{
         CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig, IntegrationConfig,
-        S3Config, ServiceState, SessionKeysConfig,
+        OidcConfig, S3Config, ServiceState, SessionKeysConfig,
     };
 
     /// Builds the service sub-configs from the environment for integration tests.
@@ -274,6 +286,7 @@ mod test {
             HealthConfig::default(),
             IntegrationConfig::default(),
             FileConnectorsConfig::default(),
+            OidcConfig::default(),
             webhook_service,
             UploadConfig::default(),
             s3,

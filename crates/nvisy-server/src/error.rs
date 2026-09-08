@@ -192,6 +192,14 @@ impl From<nvisy_file_service::Error> for Error {
     }
 }
 
+impl From<crate::service::OidcError> for Error {
+    fn from(err: crate::service::OidcError) -> Self {
+        // Only startup configuration failures reach the service `Error`; the
+        // per-request OIDC failures are handled on the HTTP path.
+        Error::config(err.to_string()).with_source(err)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

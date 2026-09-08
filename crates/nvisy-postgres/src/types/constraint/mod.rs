@@ -5,6 +5,7 @@
 
 // Account-related constraint modules
 mod account_api_tokens;
+mod account_identities;
 mod account_notifications;
 mod accounts;
 
@@ -32,6 +33,7 @@ mod workspace_connections;
 mod workspace_policies;
 
 pub use self::account_api_tokens::AccountApiTokenConstraints;
+pub use self::account_identities::AccountIdentityConstraints;
 pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
 pub use self::chat_messages::ChatMessageConstraints;
@@ -58,6 +60,7 @@ pub use self::workspaces::WorkspaceConstraints;
 pub enum ConstraintViolation {
     // Account-related constraints
     Account(AccountConstraints),
+    AccountIdentity(AccountIdentityConstraints),
     AccountNotification(AccountNotificationConstraints),
     AccountApiToken(AccountApiTokenConstraints),
 
@@ -121,6 +124,7 @@ impl ConstraintViolation {
 
         try_parse! {
             Account,
+            AccountIdentity,
             AccountNotification,
             AccountApiToken,
             ChatSession,

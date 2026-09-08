@@ -237,8 +237,8 @@ original response. This ensures retry safety in distributed systems.
 
 | Domain           | Endpoints                                                     |
 | ---------------- | ------------------------------------------------------------- |
-| Authentication   | Login, refresh, logout, SSO (SAML/OIDC)                       |
-| Accounts         | Profile (read, update, delete), SCIM provisioning             |
+| Authentication   | Login, refresh, logout, OIDC sign-in (Google, Microsoft)      |
+| Accounts         | Profile (read, update, delete), sign-in identities (password + linked providers), SCIM provisioning |
 | API Tokens       | CRUD for scoped programmatic access tokens                    |
 | Workspaces       | CRUD for tenant workspaces                                    |
 | Members          | List, remove, role management, leave workspace                |
@@ -279,8 +279,10 @@ trigger real-time checks.
 
 ## Security Model
 
-**Authentication** uses JWT tokens signed with Ed25519. Passwords are hashed
-with Argon2.
+**Authentication** uses JWT tokens signed with Ed25519. A sign-in method is
+either a local password (hashed with Argon2) or a linked OIDC provider (Google,
+Microsoft); both are stored as account identities, decoupled from the account,
+and both issue the same JWT session.
 
 **Authorization** is role-based, with permissions checked per workspace. Each
 API operation requires a specific permission (e.g., manage connections, view

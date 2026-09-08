@@ -11,6 +11,7 @@ mod health;
 mod infra;
 mod integration;
 mod notification;
+mod oidc;
 mod password;
 mod run_blob_store;
 mod session_keys;
@@ -55,6 +56,9 @@ pub use crate::service::integration::{
     StandardCronSchedule, TransferKind, TransferRequest, persist_refreshed_tokens,
 };
 pub use crate::service::notification::{NotificationEmitter, UnreadCountEvent};
+pub use crate::service::oidc::{
+    OidcAuthorization, OidcConfig, OidcError, OidcIdentity, OidcService,
+};
 pub use crate::service::password::PasswordService;
 pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
@@ -109,6 +113,7 @@ pub struct ServiceState {
     // Security services:
     pub password: PasswordService,
     pub session_keys: SessionKeys,
+    pub oidc: OidcService,
     pub user_agent_parser: UserAgentParser,
 
     // Request body size limits (server-wide hard caps):
@@ -128,6 +133,7 @@ impl ServiceState {
         health_config: HealthConfig,
         integration_config: IntegrationConfig,
         file_connectors_config: FileConnectorsConfig,
+        oidc_config: OidcConfig,
         webhook_service: WebhookService,
         upload_config: UploadConfig,
         s3_config: S3Config,
@@ -141,6 +147,7 @@ impl ServiceState {
 
         let engine = EngineService::from_config(engine_config).await?;
         let session_keys = SessionKeys::from_config(&session_config).await?;
+        let oidc = OidcService::from_config(&oidc_config)?;
 
         let health_checkers: Vec<Arc<dyn HealthCheck>> = vec![
             Arc::new(infra.postgres.clone()),
@@ -175,6 +182,7 @@ impl ServiceState {
             health_cache: HealthCache::new(&health_config, health_checkers),
             password: PasswordService::new(),
             session_keys,
+            oidc,
             user_agent_parser: UserAgentParser::new(),
             upload: upload_config,
         };
@@ -324,6 +332,7 @@ impl_di_field!(
     health_cache: HealthCache,
     password: PasswordService,
     session_keys: SessionKeys,
+    oidc: OidcService,
     user_agent_parser: UserAgentParser,
     upload: UploadConfig,
 );

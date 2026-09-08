@@ -5,6 +5,7 @@
 
 mod account;
 mod account_api_token;
+mod account_identity;
 mod account_notification;
 mod chat_message;
 mod chat_session;
@@ -31,6 +32,7 @@ mod workspace_webhook;
 // Account models
 pub use account::{Account, NewAccount, UpdateAccount};
 pub use account_api_token::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
+pub use account_identity::{AccountIdentity, NewAccountIdentity};
 pub use account_notification::{
     AccountNotification, NewAccountNotification, UpdateAccountNotification,
 };
