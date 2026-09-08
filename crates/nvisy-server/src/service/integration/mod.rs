@@ -22,6 +22,7 @@ mod file_source;
 mod import;
 mod naming;
 mod persist_oauth;
+mod provider_config;
 mod service;
 mod worker;
 
@@ -31,5 +32,6 @@ pub use cron_schedule::StandardCronSchedule;
 pub use deployment::IntegrationConfig;
 pub use file_source::SourceEntry;
 pub use persist_oauth::persist_refreshed_tokens;
+pub use provider_config::ProviderConfig;
 pub use service::{ConnectionSyncService, TransferKind, TransferRequest};
 pub use worker::{ConnectionSyncJob, ConnectionSyncWorker};

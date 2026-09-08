@@ -11,8 +11,9 @@ use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for connection sync-schedule operations.
 ///
-/// A schedule row exists only for sync-capable connections; its presence marks
-/// a connection as sync-capable.
+/// A schedule row is a connection's scheduled-sync config, present for
+/// connections that sync on a timer. Transfer capability is the connection's
+/// `provider_type`, not this row's presence.
 pub trait WorkspaceConnectionScheduleRepository {
     /// Inserts a connection's sync schedule.
     fn create_connection_schedule(
@@ -22,8 +23,8 @@ pub trait WorkspaceConnectionScheduleRepository {
 
     /// Inserts or replaces a connection's sync schedule.
     ///
-    /// Used when updating a sync-capable connection: the schedule row may or may
-    /// not already exist, so this upserts rather than assuming one is present.
+    /// Used when updating a scheduled connection: the schedule row may or may not
+    /// already exist, so this upserts rather than assuming one is present.
     fn upsert_connection_schedule(
         &mut self,
         schedule: NewWorkspaceConnectionSchedule,
@@ -37,7 +38,7 @@ pub trait WorkspaceConnectionScheduleRepository {
 
     /// Finds the sync schedules for a set of connections in one query.
     ///
-    /// Only sync-capable connections are returned; the rest are simply absent.
+    /// Only connections with a schedule are returned; the rest are simply absent.
     /// Lets a page of connections resolve its schedules in a single round-trip.
     fn find_schedules(
         &mut self,

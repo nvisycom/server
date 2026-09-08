@@ -26,6 +26,7 @@ mod workspace_invite;
 mod workspace_member;
 mod workspace_pipeline;
 mod workspace_policy;
+mod workspace_provider;
 mod workspace_redaction;
 mod workspace_webhook;
 
@@ -66,5 +67,6 @@ pub use workspace_invite::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceI
 pub use workspace_member::{NewWorkspaceMember, UpdateWorkspaceMember, WorkspaceMember};
 pub use workspace_pipeline::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
 pub use workspace_policy::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
+pub use workspace_provider::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};
 pub use workspace_redaction::{NewWorkspaceRedaction, WorkspaceRedaction};
 pub use workspace_webhook::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};

@@ -14,6 +14,10 @@ pub mod sql_types {
     pub struct ChatRole;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "connection_type"))]
+    pub struct ConnectionType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "detection_status"))]
     pub struct DetectionStatus;
 
@@ -248,7 +252,7 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-    use super::sql_types::ProviderType;
+    use super::sql_types::ConnectionType;
 
     workspace_connections (id) {
         id -> Uuid,
@@ -256,7 +260,7 @@ diesel::table! {
         account_id -> Uuid,
         display_name -> Text,
         provider -> Text,
-        provider_type -> ProviderType,
+        connection_type -> ConnectionType,
         encrypted_data -> Bytea,
         is_active -> Bool,
         metadata -> Jsonb,
@@ -458,6 +462,26 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+    use super::sql_types::ProviderType;
+
+    workspace_providers (id) {
+        id -> Uuid,
+        workspace_id -> Uuid,
+        account_id -> Uuid,
+        display_name -> Text,
+        provider -> Text,
+        provider_type -> ProviderType,
+        encrypted_data -> Bytea,
+        is_active -> Bool,
+        metadata -> Jsonb,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
 
     workspace_redactions (id) {
         id -> Uuid,
@@ -523,7 +547,7 @@ diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
 diesel::joinable!(workspace_connection_schedule -> workspace_connections (connection_id));
 diesel::joinable!(workspace_connection_syncs -> accounts (account_id));
-diesel::joinable!(workspace_connection_syncs -> workspace_connection_schedule (connection_id));
+diesel::joinable!(workspace_connection_syncs -> workspace_connections (connection_id));
 diesel::joinable!(workspace_connections -> accounts (account_id));
 diesel::joinable!(workspace_connections -> workspaces (workspace_id));
 diesel::joinable!(workspace_detection_jobs -> workspace_detections (detection_id));
@@ -543,6 +567,8 @@ diesel::joinable!(workspace_pipelines -> accounts (account_id));
 diesel::joinable!(workspace_pipelines -> workspaces (workspace_id));
 diesel::joinable!(workspace_policies -> accounts (account_id));
 diesel::joinable!(workspace_policies -> workspaces (workspace_id));
+diesel::joinable!(workspace_providers -> accounts (account_id));
+diesel::joinable!(workspace_providers -> workspaces (workspace_id));
 diesel::joinable!(workspace_redactions -> accounts (account_id));
 diesel::joinable!(workspace_redactions -> workspace_detections (detection_id));
 diesel::joinable!(workspace_webhooks -> accounts (created_by));
@@ -572,6 +598,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_pipeline_policies,
     workspace_pipelines,
     workspace_policies,
+    workspace_providers,
     workspace_redactions,
     workspace_webhooks,
     workspaces,

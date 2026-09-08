@@ -32,6 +32,11 @@ CREATE TYPE WEBHOOK_EVENT AS ENUM (
     'connection.sync.completed',
     'connection.sync.failed',
 
+    -- Provider events
+    'provider.created',
+    'provider.updated',
+    'provider.deleted',
+
     -- Pipeline, detection, and redaction events
     'pipeline.created',
     'pipeline.updated',

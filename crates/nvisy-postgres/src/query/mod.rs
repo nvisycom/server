@@ -35,6 +35,7 @@ mod workspace_invite;
 mod workspace_member;
 mod workspace_pipeline;
 mod workspace_policy;
+mod workspace_provider;
 mod workspace_redaction;
 mod workspace_webhook;
 
@@ -62,5 +63,6 @@ pub use workspace_invite::WorkspaceInviteRepository;
 pub use workspace_member::WorkspaceMemberRepository;
 pub use workspace_pipeline::WorkspacePipelineRepository;
 pub use workspace_policy::WorkspacePolicyRepository;
+pub use workspace_provider::WorkspaceProviderRepository;
 pub use workspace_redaction::WorkspaceRedactionRepository;
 pub use workspace_webhook::WorkspaceWebhookRepository;

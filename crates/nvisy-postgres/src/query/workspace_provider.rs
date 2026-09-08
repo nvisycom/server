@@ -1,0 +1,328 @@
+//! Workspace providers repository for managing encrypted inference providers.
+
+use std::future::Future;
+
+use diesel::prelude::*;
+use diesel_async::RunQueryDsl;
+use uuid::Uuid;
+
+use crate::model::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};
+use crate::types::{AccountRefRow, CursorPage, CursorPagination, ProviderType, WithAccountRef};
+use crate::{Error, PgConnection, Result, schema};
+
+/// Repository for workspace inference-provider database operations.
+///
+/// Handles provider lifecycle management including creation, updates, and
+/// workspace-scoped queries. Providers have no sync machinery.
+pub trait WorkspaceProviderRepository {
+    /// Creates a new workspace provider record.
+    fn create_workspace_provider(
+        &mut self,
+        new_provider: NewWorkspaceProvider,
+    ) -> impl Future<Output = Result<WorkspaceProvider>> + Send;
+
+    /// Finds a provider by its unique identifier.
+    fn find_workspace_provider_by_id(
+        &mut self,
+        provider_id: Uuid,
+    ) -> impl Future<Output = Result<Option<WorkspaceProvider>>> + Send;
+
+    /// Finds a provider by ID within a specific workspace.
+    fn find_provider_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        provider_id: Uuid,
+    ) -> impl Future<Output = Result<Option<WorkspaceProvider>>> + Send;
+
+    /// Finds a provider by id within a specific workspace, with the handle and
+    /// avatar of the account that created it. Excludes soft-deleted providers.
+    fn find_provider_in_workspace_with_creator(
+        &mut self,
+        workspace_id: Uuid,
+        provider_id: Uuid,
+    ) -> impl Future<Output = Result<Option<WithAccountRef<WorkspaceProvider>>>> + Send;
+
+    /// Finds the workspace's most recently updated live, enabled provider of a
+    /// given model type (e.g. its LLM), if any. Resolves a provider without
+    /// decrypting every provider's config.
+    ///
+    /// Disabled (`is_active = false`) providers are excluded: a disabled provider
+    /// is not usable, and a newer disabled one must not shadow an active one.
+    fn find_provider_by_type(
+        &mut self,
+        workspace_id: Uuid,
+        provider_type: ProviderType,
+    ) -> impl Future<Output = Result<Option<WorkspaceProvider>>> + Send;
+
+    /// Lists all providers in a workspace with cursor pagination, each paired with
+    /// the handle and avatar of the account that created it.
+    ///
+    /// An empty `providers` slice means no provider filter; otherwise a provider
+    /// matches if its concrete provider is any of the given ones.
+    fn cursor_list_workspace_providers(
+        &mut self,
+        workspace_id: Uuid,
+        pagination: CursorPagination,
+        providers: &[String],
+    ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceProvider>>>> + Send;
+
+    /// Updates a provider's mutable fields.
+    fn update_workspace_provider(
+        &mut self,
+        provider_id: Uuid,
+        updates: UpdateWorkspaceProvider,
+    ) -> impl Future<Output = Result<WorkspaceProvider>> + Send;
+
+    /// Soft deletes a provider by setting the deletion timestamp.
+    fn delete_workspace_provider(
+        &mut self,
+        provider_id: Uuid,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// Counts providers in a workspace.
+    fn count_workspace_providers(
+        &mut self,
+        workspace_id: Uuid,
+    ) -> impl Future<Output = Result<i64>> + Send;
+}
+
+impl WorkspaceProviderRepository for PgConnection {
+    async fn create_workspace_provider(
+        &mut self,
+        new_provider: NewWorkspaceProvider,
+    ) -> Result<WorkspaceProvider> {
+        use schema::workspace_providers;
+
+        let provider = diesel::insert_into(workspace_providers::table)
+            .values(&new_provider)
+            .returning(WorkspaceProvider::as_returning())
+            .get_result(self)
+            .await
+            .map_err(Error::from)?;
+
+        Ok(provider)
+    }
+
+    async fn find_workspace_provider_by_id(
+        &mut self,
+        provider_id: Uuid,
+    ) -> Result<Option<WorkspaceProvider>> {
+        use schema::workspace_providers::{self, dsl};
+
+        let provider = workspace_providers::table
+            .filter(dsl::id.eq(provider_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspaceProvider::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)?;
+
+        Ok(provider)
+    }
+
+    async fn find_provider_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        provider_id: Uuid,
+    ) -> Result<Option<WorkspaceProvider>> {
+        use schema::workspace_providers::{self, dsl};
+
+        let provider = workspace_providers::table
+            .filter(dsl::id.eq(provider_id))
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspaceProvider::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)?;
+
+        Ok(provider)
+    }
+
+    async fn find_provider_in_workspace_with_creator(
+        &mut self,
+        workspace_id: Uuid,
+        provider_id: Uuid,
+    ) -> Result<Option<WithAccountRef<WorkspaceProvider>>> {
+        use schema::workspace_providers::dsl;
+        use schema::{accounts, workspace_providers};
+
+        let row = workspace_providers::table
+            .inner_join(accounts::table)
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::id.eq(provider_id))
+            .filter(dsl::deleted_at.is_null())
+            .select((
+                WorkspaceProvider::as_select(),
+                (
+                    accounts::username,
+                    accounts::display_name,
+                    accounts::avatar_url,
+                ),
+            ))
+            .first::<(WorkspaceProvider, AccountRefRow)>(self)
+            .await
+            .optional()
+            .map_err(Error::from)?;
+
+        Ok(row.map(|(item, account)| WithAccountRef { item, account }))
+    }
+
+    async fn find_provider_by_type(
+        &mut self,
+        workspace_id: Uuid,
+        provider_type: ProviderType,
+    ) -> Result<Option<WorkspaceProvider>> {
+        use schema::workspace_providers::{self, dsl};
+
+        workspace_providers::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::provider_type.eq(provider_type))
+            .filter(dsl::deleted_at.is_null())
+            .filter(dsl::is_active.eq(true))
+            .order(dsl::updated_at.desc())
+            .select(WorkspaceProvider::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)
+    }
+
+    async fn cursor_list_workspace_providers(
+        &mut self,
+        workspace_id: Uuid,
+        pagination: CursorPagination,
+        providers: &[String],
+    ) -> Result<CursorPage<WithAccountRef<WorkspaceProvider>>> {
+        use schema::workspace_providers::dsl;
+        use schema::{accounts, workspace_providers};
+
+        let mut base_query = workspace_providers::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .into_boxed();
+
+        if !providers.is_empty() {
+            base_query = base_query.filter(dsl::provider.eq_any(providers.to_vec()));
+        }
+
+        let total = if pagination.include_count {
+            Some(
+                base_query
+                    .count()
+                    .get_result::<i64>(self)
+                    .await
+                    .map_err(Error::from)?,
+            )
+        } else {
+            None
+        };
+
+        let mut query = workspace_providers::table
+            .inner_join(accounts::table)
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .into_boxed();
+
+        if !providers.is_empty() {
+            query = query.filter(dsl::provider.eq_any(providers.to_vec()));
+        }
+
+        let limit = pagination.fetch_limit();
+
+        let rows: Vec<(WorkspaceProvider, AccountRefRow)> = if let Some(cursor) = &pagination.after
+        {
+            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
+
+            query
+                .filter(
+                    dsl::created_at
+                        .lt(&cursor_time)
+                        .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
+                )
+                .select((
+                    WorkspaceProvider::as_select(),
+                    (
+                        accounts::username,
+                        accounts::display_name,
+                        accounts::avatar_url,
+                    ),
+                ))
+                .order((dsl::created_at.desc(), dsl::id.desc()))
+                .limit(limit)
+                .load(self)
+                .await
+                .map_err(Error::from)?
+        } else {
+            query
+                .select((
+                    WorkspaceProvider::as_select(),
+                    (
+                        accounts::username,
+                        accounts::display_name,
+                        accounts::avatar_url,
+                    ),
+                ))
+                .order((dsl::created_at.desc(), dsl::id.desc()))
+                .limit(limit)
+                .load(self)
+                .await
+                .map_err(Error::from)?
+        };
+
+        let items: Vec<WithAccountRef<WorkspaceProvider>> = rows
+            .into_iter()
+            .map(|(item, account)| WithAccountRef { item, account })
+            .collect();
+
+        Ok(CursorPage::new(items, total, pagination.limit, |wp| {
+            (wp.item.created_at.into(), wp.item.id)
+        }))
+    }
+
+    async fn update_workspace_provider(
+        &mut self,
+        provider_id: Uuid,
+        updates: UpdateWorkspaceProvider,
+    ) -> Result<WorkspaceProvider> {
+        use schema::workspace_providers::{self, dsl};
+
+        let provider = diesel::update(workspace_providers::table.filter(dsl::id.eq(provider_id)))
+            .set(&updates)
+            .returning(WorkspaceProvider::as_returning())
+            .get_result(self)
+            .await
+            .map_err(Error::from)?;
+
+        Ok(provider)
+    }
+
+    async fn delete_workspace_provider(&mut self, provider_id: Uuid) -> Result<()> {
+        use diesel::dsl::now;
+        use schema::workspace_providers::{self, dsl};
+
+        diesel::update(workspace_providers::table.filter(dsl::id.eq(provider_id)))
+            .set(dsl::deleted_at.eq(now))
+            .execute(self)
+            .await
+            .map_err(Error::from)?;
+
+        Ok(())
+    }
+
+    async fn count_workspace_providers(&mut self, workspace_id: Uuid) -> Result<i64> {
+        use schema::workspace_providers::{self, dsl};
+
+        let count = workspace_providers::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .count()
+            .get_result(self)
+            .await
+            .map_err(Error::from)?;
+
+        Ok(count)
+    }
+}

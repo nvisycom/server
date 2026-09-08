@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::types::{
-    ActivityType, ConnectionId, DetectionId, Handle, RedactionId, WebhookEvent, WebhookId,
+    ActivityType, ConnectionId, DetectionId, Handle, ProviderId, RedactionId, WebhookEvent,
+    WebhookId,
 };
 
 /// Params of a workspace-scoped activity (`workspace.*`).
@@ -53,6 +54,17 @@ pub struct ConnectionActivityParams {
     pub connection_id: ConnectionId,
     /// Display name of the connection.
     pub connection_name: String,
+}
+
+/// Params of a provider activity (`provider.*`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderActivityParams {
+    /// Id of the provider.
+    pub provider_id: ProviderId,
+    /// Display name of the provider.
+    pub provider_name: String,
 }
 
 /// Params of a webhook activity (`webhook.*`).
@@ -182,6 +194,16 @@ pub enum ActivityPayload {
     #[serde(rename = "connection.sync.failed")]
     ConnectionSyncFailed(ConnectionActivityParams),
 
+    /// A provider was created.
+    #[serde(rename = "provider.created")]
+    ProviderCreated(ProviderActivityParams),
+    /// A provider was updated.
+    #[serde(rename = "provider.updated")]
+    ProviderUpdated(ProviderActivityParams),
+    /// A provider was deleted.
+    #[serde(rename = "provider.deleted")]
+    ProviderDeleted(ProviderActivityParams),
+
     /// A webhook was created.
     #[serde(rename = "webhook.created")]
     WebhookCreated(WebhookActivityParams),
@@ -256,6 +278,9 @@ impl ActivityPayload {
             ActivityPayload::ConnectionSyncStarted(_) => ActivityType::ConnectionSyncStarted,
             ActivityPayload::ConnectionSyncCompleted(_) => ActivityType::ConnectionSyncCompleted,
             ActivityPayload::ConnectionSyncFailed(_) => ActivityType::ConnectionSyncFailed,
+            ActivityPayload::ProviderCreated(_) => ActivityType::ProviderCreated,
+            ActivityPayload::ProviderUpdated(_) => ActivityType::ProviderUpdated,
+            ActivityPayload::ProviderDeleted(_) => ActivityType::ProviderDeleted,
             ActivityPayload::WebhookCreated(_) => ActivityType::WebhookCreated,
             ActivityPayload::WebhookUpdated(_) => ActivityType::WebhookUpdated,
             ActivityPayload::WebhookDeleted(_) => ActivityType::WebhookDeleted,
@@ -301,6 +326,9 @@ impl ActivityPayload {
             ActivityPayload::ConnectionSyncStarted(_) => W::ConnectionSyncStarted,
             ActivityPayload::ConnectionSyncCompleted(_) => W::ConnectionSyncCompleted,
             ActivityPayload::ConnectionSyncFailed(_) => W::ConnectionSyncFailed,
+            ActivityPayload::ProviderCreated(_) => W::ProviderCreated,
+            ActivityPayload::ProviderUpdated(_) => W::ProviderUpdated,
+            ActivityPayload::ProviderDeleted(_) => W::ProviderDeleted,
             ActivityPayload::FileCreated(_) => W::FileCreated,
             ActivityPayload::FileUpdated(_) => W::FileUpdated,
             ActivityPayload::FileDeleted(_) => W::FileDeleted,
@@ -337,6 +365,10 @@ impl ActivityPayload {
             | ActivityPayload::ConnectionSyncStarted(p)
             | ActivityPayload::ConnectionSyncCompleted(p)
             | ActivityPayload::ConnectionSyncFailed(p) => Some(p.connection_id.to_string()),
+
+            ActivityPayload::ProviderCreated(p)
+            | ActivityPayload::ProviderUpdated(p)
+            | ActivityPayload::ProviderDeleted(p) => Some(p.provider_id.to_string()),
 
             ActivityPayload::WebhookCreated(p)
             | ActivityPayload::WebhookUpdated(p)
@@ -406,6 +438,10 @@ impl ActivityPayload {
             | ActivityPayload::ConnectionSyncStarted(p)
             | ActivityPayload::ConnectionSyncCompleted(p)
             | ActivityPayload::ConnectionSyncFailed(p) => Some(p.connection_name.clone()),
+
+            ActivityPayload::ProviderCreated(p)
+            | ActivityPayload::ProviderUpdated(p)
+            | ActivityPayload::ProviderDeleted(p) => Some(p.provider_name.clone()),
 
             ActivityPayload::WebhookCreated(p)
             | ActivityPayload::WebhookUpdated(p)

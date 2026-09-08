@@ -48,10 +48,11 @@ pub struct PickerTokenRequest {
     pub resource: Option<String>,
 }
 
-/// Sync configuration for a sync-capable connection (object stores).
+/// Scheduled-sync configuration for a schedulable connection.
 ///
-/// Only meaningful for connections whose provider supports syncing; omitted for
-/// connections that do not (e.g. LLM inference).
+/// Accepted only for providers that can sync on a timer (object stores); rejected
+/// for others — a file service transfers on demand (picker import, per-file
+/// export), and an LLM does not transfer at all. Omit for on-demand only.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncScheduleInput {
@@ -80,8 +81,8 @@ pub struct CreateConnection {
     /// at rest. The `provider` tag selects which credential shape is required and
     /// which capability the connection has.
     pub config: ConnectionConfig,
-    /// Sync configuration. Applies only to sync-capable providers (object
-    /// stores); rejected for others. Omit for manual-only defaults.
+    /// Scheduled-sync configuration. Accepted only for schedulable providers
+    /// (object stores); rejected for others. Omit for on-demand only.
     #[validate(nested)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync: Option<SyncScheduleInput>,
@@ -143,8 +144,8 @@ pub struct UpdateConnection {
     /// Typed provider configuration. If provided, fully replaces the stored
     /// config (and, with it, the provider). Omit to leave it unchanged.
     pub config: Option<ConnectionConfig>,
-    /// Sync configuration. Applies only to sync-capable providers. Omit to leave
-    /// unchanged.
+    /// Scheduled-sync configuration. Accepted only for schedulable providers
+    /// (object stores); rejected for others. Omit to leave unchanged.
     #[validate(nested)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync: Option<SyncScheduleInput>,

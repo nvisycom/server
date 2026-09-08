@@ -132,6 +132,11 @@ prefixed_id! {
 }
 
 prefixed_id! {
+    /// Opaque identifier for a workspace inference provider (`prov_<uuid>`).
+    ProviderId, "prov"
+}
+
+prefixed_id! {
     /// Opaque identifier for a workspace webhook (`whk_<uuid>`).
     WebhookId, "whk"
 }

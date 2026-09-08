@@ -7,9 +7,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection};
-use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, OffsetPagination, ProviderType, WithAccountRef,
-};
+use crate::types::{AccountRefRow, CursorPage, CursorPagination, OffsetPagination, WithAccountRef};
 use crate::{Error, PgConnection, Result, schema};
 
 /// A sync-scheduled connection paired with its cron expression, as returned by
@@ -78,19 +76,6 @@ pub trait WorkspaceConnectionRepository {
         workspace_id: Uuid,
         provider: &str,
     ) -> impl Future<Output = Result<Vec<WorkspaceConnection>>> + Send;
-
-    /// Finds the workspace's most recently updated live, enabled connection of a
-    /// given capability (e.g. its language model), if any. Resolves a capability
-    /// connection without decrypting every connection's config.
-    ///
-    /// Disabled (`is_active = false`) connections are excluded: a disabled
-    /// connection is not usable, and a newer disabled one must not shadow an
-    /// active one.
-    fn find_connection_by_type(
-        &mut self,
-        workspace_id: Uuid,
-        provider_type: ProviderType,
-    ) -> impl Future<Output = Result<Option<WorkspaceConnection>>> + Send;
 
     /// Lists all active, import-mode connections that have a sync schedule,
     /// across every workspace, each paired with its cron. Used by the
@@ -269,34 +254,15 @@ impl WorkspaceConnectionRepository for PgConnection {
         Ok(connections)
     }
 
-    async fn find_connection_by_type(
-        &mut self,
-        workspace_id: Uuid,
-        provider_type: ProviderType,
-    ) -> Result<Option<WorkspaceConnection>> {
-        use schema::workspace_connections::{self, dsl};
-
-        workspace_connections::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::provider_type.eq(provider_type))
-            .filter(dsl::deleted_at.is_null())
-            .filter(dsl::is_active.eq(true))
-            .order(dsl::updated_at.desc())
-            .select(WorkspaceConnection::as_select())
-            .first(self)
-            .await
-            .optional()
-            .map_err(Error::from)
-    }
-
     async fn list_scheduled_connections(&mut self) -> Result<Vec<ScheduledConnection>> {
         use schema::workspace_connection_schedule as sched;
         use schema::workspace_connections::{self, dsl};
 
-        // Sync config lives in the schedule satellite; join it to find every
-        // active connection with a cron schedule, in either direction. The
+        // Scheduled-sync config lives in the schedule satellite; join it to find
+        // every active connection with a cron schedule, in either direction. The
         // `schedule_cron IS NOT NULL` filter makes the column non-null for this
         // query, so the worker gets the cron without re-reading the schedule row.
+        // Which connections are given a schedule is decided at the handler layer.
         let connections = workspace_connections::table
             .inner_join(sched::table.on(sched::connection_id.eq(dsl::id)))
             .filter(sched::schedule_cron.is_not_null())

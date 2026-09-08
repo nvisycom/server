@@ -7,7 +7,7 @@ mod error;
 pub mod provider;
 
 pub use client::{
-    AuthenticatedProvider, ChatTurn, InferenceClient, LlmConfig, Role, TokenStream,
-    UnauthenticatedProvider,
+    AuthenticatedProvider, ChatTurn, InferenceClient, InferenceConfig, LlmConfig, Role,
+    TokenStream, UnauthenticatedProvider,
 };
 pub use error::{Error, Result};

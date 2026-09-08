@@ -27,6 +27,7 @@ mod monitors;
 mod notifications;
 mod pipelines;
 mod policies;
+mod providers;
 mod redactions;
 pub mod request;
 pub mod response;
@@ -35,8 +36,6 @@ mod utility;
 mod webhooks;
 mod workspaces;
 
-use std::collections::HashSet;
-
 use aide::axum::ApiRouter;
 use axum::extract::FromRef;
 use axum::http::{Method, Uri};
@@ -44,7 +43,7 @@ use axum::middleware::{from_fn, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 pub use error::{Error, ErrorKind, Result};
 pub use invites::{CreatedInvite, InviteOutcome, create_invite};
-pub use utility::{BuiltinModule, CookieConfig, CustomRoutes, RouterMapFn};
+pub use utility::{CookieConfig, CustomRoutes};
 
 use crate::middleware::{csrf_protect, require_authentication, slide_session};
 use crate::service::ServiceState;
@@ -71,30 +70,18 @@ async fn handler(method: Method, uri: Uri) -> Response {
         .into_response()
 }
 
-/// Returns an [`ApiRouter`] with all built-in private routes, minus any excluded
-/// module. Downstream routes are merged separately by [`routes`], after this
-/// built-in router is erased to the caller's state type.
-fn private_routes(
-    excluded: &HashSet<BuiltinModule>,
-    disable_authentication: bool,
-    service_state: ServiceState,
-) -> ApiRouter<ServiceState> {
-    let mut router = ApiRouter::new();
-
-    // Only a few modules are toggleable, letting a wrapping binary replace them
-    // via `CustomRoutes` without a route collision. The rest are core to the
-    // platform and always mounted.
-    let is_included = |module| !excluded.contains(&module);
-
-    // Always-wired core modules.
-    router = router
+/// Returns an [`ApiRouter`] with all built-in private routes. Downstream routes
+/// are merged separately by [`routes`], after this built-in router is erased to
+/// the caller's state type.
+fn private_routes(service_state: ServiceState) -> ApiRouter<ServiceState> {
+    ApiRouter::new()
         .merge(accounts::routes(service_state.clone()))
-        .merge(identities::routes())
         .merge(workspaces::routes())
         .merge(activities::routes())
         .merge(analytics::routes())
         .merge(members::routes())
         .merge(connections::routes())
+        .merge(providers::routes())
         .merge(connection_oauth::private_routes())
         .merge(chat::routes())
         .merge(connection_syncs::routes())
@@ -104,62 +91,35 @@ fn private_routes(
         .merge(detection_audits::routes())
         .merge(redactions::routes())
         .merge(policies::routes())
-        .merge(catalog::routes());
-
-    // Toggleable modules.
-    if is_included(BuiltinModule::Tokens) {
-        router = router.merge(tokens::routes());
-    }
-    if is_included(BuiltinModule::Notifications) {
-        router = router.merge(notifications::routes());
-    }
-    if is_included(BuiltinModule::Invites) {
-        router = router.merge(invites::routes());
-    }
-    if is_included(BuiltinModule::Webhooks) {
-        router = router.merge(webhooks::routes());
-    }
-
-    // OIDC step-up re-authentication lives under the same gate as the OIDC public
-    // routes it depends on: reauth only completes through the shared public
-    // callback, so if authentication is disabled (its public routes gone), this
-    // private route must not be left mounted as a dead end.
-    if !disable_authentication && is_included(BuiltinModule::Authentication) {
-        router = router.merge(auth_oidc::private_routes());
-    }
-
-    router
+        .merge(catalog::routes())
+        .merge(tokens::routes())
+        .merge(notifications::routes())
+        .merge(invites::routes())
+        .merge(webhooks::routes())
+        // Account identity management and OIDC step-up re-auth.
+        .merge(identities::routes())
+        .merge(auth_oidc::private_routes())
 }
 
-/// Returns an [`ApiRouter`] with all built-in public routes, minus any excluded
-/// module. Downstream routes are merged separately by [`routes`].
-fn public_routes(
-    excluded: &HashSet<BuiltinModule>,
-    disable_authentication: bool,
-) -> ApiRouter<ServiceState> {
-    let mut router = ApiRouter::new();
-
-    if !disable_authentication && !excluded.contains(&BuiltinModule::Authentication) {
-        router = router.merge(authentication::routes());
-        // OIDC sign-in is an authentication method: it lives under the same
-        // gate, and its public routes (sign-in start + provider callback) need no
-        // session — the caller has none yet and the provider's browser redirect
-        // carries no Authorization header. The authenticated link route is added
-        // to the private routes.
-        router = router.merge(auth_oidc::public_routes());
-    }
-
-    router = router.merge(monitors::routes());
-
-    // Avatar serving is public so images load directly in an `<img>` tag; it is
-    // infrastructure shared by accounts and workspaces, always mounted.
-    router = router.merge(avatars::routes());
-
-    // The cloud file OAuth callback is a provider browser redirect with no
-    // Authorization header, so it is public; its single-use CSRF state guards it.
-    router = router.merge(connection_oauth::public_routes());
-
-    router
+/// Returns an [`ApiRouter`] with all built-in public routes. Downstream routes
+/// are merged separately by [`routes`].
+fn public_routes() -> ApiRouter<ServiceState> {
+    ApiRouter::new()
+        // Authentication is always mounted: password login/signup/logout plus OIDC
+        // sign-in. The OIDC public routes (sign-in start + provider callback) need
+        // no session — the caller has none yet and the provider's browser redirect
+        // carries no Authorization header. The authenticated link route is in the
+        // private routes.
+        .merge(authentication::routes())
+        .merge(auth_oidc::public_routes())
+        .merge(monitors::routes())
+        // Avatar serving is public so images load directly in an `<img>` tag; it
+        // is infrastructure shared by accounts and workspaces, always mounted.
+        .merge(avatars::routes())
+        // The cloud file OAuth callback is a provider browser redirect with no
+        // Authorization header, so it is public; its single-use CSRF state guards
+        // it.
+        .merge(connection_oauth::public_routes())
 }
 
 /// Returns an [`ApiRouter`] with all routes, over any application state `S` from
@@ -187,20 +147,12 @@ where
     let require_authentication = from_fn_with_state(service_state.clone(), require_authentication);
     let slide_session = from_fn_with_state(service_state.clone(), slide_session);
 
-    let excluded = std::mem::take(&mut routes.excluded_modules);
-
     // Built-in private routes are assembled and their map hooks applied while
     // still typed to `ServiceState`, then erased to `S` and merged with the
     // downstream's private routes. The auth `route_layer`s are applied to the
     // *combined* router, so custom private routes are authenticated too — a
     // `route_layer` only covers routes already present when it runs.
-    let mut private_router = private_routes(
-        &excluded,
-        routes.disable_authentication,
-        service_state.clone(),
-    );
-    private_router = routes.map_private_before_middleware(private_router);
-    private_router = routes.map_private_after_middleware(private_router);
+    let private_router = private_routes(service_state.clone());
     let mut private_router: ApiRouter<S> = private_router.with_state(service_state.clone());
     if let Some(additional) = routes.private_routes.take() {
         private_router = private_router.merge(additional);
@@ -223,10 +175,7 @@ where
         .route_layer(require_authentication);
 
     // Built-in public routes, same erasure (no auth layers).
-    let mut public_router = public_routes(&excluded, routes.disable_authentication);
-    public_router = routes.map_public_before_middleware(public_router);
-    public_router = routes.map_public_after_middleware(public_router);
-    let mut public_router: ApiRouter<S> = public_router.with_state(service_state);
+    let mut public_router: ApiRouter<S> = public_routes().with_state(service_state);
     if let Some(additional) = routes.public_routes.take() {
         public_router = public_router.merge(additional);
     }
@@ -347,40 +296,6 @@ mod test {
 
     #[tokio::test]
     #[ignore = "requires database and key files"]
-    async fn excluding_a_module_frees_its_path_for_a_replacement() -> anyhow::Result<()> {
-        use aide::axum::routing::get_with;
-
-        use crate::extract::Json;
-        use crate::handler::BuiltinModule;
-        use crate::handler::response::InviteSent;
-
-        // A custom router that reuses one of the built-in invite paths. Merging
-        // this alongside the built-in invites module would panic on the route
-        // collision; excluding the module first must make it succeed.
-        let custom = ApiRouter::new().api_route(
-            "/workspaces/{workspaceSlug}/invites/",
-            get_with(
-                || async { Json(InviteSent::new()) },
-                |op| op.summary("custom invites"),
-            ),
-        );
-
-        let server = create_test_server_with_router(move |state| {
-            routes(
-                CustomRoutes::new()
-                    .exclude(BuiltinModule::Invites)
-                    .add_private_routes(custom.clone()),
-                state,
-            )
-        })
-        .await?;
-
-        assert!(server.is_running());
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[ignore = "requires database and key files"]
     async fn custom_private_routes_require_authentication() -> anyhow::Result<()> {
         use aide::axum::routing::get_with;
 
@@ -411,15 +326,5 @@ mod test {
         let response = server.get("/custom/private/").await;
         response.assert_status_unauthorized();
         Ok(())
-    }
-
-    #[test]
-    fn exclude_marks_only_the_named_module() {
-        use crate::handler::BuiltinModule;
-
-        let routes = CustomRoutes::<ServiceState>::new().exclude(BuiltinModule::Invites);
-        assert!(routes.is_excluded(BuiltinModule::Invites));
-        assert!(!routes.is_excluded(BuiltinModule::Tokens));
-        assert!(!routes.is_excluded(BuiltinModule::Webhooks));
     }
 }

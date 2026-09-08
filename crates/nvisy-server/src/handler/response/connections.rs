@@ -2,13 +2,17 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::{WorkspaceConnection, WorkspaceConnectionSchedule};
-use nvisy_postgres::types::{ConnectionId, Handle, ProviderType, SyncDeletionPolicy, SyncMode};
+use nvisy_postgres::types::{ConnectionId, ConnectionType, Handle, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{AccountRef, Page};
 
-/// A connection's sync configuration, present only for sync-capable connections.
+/// A connection's scheduled-sync configuration (its cron config), present only
+/// for connections that sync on a timer. A connection can transfer on demand
+/// without this — it is purely the schedule, not a capability marker. When the
+/// connection last synced is on [`Connection`] itself, since a connection with no
+/// schedule still syncs.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncSchedule {
@@ -19,9 +23,6 @@ pub struct SyncSchedule {
     pub schedule_cron: Option<String>,
     /// How an import reconciles files whose source object was deleted.
     pub deletion_policy: SyncDeletionPolicy,
-    /// When the connection last synced successfully, if ever.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_synced: Option<Timestamp>,
 }
 
 /// Response type for a workspace connection.
@@ -39,15 +40,21 @@ pub struct Connection {
     pub created_by: AccountRef,
     /// Human-readable connection display name.
     pub display_name: String,
-    /// Provider identifier (`s3`, `azure`, `gcs`, `openai`, `ollama`, ...).
+    /// Provider identifier (`s3`, `azure`, `gcs`, `google_drive`, `dropbox`, ...).
     pub provider: String,
-    /// Capability category of the provider (object store, language model, ...).
-    pub provider_type: ProviderType,
+    /// Capability category of the connection (object store, file service).
+    pub connection_type: ConnectionType,
     /// Whether the connection is enabled.
     pub is_active: bool,
-    /// Sync configuration; present only for sync-capable connections.
+    /// Scheduled-sync configuration; present only for connections that sync on a
+    /// timer. Its absence does not mean the connection cannot sync — a file
+    /// service and an unscheduled object store both transfer on demand.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sync: Option<SyncSchedule>,
+    /// When the connection last synced successfully, if ever. Independent of
+    /// `sync`: a connection with no schedule still records its on-demand syncs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_synced_at: Option<Timestamp>,
     /// When the connection was created.
     pub created_at: Timestamp,
     /// When the connection was last updated.
@@ -110,13 +117,12 @@ impl Connection {
         workspace_slug: Handle,
         created_by: AccountRef,
         schedule: Option<WorkspaceConnectionSchedule>,
-        last_synced: Option<Timestamp>,
+        last_synced_at: Option<Timestamp>,
     ) -> Self {
         let sync = schedule.map(|schedule| SyncSchedule {
             sync_mode: schedule.sync_mode,
             schedule_cron: schedule.schedule_cron,
             deletion_policy: schedule.deletion_policy,
-            last_synced,
         });
         Self {
             id: ConnectionId::from_uuid(connection.id),
@@ -124,9 +130,10 @@ impl Connection {
             created_by,
             display_name: connection.display_name,
             provider: connection.provider,
-            provider_type: connection.provider_type,
+            connection_type: connection.connection_type,
             is_active: connection.is_active,
             sync,
+            last_synced_at,
             created_at: connection.created_at.into(),
             updated_at: connection.updated_at.into(),
         }

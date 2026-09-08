@@ -9,7 +9,9 @@ mod service;
 mod token_stream;
 mod turn;
 
-pub use self::config::{AuthenticatedProvider, LlmConfig, UnauthenticatedProvider};
+pub use self::config::{
+    AuthenticatedProvider, InferenceConfig, LlmConfig, UnauthenticatedProvider,
+};
 pub use self::service::InferenceClient;
 pub use self::token_stream::TokenStream;
 pub use self::turn::{ChatTurn, Role};

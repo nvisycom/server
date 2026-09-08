@@ -28,6 +28,11 @@ CREATE TYPE ACTIVITY_TYPE AS ENUM (
     'connection.sync.completed',
     'connection.sync.failed',
 
+    -- Provider activities
+    'provider.created',
+    'provider.updated',
+    'provider.deleted',
+
     -- Webhook activities
     'webhook.created',
     'webhook.updated',

@@ -1,35 +1,32 @@
-//! Connection provider configuration spanning every capability.
+//! Transfer-connection configuration.
 //!
-//! A connection's stored config is one of the capability configs — object
-//! storage, LLM inference, or a cloud file service. The outer enum is untagged,
-//! so on the wire it is flat: the inner config's own `provider` tag is the sole
-//! discriminator (`{ "provider": "s3", ... }`, `{ "provider": "openai", ... }`,
-//! `{ "provider": "google_drive", ... }`). Capability crates own their provider
-//! configs; this type only composes them.
+//! A connection's stored config is one of the transfer-capability configs —
+//! object storage or a cloud file service. The outer enum is untagged, so on the
+//! wire it is flat: the inner config's own `provider` tag is the sole
+//! discriminator (`{ "provider": "s3", ... }`, `{ "provider": "google_drive",
+//! ... }`). Capability crates own their provider configs; this type only composes
+//! them. Inference services are a separate resource (see `ProviderConfig`).
 
 use nvisy_core::net::EndpointPolicy;
 use nvisy_file_service::provider::FileServiceConfig;
-use nvisy_inference::LlmConfig;
 use nvisy_object_store::provider::StorageConfig;
-use nvisy_postgres::types::ProviderType;
+use nvisy_postgres::types::ConnectionType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::handler::{ErrorKind, Result};
 
-/// A fully-typed connection configuration for any capability.
+/// A fully-typed transfer-connection configuration.
 ///
 /// Untagged: the two inner enums have disjoint `provider` values, so serde
 /// resolves the variant from the flat payload without an outer discriminator.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ConnectionConfig {
-    /// An object-storage connection (s3, azure, gcs) — transfer-capable.
+    /// An object-storage connection (s3, azure, gcs).
     ObjectStore(StorageConfig),
-    /// A file-service connection (google_drive, dropbox, ...) — transfer-capable.
+    /// A file-service connection (google_drive, dropbox, ...).
     FileService(FileServiceConfig),
-    /// An LLM inference connection (openai, ollama, anthropic).
-    Inference(LlmConfig),
 }
 
 impl ConnectionConfig {
@@ -40,27 +37,28 @@ impl ConnectionConfig {
         match self {
             Self::ObjectStore(config) => config.provider_id(),
             Self::FileService(config) => config.provider_id(),
-            Self::Inference(config) => config.provider_id(),
         }
     }
 
     /// The capability category of this config, stored on the connection so it can
     /// be found by what it does without decrypting the config.
     #[must_use]
-    pub fn provider_type(&self) -> ProviderType {
+    pub fn connection_type(&self) -> ConnectionType {
         match self {
-            Self::ObjectStore(_) => ProviderType::ObjectStore,
-            Self::FileService(_) => ProviderType::FileService,
-            Self::Inference(_) => ProviderType::LanguageModel,
+            Self::ObjectStore(_) => ConnectionType::ObjectStore,
+            Self::FileService(_) => ConnectionType::FileService,
         }
     }
 
-    /// Whether this connection can transfer files (import from or export to it).
-    /// Object stores and cloud file services can; an inference connection cannot.
-    /// Determines whether sync configuration, syncs, and transfers apply.
+    /// Whether this connection can be given a scheduled-sync configuration (a
+    /// cron that runs the transfer on a timer).
+    ///
+    /// Delegates to [`ConnectionType::supports_schedule`] on the config's category,
+    /// so the rule lives in one place whether the caller has the typed config or
+    /// only the stored `connection_type`.
     #[must_use]
-    pub fn supports_transfer(&self) -> bool {
-        matches!(self, Self::ObjectStore(_) | Self::FileService(_))
+    pub fn supports_schedule(&self) -> bool {
+        self.connection_type().supports_schedule()
     }
 
     /// Whether this connection is a cloud file service. Only file services back
@@ -75,9 +73,9 @@ impl ConnectionConfig {
     /// rejecting one the deployment does not allow (plaintext http, a non-global
     /// host in strict mode, and so on) before it is stored or reached.
     ///
-    /// Object-store `endpoint` and inference `base_url` are the attacker-
-    /// influenced URLs the server would otherwise send requests to; a file-
-    /// service connection has no such URL (OAuth endpoints are provider-owned).
+    /// An object store's `endpoint` is the attacker-influenced URL the server
+    /// would otherwise send requests to; a file-service connection has no such URL
+    /// (OAuth endpoints are provider-owned).
     ///
     /// # Errors
     ///
@@ -85,7 +83,6 @@ impl ConnectionConfig {
     pub async fn validate_endpoints(&self, policy: EndpointPolicy) -> Result<()> {
         let endpoint = match self {
             Self::ObjectStore(config) => config.endpoint(),
-            Self::Inference(config) => config.base_url(),
             Self::FileService(_) => None,
         };
         if let Some(endpoint) = endpoint {

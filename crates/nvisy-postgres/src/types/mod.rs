@@ -20,10 +20,10 @@ pub use constraint::{
     WorkspacePolicyConstraints, WorkspaceWebhookConstraints,
 };
 pub use enums::{
-    ActivityType, ApiTokenType, ChatRole, DetectionStatus, FileKind, IdentityProvider,
-    InviteStatus, NotificationEvent, OutboxStatus, PipelineStatus, PipelineTriggerType,
-    ProviderType, SyncDeletionPolicy, SyncMode, SyncStatus, SyncTriggerType, WebhookEvent,
-    WebhookStatus, WorkspaceRole,
+    ActivityType, ApiTokenType, ChatRole, ConnectionType, DetectionStatus, FileKind,
+    IdentityProvider, InviteStatus, NotificationEvent, OutboxStatus, PipelineStatus,
+    PipelineTriggerType, ProviderType, SyncDeletionPolicy, SyncMode, SyncStatus, SyncTriggerType,
+    WebhookEvent, WebhookStatus, WorkspaceRole,
 };
 pub use filtering::{DetectionFilter, FileFilter, InviteFilter, MemberFilter};
 pub use handle::{HANDLE_MAX_LENGTH, HANDLE_MIN_LENGTH, Handle, HandleError};
@@ -33,12 +33,14 @@ pub use json::{
     DetectionFailedParams, DetectionMetadata, FileActivityParams, InvalidHeader,
     InviteActivityParams, Json, MemberActivityParams, MemberInvitedParams, MemberJoinedParams,
     NotificationPayload, PipelineActivityParams, PipelineMetadata, PolicyActivityParams,
-    RasterPolicy, RedactionActivityParams, RedactionCreatedParams, Retention, RetentionOverride,
-    RetentionScope, RetentionSettings, WebhookActivityParams, WebhookHeaders,
-    WorkspaceActivityParams, WorkspaceMetadata, WorkspaceSettings,
+    ProviderActivityParams, RasterPolicy, RedactionActivityParams, RedactionCreatedParams,
+    Retention, RetentionOverride, RetentionScope, RetentionSettings, WebhookActivityParams,
+    WebhookHeaders, WorkspaceActivityParams, WorkspaceMetadata, WorkspaceSettings,
 };
 pub use pagination::{Cursor, CursorPage, CursorPagination, OffsetPage, OffsetPagination};
-pub use prefixed_id::{ConnectionId, DetectionId, PrefixedIdError, RedactionId, WebhookId};
+pub use prefixed_id::{
+    ConnectionId, DetectionId, PrefixedIdError, ProviderId, RedactionId, WebhookId,
+};
 pub use sorting::{
     FileSortBy, FileSortField, InviteSortBy, InviteSortField, MemberSortBy, MemberSortField,
     SortBy, SortOrder,

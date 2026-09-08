@@ -85,6 +85,12 @@ pub enum Permission {
     /// Can trigger and cancel connection syncs.
     RunConnectionSyncs,
 
+    // Provider permissions
+    /// Can view workspace inference providers.
+    ViewProviders,
+    /// Can create, modify, and manage workspace inference providers.
+    ManageProviders,
+
     // Policy permissions
     /// Can view workspace policies.
     ViewPolicies,
@@ -129,6 +135,7 @@ impl Permission {
             | Self::ViewActivity
             | Self::ViewMembers
             | Self::ViewConnections
+            | Self::ViewProviders
             | Self::ViewPolicies
             | Self::ViewWebhooks => WorkspaceRole::Reviewer,
 
@@ -150,6 +157,7 @@ impl Permission {
             | Self::InviteMembers
             | Self::RemoveMembers
             | Self::ManageConnections
+            | Self::ManageProviders
             | Self::ManagePolicies
             | Self::CreateWebhooks
             | Self::UpdateWebhooks

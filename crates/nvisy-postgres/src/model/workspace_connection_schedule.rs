@@ -1,7 +1,8 @@
 //! Workspace connection sync-schedule model.
 //!
-//! The sync capability's configuration for a connection. One row per
-//! sync-capable connection; its presence marks the connection as sync-capable.
+//! A connection's scheduled-sync configuration. One row per connection that syncs
+//! on a timer. Transfer capability is the connection's `provider_type`, not this
+//! row's presence.
 
 use diesel::prelude::*;
 use uuid::Uuid;

@@ -22,7 +22,6 @@ use axum::http::header::CACHE_CONTROL;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use nvisy_core::net::EndpointPolicy;
 use nvisy_file_service::FileService;
-use nvisy_inference::Error as InferenceError;
 use nvisy_postgres::model::{
     NewWorkspaceConnection, NewWorkspaceConnectionSchedule, UpdateWorkspaceConnection,
     WorkspaceConnection, WorkspaceConnectionSchedule,
@@ -85,13 +84,14 @@ async fn create_connection(
     // config is ever stored (SSRF / cleartext-credential guard).
     request.config.validate_endpoints(endpoint_policy).await?;
 
-    // Sync config applies only to transfer-capable providers. Validate the
+    // A `sync` block configures a scheduled sync, which only schedulable providers
+    // accept (a file service transfers on demand, not on a timer). Validate the
     // pairing before any write so a mismatch fails fast.
-    let supports_transfer = request.config.supports_transfer();
     if let Some(sync) = &request.sync {
-        if !supports_transfer {
-            return Err(ErrorKind::BadRequest
-                .with_message("This provider does not support sync configuration"));
+        if !request.config.supports_schedule() {
+            return Err(
+                ErrorKind::BadRequest.with_message("This provider does not support scheduled sync")
+            );
         }
         validate_sync_input(sync)?;
     }
@@ -99,7 +99,7 @@ async fn create_connection(
     // The provider and its capability type are derived from the typed config so
     // they can never disagree with it; the full config is encrypted at rest.
     let provider = request.config.provider_id().to_owned();
-    let provider_type = request.config.provider_type();
+    let connection_type = request.config.connection_type();
     let encrypted_data = crypto.encrypt_json(workspace.id, &request.config)?;
 
     let new_connection = NewWorkspaceConnection {
@@ -107,24 +107,23 @@ async fn create_connection(
         account_id,
         display_name: request.display_name,
         provider,
-        provider_type,
+        connection_type,
         encrypted_data,
         is_active: request.is_active,
         metadata: None,
     };
 
-    // Insert the connection, its schedule (if transfer-capable), and the outbox
-    // event atomically, so a partial write can never leave a transfer-capable
-    // connection without a schedule, nor record — or lose — the event out of step
-    // with the insert.
-    let sync = request.sync.unwrap_or_default();
+    // Insert the connection, its schedule (only when a `sync` block was given for
+    // a schedulable provider), and the outbox event atomically, so a partial write
+    // can never leave the schedule out of step with the connection, nor record —
+    // or lose — the event out of step with the insert. A connection without a
+    // schedule row still transfers on demand; the row is purely the cron config.
+    let sync = request.sync;
     let (connection, schedule) = conn
         .transaction(async |conn| {
             let connection = conn.create_workspace_connection(new_connection).await?;
-            // A transfer-capable connection gets a schedule row (its presence
-            // marks the capability).
-            let schedule = if supports_transfer {
-                Some(
+            let schedule = match sync {
+                Some(sync) => Some(
                     conn.create_connection_schedule(NewWorkspaceConnectionSchedule {
                         connection_id: connection.id,
                         sync_mode: Some(sync.sync_mode),
@@ -132,9 +131,8 @@ async fn create_connection(
                         deletion_policy: Some(sync.deletion_policy),
                     })
                     .await?,
-                )
-            } else {
-                None
+                ),
+                None => None,
             };
             conn.emit_event(
                 EventOrigin {
@@ -216,7 +214,7 @@ async fn list_connections(
 
     // One grouped query resolves last-synced for the whole page (not per row).
     let ids: Vec<Uuid> = page.items.iter().map(|wc| wc.item.id).collect();
-    let last_synced: HashMap<Uuid, jiff::Timestamp> = conn
+    let last_synced_at: HashMap<Uuid, jiff::Timestamp> = conn
         .last_successful_sync_at(&ids)
         .await?
         .into_iter()
@@ -242,7 +240,7 @@ async fn list_connections(
     Ok((
         StatusCode::OK,
         Json(ConnectionsPage::from_cursor_page(page, |wc| {
-            let synced = last_synced.get(&wc.item.id).copied();
+            let synced = last_synced_at.get(&wc.item.id).copied();
             let schedule = schedules.remove(&wc.item.id);
             Connection::from_model(
                 wc.item,
@@ -291,7 +289,7 @@ async fn read_connection(
     let FoundConnection {
         connection: found,
         schedule,
-        last_synced,
+        last_synced_at,
     } = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace connection read");
@@ -303,7 +301,7 @@ async fn read_connection(
             workspace.slug,
             found.account.into(),
             schedule,
-            last_synced,
+            last_synced_at,
         )),
     ))
 }
@@ -353,17 +351,16 @@ async fn update_connection(
         .connection
         .item;
 
-    // Sync config only applies to transfer-capable connections. A connection's
-    // capability is fixed by its provider, which the config replacement (if any)
-    // must preserve.
-    let supports_transfer = match &request.config {
-        Some(config) => config.supports_transfer(),
-        None => conn.find_connection_schedule(existing.id).await?.is_some(),
-    };
+    // A `sync` block configures a scheduled sync, which only schedulable
+    // connection types accept. Schedulability is fixed by the connection's
+    // provider (a config replacement must preserve the provider, checked under the
+    // lock below), so it is read from the stored `connection_type` without
+    // decrypting the config.
     if let Some(sync) = &request.sync {
-        if !supports_transfer {
-            return Err(ErrorKind::BadRequest
-                .with_message("This provider does not support sync configuration"));
+        if !existing.connection_type.supports_schedule() {
+            return Err(
+                ErrorKind::BadRequest.with_message("This provider does not support scheduled sync")
+            );
         }
         validate_sync_input(sync)?;
     }
@@ -461,7 +458,7 @@ async fn update_connection(
     let FoundConnection {
         connection: found,
         schedule,
-        last_synced,
+        last_synced_at,
     } = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Connection updated");
@@ -473,7 +470,7 @@ async fn update_connection(
             workspace.slug,
             found.account.into(),
             schedule,
-            last_synced,
+            last_synced_at,
         )),
     ))
 }
@@ -644,22 +641,6 @@ async fn verify_connection(
                 ConnectionVerification::unreachable("credentials rejected or provider unreachable")
             }
         },
-        ConnectionConfig::Inference(config) => match config.validate().await {
-            Ok(()) => {
-                tracing::info!(target: TRACING_TARGET, "Connection verified");
-                ConnectionVerification::reachable()
-            }
-            Err(err) => {
-                // Log the full error, but return only a safe, kind-based reason
-                // so provider endpoints/keys are not echoed to the client.
-                tracing::warn!(target: TRACING_TARGET, error = %err, "Connection verification failed");
-                let reason = match err {
-                    InferenceError::Build(_) => "invalid configuration",
-                    _ => "credentials rejected or provider unreachable",
-                };
-                ConnectionVerification::unreachable(reason)
-            }
-        },
     };
 
     Ok((StatusCode::OK, Json(verification)))
@@ -799,7 +780,7 @@ struct FoundConnection {
     /// The sync schedule, present only for transfer-capable connections.
     schedule: Option<WorkspaceConnectionSchedule>,
     /// When the connection last synced successfully, if ever.
-    last_synced: Option<jiff::Timestamp>,
+    last_synced_at: Option<jiff::Timestamp>,
 }
 
 /// Finds a connection within a workspace by id, with its creator, or returns a
@@ -814,7 +795,7 @@ async fn find_connection(
         .await?
         .ok_or_else(|| Error::not_found("connection"))?;
     let schedule = conn.find_connection_schedule(found.item.id).await?;
-    let last_synced = conn
+    let last_synced_at = conn
         .last_successful_sync_at(&[found.item.id])
         .await?
         .into_iter()
@@ -823,7 +804,7 @@ async fn find_connection(
     Ok(FoundConnection {
         connection: found,
         schedule,
-        last_synced,
+        last_synced_at,
     })
 }
 
