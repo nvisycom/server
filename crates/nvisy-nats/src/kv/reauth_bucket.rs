@@ -18,7 +18,7 @@ use derive_more::Display;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use super::core::{KvBucket, KvKey};
+use super::core::{InvalidKvKey, KvBucket, KvKey, validate_kv_key};
 
 /// The key of a step-up re-authentication proof: an opaque, unguessable id minted
 /// by the reauth callback and presented by the credential-adding action.
@@ -31,28 +31,12 @@ use super::core::{KvBucket, KvKey};
 pub struct ReauthProofKey(pub String);
 
 impl FromStr for ReauthProofKey {
-    type Err = InvalidReauthProofKey;
+    type Err = InvalidKvKey;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.is_empty() {
-            return Err(InvalidReauthProofKey);
-        }
-        let valid = s
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'/' | b'_' | b'=' | b'.'));
-        if valid {
-            Ok(Self(s.to_owned()))
-        } else {
-            Err(InvalidReauthProofKey)
-        }
+        validate_kv_key(s).map(Self)
     }
 }
-
-/// Returned when a string is not a valid [`ReauthProofKey`] (empty, or containing
-/// characters NATS KV keys disallow).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("invalid reauth proof key")]
-pub struct InvalidReauthProofKey;
 
 impl KvKey for ReauthProofKey {}
 
@@ -80,23 +64,4 @@ where
     const DESCRIPTION: &'static str = "Step-up re-authentication proofs";
     const NAME: &'static str = "reauth_proof";
     const TTL: Option<Duration> = Some(Duration::from_secs(5 * 60)); // 5 minutes
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reauth_proof_key_roundtrip() {
-        let key = ReauthProofKey("abc-123_XYZ=".to_owned());
-        let parsed: ReauthProofKey = key.to_string().parse().unwrap();
-        assert_eq!(key, parsed);
-    }
-
-    #[test]
-    fn reauth_proof_key_rejects_invalid() {
-        assert!("".parse::<ReauthProofKey>().is_err());
-        assert!("has space".parse::<ReauthProofKey>().is_err());
-        assert!("bad*char".parse::<ReauthProofKey>().is_err());
-    }
 }

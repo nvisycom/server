@@ -6,7 +6,7 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::schema::workspace_policies;
-use crate::types::{Handle, HasCreatedAt, HasDeletedAt, HasUpdatedAt};
+use crate::types::Handle;
 
 /// Workspace policy representing a structured redaction governance policy.
 ///
@@ -76,22 +76,4 @@ pub struct UpdateWorkspacePolicy {
     pub metadata: Option<JsonValue>,
     /// Soft delete timestamp.
     pub deleted_at: Option<Option<Timestamp>>,
-}
-
-impl HasCreatedAt for WorkspacePolicy {
-    fn created_at(&self) -> jiff::Timestamp {
-        self.created_at.into()
-    }
-}
-
-impl HasUpdatedAt for WorkspacePolicy {
-    fn updated_at(&self) -> jiff::Timestamp {
-        self.updated_at.into()
-    }
-}
-
-impl HasDeletedAt for WorkspacePolicy {
-    fn deleted_at(&self) -> Option<jiff::Timestamp> {
-        self.deleted_at.map(Into::into)
-    }
 }

@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_invites;
-use crate::types::{HasCreatedAt, HasUpdatedAt, InviteStatus, WorkspaceRole};
+use crate::types::{InviteStatus, WorkspaceRole};
 
 /// Workspace invitation model representing an invitation to join a workspace.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -87,17 +87,5 @@ impl WorkspaceInvite {
     /// Returns whether the invitation can still be used.
     pub fn can_be_used(&self) -> bool {
         self.is_valid() && !self.is_expired()
-    }
-}
-
-impl HasCreatedAt for WorkspaceInvite {
-    fn created_at(&self) -> jiff::Timestamp {
-        self.created_at.into()
-    }
-}
-
-impl HasUpdatedAt for WorkspaceInvite {
-    fn updated_at(&self) -> jiff::Timestamp {
-        self.updated_at.into()
     }
 }

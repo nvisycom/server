@@ -16,7 +16,7 @@ use nvisy_postgres::model::{
 use nvisy_postgres::query::{
     AccountApiTokenRepository, AccountIdentityRepository, AccountRepository,
 };
-use nvisy_postgres::types::{ApiTokenType, HasDeletedAt, IdentityProvider};
+use nvisy_postgres::types::{ApiTokenType, IdentityProvider};
 use nvisy_postgres::{AsyncConnection, Error as PgError, JiffTimestamp, PgClient};
 
 use super::request::{Login, Signup};

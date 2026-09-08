@@ -47,7 +47,7 @@ use nvisy_postgres::model::{Account, NewAccount, NewAccountApiToken, NewAccountI
 use nvisy_postgres::query::{
     AccountApiTokenRepository, AccountIdentityRepository, AccountRepository,
 };
-use nvisy_postgres::types::{ApiTokenType, Handle, HasDeletedAt, IdentityProvider};
+use nvisy_postgres::types::{ApiTokenType, Handle, IdentityProvider};
 use nvisy_postgres::{AsyncConnection, Error as PgError, PgClient, PgConn};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

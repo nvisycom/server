@@ -8,10 +8,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_webhooks;
-use crate::types::{
-    HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, Json, WebhookEvent, WebhookHeaders,
-    WebhookStatus,
-};
+use crate::types::{Json, WebhookEvent, WebhookHeaders, WebhookStatus};
 
 /// Workspace webhook model representing a webhook configuration for a workspace.
 ///
@@ -111,29 +108,5 @@ impl WorkspaceWebhook {
     /// Returns the custom headers, or an empty set for an absent/older blob.
     pub fn parsed_headers(&self) -> WebhookHeaders {
         self.headers.or_default()
-    }
-}
-
-impl HasCreatedAt for WorkspaceWebhook {
-    fn created_at(&self) -> jiff::Timestamp {
-        self.created_at.into()
-    }
-}
-
-impl HasUpdatedAt for WorkspaceWebhook {
-    fn updated_at(&self) -> jiff::Timestamp {
-        self.updated_at.into()
-    }
-}
-
-impl HasDeletedAt for WorkspaceWebhook {
-    fn deleted_at(&self) -> Option<jiff::Timestamp> {
-        self.deleted_at.map(Into::into)
-    }
-}
-
-impl HasOwnership for WorkspaceWebhook {
-    fn created_by(&self) -> Uuid {
-        self.created_by
     }
 }

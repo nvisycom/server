@@ -6,7 +6,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::account_api_tokens;
-use crate::types::{ApiTokenType, HasCreatedAt, HasExpiresAt, HasSecurityContext};
+use crate::types::ApiTokenType;
 
 /// Account API token model representing an authentication token.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -73,26 +73,4 @@ pub struct UpdateAccountApiToken {
     pub expired_at: Option<Option<Timestamp>>,
     /// Timestamp when the token was soft-deleted.
     pub deleted_at: Option<Option<Timestamp>>,
-}
-
-impl HasCreatedAt for AccountApiToken {
-    fn created_at(&self) -> jiff::Timestamp {
-        self.issued_at.into()
-    }
-}
-
-impl HasExpiresAt for AccountApiToken {
-    fn expires_at(&self) -> Option<jiff::Timestamp> {
-        self.expired_at.map(Into::into)
-    }
-}
-
-impl HasSecurityContext for AccountApiToken {
-    fn ip_address(&self) -> Option<IpNet> {
-        self.ip_address
-    }
-
-    fn user_agent(&self) -> Option<&str> {
-        self.user_agent.as_deref()
-    }
 }

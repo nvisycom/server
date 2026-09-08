@@ -15,7 +15,7 @@ use derive_more::Display;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use super::core::{KvBucket, KvKey};
+use super::core::{InvalidKvKey, KvBucket, KvKey, validate_kv_key};
 
 /// The CSRF-state key for an in-flight OIDC sign-in. The value is the opaque
 /// state token the provider echoes back to the callback.
@@ -28,28 +28,12 @@ use super::core::{KvBucket, KvKey};
 pub struct OidcStateKey(pub String);
 
 impl FromStr for OidcStateKey {
-    type Err = InvalidOidcStateKey;
+    type Err = InvalidKvKey;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.is_empty() {
-            return Err(InvalidOidcStateKey);
-        }
-        let valid = s
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'/' | b'_' | b'=' | b'.'));
-        if valid {
-            Ok(Self(s.to_owned()))
-        } else {
-            Err(InvalidOidcStateKey)
-        }
+        validate_kv_key(s).map(Self)
     }
 }
-
-/// Returned when a string is not a valid [`OidcStateKey`] (empty, or containing
-/// characters NATS KV keys disallow).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("invalid OIDC state key")]
-pub struct InvalidOidcStateKey;
 
 impl KvKey for OidcStateKey {}
 
@@ -79,26 +63,4 @@ where
     const DESCRIPTION: &'static str = "In-flight OIDC sign-in state";
     const NAME: &'static str = "oidc_state";
     const TTL: Option<Duration> = Some(Duration::from_secs(10 * 60)); // 10 minutes
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn oidc_state_key_roundtrip() {
-        // A URL-safe base64 OIDC state (with padding) round-trips.
-        let key = OidcStateKey("abc-123_XYZ=".to_owned());
-        let parsed: OidcStateKey = key.to_string().parse().unwrap();
-        assert_eq!(key, parsed);
-    }
-
-    #[test]
-    fn oidc_state_key_rejects_invalid() {
-        // Empty and characters outside the NATS KV key set are rejected.
-        assert!("".parse::<OidcStateKey>().is_err());
-        assert!("has space".parse::<OidcStateKey>().is_err());
-        assert!("bad*char".parse::<OidcStateKey>().is_err());
-        assert!("newline\n".parse::<OidcStateKey>().is_err());
-    }
 }

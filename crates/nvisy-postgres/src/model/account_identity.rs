@@ -11,7 +11,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::account_identities;
-use crate::types::{HasCreatedAt, HasUpdatedAt, IdentityProvider};
+use crate::types::IdentityProvider;
 
 /// One authentication method for an account.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -81,17 +81,5 @@ impl NewAccountIdentity {
             provider_subject: Some(provider_subject),
             provider_email,
         }
-    }
-}
-
-impl HasCreatedAt for AccountIdentity {
-    fn created_at(&self) -> jiff::Timestamp {
-        self.created_at.into()
-    }
-}
-
-impl HasUpdatedAt for AccountIdentity {
-    fn updated_at(&self) -> jiff::Timestamp {
-        self.updated_at.into()
     }
 }

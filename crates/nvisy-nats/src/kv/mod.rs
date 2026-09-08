@@ -21,7 +21,7 @@ mod reauth_bucket;
 mod scheduler_bucket;
 mod typed_store;
 
-pub use core::{KvBucket, KvKey};
+pub use core::{InvalidKvKey, KvBucket, KvKey, validate_kv_key};
 
 pub use oauth_bucket::{OAuthStateBucket, OAuthStateKey};
 pub use oidc_bucket::{OidcStateBucket, OidcStateKey};

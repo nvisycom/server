@@ -11,12 +11,11 @@
 //! - [`UpdateAccount`] - Data structure for updating existing account information
 
 use diesel::prelude::*;
-use ipnet::IpNet;
 use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::accounts;
-use crate::types::{Handle, HasCreatedAt, HasDeletedAt, HasSecurityContext, HasUpdatedAt};
+use crate::types::Handle;
 
 /// Main account model representing a user account in the system.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -104,32 +103,9 @@ impl Account {
     pub fn is_suspended(&self) -> bool {
         self.is_suspended
     }
-}
 
-impl HasCreatedAt for Account {
-    fn created_at(&self) -> jiff::Timestamp {
-        self.created_at.into()
-    }
-}
-
-impl HasUpdatedAt for Account {
-    fn updated_at(&self) -> jiff::Timestamp {
-        self.updated_at.into()
-    }
-}
-
-impl HasDeletedAt for Account {
-    fn deleted_at(&self) -> Option<jiff::Timestamp> {
-        self.deleted_at.map(Into::into)
-    }
-}
-
-impl HasSecurityContext for Account {
-    fn ip_address(&self) -> Option<IpNet> {
-        None
-    }
-
-    fn user_agent(&self) -> Option<&str> {
-        None
+    /// Returns whether the account has been soft-deleted.
+    pub fn is_deleted(&self) -> bool {
+        self.deleted_at.is_some()
     }
 }
