@@ -147,6 +147,16 @@ impl OAuthAppsConfig {
             .map(str::trim)
             .filter(|value| !value.is_empty());
         let Some(redirect_uri) = redirect_uri else {
+            // Warn when a provider is credentialed but the shared redirect URI is
+            // missing: that configuration silently disables every connector, and a
+            // startup warning surfaces the misconfiguration instead of leaving only
+            // a per-request "not configured" error.
+            if self.has_provider_credentials() {
+                tracing::warn!(
+                    "cloud file connectors are configured but FILE_SERVICE_OAUTH_REDIRECT_URI \
+                     is unset; all connectors are disabled until it is set",
+                );
+            }
             return OAuthApps::default();
         };
 
@@ -156,6 +166,20 @@ impl OAuthAppsConfig {
             onedrive: self.onedrive.to_app(redirect_uri),
             box_app: self.box_app.to_app(redirect_uri),
         }
+    }
+
+    /// Whether any provider has a client id set (non-empty), i.e. at least one
+    /// connector is meant to be configured.
+    #[must_use]
+    fn has_provider_credentials(&self) -> bool {
+        [
+            &self.google_drive.client_id,
+            &self.dropbox.client_id,
+            &self.onedrive.client_id,
+            &self.box_app.client_id,
+        ]
+        .into_iter()
+        .any(|id| id.as_deref().is_some_and(|id| !id.trim().is_empty()))
     }
 
     /// Builds a [`FileService`] from this configuration.

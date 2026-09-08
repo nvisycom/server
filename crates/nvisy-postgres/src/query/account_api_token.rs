@@ -251,6 +251,15 @@ impl AccountApiTokenRepository for PgConnection {
                 .filter(dsl::id.eq(token_id))
                 .filter(dsl::deleted_at.is_null())
                 .filter(dsl::session_type.eq(ApiTokenType::Web))
+                // Only slide a session still within its idle bound; an idle-expired
+                // row is never moved back into the future. Defense in depth: the
+                // caller validates activity before sliding, so this guards against
+                // a future reordering, not the current path.
+                .filter(
+                    dsl::expired_at
+                        .is_null()
+                        .or(dsl::expired_at.gt(diesel::dsl::now)),
+                )
                 .filter(
                     dsl::last_used_at
                         .is_null()
@@ -346,36 +355,55 @@ impl AccountApiTokenRepository for PgConnection {
     }
 
     async fn prune_app_tokens(&mut self, account_id: Uuid, keep: usize) -> Result<i64> {
-        use diesel::dsl::now;
-        use schema::account_api_tokens::{self, dsl};
+        use crate::AsyncConnection;
 
-        // The `keep` newest live `app` tokens for the account are retained; load
-        // their ids, then soft-delete every other live `app` token. Two steps
-        // rather than a `NOT IN (… LIMIT …)` subquery, which Diesel does not
-        // express cleanly.
-        let keep_ids: Vec<Uuid> = account_api_tokens::table
-            .filter(dsl::account_id.eq(account_id))
-            .filter(dsl::session_type.eq(ApiTokenType::App))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::issued_at.desc())
-            .limit(keep as i64)
-            .select(dsl::id)
-            .load(self)
-            .await
-            .map_err(Error::from)?;
+        // Prune in one transaction so the "which to keep" read and the delete are
+        // atomic. The delete is bounded by the `issued_at` of the oldest kept token
+        // rather than an id set, so a token minted concurrently — necessarily the
+        // newest by `issued_at` — is never inside the delete range and cannot be
+        // revoked out from under the client that just received it.
+        self.transaction(async |conn| {
+            use diesel::dsl::now;
+            use schema::account_api_tokens::{self, dsl};
 
-        diesel::update(
-            account_api_tokens::table
+            // The `issued_at` of the `keep`-th newest live app token. If the account
+            // has at most `keep`, there is nothing to prune.
+            let kept_issued_at: Vec<crate::JiffTimestamp> = account_api_tokens::table
                 .filter(dsl::account_id.eq(account_id))
                 .filter(dsl::session_type.eq(ApiTokenType::App))
                 .filter(dsl::deleted_at.is_null())
-                .filter(dsl::id.ne_all(&keep_ids)),
-        )
-        .set(dsl::deleted_at.eq(now))
-        .execute(self)
+                .order(dsl::issued_at.desc())
+                .limit(keep as i64)
+                .select(dsl::issued_at)
+                .load(conn)
+                .await
+                .map_err(Error::from)?;
+
+            let Some(cutoff) = kept_issued_at.last().copied() else {
+                return Ok(0);
+            };
+            if kept_issued_at.len() < keep {
+                // Fewer than `keep` tokens exist; nothing beyond the window.
+                return Ok(0);
+            }
+
+            // Soft-delete live app tokens older than the kept window. A concurrent
+            // insert has `issued_at >= cutoff` and is spared.
+            let deleted = diesel::update(
+                account_api_tokens::table
+                    .filter(dsl::account_id.eq(account_id))
+                    .filter(dsl::session_type.eq(ApiTokenType::App))
+                    .filter(dsl::deleted_at.is_null())
+                    .filter(dsl::issued_at.lt(cutoff)),
+            )
+            .set(dsl::deleted_at.eq(now))
+            .execute(conn)
+            .await
+            .map_err(Error::from)?;
+
+            Ok::<_, Error>(deleted as i64)
+        })
         .await
-        .map_err(Error::from)
-        .map(|rows| rows as i64)
     }
 
     async fn offset_list_account_api_tokens(

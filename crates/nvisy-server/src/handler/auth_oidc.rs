@@ -50,8 +50,10 @@ use nvisy_nats::kv::{
     ReauthProofKey,
 };
 use nvisy_postgres::model::{Account, NewAccount, NewAccountIdentity};
-use nvisy_postgres::query::{AccountIdentityRepository, AccountRepository, LinkIdentityOutcome};
-use nvisy_postgres::types::{HANDLE_MAX_LENGTH, Handle, IdentityProvider};
+use nvisy_postgres::query::{
+    AccountApiTokenRepository, AccountIdentityRepository, AccountRepository, LinkIdentityOutcome,
+};
+use nvisy_postgres::types::{ApiTokenType, HANDLE_MAX_LENGTH, Handle, IdentityProvider};
 use nvisy_postgres::{AsyncConnection, Error as PgError, PgClient, PgConn};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -337,6 +339,21 @@ async fn mint_desktop_token(
     }
 
     let mut conn = pg_client.get_connection().await?;
+
+    // Only a browser (`web`) session may mint a desktop token: the desktop login
+    // completes in the browser first. Rejecting `app`/`api` tokens stops a leaked
+    // long-lived `app` token from renewing itself indefinitely by minting fresh
+    // `app` tokens.
+    let session = conn
+        .find_account_api_token_by_id(auth_claims.token_id)
+        .await?
+        .ok_or_else(|| ErrorKind::Unauthorized.with_message("Session not found"))?;
+    if session.session_type != ApiTokenType::Web {
+        return Err(ErrorKind::Forbidden
+            .with_message("Desktop tokens can only be minted from a browser session")
+            .with_resource("session"));
+    }
+
     let account = load_active_account(&mut conn, auth_claims.account_id).await?;
     gate_account_status(&account)?;
 

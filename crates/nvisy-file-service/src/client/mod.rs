@@ -14,5 +14,5 @@ pub use self::config::{
 };
 pub use self::connected::ConnectedFileService;
 pub use self::service::{
-    ByteStream, FileService, FileServiceClient, FileUpload, PickerAccessToken,
+    ByteStream, FileService, FileServiceClient, FileUpload, FreshToken, PickerAccessToken,
 };

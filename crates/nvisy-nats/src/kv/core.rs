@@ -24,16 +24,23 @@ pub struct InvalidKvKey;
 /// the alphanumeric and `-/_=.` characters KV keys allow. A URL-safe base64 token
 /// (the common opaque-key case) always passes.
 ///
+/// The `.` is a NATS subject-token separator, so a key must have no empty
+/// token: a leading, trailing, or consecutive dot (e.g. `.a`, `a.`, `a..b`, or a
+/// bare `.`) is rejected, matching async-nats KV subject rules.
+///
 /// Returns the value on success so a caller's [`FromStr`] is a one-liner:
 /// `validate_kv_key(s).map(Self)`.
 pub fn validate_kv_key(value: &str) -> Result<String, InvalidKvKey> {
     if value.is_empty() {
         return Err(InvalidKvKey);
     }
-    let valid = value
+    let chars_valid = value
         .bytes()
         .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'/' | b'_' | b'=' | b'.'));
-    if valid {
+    // Every dot-separated token must be non-empty (no leading, trailing, or
+    // consecutive dots), since `.` separates NATS subject tokens.
+    let tokens_nonempty = value.split('.').all(|token| !token.is_empty());
+    if chars_valid && tokens_nonempty {
         Ok(value.to_owned())
     } else {
         Err(InvalidKvKey)
@@ -84,5 +91,16 @@ mod tests {
         assert_eq!(validate_kv_key("has space"), Err(InvalidKvKey));
         assert_eq!(validate_kv_key("bad*char"), Err(InvalidKvKey));
         assert_eq!(validate_kv_key("newline\n"), Err(InvalidKvKey));
+    }
+
+    #[test]
+    fn validate_kv_key_rejects_empty_dot_tokens() {
+        // `.` separates NATS subject tokens, so no token may be empty.
+        assert_eq!(validate_kv_key("."), Err(InvalidKvKey));
+        assert_eq!(validate_kv_key(".a"), Err(InvalidKvKey));
+        assert_eq!(validate_kv_key("a."), Err(InvalidKvKey));
+        assert_eq!(validate_kv_key("a..b"), Err(InvalidKvKey));
+        // A single interior dot with non-empty tokens is still fine.
+        assert_eq!(validate_kv_key("a.b").unwrap(), "a.b");
     }
 }

@@ -20,7 +20,6 @@ use super::apps::OAuthApps;
 use super::connected::ConnectedFileService;
 use crate::error::{Error, ErrorKind, Result};
 use crate::oauth::{OAuthClient, OAuthTokens};
-use crate::provider::onedrive::mint_picker_token as mint_onedrive_picker_token;
 use crate::provider::{FileServiceConfig, Provider};
 
 /// Tracing target for cloud file-service operations.
@@ -95,19 +94,23 @@ impl FileService {
         ))
     }
 
-    /// Refreshes the OAuth access token for `config` if it is expired, returning
-    /// the access token to use and, when a refresh happened, the updated config.
+    /// Ensures `config` has a usable access token, refreshing it if expired.
     ///
     /// The refresh token is required; a config without one that has expired
     /// cannot be renewed and must be reconnected by the user.
-    pub async fn ensure_fresh(
-        &self,
-        config: &FileServiceConfig,
-    ) -> Result<(String, Option<FileServiceConfig>)> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::Unauthenticated`] if the token is expired and there is
+    /// no refresh token, or the refresh is rejected.
+    pub async fn ensure_fresh(&self, config: &FileServiceConfig) -> Result<FreshToken> {
         let now = jiff::Timestamp::now().as_second();
         let tokens = config.tokens();
         if !tokens.is_expired(now, REFRESH_SKEW_SECS) {
-            return Ok((tokens.access_token.clone(), None));
+            return Ok(FreshToken {
+                access_token: tokens.access_token.clone(),
+                refreshed: None,
+            });
         }
 
         let refresh_token = tokens.refresh_token.clone().ok_or_else(|| {
@@ -126,7 +129,10 @@ impl FileService {
 
         let mut refreshed = config.clone();
         refreshed.set_tokens(new_tokens);
-        Ok((access_token, Some(refreshed)))
+        Ok(FreshToken {
+            access_token,
+            refreshed: Some(refreshed),
+        })
     }
 
     /// The shared HTTP client, for provider-specific helpers within this crate
@@ -175,33 +181,35 @@ impl FileService {
         config: &FileServiceConfig,
         resource: Option<&str>,
     ) -> Result<PickerAccessToken> {
-        match config.provider {
-            Provider::OneDrive => mint_onedrive_picker_token(self, config, resource).await,
-            // Other token-based pickers (Google Drive, Box) take the provider's
-            // ordinary access token, refreshed if stale.
-            Provider::GoogleDrive | Provider::Box => {
-                let (access_token, refreshed) = self.ensure_fresh(config).await?;
-                let expires_at = refreshed.as_ref().unwrap_or(config).tokens().expires_at;
-                Ok(PickerAccessToken {
-                    access_token,
-                    expires_at,
-                    refreshed,
-                })
-            }
-            Provider::Dropbox => Err(Error::new(
-                ErrorKind::BadRequest,
-                "this provider's picker uses a client-side app key, not a server token",
-            )),
-        }
+        // Provider dispatch lives on `Provider` (beside `connect`), so this stays
+        // provider-neutral.
+        config
+            .provider
+            .mint_picker_token(self, config, resource)
+            .await
     }
 
     /// Connects to the file service described by `config`, refreshing its OAuth
     /// token first if needed.
     pub async fn connect(&self, config: &FileServiceConfig) -> Result<ConnectedFileService> {
-        let (access_token, refreshed) = self.ensure_fresh(config).await?;
-        let client = config.connect(self.http.clone(), access_token);
-        Ok(ConnectedFileService { client, refreshed })
+        let fresh = self.ensure_fresh(config).await?;
+        let client = config.connect(self.http.clone(), fresh.access_token);
+        Ok(ConnectedFileService {
+            client,
+            refreshed: fresh.refreshed,
+        })
     }
+}
+
+/// A usable access token for a connection, from [`FileService::ensure_fresh`]:
+/// the access token to use, plus the updated config to persist when a refresh
+/// produced new tokens (`None` when the stored token was still valid).
+#[must_use]
+pub struct FreshToken {
+    /// The access token to use for the request.
+    pub access_token: String,
+    /// The updated config to persist, present only if a refresh happened.
+    pub refreshed: Option<FileServiceConfig>,
 }
 
 /// A minted browser file-picker access token: the token, its expiry (Unix

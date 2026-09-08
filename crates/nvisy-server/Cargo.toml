@@ -94,7 +94,6 @@ hkdf = { workspace = true, features = [] }
 base64 = { workspace = true, features = ["std"] }
 hex = { workspace = true, features = [] }
 mime_guess = { workspace = true }
-percent-encoding = { workspace = true, features = [] }
 
 # Randomness
 rand = { workspace = true, features = [] }

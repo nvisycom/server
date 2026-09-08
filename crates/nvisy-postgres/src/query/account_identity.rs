@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::model::{AccountIdentity, NewAccountIdentity};
 use crate::types::IdentityProvider;
-use crate::{Error, PgConnection, Result, schema};
+use crate::{DieselError, Error, JiffTimestamp, PgConnection, Result, schema};
 
 /// Repository for account identity database operations.
 ///
@@ -156,39 +156,50 @@ impl AccountIdentityRepository for PgConnection {
         &mut self,
         identity: NewAccountIdentity,
     ) -> Result<LinkIdentityOutcome> {
+        use crate::AsyncConnection;
         use crate::types::{AccountIdentityConstraints, ConstraintViolation};
 
         let account_id = identity.account_id;
         let provider = identity.provider;
         let subject = identity.provider_subject.clone();
 
-        match self.create_account_identity(identity).await {
-            Ok(_) => Ok(LinkIdentityOutcome::Linked),
-            // A concurrent callback won the `(account_id, provider)` slot. Whether
-            // that is benign depends on what it linked, so read the winning row
-            // back and compare.
-            Err(err)
-                if matches!(
-                    err.constraint_violation(),
-                    Some(ConstraintViolation::AccountIdentity(
-                        AccountIdentityConstraints::AccountProviderUnique
-                    ))
-                ) =>
-            {
-                let existing = self.find_account_identity(account_id, provider).await?;
-                let same = existing.is_some_and(|row| {
-                    // Only an OIDC identity can match; a password row (subject
-                    // `None`) never equals a link attempt.
-                    row.provider_subject.is_some() && row.provider_subject == subject
-                });
-                Ok(if same {
-                    LinkIdentityOutcome::AlreadyLinked
-                } else {
-                    LinkIdentityOutcome::ProviderConflict
-                })
+        // Lock the account row and reject a tombstoned account before writing, so
+        // an identity insert cannot race a concurrent `delete_account` (which
+        // soft-deletes the account and clears its identities in one transaction)
+        // and leave a dead account holding a live identity — which would also pin
+        // the `(provider, provider_subject)` uniqueness against a deleted account.
+        self.transaction(async |conn| {
+            lock_active_account(conn, account_id).await?;
+
+            match conn.create_account_identity(identity).await {
+                Ok(_) => Ok(LinkIdentityOutcome::Linked),
+                // A concurrent callback won the `(account_id, provider)` slot.
+                // Whether that is benign depends on what it linked, so read the
+                // winning row back and compare.
+                Err(err)
+                    if matches!(
+                        err.constraint_violation(),
+                        Some(ConstraintViolation::AccountIdentity(
+                            AccountIdentityConstraints::AccountProviderUnique
+                        ))
+                    ) =>
+                {
+                    let existing = conn.find_account_identity(account_id, provider).await?;
+                    let same = existing.is_some_and(|row| {
+                        // Only an OIDC identity can match; a password row (subject
+                        // `None`) never equals a link attempt.
+                        row.provider_subject.is_some() && row.provider_subject == subject
+                    });
+                    Ok(if same {
+                        LinkIdentityOutcome::AlreadyLinked
+                    } else {
+                        LinkIdentityOutcome::ProviderConflict
+                    })
+                }
+                Err(err) => Err(err),
             }
-            Err(err) => Err(err),
-        }
+        })
+        .await
     }
 
     async fn find_identity_by_subject(
@@ -227,18 +238,28 @@ impl AccountIdentityRepository for PgConnection {
     ) -> Result<AccountIdentity> {
         use schema::account_identities::dsl;
 
-        let new_identity = NewAccountIdentity::password(account_id, secret.clone());
-        diesel::insert_into(dsl::account_identities)
-            .values(&new_identity)
-            // A password identity already exists for this account: replace its
-            // secret instead of failing the `(account_id, provider)` uniqueness.
-            .on_conflict((dsl::account_id, dsl::provider))
-            .do_update()
-            .set(dsl::secret.eq(secret))
-            .returning(AccountIdentity::as_returning())
-            .get_result(self)
-            .await
-            .map_err(Error::from)
+        use crate::AsyncConnection;
+
+        // Lock the account row and reject a tombstoned account before writing, so
+        // setting a password cannot race a concurrent `delete_account` and leave
+        // a dead account holding a live credential (see `link_oidc_identity`).
+        self.transaction(async |conn| {
+            lock_active_account(conn, account_id).await?;
+
+            let new_identity = NewAccountIdentity::password(account_id, secret.clone());
+            diesel::insert_into(dsl::account_identities)
+                .values(&new_identity)
+                // A password identity already exists for this account: replace its
+                // secret instead of failing the `(account_id, provider)` uniqueness.
+                .on_conflict((dsl::account_id, dsl::provider))
+                .do_update()
+                .set(dsl::secret.eq(secret))
+                .returning(AccountIdentity::as_returning())
+                .get_result(conn)
+                .await
+                .map_err(Error::from)
+        })
+        .await
     }
 
     async fn delete_account_identity(
@@ -286,5 +307,34 @@ impl AccountIdentityRepository for PgConnection {
             Ok::<_, Error>(DeleteIdentityOutcome::Deleted)
         })
         .await
+    }
+}
+
+/// Locks the account row `FOR UPDATE` and confirms it is live, returning a
+/// not-found error if the account is absent or soft-deleted (`deleted_at` set).
+///
+/// Called inside an identity-write transaction so the write serializes against a
+/// concurrent [`delete_account`](super::AccountRepository::delete_account): the
+/// lock forces the delete's `UPDATE accounts … SET deleted_at` to commit before
+/// this sees the row, and the `deleted_at` recheck then rejects the write against
+/// a tombstoned account.
+async fn lock_active_account(conn: &mut PgConnection, account_id: Uuid) -> Result<()> {
+    use schema::accounts::{self, dsl};
+
+    // The outer `Option` is row presence; the inner is the nullable `deleted_at`.
+    let row: Option<Option<JiffTimestamp>> = accounts::table
+        .filter(dsl::id.eq(account_id))
+        .for_update()
+        .select(dsl::deleted_at)
+        .first::<Option<JiffTimestamp>>(conn)
+        .await
+        .optional()
+        .map_err(Error::from)?;
+
+    match row {
+        // Row exists and is not tombstoned (`deleted_at IS NULL`).
+        Some(None) => Ok(()),
+        // Absent, or soft-deleted: treat as gone.
+        _ => Err(Error::from(DieselError::NotFound)),
     }
 }

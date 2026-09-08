@@ -55,8 +55,8 @@ pub fn oauth_provider() -> OAuthProvider {
 /// resolved host is used. The resolved host also gates account type. The
 /// connector's own Graph token is never disturbed.
 ///
-/// The OneDrive arm of [`FileService::mint_picker_token`], kept here so the
-/// generic client layer holds no provider-specific logic.
+/// The OneDrive arm of [`Provider::mint_picker_token`](super::Provider::mint_picker_token),
+/// kept here so the dispatch holds no provider-specific logic.
 ///
 /// # Errors
 ///
@@ -64,17 +64,17 @@ pub fn oauth_provider() -> OAuthProvider {
 /// personal/consumer account (no SharePoint host) — the modern picker is only
 /// supported for OneDrive for Business — or an auth error if the token cannot be
 /// minted.
-pub(crate) async fn mint_picker_token(
+pub(super) async fn mint_picker_token(
     service: &FileService,
     config: &FileServiceConfig,
     resource: Option<&str>,
 ) -> Result<PickerAccessToken> {
     // The Graph token is needed to resolve the SharePoint host; a refresh here is
     // handed back so the caller can persist a rotated refresh token.
-    let (graph_access_token, refreshed) = service.ensure_fresh(config).await?;
-    let effective = refreshed.as_ref().unwrap_or(config);
+    let fresh = service.ensure_fresh(config).await?;
+    let effective = fresh.refreshed.as_ref().unwrap_or(config);
 
-    let host = resolve_sharepoint_host(service.http(), &graph_access_token)
+    let host = resolve_sharepoint_host(service.http(), &fresh.access_token)
         .await?
         .ok_or_else(|| {
             Error::new(
@@ -97,7 +97,7 @@ pub(crate) async fn mint_picker_token(
     Ok(PickerAccessToken {
         access_token: tokens.access_token,
         expires_at: tokens.expires_at,
-        refreshed,
+        refreshed: fresh.refreshed,
     })
 }
 
@@ -115,7 +115,7 @@ pub(crate) async fn mint_picker_token(
 /// # Errors
 ///
 /// Returns an error if the Graph request fails or its body cannot be parsed.
-pub(crate) async fn resolve_sharepoint_host(
+pub(super) async fn resolve_sharepoint_host(
     http: &reqwest::Client,
     graph_access_token: &str,
 ) -> Result<Option<String>> {
@@ -131,11 +131,11 @@ pub(crate) async fn resolve_sharepoint_host(
         .send()
         .await
         .map_err(|err| Error::connection("failed to query OneDrive drive").with_source(err))?
+        // Classify by status via the crate's `From<reqwest::Error>`, so 401 maps
+        // to an auth error while a 429 throttle or 5xx outage maps to a transient
+        // kind rather than an auth failure.
         .error_for_status()
-        .map_err(|err| {
-            Error::new(ErrorKind::Unauthenticated, "OneDrive drive lookup rejected")
-                .with_source(err)
-        })?
+        .map_err(Error::from)?
         .json::<DriveResponse>()
         .await
         .map_err(|err| Error::connection("invalid OneDrive drive response").with_source(err))?;

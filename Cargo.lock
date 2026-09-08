@@ -6958,7 +6958,6 @@ dependencies = [
  "nvisy-s3",
  "nvisy-webhook",
  "openidconnect",
- "percent-encoding",
  "pin-project-lite",
  "rand 0.10.2",
  "schemars 1.2.2",

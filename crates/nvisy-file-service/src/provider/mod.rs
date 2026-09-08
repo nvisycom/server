@@ -9,10 +9,7 @@
 mod box_provider;
 mod drive;
 mod dropbox;
-// `pub(crate)`: the client layer dispatches picker-token minting into the
-// OneDrive-specific helper here. The module's items stay crate-internal (no
-// re-export from the crate root).
-pub(crate) mod onedrive;
+mod onedrive;
 
 use futures::TryStreamExt;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
@@ -22,8 +19,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::EnumIter;
 
-use crate::client::{ByteStream, FileServiceClient};
-use crate::error::{Error, Result, kind_for_status};
+use crate::client::{ByteStream, FileService, FileServiceClient, PickerAccessToken};
+use crate::error::{Error, ErrorKind, Result, kind_for_status};
 use crate::oauth::{OAuthProvider, OAuthTokens};
 
 /// Tracing target for provider requests.
@@ -188,6 +185,55 @@ impl Provider {
             Self::Dropbox => Box::new(dropbox::DropboxClient::new(http, access_token, root)),
             Self::OneDrive => Box::new(onedrive::OneDriveClient::new(http, access_token, root)),
             Self::Box => Box::new(box_provider::BoxClient::new(http, access_token, root)),
+        }
+    }
+
+    /// Mints a browser file-picker token for a connection of this provider,
+    /// dispatching to the provider's picker-token behavior.
+    ///
+    /// OneDrive mints a SharePoint-audience token (its picker requires one,
+    /// distinct from the Graph token the connector uses); Google Drive and Box
+    /// return their ordinary access token, refreshed if stale; Dropbox's Chooser
+    /// uses a client-side app key and has no server token.
+    ///
+    /// The provider-specific logic lives in each provider module (e.g.
+    /// [`onedrive::mint_picker_token`]); this is the dispatch, kept here beside
+    /// [`connect`](Self::connect) so the generic [`FileService`] stays
+    /// provider-neutral.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider's picker does not use a server token, the
+    /// account is unsupported (e.g. a personal OneDrive account), or the token
+    /// cannot be minted.
+    pub(crate) async fn mint_picker_token(
+        self,
+        service: &FileService,
+        config: &FileServiceConfig,
+        resource: Option<&str>,
+    ) -> Result<PickerAccessToken> {
+        match self {
+            Self::OneDrive => onedrive::mint_picker_token(service, config, resource).await,
+            // Google Drive and Box pickers take the provider's ordinary access
+            // token, refreshed if stale.
+            Self::GoogleDrive | Self::Box => {
+                let fresh = service.ensure_fresh(config).await?;
+                let expires_at = fresh
+                    .refreshed
+                    .as_ref()
+                    .unwrap_or(config)
+                    .tokens()
+                    .expires_at;
+                Ok(PickerAccessToken {
+                    access_token: fresh.access_token,
+                    expires_at,
+                    refreshed: fresh.refreshed,
+                })
+            }
+            Self::Dropbox => Err(Error::new(
+                ErrorKind::BadRequest,
+                "this provider's picker uses a client-side app key, not a server token",
+            )),
         }
     }
 }
