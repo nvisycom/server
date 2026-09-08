@@ -6,7 +6,7 @@
 //! governs how those endpoints are validated — permissive for self-hosting,
 //! strict for a multi-tenant cloud — so the deployment mode decides the SSRF and
 //! cleartext-credential posture in one place. It also holds the sync engine's
-//! concurrency tunable, so every integration deployment knob lives here.
+//! concurrency tunables, so every integration deployment knob lives here.
 
 use nvisy_core::net::EndpointPolicy;
 
@@ -16,8 +16,13 @@ use nvisy_core::net::EndpointPolicy;
 /// handlers and other workers.
 pub const DEFAULT_IMPORT_CONCURRENCY: usize = 4;
 
+/// Default number of files exported concurrently per sync. Bounded like
+/// [`DEFAULT_IMPORT_CONCURRENCY`] for the same reason (shared Postgres pool).
+pub const DEFAULT_EXPORT_CONCURRENCY: usize = 4;
+
 /// Deployment configuration for the integration subsystem: how workspace
-/// connections may be created (endpoint policy) and synced (import concurrency).
+/// connections may be created (endpoint policy) and synced (import/export
+/// concurrency).
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 #[must_use = "config does nothing unless you use it"]
@@ -38,17 +43,31 @@ pub struct IntegrationConfig {
     )]
     pub endpoint_policy: EndpointPolicy,
 
-    /// Maximum objects imported concurrently within a single sync. Bounds the
-    /// in-flight fetch/decrypt/store pipelines against one connection.
+    /// Maximum objects imported (provider → Nvisy) concurrently within a single
+    /// sync. Bounds the in-flight fetch/decrypt/store pipelines against one
+    /// connection.
     #[cfg_attr(
         feature = "cli",
         arg(
-            long = "sync-import-concurrency",
-            env = "SYNC_IMPORT_CONCURRENCY",
+            long = "connection-sync-import-concurrency",
+            env = "CONNECTION_SYNC_IMPORT_CONCURRENCY",
             default_value_t = DEFAULT_IMPORT_CONCURRENCY,
         )
     )]
     pub import_concurrency: usize,
+
+    /// Maximum files exported (Nvisy → provider) concurrently within a single
+    /// sync. Bounds the in-flight read/decrypt/upload pipelines against one
+    /// connection.
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            long = "connection-sync-export-concurrency",
+            env = "CONNECTION_SYNC_EXPORT_CONCURRENCY",
+            default_value_t = DEFAULT_EXPORT_CONCURRENCY,
+        )
+    )]
+    pub export_concurrency: usize,
 }
 
 impl Default for IntegrationConfig {
@@ -56,6 +75,7 @@ impl Default for IntegrationConfig {
         Self {
             endpoint_policy: EndpointPolicy::default(),
             import_concurrency: DEFAULT_IMPORT_CONCURRENCY,
+            export_concurrency: DEFAULT_EXPORT_CONCURRENCY,
         }
     }
 }

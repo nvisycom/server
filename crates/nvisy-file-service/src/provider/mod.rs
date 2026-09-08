@@ -9,7 +9,10 @@
 mod box_provider;
 mod drive;
 mod dropbox;
-mod onedrive;
+// `pub(crate)`: the client layer dispatches picker-token minting into the
+// OneDrive-specific helper here. The module's items stay crate-internal (no
+// re-export from the crate root).
+pub(crate) mod onedrive;
 
 use futures::TryStreamExt;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};

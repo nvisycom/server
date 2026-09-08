@@ -13,59 +13,62 @@
 //!    selects the action:
 //!    - **sign-in** — resolve the identity to an account (provisioning on first
 //!      sign-in, or auto-linking to an existing account on a verified email) and
-//!      mint a session;
+//!      mint a session, delivered by the redirect target: a **web** origin gets an
+//!      `HttpOnly` session cookie; a **desktop** deep-link scheme gets a long-lived
+//!      `app` token in the redirect's URL fragment (for the native app);
 //!    - **link** — attach the verified provider identity to the authenticated
 //!      account that started the flow (started under the account-identities
 //!      resource; requires a step-up proof);
 //!    - **reauth** — confirm current control of a provider already linked to the
 //!      account and mint a single-use step-up proof.
 //!
-//! A signed-in session is the same [`AuthToken`] password login returns, so
-//! everything downstream sees one session model. The PKCE verifier and nonce stay
-//! server-side (round-tripping them through the browser would defeat them), so the
-//! flow state is stored, single-use, and TTL-expired. The callback conveys its
-//! result to the frontend by redirect (only to an allow-listed origin); any token
-//! it hands back rides in the URL fragment, never the query.
+//! A separate `POST /auth/desktop/token` mints the same native-app token for a
+//! *password* desktop login: the browser completes a normal cookie login, then the
+//! frontend exchanges that session for an `app` token to hand to the app.
+//!
+//! The PKCE verifier and nonce stay server-side (round-tripping them through the
+//! browser would defeat them), so the flow state is stored, single-use, and
+//! TTL-expired. The callback conveys its result by redirect (only to an
+//! allow-listed target): a web sign-in sets the session cookie on that redirect,
+//! so no token appears in the URL. The step-up reauth proof rides in the web
+//! redirect's fragment (not logged or refereed); a desktop sign-in carries its
+//! `app` token in the custom-scheme deep-link's query (no server hop to leak to).
 
 use std::str::FromStr;
 
 use aide::axum::ApiRouter;
-use aide::axum::routing::get_with;
+use aide::axum::routing::{get_with, post_with};
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum_extra::headers::UserAgent;
-use jiff::{Span, Timestamp};
 use nvisy_nats::NatsClient;
 use nvisy_nats::kv::{
     OidcStateBucket as OidcStateKvBucket, OidcStateKey, ReauthProofBucket as ReauthProofKvBucket,
     ReauthProofKey,
 };
-use nvisy_postgres::model::{Account, NewAccount, NewAccountApiToken, NewAccountIdentity};
-use nvisy_postgres::query::{
-    AccountApiTokenRepository, AccountIdentityRepository, AccountRepository, LinkIdentityOutcome,
-};
-use nvisy_postgres::types::{ApiTokenType, HANDLE_MAX_LENGTH, Handle, IdentityProvider};
+use nvisy_postgres::model::{Account, NewAccount, NewAccountIdentity};
+use nvisy_postgres::query::{AccountIdentityRepository, AccountRepository, LinkIdentityOutcome};
+use nvisy_postgres::types::{HANDLE_MAX_LENGTH, Handle, IdentityProvider};
 use nvisy_postgres::{AsyncConnection, Error as PgError, PgClient, PgConn};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::authentication::create_auth_header;
-use crate::extract::{AuthState, Json, Path, Query, TypedHeader};
-use crate::handler::request::{IdentityPathParams, OidcCallbackQuery};
-use crate::handler::response::ErrorResponse;
+use super::authentication::{mint_app_token, mint_web_session};
+use crate::extract::{AuthState, Json, Path, Query, TypedHeader, ValidateJson};
+use crate::handler::request::{DesktopTokenRequest, IdentityPathParams, OidcCallbackQuery};
+use crate::handler::response::{DesktopToken, ErrorResponse};
+use crate::handler::utility::CookieConfig;
 use crate::handler::{ErrorKind, Result};
 use crate::service::{
-    OidcAuthorization, OidcIdentity, OidcService, ServiceState, SessionKeys, UserAgentParser,
+    OidcAuthorization, OidcIdentity, OidcService, RedirectKind, ServiceState, SessionKeys,
+    UserAgentParser,
 };
 
 /// Tracing target for OIDC sign-in operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::auth_oidc";
-
-/// Session lifetime for an OIDC sign-in, in days, matching password login.
-const SESSION_DAYS: i64 = 90;
 
 /// How many suffixed handles to try when deriving a unique username on
 /// provisioning, before giving up. A collision past this many is implausible
@@ -303,6 +306,71 @@ fn start_reauth_docs(op: TransformOperation) -> TransformOperation {
         .response::<503, Json<ErrorResponse>>()
 }
 
+/// Mints a native-app (desktop) session token for the authenticated account.
+///
+/// The desktop app can't use the browser cookie session (its webview and its Rust
+/// HTTP client have separate cookie jars, and an `HttpOnly` cookie is invisible to
+/// the app). Instead, after the user completes a normal browser login, the
+/// frontend calls this with the desktop deep-link; it mints a long-lived `app`
+/// token and returns it for the frontend to hand back to the app via the
+/// deep-link. Authenticated by the just-established session, so a caller can only
+/// mint a token for their own account. No cookie is set on the response.
+#[tracing::instrument(skip_all, fields(account_id = %auth_claims.account_id))]
+async fn mint_desktop_token(
+    State(pg_client): State<PgClient>,
+    State(oidc): State<OidcService>,
+    State(auth_keys): State<SessionKeys>,
+    State(ua_parser): State<UserAgentParser>,
+    AuthState(auth_claims): AuthState,
+    TypedHeader(user_agent): TypedHeader<UserAgent>,
+    ValidateJson(request): ValidateJson<DesktopTokenRequest>,
+) -> Result<(StatusCode, Json<DesktopToken>)> {
+    tracing::debug!(target: TRACING_TARGET, "Minting desktop app token");
+
+    // The target must be an allow-listed desktop scheme. Refuse a web origin (or
+    // anything else) so this endpoint cannot be used to mint a token toward an
+    // http page that would then hold a bearer credential.
+    if oidc.classify_redirect(&request.redirect_uri) != Some(RedirectKind::DesktopScheme) {
+        return Err(ErrorKind::BadRequest
+            .with_message("redirectUri is not an allowed desktop scheme")
+            .with_resource("account"));
+    }
+
+    let mut conn = pg_client.get_connection().await?;
+    let account = load_active_account(&mut conn, auth_claims.account_id).await?;
+    gate_account_status(&account)?;
+
+    let api_token = mint_app_token(
+        &mut conn,
+        auth_keys,
+        &ua_parser,
+        &account,
+        user_agent.to_string(),
+    )
+    .await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(DesktopToken {
+            api_token,
+            redirect_uri: request.redirect_uri,
+        }),
+    ))
+}
+
+fn mint_desktop_token_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Mint a desktop app token")
+        .description(
+            "Mints a long-lived native-app session token for the authenticated account, to be \
+             delivered to the desktop app via the given desktop deep-link. Requires an active \
+             browser session (the desktop login completes in the browser first). The `redirectUri` \
+             must be a configured desktop scheme.",
+        )
+        .response::<200, Json<DesktopToken>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+}
+
 /// Begins an authorization (sign-in, link, or reauth) and stashes the flow
 /// state, returning the provider authorize URL.
 async fn begin_flow(
@@ -366,6 +434,7 @@ async fn oidc_callback(
     State(oidc): State<OidcService>,
     State(auth_keys): State<SessionKeys>,
     State(ua_parser): State<UserAgentParser>,
+    State(cookie): State<CookieConfig>,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     Query(query): Query<OidcCallbackQuery>,
 ) -> Response {
@@ -394,7 +463,7 @@ async fn oidc_callback(
     {
         Ok(outcome) => {
             tracing::info!(target: TRACING_TARGET, kind = outcome.kind(), "OIDC callback succeeded");
-            outcome.into_redirect(redirect_uri.as_deref())
+            outcome.into_redirect(redirect_uri.as_deref(), cookie)
         }
         Err(err) => {
             tracing::warn!(target: TRACING_TARGET, error = %err, "OIDC callback failed");
@@ -405,8 +474,12 @@ async fn oidc_callback(
 
 /// The result of a completed callback, by flow purpose.
 enum CallbackOutcome {
-    /// A sign-in: the minted session token is handed back to the frontend.
-    SignedIn { api_token: String },
+    /// A web sign-in: the minted session JWT, delivered to the browser as an
+    /// HttpOnly session cookie set on the callback redirect.
+    SignedIn { jwt: String },
+    /// A native-app (desktop) sign-in: the minted `app` token, delivered to the
+    /// app in the callback's deep-link query (`?token=…`), never a cookie.
+    DesktopSignedIn { jwt: String },
     /// A provider was linked to the account. No token; just an outcome.
     Linked,
     /// A step-up re-authentication: the single-use proof is handed back for the
@@ -419,25 +492,39 @@ impl CallbackOutcome {
     fn kind(&self) -> &'static str {
         match self {
             Self::SignedIn { .. } => "sign_in",
+            Self::DesktopSignedIn { .. } => "sign_in_desktop",
             Self::Linked => "link",
             Self::Reauthed { .. } => "reauth",
         }
     }
 
     /// Builds the browser response returning to the frontend for this outcome.
-    fn into_redirect(self, redirect_uri: Option<&str>) -> Response {
+    /// `cookie` supplies the session-cookie policy for a web sign-in.
+    fn into_redirect(self, redirect_uri: Option<&str>, cookie: CookieConfig) -> Response {
         match self {
-            Self::SignedIn { api_token } => redirect_to_frontend(
-                redirect_uri,
-                RedirectResult::Token {
-                    name: "token",
-                    value: &api_token,
-                },
-            ),
+            Self::SignedIn { jwt } => {
+                // Web sign-in delivers the session as an HttpOnly cookie (plus its
+                // CSRF cookie) set on the success redirect — never in the URL.
+                let redirect = redirect_to_frontend(redirect_uri, RedirectResult::Success);
+                (cookie.session_jar(jwt), redirect).into_response()
+            }
+            Self::DesktopSignedIn { jwt } => {
+                // Desktop sign-in hands the app token back in the deep-link's URL
+                // query (`?token=…`) — never a cookie the app's webview can't see.
+                // The target is the allow-listed custom scheme, which has no server
+                // hop, so the query is safe and matches the native OAuth convention.
+                redirect_to_frontend(
+                    redirect_uri,
+                    RedirectResult::Query {
+                        name: "token",
+                        value: &jwt,
+                    },
+                )
+            }
             Self::Linked => redirect_to_frontend(redirect_uri, RedirectResult::Success),
             Self::Reauthed { proof } => redirect_to_frontend(
                 redirect_uri,
-                RedirectResult::Token {
+                RedirectResult::Fragment {
                     name: "reauthProof",
                     value: &proof,
                 },
@@ -500,9 +587,44 @@ async fn run_flow(
     match flow.purpose {
         OidcPurpose::SignIn => {
             let account = resolve_account(&mut conn, flow.provider, identity).await?;
-            let api_token =
-                mint_session(&mut conn, auth_keys, ua_parser, &account, user_agent).await?;
-            Ok(CallbackOutcome::SignedIn { api_token })
+            gate_account_status(&account)?;
+
+            // The redirect target decides how the session is delivered. A desktop
+            // deep-link scheme gets a long-lived `app` token in the callback's URL
+            // fragment; a web origin gets an HttpOnly session cookie. The target was
+            // already allow-listed at flow start; a `None` here means it is neither
+            // kind (which `begin_flow` would have rejected), so default to the web
+            // cookie path.
+            let kind = flow
+                .redirect_uri
+                .as_deref()
+                .and_then(|uri| oidc.classify_redirect(uri));
+
+            if kind == Some(RedirectKind::DesktopScheme) {
+                let jwt = mint_app_token(
+                    &mut conn,
+                    auth_keys.clone(),
+                    ua_parser,
+                    &account,
+                    user_agent,
+                )
+                .await?;
+                Ok(CallbackOutcome::DesktopSignedIn { jwt })
+            } else {
+                // OIDC web sign-in delivers a remembered browser session as an
+                // HttpOnly cookie set on the callback redirect — the token never
+                // appears in the URL.
+                let jwt = mint_web_session(
+                    &mut conn,
+                    auth_keys.clone(),
+                    ua_parser,
+                    &account,
+                    true,
+                    user_agent,
+                )
+                .await?;
+                Ok(CallbackOutcome::SignedIn { jwt })
+            }
         }
         OidcPurpose::Link { account_id } => {
             link_account(&mut conn, account_id, flow.provider, identity).await?;
@@ -527,15 +649,9 @@ async fn run_flow(
     }
 }
 
-/// Mints a session token for a signed-in account, mirroring password login. The
-/// account's status is gated first, as password login does.
-async fn mint_session(
-    conn: &mut PgConn,
-    auth_keys: &SessionKeys,
-    ua_parser: &UserAgentParser,
-    account: &Account,
-    user_agent: String,
-) -> Result<String> {
+/// Refuses a sign-in for a suspended or deleted account, before any session token
+/// is minted — mirroring what password login gates on.
+fn gate_account_status(account: &Account) -> Result<()> {
     if account.is_suspended() {
         return Err(ErrorKind::Forbidden
             .with_message("Account is suspended")
@@ -546,20 +662,7 @@ async fn mint_session(
             .with_message("Account has been deleted")
             .with_resource("account"));
     }
-
-    let expired_at = Timestamp::now() + Span::new().days(SESSION_DAYS);
-    let new_token = NewAccountApiToken {
-        account_id: account.id,
-        display_name: ua_parser.parse(&user_agent),
-        ip_address: None,
-        user_agent: Some(user_agent),
-        is_remembered: Some(false),
-        session_type: Some(ApiTokenType::Web),
-        expired_at: Some(expired_at.into()),
-    };
-    let token = conn.create_account_api_token(new_token).await?;
-    let auth_header = create_auth_header(auth_keys.clone(), account, &token)?;
-    auth_header.into_string()
+    Ok(())
 }
 
 /// Mints and stores a single-use step-up proof for `account_id`, returning its
@@ -839,37 +942,51 @@ fn truncate_on_char_boundary(value: &str, max: usize) -> &str {
     &value[..end]
 }
 
-/// The outcome conveyed to the frontend by the callback redirect.
+/// The outcome conveyed to the frontend by the callback redirect, and where its
+/// value (if any) is placed on the redirect URL.
 enum RedirectResult<'a> {
-    /// A plain success with no value (a completed link).
+    /// A plain success with no value (a completed link, or a web sign-in whose
+    /// session rides in cookies set on the same response).
     Success,
     /// A failure.
     Error,
-    /// A success carrying a named token to hand to the frontend (a session token
-    /// for sign-in, or a reauth proof for step-up).
-    Token { name: &'a str, value: &'a str },
+    /// A value carried in the URL **fragment** (`#{name}=…`) — for a *web* target,
+    /// where a fragment is not sent to the server, not in `Referer`, and stays
+    /// client-side. Used for the step-up reauth proof (a bearer credential the web
+    /// frontend presents to a credential-adding action).
+    Fragment { name: &'a str, value: &'a str },
+    /// A value carried in the URL **query** (`?{name}=…`) — for a *desktop*
+    /// custom-scheme deep-link, which has no server hop (so fragment vs query is
+    /// moot for leakage) and where the query is the RFC 8252 native convention.
+    /// Used for the desktop `app` token.
+    Query { name: &'a str, value: &'a str },
 }
 
 /// Returns the browser to the frontend with the callback outcome.
 ///
-/// The `signin=success|error` status goes in the query string. A token (the
-/// session token, or a reauth proof) instead goes in the URL **fragment**
-/// (`#{name}={value}`): a fragment is not sent in the `Referer` header, not
-/// shared when the URL is copied to logs or history sync, and stays client-side
-/// for the frontend's script to read — so a bearer credential never rides in a
-/// place that leaks it.
+/// The `signin=success|error` status always goes in the query string. A carried
+/// value's placement depends on the target: [`Fragment`](RedirectResult::Fragment)
+/// for a web target (the reauth proof — kept out of the query so it does not leak
+/// via `Referer`/history), [`Query`](RedirectResult::Query) for a desktop
+/// custom-scheme deep-link (the `app` token — no server hop, query is the native
+/// convention). Web sign-in carries no value here: its session rides in cookies.
 ///
-/// `base` is only ever an allow-listed origin (the redirect target is validated
-/// when the flow starts). When no frontend URL is configured, or the configured
-/// one somehow fails to parse, this renders a minimal self-describing page
-/// instead of redirecting: a `data:` URL cannot be used, since browsers block
-/// top-level navigation to it, and a token must never be placed in one regardless.
+/// `base` is only ever an allow-listed target (validated when the flow starts).
+/// When no target is configured, or it somehow fails to parse, this renders a
+/// minimal self-describing page instead of redirecting.
 fn redirect_to_frontend(base: Option<&str>, result: RedirectResult<'_>) -> Response {
-    let (status, token) = match result {
-        RedirectResult::Success => ("success", None),
-        RedirectResult::Error => ("error", None),
-        RedirectResult::Token { name, value } => ("success", Some((name, value))),
+    enum Placement<'a> {
+        None,
+        Fragment(&'a str, &'a str),
+        Query(&'a str, &'a str),
+    }
+    let (status, placement) = match result {
+        RedirectResult::Success => ("success", Placement::None),
+        RedirectResult::Error => ("error", Placement::None),
+        RedirectResult::Fragment { name, value } => ("success", Placement::Fragment(name, value)),
+        RedirectResult::Query { name, value } => ("success", Placement::Query(name, value)),
     };
+    let carries_value = !matches!(placement, Placement::None);
 
     // Build the redirect target through the URL parser so the query and fragment
     // are assembled and encoded correctly, rather than by string concatenation
@@ -878,33 +995,57 @@ fn redirect_to_frontend(base: Option<&str>, result: RedirectResult<'_>) -> Respo
         && let Ok(mut url) = url::Url::parse(base)
     {
         url.query_pairs_mut().append_pair("signin", status);
-        match token {
-            // The token goes in the fragment, never the query, so it is not
-            // leaked via Referer, history, or logs. `Url` percent-encodes the
-            // fragment it is given.
-            Some((name, value)) => url.set_fragment(Some(&format!("{name}={value}"))),
-            None => url.set_fragment(None),
+        match placement {
+            Placement::None => url.set_fragment(None),
+            // A web bearer secret goes in the fragment, never the query, so it is
+            // not leaked via Referer, history, or logs. `Url` percent-encodes it.
+            Placement::Fragment(name, value) => {
+                url.set_fragment(Some(&format!("{name}={value}")));
+            }
+            // A desktop deep-link value goes in the query (`query_pairs_mut`
+            // percent-encodes it). The custom scheme has no server hop, so this
+            // does not leak; it matches the native OAuth redirect convention.
+            Placement::Query(name, value) => {
+                url.query_pairs_mut().append_pair(name, value);
+            }
         }
         return Redirect::to(url.as_str()).into_response();
     }
 
-    // No usable frontend origin: render a minimal in-page result. Never a token —
-    // the only outcomes reaching here carry none, since a token flow requires an
-    // allow-listed redirect to have been validated at start.
+    // No usable redirect target. A value-carrying outcome must NOT reach here: its
+    // target was allow-listed at flow start, so a missing/unparseable base now is a
+    // server-side invariant break — rendering the in-page page would silently
+    // discard the token (leaving a desktop app hung) instead of delivering it. Fail
+    // loudly rather than swallow it.
+    if carries_value {
+        tracing::error!(
+            target: TRACING_TARGET,
+            "callback reached the no-redirect fallback while carrying a token; \
+             the redirect target should have been validated at flow start",
+        );
+        return ErrorKind::InternalServerError
+            .with_message("Sign-in could not be completed")
+            .with_resource("authentication")
+            .into_response();
+    }
+
+    // A valueless success/error with no configured frontend: render a minimal
+    // in-page result.
     let body = format!("Sign-in {status}. You can close this window.");
     (StatusCode::OK, body).into_response()
 }
 
-/// Returns the public OIDC sign-in routes.
-///
-/// The public OIDC routes: sign-in start and the provider callback.
+/// Returns the public OIDC sign-in routes: sign-in start and the provider
+/// callback.
 ///
 /// Both are unauthenticated: sign-in is how a caller obtains a session in the
-/// first place, and the provider's browser redirect lands on the callback with
-/// no `Authorization` header. The callback serves both the sign-in and link
-/// flows (they share one redirect URI); its security rests on the single-use,
+/// first place, and the provider's browser redirect lands on the callback with no
+/// `Authorization` header. The callback serves the sign-in, link, and reauth flows
+/// (they share one redirect URI); its security rests on the single-use,
 /// unguessable CSRF state it consumes and the ID-token verification, and a link
-/// flow additionally carries the authenticated account id captured at start.
+/// flow additionally carries the authenticated account id captured at start. A
+/// sign-in sets the session cookie on the callback redirect, so there is no
+/// separate exchange step.
 pub fn public_routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         // The start endpoint is part of the API contract (a client initiates it),
@@ -933,6 +1074,13 @@ pub fn private_routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/auth/{provider}/reauth/",
             get_with(start_reauth, start_reauth_docs),
+        )
+        // Desktop token minting: the browser session is exchanged for a native-app
+        // Bearer token. A static path alongside the `{provider}` routes above; they
+        // diverge after the second segment, so there is no route conflict.
+        .api_route(
+            "/auth/desktop/token/",
+            post_with(mint_desktop_token, mint_desktop_token_docs),
         )
         .with_path_items(|item| item.tag("Authentication"))
 }

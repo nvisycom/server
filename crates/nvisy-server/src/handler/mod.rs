@@ -40,13 +40,13 @@ use std::collections::HashSet;
 use aide::axum::ApiRouter;
 use axum::extract::FromRef;
 use axum::http::{Method, Uri};
-use axum::middleware::from_fn_with_state;
+use axum::middleware::{from_fn, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 pub use error::{Error, ErrorKind, Result};
 pub use invites::{CreatedInvite, InviteOutcome, create_invite};
-pub use utility::{BuiltinModule, CustomRoutes, RouterMapFn};
+pub use utility::{BuiltinModule, CookieConfig, CustomRoutes, RouterMapFn};
 
-use crate::middleware::{require_authentication, validate_token_middleware};
+use crate::middleware::{csrf_protect, require_authentication, slide_session};
 use crate::service::ServiceState;
 
 /// Tracing target for unmatched-route fallbacks.
@@ -185,8 +185,7 @@ where
     // Auth middleware extracts from `ServiceState`; the layer captures its own
     // state, independent of the router's `S`.
     let require_authentication = from_fn_with_state(service_state.clone(), require_authentication);
-    let validate_token_middleware =
-        from_fn_with_state(service_state.clone(), validate_token_middleware);
+    let slide_session = from_fn_with_state(service_state.clone(), slide_session);
 
     let excluded = std::mem::take(&mut routes.excluded_modules);
 
@@ -206,9 +205,22 @@ where
     if let Some(additional) = routes.private_routes.take() {
         private_router = private_router.merge(additional);
     }
+    // Layer order matters, and is security-relevant. `route_layer`s apply
+    // bottom-up, so the LAST one added is the OUTERMOST (runs first). We want, per
+    // request, in order:
+    //   1. require_authentication — resolves and caches the verified `AuthHeader`
+    //      (which records the transport), rejecting an unauthenticated request,
+    //   2. csrf_protect — enforces CSRF on cookie-authed state-changing requests,
+    //      reading the transport cached above; rejects a forged request here,
+    //   3. slide_session — extends the session (a DB write).
+    // CSRF runs BEFORE the slide so a CSRF-forged cookie request is rejected
+    // without performing the session-extending write. So `slide_session` is added
+    // first (innermost, runs last), then `csrf_protect`, then
+    // `require_authentication` outermost.
     private_router = private_router
-        .route_layer(require_authentication)
-        .route_layer(validate_token_middleware);
+        .route_layer(slide_session)
+        .route_layer(from_fn(csrf_protect))
+        .route_layer(require_authentication);
 
     // Built-in public routes, same erasure (no auth layers).
     let mut public_router = public_routes(&excluded, routes.disable_authentication);
@@ -234,6 +246,7 @@ mod test {
     use nvisy_postgres::PgConfig;
     use nvisy_webhook::reqwest::ReqwestClient;
 
+    use crate::handler::utility::CookieConfig;
     use crate::handler::{CustomRoutes, routes};
     use crate::middleware::UploadConfig;
     use crate::service::{
@@ -301,6 +314,7 @@ mod test {
             OidcConfig::default(),
             webhook_service,
             UploadConfig::default(),
+            CookieConfig::default(),
             s3,
         )
         .await?;

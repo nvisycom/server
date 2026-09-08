@@ -11,15 +11,18 @@ use crate::oauth::OAuthApp;
 ///
 /// Each provider gets its own struct (rather than one flattened four times)
 /// because clap-derive cannot prefix a flattened struct's args, so the client
-/// id / secret / redirect flags — and their `long`/`id` — are declared per
-/// provider to avoid collisions when the four are flattened together.
+/// id / secret flags — and their `long`/`id` — are declared per provider to avoid
+/// collisions when the four are flattened together.
+///
+/// The redirect URI is *not* here: the server exposes a single OAuth callback
+/// route shared by every provider, so it is one deployment-wide value
+/// ([`OAuthAppsConfig::redirect_uri`]), not a per-provider one.
 macro_rules! provider_app_config {
     (
         $(#[$meta:meta])*
         $name:ident,
         $id_long:literal, $id_env:literal,
-        $secret_long:literal, $secret_env:literal,
-        $redirect_long:literal, $redirect_env:literal
+        $secret_long:literal, $secret_env:literal
     ) => {
         $(#[$meta])*
         #[derive(Debug, Clone, Default)]
@@ -34,20 +37,15 @@ macro_rules! provider_app_config {
                 arg(id = $secret_long, long = $secret_long, env = $secret_env)
             )]
             pub client_secret: Option<String>,
-            /// OAuth redirect URI (the callback route registered with the provider).
-            #[cfg_attr(
-                feature = "cli",
-                arg(id = $redirect_long, long = $redirect_long, env = $redirect_env)
-            )]
-            pub redirect_uri: Option<String>,
         }
 
         impl $name {
-            /// The [`OAuthApp`], present only when all three values are set to a
-            /// non-empty string. An empty value (e.g. `GOOGLE_DRIVE_CLIENT_ID=`
-            /// in an env file) counts as unset, so a placeholder line does not
-            /// mark the provider as configured.
-            fn to_app(&self) -> Option<OAuthApp> {
+            /// The [`OAuthApp`], present only when the client id and secret are set
+            /// to non-empty strings and a shared `redirect_uri` is supplied. An
+            /// empty value (e.g. `GOOGLE_DRIVE_CLIENT_ID=` in an env file) counts as
+            /// unset, so a placeholder line does not mark the provider as
+            /// configured.
+            fn to_app(&self, redirect_uri: &str) -> Option<OAuthApp> {
                 let non_empty = |value: &Option<String>| {
                     value
                         .as_deref()
@@ -58,7 +56,7 @@ macro_rules! provider_app_config {
                 Some(OAuthApp {
                     client_id: non_empty(&self.client_id)?,
                     client_secret: non_empty(&self.client_secret)?,
-                    redirect_uri: non_empty(&self.redirect_uri)?,
+                    redirect_uri: redirect_uri.to_owned(),
                 })
             }
         }
@@ -71,9 +69,7 @@ provider_app_config!(
     "google-drive-client-id",
     "GOOGLE_DRIVE_CLIENT_ID",
     "google-drive-client-secret",
-    "GOOGLE_DRIVE_CLIENT_SECRET",
-    "google-drive-redirect-uri",
-    "GOOGLE_DRIVE_REDIRECT_URI"
+    "GOOGLE_DRIVE_CLIENT_SECRET"
 );
 provider_app_config!(
     /// Dropbox OAuth app credentials.
@@ -81,9 +77,7 @@ provider_app_config!(
     "dropbox-client-id",
     "DROPBOX_CLIENT_ID",
     "dropbox-client-secret",
-    "DROPBOX_CLIENT_SECRET",
-    "dropbox-redirect-uri",
-    "DROPBOX_REDIRECT_URI"
+    "DROPBOX_CLIENT_SECRET"
 );
 provider_app_config!(
     /// OneDrive OAuth app credentials.
@@ -91,9 +85,7 @@ provider_app_config!(
     "onedrive-client-id",
     "ONEDRIVE_CLIENT_ID",
     "onedrive-client-secret",
-    "ONEDRIVE_CLIENT_SECRET",
-    "onedrive-redirect-uri",
-    "ONEDRIVE_REDIRECT_URI"
+    "ONEDRIVE_CLIENT_SECRET"
 );
 provider_app_config!(
     /// Box OAuth app credentials.
@@ -101,17 +93,33 @@ provider_app_config!(
     "box-client-id",
     "BOX_CLIENT_ID",
     "box-client-secret",
-    "BOX_CLIENT_SECRET",
-    "box-redirect-uri",
-    "BOX_REDIRECT_URI"
+    "BOX_CLIENT_SECRET"
 );
 
-/// Deployment configuration for the cloud file-service OAuth apps: one struct per
-/// provider. A provider whose three values are not all set is left unconfigured
-/// and cannot be connected.
+/// Deployment configuration for the cloud file-service OAuth apps: a shared
+/// redirect URI plus one credential struct per provider. A provider whose client
+/// id and secret are not both set — or when the shared redirect URI is unset — is
+/// left unconfigured and cannot be connected.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct OAuthAppsConfig {
+    /// The OAuth callback URI, shared by every provider.
+    ///
+    /// The server exposes a single connection-OAuth callback route, so all
+    /// providers redirect to the same URI (which must be registered with each
+    /// provider). It differs only by deployment (dev vs prod host), so it is one
+    /// deployment-wide value rather than a per-provider one. When unset, no
+    /// provider can be connected.
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            id = "file-service-oauth-redirect-uri",
+            long = "file-service-oauth-redirect-uri",
+            env = "FILE_SERVICE_OAUTH_REDIRECT_URI"
+        )
+    )]
+    pub redirect_uri: Option<String>,
+
     /// Google Drive OAuth app.
     #[cfg_attr(feature = "cli", command(flatten))]
     pub google_drive: GoogleDriveConfig,
@@ -128,13 +136,25 @@ pub struct OAuthAppsConfig {
 
 impl OAuthAppsConfig {
     /// Resolves this configuration into the configured [`OAuthApps`].
+    ///
+    /// Every provider is left unconfigured when the shared redirect URI is unset
+    /// or blank — no provider can complete an OAuth flow without the callback.
     #[must_use]
     pub fn into_apps(self) -> OAuthApps {
+        let redirect_uri = self
+            .redirect_uri
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let Some(redirect_uri) = redirect_uri else {
+            return OAuthApps::default();
+        };
+
         OAuthApps {
-            google_drive: self.google_drive.to_app(),
-            dropbox: self.dropbox.to_app(),
-            onedrive: self.onedrive.to_app(),
-            box_app: self.box_app.to_app(),
+            google_drive: self.google_drive.to_app(redirect_uri),
+            dropbox: self.dropbox.to_app(redirect_uri),
+            onedrive: self.onedrive.to_app(redirect_uri),
+            box_app: self.box_app.to_app(redirect_uri),
         }
     }
 
@@ -154,25 +174,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn provider_is_unset_when_any_value_is_empty_or_missing() {
+    fn provider_is_unset_when_credentials_empty_or_missing() {
         let config = OAuthAppsConfig {
-            // Fully set (non-empty) -> configured.
+            redirect_uri: Some("https://example.com/callback".to_owned()),
+            // Both credentials set (non-empty) -> configured.
             google_drive: GoogleDriveConfig {
                 client_id: Some("id".to_owned()),
                 client_secret: Some("secret".to_owned()),
-                redirect_uri: Some("https://example.com/callback".to_owned()),
             },
-            // All present but empty/blank (as an env file's `KEY=` yields) -> unset.
+            // Present but empty/blank (as an env file's `KEY=` yields) -> unset.
             dropbox: DropboxConfig {
                 client_id: Some(String::new()),
                 client_secret: Some("   ".to_owned()),
-                redirect_uri: Some(String::new()),
             },
             // Partially set (missing secret) -> unset.
             onedrive: OneDriveConfig {
                 client_id: Some("id".to_owned()),
                 client_secret: None,
-                redirect_uri: Some("https://example.com/callback".to_owned()),
             },
             // All None -> unset.
             box_app: BoxConfig::default(),
@@ -183,5 +201,28 @@ mod tests {
         assert!(apps.dropbox.is_none());
         assert!(apps.onedrive.is_none());
         assert!(apps.box_app.is_none());
+
+        // The configured provider carries the shared redirect URI.
+        assert_eq!(
+            apps.google_drive.unwrap().redirect_uri,
+            "https://example.com/callback"
+        );
+    }
+
+    #[test]
+    fn every_provider_unset_without_the_shared_redirect_uri() {
+        // Credentials fully set, but no shared redirect URI -> nothing configured,
+        // since no provider can complete an OAuth flow without the callback.
+        let config = OAuthAppsConfig {
+            redirect_uri: None,
+            google_drive: GoogleDriveConfig {
+                client_id: Some("id".to_owned()),
+                client_secret: Some("secret".to_owned()),
+            },
+            ..Default::default()
+        };
+
+        let apps = config.into_apps();
+        assert!(apps.google_drive.is_none());
     }
 }

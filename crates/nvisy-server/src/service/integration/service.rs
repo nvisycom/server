@@ -104,18 +104,19 @@ pub struct ConnectionSyncService {
 }
 
 impl ConnectionSyncService {
-    /// Creates a new [`ConnectionSyncService`]. `import_concurrency` bounds the
-    /// in-flight imports per sync (see
+    /// Creates a new [`ConnectionSyncService`]. `import_concurrency` and
+    /// `export_concurrency` bound the in-flight imports and exports per sync (see
     /// [`IntegrationConfig`](crate::service::IntegrationConfig)).
     pub fn new(
         infra: Infra,
         object: ExternalObjectStore,
         cloud: FileService,
         import_concurrency: usize,
+        export_concurrency: usize,
     ) -> Self {
         let connector = Connector::new(infra.clone(), object, cloud);
         let importer = Importer::new(infra.clone(), connector.clone(), import_concurrency);
-        let exporter = Exporter::new(infra.clone(), connector);
+        let exporter = Exporter::new(infra.clone(), connector, export_concurrency);
         Self {
             infra,
             importer,

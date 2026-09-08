@@ -184,6 +184,7 @@ uuid = { version = "1.22", features = ["serde", "v4", "v7"] }
 bytes = { version = "1.10", features = ["serde"] }
 bigdecimal = { version = "0.4", features = ["serde"] }
 jiff = { version = "0.2", features = ["serde"] }
+time = { version = "0.3", features = [] }
 
 # Image processing
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }

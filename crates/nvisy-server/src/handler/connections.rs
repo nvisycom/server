@@ -40,8 +40,8 @@ use crate::extract::{
     ValidateJson, ViewConnections,
 };
 use crate::handler::request::{
-    ConnectionPathParams, ConnectionsQuery, CreateConnection, CursorPagination, SyncScheduleInput,
-    UpdateConnection,
+    ConnectionPathParams, ConnectionsQuery, CreateConnection, CursorPagination, PickerTokenRequest,
+    SyncScheduleInput, UpdateConnection,
 };
 use crate::handler::response::{
     Connection, ConnectionVerification, ConnectionsPage, ErrorResponse, PickerToken,
@@ -288,8 +288,11 @@ async fn read_connection(
     let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
 
-    let (found, schedule, last_synced) =
-        find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
+    let FoundConnection {
+        connection: found,
+        schedule,
+        last_synced,
+    } = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace connection read");
 
@@ -347,7 +350,7 @@ async fn update_connection(
 
     let existing = find_connection(&mut conn, workspace.id, path_params.connection_id)
         .await?
-        .0
+        .connection
         .item;
 
     // Sync config only applies to transfer-capable connections. A connection's
@@ -455,8 +458,11 @@ async fn update_connection(
     })
     .await?;
 
-    let (found, schedule, last_synced) =
-        find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
+    let FoundConnection {
+        connection: found,
+        schedule,
+        last_synced,
+    } = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Connection updated");
 
@@ -507,7 +513,7 @@ async fn delete_connection(
 
     let existing = find_connection(&mut conn, workspace.id, path_params.connection_id)
         .await?
-        .0
+        .connection
         .item;
 
     // Delete the connection and record the outbox event atomically, so the event
@@ -578,7 +584,7 @@ async fn verify_connection(
         let mut conn = pg_client.get_connection().await?;
         find_connection(&mut conn, workspace.id, path_params.connection_id)
             .await?
-            .0
+            .connection
             .item
     };
 
@@ -692,8 +698,12 @@ async fn mint_picker_token(
     State(cloud): State<FileService>,
     authz: Authorized<RunConnectionSyncs>,
     Path(path_params): Path<ConnectionPathParams>,
+    // Optional body: a picker that names a resource per `authenticate` command
+    // (OneDrive) sends `{ resource }`; single-token pickers send no body.
+    request: Option<ValidateJson<PickerTokenRequest>>,
 ) -> Result<(StatusCode, HeaderMap, Json<PickerToken>)> {
     tracing::debug!(target: TRACING_TARGET, "Minting picker token");
+    let resource = request.and_then(|ValidateJson(body)| body.resource);
 
     let workspace = authz.workspace;
 
@@ -703,7 +713,7 @@ async fn mint_picker_token(
         let mut conn = pg_client.get_connection().await?;
         find_connection(&mut conn, workspace.id, path_params.connection_id)
             .await?
-            .0
+            .connection
             .item
     };
 
@@ -722,15 +732,14 @@ async fn mint_picker_token(
         ));
     }
 
-    // Mint the access token, refreshing (and persisting) if the stored one has
-    // expired. The refresh token never leaves the server; only the short-lived
-    // access token and its expiry are returned.
-    let (access_token, refreshed) = cloud.ensure_fresh(&config).await?;
-    let expires_at = match &refreshed {
-        Some(refreshed) => refreshed.tokens().expires_at,
-        None => config.tokens().expires_at,
-    };
-    if let Some(refreshed) = refreshed {
+    // Mint the picker access token for the requested resource. The provider layer
+    // decides what the picker needs (OneDrive: a SharePoint-audience token; Drive
+    // and Box: the ordinary provider token). The refresh token never leaves the
+    // server; a rotated refresh token comes back for persistence.
+    let picker = cloud
+        .mint_picker_token(&config, resource.as_deref())
+        .await?;
+    if let Some(refreshed) = picker.refreshed {
         let mut conn = pg_client.get_connection().await?;
         persist_refreshed_tokens(
             &mut conn,
@@ -747,8 +756,8 @@ async fn mint_picker_token(
     headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
 
     let token = PickerToken {
-        access_token,
-        expires_at,
+        access_token: picker.access_token,
+        expires_at: picker.expires_at,
     };
     Ok((StatusCode::OK, headers, Json(token)))
 }
@@ -757,7 +766,11 @@ fn mint_picker_token_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Mint picker token")
         .description(
             "Returns a short-lived provider access token for a browser file picker (file \
-             services with a token-based picker only). The refresh token is never returned.",
+             services with a token-based picker only). The refresh token is never returned. \
+             An optional body `{ resource }` names the resource the picker requested (used by \
+             the OneDrive picker, which requires a SharePoint-audience token); providers whose \
+             picker takes a single token ignore it. The OneDrive picker is available only for \
+             work or school (OneDrive for Business) accounts.",
         )
         .response::<200, Json<PickerToken>>()
         .response::<400, Json<ErrorResponse>>()
@@ -778,14 +791,19 @@ fn validate_sync_input(sync: &SyncScheduleInput) -> Result<()> {
     Ok(())
 }
 
+/// A connection found within a workspace, with its creator, schedule, and last
+/// successful sync time.
+struct FoundConnection {
+    /// The connection paired with its creator account reference.
+    connection: WithAccountRef<WorkspaceConnection>,
+    /// The sync schedule, present only for transfer-capable connections.
+    schedule: Option<WorkspaceConnectionSchedule>,
+    /// When the connection last synced successfully, if ever.
+    last_synced: Option<jiff::Timestamp>,
+}
+
 /// Finds a connection within a workspace by id, with its creator, or returns a
 /// NotFound error.
-type FoundConnection = (
-    WithAccountRef<WorkspaceConnection>,
-    Option<WorkspaceConnectionSchedule>,
-    Option<jiff::Timestamp>,
-);
-
 async fn find_connection(
     conn: &mut PgConn,
     workspace_id: Uuid,
@@ -802,7 +820,11 @@ async fn find_connection(
         .into_iter()
         .next()
         .map(|(_, ts)| ts.into());
-    Ok((found, schedule, last_synced))
+    Ok(FoundConnection {
+        connection: found,
+        schedule,
+        last_synced,
+    })
 }
 
 /// Returns routes for workspace connection management.

@@ -31,6 +31,23 @@ pub struct ConnectionPathParams {
     pub connection_id: ConnectionId,
 }
 
+/// Body for minting a browser file-picker token.
+///
+/// The OneDrive v8 picker requests a token per resource (it names the resource in
+/// each `authenticate` command); the caller passes that `resource` so the server
+/// mints a token scoped to exactly it. Ignored by providers whose picker takes a
+/// single provider token (Google Drive, Box); omit it for those.
+#[must_use]
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct PickerTokenRequest {
+    /// The resource the picker asked for (its `authenticate` command's
+    /// `resource`), e.g. `https://contoso-my.sharepoint.com`. Optional; when
+    /// absent the server uses the connection's default picker resource.
+    #[validate(length(min = 1, max = 2048))]
+    pub resource: Option<String>,
+}
+
 /// Sync configuration for a sync-capable connection (object stores).
 ///
 /// Only meaningful for connections whose provider supports syncing; omitted for

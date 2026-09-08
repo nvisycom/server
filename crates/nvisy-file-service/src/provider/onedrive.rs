@@ -6,10 +6,11 @@
 //! `common` tenant supports both personal and work/school accounts.
 
 use reqwest::header::CONTENT_LENGTH;
+use serde::Deserialize;
 
-use super::{ProviderRequest, encode_path_segment, response_stream};
-use crate::client::{ByteStream, FileServiceClient, FileUpload};
-use crate::error::Result;
+use super::{FileServiceConfig, ProviderRequest, encode_path_segment, response_stream};
+use crate::client::{ByteStream, FileService, FileServiceClient, FileUpload, PickerAccessToken};
+use crate::error::{Error, ErrorKind, Result};
 use crate::oauth::OAuthProvider;
 
 /// Provider identifier stored in the connection's `provider` column.
@@ -40,6 +41,116 @@ pub fn oauth_provider() -> OAuthProvider {
         ],
         extra_authorize_params: Vec::new(),
     }
+}
+
+/// Mints a v8 file-picker token for a OneDrive connection, scoped to the
+/// SharePoint resource that backs the account's drive.
+///
+/// A OneDrive for Business drive is a SharePoint personal site, and the picker
+/// requires a SharePoint-audience token (not the Graph token the connector uses).
+/// This resolves that per-account SharePoint host from Graph via `service`, then
+/// mints a `{resource}/.default` token from the stored refresh token — a scope
+/// subset of the existing grant, so no re-consent. `resource`, when given, is the
+/// exact resource the picker named in its `authenticate` command; otherwise the
+/// resolved host is used. The resolved host also gates account type. The
+/// connector's own Graph token is never disturbed.
+///
+/// The OneDrive arm of [`FileService::mint_picker_token`], kept here so the
+/// generic client layer holds no provider-specific logic.
+///
+/// # Errors
+///
+/// Returns [`ErrorKind::BadRequest`](crate::error::ErrorKind::BadRequest) for a
+/// personal/consumer account (no SharePoint host) — the modern picker is only
+/// supported for OneDrive for Business — or an auth error if the token cannot be
+/// minted.
+pub(crate) async fn mint_picker_token(
+    service: &FileService,
+    config: &FileServiceConfig,
+    resource: Option<&str>,
+) -> Result<PickerAccessToken> {
+    // The Graph token is needed to resolve the SharePoint host; a refresh here is
+    // handed back so the caller can persist a rotated refresh token.
+    let (graph_access_token, refreshed) = service.ensure_fresh(config).await?;
+    let effective = refreshed.as_ref().unwrap_or(config);
+
+    let host = resolve_sharepoint_host(service.http(), &graph_access_token)
+        .await?
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::BadRequest,
+                "the OneDrive file picker is available only for work or school \
+                 (OneDrive for Business) accounts, not personal accounts",
+            )
+        })?;
+
+    // The picker names the resource it wants per `authenticate` command; fall back
+    // to the account's SharePoint host. Either way the audience is a SharePoint
+    // resource, requested via the v2.0 `.default` scope.
+    let resource = resource.unwrap_or(&host);
+    let scope = format!("{}/.default", resource.trim_end_matches('/'));
+
+    let tokens = service
+        .mint_scoped_token(effective, std::slice::from_ref(&scope))
+        .await?;
+
+    Ok(PickerAccessToken {
+        access_token: tokens.access_token,
+        expires_at: tokens.expires_at,
+        refreshed,
+    })
+}
+
+/// Resolves the SharePoint host that backs a OneDrive account's drive, using a
+/// Microsoft Graph access token. Returns `None` for a consumer/personal account,
+/// whose drive is on the legacy consumer OneDrive service and has no SharePoint
+/// host.
+///
+/// A OneDrive for Business drive is a SharePoint personal site, so `webUrl` is a
+/// `https://{tenant}-my.sharepoint.com/...` URL; the origin of that URL is the
+/// audience the v8 file picker's tokens must target. A personal account's `webUrl`
+/// points at `onedrive.live.com` (no SharePoint), which is why the modern picker
+/// is unsupported there.
+///
+/// # Errors
+///
+/// Returns an error if the Graph request fails or its body cannot be parsed.
+pub(crate) async fn resolve_sharepoint_host(
+    http: &reqwest::Client,
+    graph_access_token: &str,
+) -> Result<Option<String>> {
+    #[derive(Deserialize)]
+    struct DriveResponse {
+        #[serde(rename = "webUrl")]
+        web_url: Option<String>,
+    }
+
+    let response = http
+        .get(format!("{API_BASE}/me/drive?$select=webUrl"))
+        .bearer_auth(graph_access_token)
+        .send()
+        .await
+        .map_err(|err| Error::connection("failed to query OneDrive drive").with_source(err))?
+        .error_for_status()
+        .map_err(|err| {
+            Error::new(ErrorKind::Unauthenticated, "OneDrive drive lookup rejected")
+                .with_source(err)
+        })?
+        .json::<DriveResponse>()
+        .await
+        .map_err(|err| Error::connection("invalid OneDrive drive response").with_source(err))?;
+
+    let host = response.web_url.and_then(|url| {
+        let parsed = reqwest::Url::parse(&url).ok()?;
+        let host = parsed.host_str()?;
+        // A business (OneDrive for Business) drive lives on `*.sharepoint.com`; a
+        // personal drive does not, and yields `None` here.
+        host.to_ascii_lowercase()
+            .ends_with(".sharepoint.com")
+            .then(|| format!("https://{host}"))
+    });
+
+    Ok(host)
 }
 
 /// A connected OneDrive client holding a valid access token.

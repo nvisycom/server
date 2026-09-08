@@ -171,6 +171,28 @@ pub struct OidcConfig {
         )
     )]
     pub allowed_redirect_origins: Vec<String>,
+
+    /// Allowed custom URL schemes the sign-in callback may deep-link to for
+    /// **native app** (desktop) auth, as a comma-separated list of bare scheme
+    /// names (e.g. `nvisy`).
+    ///
+    /// A desktop app opens the system browser to sign in and receives an API
+    /// token via a custom-scheme deep-link (`nvisy://auth/callback?token=…`)
+    /// rather than a cookie. A caller-supplied `redirectUri` whose scheme matches
+    /// one of these is treated as a desktop flow; kept separate from the web
+    /// [`allowed_redirect_origins`](Self::allowed_redirect_origins) because it is
+    /// a scheme allow-list, not an origin allow-list. `http`/`https` are never
+    /// accepted here. Empty means no desktop deep-link is allowed.
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            long = "desktop-allowed-redirect-schemes",
+            env = "DESKTOP_ALLOWED_REDIRECT_SCHEMES",
+            value_delimiter = ',',
+            num_args = 0..,
+        )
+    )]
+    pub desktop_allowed_redirect_schemes: Vec<String>,
 }
 
 impl OidcConfig {
@@ -206,6 +228,20 @@ impl OidcConfig {
                     .is_tuple()
                     .then(|| origin.ascii_serialization().to_ascii_lowercase())
             })
+            .collect()
+    }
+
+    /// The configured desktop deep-link schemes, trimmed and lowercased, with
+    /// blanks and `http`/`https` dropped (those are web origins, never desktop
+    /// schemes). Compared against a redirect URL's scheme by [`classify_redirect`].
+    ///
+    /// [`classify_redirect`]: super::OidcService::classify_redirect
+    #[must_use]
+    pub fn desktop_allowed_redirect_schemes(&self) -> Vec<String> {
+        self.desktop_allowed_redirect_schemes
+            .iter()
+            .map(|scheme| scheme.trim().to_ascii_lowercase())
+            .filter(|scheme| !scheme.is_empty() && scheme != "http" && scheme != "https")
             .collect()
     }
 }
@@ -304,6 +340,25 @@ mod tests {
                 "https://app.example.com".to_owned(),
                 "http://localhost:3000".to_owned(),
             ]
+        );
+    }
+
+    #[test]
+    fn desktop_schemes_are_normalized_and_http_dropped() {
+        let config = OidcConfig {
+            desktop_allowed_redirect_schemes: vec![
+                " Nvisy ".to_owned(), // trimmed + lowercased
+                "myapp".to_owned(),
+                "".to_owned(),      // blank dropped
+                "https".to_owned(), // web schemes are never desktop schemes
+                "http".to_owned(),
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            config.desktop_allowed_redirect_schemes(),
+            vec!["nvisy".to_owned(), "myapp".to_owned()]
         );
     }
 }

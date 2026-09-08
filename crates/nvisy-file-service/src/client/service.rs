@@ -20,6 +20,7 @@ use super::apps::OAuthApps;
 use super::connected::ConnectedFileService;
 use crate::error::{Error, ErrorKind, Result};
 use crate::oauth::{OAuthClient, OAuthTokens};
+use crate::provider::onedrive::mint_picker_token as mint_onedrive_picker_token;
 use crate::provider::{FileServiceConfig, Provider};
 
 /// Tracing target for cloud file-service operations.
@@ -128,6 +129,72 @@ impl FileService {
         Ok((access_token, Some(refreshed)))
     }
 
+    /// The shared HTTP client, for provider-specific helpers within this crate
+    /// that need a raw request (e.g. resolving a picker's target resource).
+    pub(crate) fn http(&self) -> &reqwest::Client {
+        &self.http
+    }
+
+    /// Mints an access token for `config` scoped to `scopes` (a subset of the
+    /// original grant), from the stored refresh token, without disturbing the
+    /// connection's primary token. Crate-internal building block for provider
+    /// picker-token helpers.
+    pub(crate) async fn mint_scoped_token(
+        &self,
+        config: &FileServiceConfig,
+        scopes: &[String],
+    ) -> Result<OAuthTokens> {
+        let refresh_token = config.tokens().refresh_token.clone().ok_or_else(|| {
+            Error::new(
+                ErrorKind::Unauthenticated,
+                "the connection has expired and must be reconnected",
+            )
+        })?;
+        self.oauth_client(config.provider)?
+            .refresh_with_scopes(&refresh_token, scopes)
+            .await
+    }
+
+    /// Mints a short-lived access token for a provider's browser file picker.
+    ///
+    /// Provider-neutral entry point: the caller passes the connection config and,
+    /// when the picker asked for a specific resource, that `resource`; this
+    /// dispatches to the provider's picker-token logic. OneDrive mints a
+    /// SharePoint-audience token (its picker requires one, distinct from the Graph
+    /// token the connector uses); Google Drive and Box return their ordinary
+    /// provider token. The connection's primary token is not disturbed; a rotated
+    /// refresh token is returned via [`PickerAccessToken::refreshed`] to persist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider's picker does not use a server token, if
+    /// the account is unsupported (e.g. a personal OneDrive account), or if the
+    /// token cannot be minted.
+    pub async fn mint_picker_token(
+        &self,
+        config: &FileServiceConfig,
+        resource: Option<&str>,
+    ) -> Result<PickerAccessToken> {
+        match config.provider {
+            Provider::OneDrive => mint_onedrive_picker_token(self, config, resource).await,
+            // Other token-based pickers (Google Drive, Box) take the provider's
+            // ordinary access token, refreshed if stale.
+            Provider::GoogleDrive | Provider::Box => {
+                let (access_token, refreshed) = self.ensure_fresh(config).await?;
+                let expires_at = refreshed.as_ref().unwrap_or(config).tokens().expires_at;
+                Ok(PickerAccessToken {
+                    access_token,
+                    expires_at,
+                    refreshed,
+                })
+            }
+            Provider::Dropbox => Err(Error::new(
+                ErrorKind::BadRequest,
+                "this provider's picker uses a client-side app key, not a server token",
+            )),
+        }
+    }
+
     /// Connects to the file service described by `config`, refreshing its OAuth
     /// token first if needed.
     pub async fn connect(&self, config: &FileServiceConfig) -> Result<ConnectedFileService> {
@@ -135,6 +202,19 @@ impl FileService {
         let client = config.connect(self.http.clone(), access_token);
         Ok(ConnectedFileService { client, refreshed })
     }
+}
+
+/// A minted browser file-picker access token: the token, its expiry (Unix
+/// seconds, if the provider returned one), and — when minting rotated the
+/// connection's refresh token — the updated config for the caller to persist.
+#[must_use]
+pub struct PickerAccessToken {
+    /// The access token to hand to the picker.
+    pub access_token: String,
+    /// Expiry as a Unix timestamp, if known.
+    pub expires_at: Option<i64>,
+    /// The updated config to persist, present only if the refresh token rotated.
+    pub refreshed: Option<FileServiceConfig>,
 }
 
 /// A byte stream, the shape both directions of a transfer move data in.

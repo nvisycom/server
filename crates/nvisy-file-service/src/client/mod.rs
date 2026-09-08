@@ -13,4 +13,6 @@ pub use self::config::{
     BoxConfig, DropboxConfig, GoogleDriveConfig, OAuthAppsConfig, OneDriveConfig,
 };
 pub use self::connected::ConnectedFileService;
-pub use self::service::{ByteStream, FileService, FileServiceClient, FileUpload};
+pub use self::service::{
+    ByteStream, FileService, FileServiceClient, FileUpload, PickerAccessToken,
+};

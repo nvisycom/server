@@ -37,7 +37,8 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         // Reuses the optional extraction: a valid token authenticates, an absent or
-        // invalid one yields `None` rather than rejecting.
+        // invalid one yields `None`, and an infrastructure error still propagates
+        // (it is not silently degraded to "not authenticated").
         <AuthState<T> as OptionalFromRequestParts<S>>::from_request_parts(parts, state)
             .await
             .map(OptionalAuth)

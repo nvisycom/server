@@ -74,6 +74,23 @@ pub struct ConfirmPasswordReset {
     pub new_password: String,
 }
 
+/// Request payload to mint a native-app (desktop) session token.
+///
+/// Called by the frontend after a normal browser (cookie) login when the login
+/// was initiated by the desktop app: it exchanges the just-established session for
+/// a long-lived `app` token the frontend then hands to the app via the
+/// `redirectUri` deep-link. The `redirectUri` must be a registered desktop scheme
+/// (e.g. `nvisy://…`), so a token cannot be minted toward a web origin.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTokenRequest {
+    /// The desktop deep-link the app will receive the token on. Must match a
+    /// configured desktop redirect scheme.
+    #[validate(length(min = 1, max = 2048))]
+    pub redirect_uri: String,
+}
+
 /// Query parameters the provider appends when redirecting to the OIDC callback.
 ///
 /// The callback serves every OIDC flow (sign-in, link, and step-up reauth); the

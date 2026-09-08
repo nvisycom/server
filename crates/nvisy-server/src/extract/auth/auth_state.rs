@@ -14,6 +14,7 @@ use axum::http::request::Parts;
 use derive_more::{Deref, DerefMut};
 use nvisy_postgres::model::Account;
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
+use nvisy_postgres::types::session;
 use nvisy_postgres::{PgClient, PgConn};
 use serde::Deserialize;
 
@@ -310,8 +311,17 @@ where
     ///
     /// Returns [`ErrorKind::Unauthorized`] if the token has been revoked.
     async fn verify_token_active(conn: &mut PgConn, auth_claims: &AuthClaims<T>) -> Result<()> {
+        // This check is the SOLE authority for session validity: revocation, idle
+        // expiry, and absolute-age expiry all go through `is_active`. It MUST fail
+        // closed — a database error maps to an error (request rejected), never to
+        // "allow through". Do not add an allow-on-error fallback here, or a revoked
+        // or expired session would authenticate.
         let is_active = conn
-            .account_api_token_is_active(auth_claims.token_id, auth_claims.account_id)
+            .account_api_token_is_active(
+                auth_claims.token_id,
+                auth_claims.account_id,
+                session::MAX_AGE,
+            )
             .await
             .map_err(|db_error| {
                 tracing::error!(
@@ -319,7 +329,7 @@ where
                     error = %db_error,
                     account_id = %auth_claims.account_id,
                     token_id = %auth_claims.token_id,
-                    "database error occurred during token revocation check"
+                    "database error occurred during session validity check"
                 );
 
                 ErrorKind::InternalServerError
@@ -385,9 +395,26 @@ where
         parts: &mut Parts,
         state: &S,
     ) -> Result<Option<Self>, Self::Rejection> {
+        use crate::handler::ErrorKind;
+
         match <Self as FromRequestParts<S>>::from_request_parts(parts, state).await {
             Ok(auth_state) => Ok(Some(auth_state)),
-            Err(_) => Ok(None),
+            // Only a genuinely absent-or-invalid credential degrades to "not
+            // authenticated" (`None`). An infrastructure error (e.g. the database
+            // validity check failing) or a forbidden account must PROPAGATE, not
+            // silently become anonymous — mapping those to `None` would fail open,
+            // contradicting the fail-closed authority of the `is_active` check.
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    ErrorKind::MissingAuthToken
+                        | ErrorKind::MalformedAuthToken
+                        | ErrorKind::Unauthorized
+                ) =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
         }
     }
 }

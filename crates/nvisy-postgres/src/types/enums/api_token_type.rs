@@ -24,8 +24,9 @@ pub enum ApiTokenType {
     #[serde(rename = "api")]
     Api,
 
-    /// CLI tool token (command-line interface)
-    #[db_rename = "cli"]
-    #[serde(rename = "cli")]
-    Cli,
+    /// Native app session token (obtained by interactive desktop login via the
+    /// external browser + deep-link flow, sent as a Bearer token)
+    #[db_rename = "app"]
+    #[serde(rename = "app")]
+    App,
 }

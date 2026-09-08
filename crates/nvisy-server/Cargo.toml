@@ -70,7 +70,7 @@ pin-project-lite = { workspace = true, features = [] }
 # HTTP server & middleware
 axum = { workspace = true, features = ["http2", "macros", "multipart"] }
 axum-client-ip = { workspace = true, features = [] }
-axum-extra = { workspace = true, features = ["typed-header", "attachment", "query"] }
+axum-extra = { workspace = true, features = ["typed-header", "attachment", "query", "cookie"] }
 tower = { workspace = true, features = [] }
 tower-http = { workspace = true, features = [] }
 
@@ -127,6 +127,7 @@ anyhow = { workspace = true, features = [] }
 # Primitive datatypes
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
+time = { workspace = true, features = [] }
 ipnet = { workspace = true, features = [] }
 
 # Image processing

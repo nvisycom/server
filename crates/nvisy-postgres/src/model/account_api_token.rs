@@ -63,6 +63,8 @@ pub struct NewAccountApiToken {
 #[diesel(table_name = account_api_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateAccountApiToken {
+    /// Timestamp of token creation (the absolute-cap anchor).
+    pub issued_at: Option<Timestamp>,
     /// Timestamp of most recent token activity.
     pub last_used_at: Option<Option<Timestamp>>,
     /// Updated display name for the API token.

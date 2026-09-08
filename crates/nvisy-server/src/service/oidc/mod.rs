@@ -121,6 +121,21 @@ pub struct OidcService {
     /// to. A caller-supplied redirect must match one of these, or it is refused —
     /// so the flow's minted session token cannot be sent to an attacker host.
     allowed_redirect_origins: Arc<Vec<String>>,
+    /// Custom URL schemes (e.g. `nvisy`) the callback may deep-link to for native
+    /// app (desktop) auth. A redirect whose scheme matches one of these is a
+    /// desktop flow (token in the deep-link), distinct from a web origin (cookie).
+    allowed_redirect_schemes: Arc<Vec<String>>,
+}
+
+/// What kind of allowed redirect target a `redirectUri` is, deciding how the
+/// sign-in callback delivers its result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RedirectKind {
+    /// An allow-listed web origin: the callback sets a session cookie (web flow).
+    WebOrigin,
+    /// An allow-listed custom scheme: the callback deep-links an API token to the
+    /// native app (desktop flow).
+    DesktopScheme,
 }
 
 impl OidcService {
@@ -156,27 +171,49 @@ impl OidcService {
             http,
             providers: Arc::new(providers),
             allowed_redirect_origins: Arc::new(config.allowed_redirect_origins()),
+            allowed_redirect_schemes: Arc::new(config.desktop_allowed_redirect_schemes()),
         })
     }
 
-    /// Whether `redirect_uri` is a permitted post-sign-in redirect target: its
-    /// origin (`scheme://host[:port]`) must exactly match a configured allowed
-    /// origin. An unparseable URL, or one whose origin is not allow-listed, is
-    /// rejected — the flow carries the minted session token, so it must never be
-    /// redirected to an origin the deployment did not sanction.
+    /// Classifies a caller-supplied `redirect_uri` as a permitted redirect target,
+    /// or `None` if it is not allow-listed.
+    ///
+    /// A web target's origin (`scheme://host[:port]`) must exactly match a
+    /// configured allowed origin ([`WebOrigin`](RedirectKind::WebOrigin)); a
+    /// desktop target's custom scheme must match a configured desktop scheme
+    /// ([`DesktopScheme`](RedirectKind::DesktopScheme)). Anything else — an
+    /// unparseable URL, an un-allow-listed origin, an unknown scheme — is refused,
+    /// because the callback carries the minted token and must never deliver it to
+    /// a target the deployment did not sanction.
+    #[must_use]
+    pub fn classify_redirect(&self, redirect_uri: &str) -> Option<RedirectKind> {
+        let url = url::Url::parse(redirect_uri).ok()?;
+
+        // A tuple (http/https) origin is a web target; match it against the origin
+        // allow-list. `Url::origin()` yields an opaque origin for a custom scheme,
+        // which is never a web match.
+        let origin = url.origin();
+        if origin.is_tuple() {
+            let ascii_origin = origin.ascii_serialization().to_ascii_lowercase();
+            return self
+                .allowed_redirect_origins
+                .contains(&ascii_origin)
+                .then_some(RedirectKind::WebOrigin);
+        }
+
+        // Otherwise it may be a desktop deep-link: its scheme must be allow-listed.
+        let scheme = url.scheme().to_ascii_lowercase();
+        self.allowed_redirect_schemes
+            .contains(&scheme)
+            .then_some(RedirectKind::DesktopScheme)
+    }
+
+    /// Whether `redirect_uri` is a permitted post-sign-in redirect target (web or
+    /// desktop). Used to gate a flow at start; the callback re-classifies to
+    /// decide how to deliver the result.
     #[must_use]
     pub fn is_redirect_allowed(&self, redirect_uri: &str) -> bool {
-        let Ok(url) = url::Url::parse(redirect_uri) else {
-            return false;
-        };
-        // `Url::origin()` yields the tuple origin (scheme, host, port); an opaque
-        // origin (e.g. a `data:` URL) is never allowed.
-        let origin = url.origin();
-        if !origin.is_tuple() {
-            return false;
-        }
-        let ascii_origin = origin.ascii_serialization().to_ascii_lowercase();
-        self.allowed_redirect_origins.contains(&ascii_origin)
+        self.classify_redirect(redirect_uri).is_some()
     }
 
     /// Looks up a configured provider by its identity kind.
@@ -286,12 +323,17 @@ impl OidcService {
 mod tests {
     use super::*;
 
-    fn service_with_origins(origins: &[&str]) -> OidcService {
+    fn service_with(origins: &[&str], schemes: &[&str]) -> OidcService {
         OidcService {
             http: reqwest::Client::new(),
             providers: Arc::new(Vec::new()),
             allowed_redirect_origins: Arc::new(origins.iter().map(|o| o.to_string()).collect()),
+            allowed_redirect_schemes: Arc::new(schemes.iter().map(|s| s.to_string()).collect()),
         }
+    }
+
+    fn service_with_origins(origins: &[&str]) -> OidcService {
+        service_with(origins, &[])
     }
 
     #[test]
@@ -321,5 +363,32 @@ mod tests {
         assert!(!oidc.is_redirect_allowed("data:text/html,evil"));
         // A relative path has no origin to match.
         assert!(!oidc.is_redirect_allowed("/signed-in"));
+    }
+
+    #[test]
+    fn classify_distinguishes_web_origins_and_desktop_schemes() {
+        let oidc = service_with(&["https://app.example.com"], &["nvisy"]);
+
+        // A web origin classifies as a web target (cookie flow).
+        assert_eq!(
+            oidc.classify_redirect("https://app.example.com/done"),
+            Some(RedirectKind::WebOrigin)
+        );
+        // The allow-listed custom scheme classifies as a desktop target.
+        assert_eq!(
+            oidc.classify_redirect("nvisy://auth/callback"),
+            Some(RedirectKind::DesktopScheme)
+        );
+        // An un-allow-listed scheme or origin is refused.
+        assert_eq!(oidc.classify_redirect("other://auth/callback"), None);
+        assert_eq!(oidc.classify_redirect("https://evil.example.com/"), None);
+    }
+
+    #[test]
+    fn desktop_scheme_is_not_matched_when_none_configured() {
+        // With no desktop schemes, a custom-scheme redirect is refused even though
+        // web origins are allowed.
+        let oidc = service_with_origins(&["https://app.example.com"]);
+        assert_eq!(oidc.classify_redirect("nvisy://auth/callback"), None);
     }
 }

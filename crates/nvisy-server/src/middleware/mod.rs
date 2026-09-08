@@ -30,24 +30,24 @@
 //! ```rust
 //! use axum::Router;
 //! use nvisy_server::middleware::{
-//!     RecoveryConfig, RouterRecoveryExt, RouterObservabilityExt,
-//!     RouterSecurityExt, RouterAuthExt,
+//!     RecoveryConfig, RouterRecoveryExt, RouterObservabilityExt, RouterSecurityExt,
 //! };
 //! use nvisy_server::service::ServiceState;
 //!
 //! fn create_router(state: ServiceState) -> Router {
 //!     Router::new()
-//!         .with_authentication(state.clone())  // 5. Auth
-//!         .with_metrics()                      // 4. Metrics
-//!         .with_default_security()             // 3. Security
-//!         .with_observability()                // 2. Observability
-//!         .with_default_recovery()             // 1. Recovery (outermost)
+//!         .with_metrics()              // 4. Metrics
+//!         .with_default_security()     // 3. Security
+//!         .with_observability()        // 2. Observability
+//!         .with_default_recovery()     // 1. Recovery (outermost)
 //! }
 //! ```
+//!
+//! Authentication is applied by the route composition in
+//! [`handler::routes`](crate::handler::routes), not through a router extension.
 
 mod args;
-mod authentication;
-mod authorization;
+mod auth;
 mod constants;
 mod counting_body;
 mod observability;
@@ -57,8 +57,7 @@ mod specification;
 mod sunset;
 
 pub use args::{MiddlewareArgs, RouterMiddlewareExt};
-pub use authentication::{RouterAuthExt, require_authentication, validate_token_middleware};
-pub use authorization::require_admin;
+pub use auth::{csrf_protect, require_authentication, slide_session};
 pub use constants::{DEFAULT_MAX_BODY_SIZE, DEFAULT_MAX_FILE_BODY_SIZE};
 pub use observability::RouterObservabilityExt;
 pub use recovery::{RecoveryConfig, RouterRecoveryExt};

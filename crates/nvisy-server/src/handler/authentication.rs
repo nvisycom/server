@@ -8,6 +8,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum_extra::headers::UserAgent;
 use jiff::{Span, Timestamp};
 use nvisy_postgres::model::{
@@ -16,13 +17,13 @@ use nvisy_postgres::model::{
 use nvisy_postgres::query::{
     AccountApiTokenRepository, AccountIdentityRepository, AccountRepository,
 };
-use nvisy_postgres::types::{ApiTokenType, IdentityProvider};
-use nvisy_postgres::{AsyncConnection, Error as PgError, JiffTimestamp, PgClient};
+use nvisy_postgres::types::{ApiTokenType, IdentityProvider, session};
+use nvisy_postgres::{AsyncConnection, Error as PgError, JiffTimestamp, PgClient, PgConn};
 
 use super::request::{Login, Signup};
-use super::response::{AuthToken, ErrorResponse};
+use super::response::ErrorResponse;
 use crate::extract::{AuthClaims, AuthHeader, AuthState, Json, TypedHeader, ValidateJson};
-use crate::handler::utility::build_password_user_inputs;
+use crate::handler::utility::{CookieConfig, build_password_user_inputs};
 use crate::handler::{ErrorKind, Result};
 use crate::service::{PasswordService, ServiceState, SessionKeys, UserAgentParser};
 
@@ -43,6 +44,115 @@ pub(crate) fn create_auth_header(
     Ok(auth_header)
 }
 
+/// Mints a new session token of `session_type` for `account`, persists its
+/// `account_api_tokens` row, and returns the signed JWT. The shared core behind
+/// [`mint_web_session`] and [`mint_app_token`], so every sign-in path produces a
+/// consistently-shaped token.
+///
+/// The caller is responsible for gating the account's status (suspended/deleted)
+/// before minting.
+async fn mint_session_token(
+    conn: &mut PgConn,
+    auth_keys: SessionKeys,
+    ua_parser: &UserAgentParser,
+    account: &Account,
+    session_type: ApiTokenType,
+    is_remembered: bool,
+    expired_at: JiffTimestamp,
+    user_agent: String,
+) -> Result<String> {
+    let new_token = NewAccountApiToken {
+        account_id: account.id,
+        display_name: ua_parser.parse(&user_agent),
+        ip_address: None,
+        user_agent: Some(user_agent),
+        is_remembered: Some(is_remembered),
+        session_type: Some(session_type),
+        expired_at: Some(expired_at),
+    };
+    let token = conn.create_account_api_token(new_token).await?;
+    tracing::info!(
+        target: TRACING_TARGET,
+        token_id = %token.id,
+        account_id = %account.id,
+        session_type = ?session_type,
+        "Minted session token",
+    );
+    create_auth_header(auth_keys, account, &token)?.into_string()
+}
+
+/// Mints a `web` browser session for `account` and returns its signed JWT.
+///
+/// The idle bound follows `remember_me`; the session then slides forward on use
+/// up to the absolute cap. Password login, signup, and OIDC sign-in all go through
+/// it, so the browser session shape is identical across the three paths. The
+/// caller delivers the returned JWT to the browser as a session cookie.
+pub(crate) async fn mint_web_session(
+    conn: &mut PgConn,
+    auth_keys: SessionKeys,
+    ua_parser: &UserAgentParser,
+    account: &Account,
+    remember_me: bool,
+    user_agent: String,
+) -> Result<String> {
+    mint_session_token(
+        conn,
+        auth_keys,
+        ua_parser,
+        account,
+        ApiTokenType::Web,
+        remember_me,
+        session::initial_expires_at(remember_me).into(),
+        user_agent,
+    )
+    .await
+}
+
+/// Mints a native-app (desktop) session token for `account` and returns its
+/// signed JWT — a long-lived `app` token (see [`session::APP_TOKEN_LIFETIME`])
+/// that does not slide and is exempt from the browser absolute cap. The desktop
+/// app stores it and sends it as a Bearer credential; it is never a cookie.
+pub(crate) async fn mint_app_token(
+    conn: &mut PgConn,
+    auth_keys: SessionKeys,
+    ua_parser: &UserAgentParser,
+    account: &Account,
+    user_agent: String,
+) -> Result<String> {
+    let expired_at =
+        Timestamp::now() + Span::new().seconds(session::APP_TOKEN_LIFETIME.as_secs() as i64);
+    let jwt = mint_session_token(
+        conn,
+        auth_keys,
+        ua_parser,
+        account,
+        ApiTokenType::App,
+        false,
+        expired_at.into(),
+        user_agent,
+    )
+    .await?;
+
+    // Cap live app tokens per account so repeated desktop logins do not accumulate
+    // unbounded long-lived credentials: evict the oldest beyond the limit (the
+    // token just minted is the newest, so it is always retained). Best-effort — a
+    // pruning failure must not fail an otherwise-successful sign-in, so it is
+    // logged, not propagated.
+    if let Err(error) = conn
+        .prune_app_tokens(account.id, session::MAX_APP_TOKENS_PER_ACCOUNT)
+        .await
+    {
+        tracing::warn!(
+            target: TRACING_TARGET,
+            error = %error,
+            account_id = %account.id,
+            "failed to prune old app tokens after minting",
+        );
+    }
+
+    Ok(jwt)
+}
+
 /// Creates a new account API token (login).
 #[tracing::instrument(skip_all)]
 async fn login(
@@ -50,9 +160,10 @@ async fn login(
     State(password): State<PasswordService>,
     State(auth_keys): State<SessionKeys>,
     State(ua_parser): State<UserAgentParser>,
+    State(cookie): State<CookieConfig>,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Login>,
-) -> Result<(StatusCode, Json<AuthToken>)> {
+) -> Result<Response> {
     tracing::debug!(target: TRACING_TARGET, "Login attempt");
 
     let mut conn = pg_client.get_connection().await?;
@@ -104,43 +215,27 @@ async fn login(
         Some(acc) => acc,
     };
 
-    let expired_at = Timestamp::now() + Span::new().hours(90 * 24);
-    let new_token = NewAccountApiToken {
-        account_id: account.id,
-        display_name: ua_parser.parse(user_agent.as_str()),
-        ip_address: None,
-        user_agent: Some(user_agent.to_string()),
-        is_remembered: Some(request.remember_me),
-        session_type: Some(ApiTokenType::Web),
-        expired_at: Some(expired_at.into()),
-    };
+    let jwt = mint_web_session(
+        &mut conn,
+        auth_keys,
+        &ua_parser,
+        &account,
+        request.remember_me,
+        user_agent.to_string(),
+    )
+    .await?;
 
-    let account_api_token = conn.create_account_api_token(new_token).await?;
-    let auth_header = create_auth_header(auth_keys, &account, &account_api_token)?;
-
-    let auth_claims = auth_header.as_auth_claims();
-    let api_token = auth_header.into_string()?;
-    let response = AuthToken {
-        api_token,
-        username: account.username.clone(),
-        issued_at: Timestamp::from_second(auth_claims.issued_at).unwrap_or(Timestamp::now()),
-        expires_at: Timestamp::from_second(auth_claims.expires_at).unwrap_or(Timestamp::now()),
-    };
-
-    tracing::info!(
-        target: TRACING_TARGET,
-        token_id = %auth_claims.token_id,
-        account_id = %auth_claims.account_id,
-        "Login successful",
-    );
-
-    Ok((StatusCode::CREATED, Json(response)))
+    Ok(cookie.session_response(jwt))
 }
 
 fn login_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Login")
-        .description("Authenticates a user and returns an access token.")
-        .response::<201, Json<AuthToken>>()
+        .description(
+            "Authenticates a user and starts a browser session: sets an HttpOnly session cookie \
+             and a CSRF cookie, returning no body. (Programmatic clients authenticate with an API \
+             token created via the tokens endpoint, not this one.)",
+        )
+        .response::<204, ()>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
 }
@@ -152,9 +247,10 @@ async fn signup(
     State(password): State<PasswordService>,
     State(auth_keys): State<SessionKeys>,
     State(ua_parser): State<UserAgentParser>,
+    State(cookie): State<CookieConfig>,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<Signup>,
-) -> Result<(StatusCode, Json<AuthToken>)> {
+) -> Result<Response> {
     tracing::debug!(target: TRACING_TARGET, "Signing up");
 
     // Validate password strength and hash
@@ -205,48 +301,26 @@ async fn signup(
         "Account created",
     );
 
-    let expired_at = Timestamp::now()
-        .checked_add(Span::new().hours(90 * 24))
-        .ok()
-        .map(JiffTimestamp::from);
+    let jwt = mint_web_session(
+        &mut conn,
+        auth_keys,
+        &ua_parser,
+        &account,
+        request.remember_me,
+        user_agent.to_string(),
+    )
+    .await?;
 
-    let user_agent_str = user_agent.to_string();
-    let new_token = NewAccountApiToken {
-        account_id: account.id,
-        display_name: ua_parser.parse(&user_agent_str),
-        ip_address: None,
-        user_agent: Some(user_agent_str),
-        is_remembered: Some(request.remember_me),
-        session_type: Some(ApiTokenType::Web),
-        expired_at,
-    };
-    let account_api_token = conn.create_account_api_token(new_token).await?;
-
-    let auth_header = create_auth_header(auth_keys, &account, &account_api_token)?;
-
-    let auth_claims = auth_header.as_auth_claims();
-    let api_token = auth_header.into_string()?;
-    let response = AuthToken {
-        api_token,
-        username: account.username.clone(),
-        issued_at: Timestamp::from_second(auth_claims.issued_at).unwrap_or(Timestamp::now()),
-        expires_at: Timestamp::from_second(auth_claims.expires_at).unwrap_or(Timestamp::now()),
-    };
-
-    tracing::info!(
-        target: TRACING_TARGET,
-        token_id = %auth_claims.token_id,
-        account_id = %auth_claims.account_id,
-        "Signup successful",
-    );
-
-    Ok((StatusCode::CREATED, Json(response)))
+    Ok(cookie.session_response(jwt))
 }
 
 fn signup_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Signup")
-        .description("Creates a new account and returns an access token.")
-        .response::<201, Json<AuthToken>>()
+        .description(
+            "Creates a new account and starts a browser session: sets an HttpOnly session cookie \
+             and a CSRF cookie, returning no body.",
+        )
+        .response::<204, ()>()
         .response::<400, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
 }
@@ -261,8 +335,9 @@ fn signup_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn logout(
     State(pg_client): State<PgClient>,
+    State(cookie): State<CookieConfig>,
     AuthState(auth_claims): AuthState,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     tracing::debug!(target: TRACING_TARGET, "Logging out");
 
     let mut conn = pg_client.get_connection().await?;
@@ -273,12 +348,19 @@ async fn logout(
         .await?
         .is_some();
 
+    // Whatever the outcome, clear the browser session and CSRF cookies. A bearer
+    // client simply has no cookies to clear and ignores them; a cookie client is
+    // logged out on the client side too. Revocation is authoritative server-side
+    // via the token soft-delete below.
+    let cleared = cookie.clearing_response_jar();
+
     if !token_exists {
         tracing::warn!(target: TRACING_TARGET, "Logout attempted on non-existent token");
-        return Ok(StatusCode::OK); // Consider it successful if token doesn't exist
+        // Consider it successful if the token doesn't exist.
+        return Ok((StatusCode::OK, cleared).into_response());
     }
 
-    // Delete the API token
+    // Delete the API token (revocation: the row is the session authority).
     let deleted = conn.delete_account_api_token(auth_claims.token_id).await?;
 
     if deleted {
@@ -298,12 +380,12 @@ async fn logout(
         );
     }
 
-    Ok(StatusCode::OK)
+    Ok((StatusCode::OK, cleared).into_response())
 }
 
 fn logout_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Logout")
-        .description("Invalidates the current access token.")
+        .description("Invalidates the current session and clears session cookies.")
         .response_with::<200, (), _>(|res| res.description("Logged out."))
         .response::<401, Json<ErrorResponse>>()
 }
@@ -319,4 +401,304 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route("/auth/signup/", post_with(signup, signup_docs))
         .api_route("/auth/logout/", post_with(logout, logout_docs))
         .with_path_items(|item| item.tag("Authentication"))
+}
+
+#[cfg(test)]
+mod tests {
+    use jiff::{Span, Timestamp};
+    use nvisy_postgres::model::{NewAccount, NewAccountApiToken, UpdateAccountApiToken};
+    use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
+    use nvisy_postgres::types::{Handle, session};
+    use nvisy_postgres::{JiffTimestamp, PgClient, PgConfig, PgConn};
+    use uuid::Uuid;
+
+    /// A throwaway session token on a throwaway account, for exercising the
+    /// session-lifecycle checks against a live database. Cleaned up with
+    /// [`Self::cleanup`].
+    struct SessionFixture {
+        conn: PgConn,
+        account_id: Uuid,
+        token_id: Uuid,
+    }
+
+    impl SessionFixture {
+        /// Creates the fixture: a fresh account and a not-remembered `web` session
+        /// token.
+        async fn create() -> anyhow::Result<Self> {
+            Self::create_with(super::ApiTokenType::Web, session::initial_expires_at(false)).await
+        }
+
+        /// Like [`create`](Self::create) but for an `app` token with the given
+        /// idle/expiry bound — a native-app session.
+        async fn create_app(expired_at: Timestamp) -> anyhow::Result<Self> {
+            Self::create_with(super::ApiTokenType::App, expired_at).await
+        }
+
+        async fn create_with(
+            session_type: super::ApiTokenType,
+            expired_at: Timestamp,
+        ) -> anyhow::Result<Self> {
+            dotenvy::dotenv().ok();
+            let pg = PgClient::new(PgConfig::new(std::env::var("POSTGRES_URL")?))?;
+            let mut conn = pg.get_connection().await?;
+
+            let suffix = Uuid::now_v7().simple().to_string();
+            let account = conn
+                .create_account(NewAccount {
+                    username: Handle::parse(format!("sesstest-{}", &suffix[..8]))?,
+                    display_name: None,
+                    email_address: format!("sesstest-{suffix}@example.test"),
+                    avatar_url: None,
+                    timezone: None,
+                    locale: None,
+                })
+                .await?;
+            let token = conn
+                .create_account_api_token(NewAccountApiToken {
+                    account_id: account.id,
+                    display_name: "session test".to_owned(),
+                    is_remembered: Some(false),
+                    session_type: Some(session_type),
+                    expired_at: Some(JiffTimestamp::from(expired_at)),
+                    ..Default::default()
+                })
+                .await?;
+
+            Ok(Self {
+                conn,
+                account_id: account.id,
+                token_id: token.id,
+            })
+        }
+
+        /// Overwrites the token's time columns to simulate elapsed time.
+        async fn set_times(
+            &mut self,
+            issued_at: Timestamp,
+            expired_at: Timestamp,
+            last_used_at: Option<Timestamp>,
+        ) -> anyhow::Result<()> {
+            self.conn
+                .update_account_api_token(
+                    self.token_id,
+                    UpdateAccountApiToken {
+                        issued_at: Some(JiffTimestamp::from(issued_at)),
+                        expired_at: Some(Some(JiffTimestamp::from(expired_at))),
+                        last_used_at: Some(last_used_at.map(JiffTimestamp::from)),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+            Ok(())
+        }
+
+        async fn is_active(&mut self) -> anyhow::Result<bool> {
+            Ok(self
+                .conn
+                .account_api_token_is_active(self.token_id, self.account_id, session::MAX_AGE)
+                .await?)
+        }
+
+        async fn slide(&mut self) -> anyhow::Result<bool> {
+            Ok(self
+                .conn
+                .slide_account_api_token(self.token_id, session::SlidingWindow::standard())
+                .await?)
+        }
+
+        async fn cleanup(mut self) -> anyhow::Result<()> {
+            self.conn.delete_account_api_token(self.token_id).await?;
+            self.conn.delete_account(self.account_id).await?;
+            Ok(())
+        }
+    }
+
+    fn days(d: i64) -> Span {
+        Span::new().hours(d * 24)
+    }
+
+    /// A fresh session (issued now, idle bound in the future) is active; one past
+    /// its idle bound is not, even though issued recently and not revoked.
+    #[tokio::test]
+    #[ignore = "requires database and key files"]
+    async fn idle_bound_governs_activity() -> anyhow::Result<()> {
+        let mut fixture = SessionFixture::create().await?;
+        let now = Timestamp::now();
+
+        fixture.set_times(now, now + days(1), None).await?;
+        assert!(fixture.is_active().await?, "an unexpired session is active");
+
+        fixture.set_times(now, now - days(1), None).await?;
+        assert!(
+            !fixture.is_active().await?,
+            "a session past its idle bound is inactive"
+        );
+
+        fixture.cleanup().await
+    }
+
+    /// A session issued longer ago than the absolute cap is rejected regardless of
+    /// a healthy (future) idle bound.
+    #[tokio::test]
+    #[ignore = "requires database and key files"]
+    async fn absolute_cap_governs_activity() -> anyhow::Result<()> {
+        let mut fixture = SessionFixture::create().await?;
+        let now = Timestamp::now();
+
+        let beyond_cap = now - Span::new().seconds(session::MAX_AGE.as_secs() as i64 + 3600);
+        fixture.set_times(beyond_cap, now + days(1), None).await?;
+        assert!(
+            !fixture.is_active().await?,
+            "a session past the absolute age cap is inactive even if not idle"
+        );
+
+        fixture.cleanup().await
+    }
+
+    /// A recently-used session does not slide (throttled); a session last used
+    /// before the throttle window slides forward, advancing its idle bound.
+    #[tokio::test]
+    #[ignore = "requires database and key files"]
+    async fn slide_is_throttled_then_advances() -> anyhow::Result<()> {
+        let mut fixture = SessionFixture::create().await?;
+        let now = Timestamp::now();
+
+        fixture.set_times(now, now + days(1), Some(now)).await?;
+        assert!(
+            !fixture.slide().await?,
+            "a session used within the throttle window does not slide"
+        );
+
+        let stale = now - Span::new().seconds(session::SLIDE_THROTTLE.as_secs() as i64 + 60);
+        fixture
+            .set_times(now, now + Span::new().hours(1), Some(stale))
+            .await?;
+        assert!(fixture.slide().await?, "a stale session slides");
+
+        let after = fixture
+            .conn
+            .find_account_api_token_by_id(fixture.token_id)
+            .await?
+            .expect("token exists");
+        let after_expired: Timestamp = after.expired_at.expect("has idle bound").into();
+        assert!(
+            after_expired > now + Span::new().hours(1),
+            "the idle bound advances past its prior value after a slide"
+        );
+
+        fixture.cleanup().await
+    }
+
+    /// An `app` (desktop) token does not slide and is not subject to the browser
+    /// absolute cap: it stays valid on its own long `expired_at` even when it was
+    /// issued far longer ago than the web MAX_AGE and never used.
+    #[tokio::test]
+    #[ignore = "requires database and key files"]
+    async fn app_token_does_not_slide_and_ignores_absolute_cap() -> anyhow::Result<()> {
+        let now = Timestamp::now();
+        // Idle bound a year out, as `mint_app_token` sets.
+        let mut fixture = SessionFixture::create_app(now + days(365)).await?;
+
+        // Issued longer ago than the browser absolute cap, with a far-future idle
+        // bound and no recent use: a `web` session would be rejected by the cap and
+        // would slide, but an `app` token is exempt from both.
+        let long_ago = now - days(400);
+        fixture.set_times(long_ago, now + days(365), None).await?;
+
+        assert!(
+            fixture.is_active().await?,
+            "an app token past the web absolute cap is still active on its own expiry"
+        );
+        assert!(!fixture.slide().await?, "an app token must not slide");
+
+        // The idle bound is unchanged (no slide wrote a shorter window over it).
+        let after = fixture
+            .conn
+            .find_account_api_token_by_id(fixture.token_id)
+            .await?
+            .expect("token exists");
+        let after_expired: Timestamp = after.expired_at.expect("has expiry").into();
+        assert!(
+            after_expired > now + days(300),
+            "the app token's long expiry is not overwritten by a slide"
+        );
+
+        fixture.cleanup().await
+    }
+
+    /// `prune_app_tokens` keeps only the newest `keep` live app tokens for an
+    /// account and revokes the rest, and never touches web tokens.
+    #[tokio::test]
+    #[ignore = "requires database and key files"]
+    async fn prune_app_tokens_keeps_newest_and_spares_web() -> anyhow::Result<()> {
+        dotenvy::dotenv().ok();
+        let pg = PgClient::new(PgConfig::new(std::env::var("POSTGRES_URL")?))?;
+        let mut conn = pg.get_connection().await?;
+
+        let suffix = Uuid::now_v7().simple().to_string();
+        let account = conn
+            .create_account(NewAccount {
+                username: Handle::parse(format!("pruntest-{}", &suffix[..8]))?,
+                display_name: None,
+                email_address: format!("pruntest-{suffix}@example.test"),
+                avatar_url: None,
+                timezone: None,
+                locale: None,
+            })
+            .await?;
+
+        let now = Timestamp::now();
+        // Five app tokens with staggered issue times (newest last), plus one web
+        // session that must survive pruning untouched.
+        let mut app_ids = Vec::new();
+        for i in 0..5 {
+            let token = conn
+                .create_account_api_token(NewAccountApiToken {
+                    account_id: account.id,
+                    display_name: format!("app {i}"),
+                    session_type: Some(super::ApiTokenType::App),
+                    expired_at: Some(JiffTimestamp::from(now + days(365))),
+                    ..Default::default()
+                })
+                .await?;
+            // Backdate issued_at so ordering is deterministic (i=0 oldest).
+            conn.update_account_api_token(
+                token.id,
+                UpdateAccountApiToken {
+                    issued_at: Some(JiffTimestamp::from(now - days(5 - i))),
+                    ..Default::default()
+                },
+            )
+            .await?;
+            app_ids.push(token.id);
+        }
+        let web = conn
+            .create_account_api_token(NewAccountApiToken {
+                account_id: account.id,
+                display_name: "web".to_owned(),
+                session_type: Some(super::ApiTokenType::Web),
+                expired_at: Some(session::initial_expires_at(false).into()),
+                ..Default::default()
+            })
+            .await?;
+
+        // Keep the 2 newest app tokens; the 3 oldest are revoked.
+        let revoked = conn.prune_app_tokens(account.id, 2).await?;
+        assert_eq!(revoked, 3, "the three oldest app tokens are revoked");
+
+        // The two newest app tokens survive; the oldest three are gone.
+        for (i, id) in app_ids.iter().enumerate() {
+            let alive = conn.find_account_api_token_by_id(*id).await?.is_some();
+            assert_eq!(alive, i >= 3, "app token {i} liveness after prune");
+        }
+        // The web session is untouched by app-token pruning.
+        assert!(
+            conn.find_account_api_token_by_id(web.id).await?.is_some(),
+            "pruning app tokens must not revoke web sessions"
+        );
+
+        conn.delete_all_account_api_tokens(account.id).await?;
+        conn.delete_account(account.id).await?;
+        Ok(())
+    }
 }

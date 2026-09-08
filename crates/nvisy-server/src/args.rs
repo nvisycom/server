@@ -15,6 +15,7 @@ use nvisy_postgres::PgConfig;
 use nvisy_webhook::WebhookService;
 
 use crate::Result;
+use crate::handler::CookieConfig;
 use crate::middleware::UploadConfig;
 use crate::service::{
     CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig, IntegrationConfig, OidcConfig,
@@ -76,6 +77,10 @@ pub struct ServiceArgs {
     /// Request body size limits (server-wide hard caps).
     #[cfg_attr(feature = "cli", clap(flatten))]
     pub upload: UploadConfig,
+
+    /// Session-cookie policy (the `Secure` attribute) for browser clients.
+    #[cfg_attr(feature = "cli", clap(flatten))]
+    pub cookie: CookieConfig,
 }
 
 impl ServiceArgs {
@@ -123,6 +128,7 @@ impl ServiceState {
             args.oidc,
             webhook,
             args.upload,
+            args.cookie,
             args.s3,
         )
         .await

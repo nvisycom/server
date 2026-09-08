@@ -3,12 +3,12 @@
 
 -- Kind of client an API token was issued to.
 CREATE TYPE API_TOKEN_TYPE AS ENUM (
-    'web',      -- Web browser session
-    'api',      -- API client session
-    'cli'       -- CLI tool session
+    'web',      -- Web browser session (cookie)
+    'api',      -- API client session (programmatic access, user-minted)
+    'app'       -- Native app session (interactive desktop login, Bearer token)
 );
 
-COMMENT ON TYPE API_TOKEN_TYPE IS 'Client kind an API token was issued to: web, api, or cli.';
+COMMENT ON TYPE API_TOKEN_TYPE IS 'Client kind an API token was issued to: web, api, or app.';
 
 -- How an account authenticates. 'password' is a locally-held Argon2 secret; the
 -- rest are external OIDC identity providers keyed by the provider's subject claim.

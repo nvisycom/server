@@ -12,6 +12,7 @@ use axum_extra::headers::authorization::Bearer;
 use jiff::{Span, Timestamp};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use nvisy_postgres::model::{Account, AccountApiToken};
+use nvisy_postgres::types::{ApiTokenType, session};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -106,16 +107,38 @@ impl<T> AuthClaims<T> {
         account_api_token: &AccountApiToken,
         custom_claims: T,
     ) -> Self {
+        let issued_at = Timestamp::from(account_api_token.issued_at);
+
+        // The JWT's `exp` depends on the token kind:
+        //
+        // - `web` browser sessions: the session's ABSOLUTE cap (`issued_at +
+        //   MAX_AGE`), NOT the row's sliding idle bound (`expired_at`). This lets
+        //   the idle bound slide freely on the row without the JWT lapsing
+        //   mid-session, while the JWT still independently guarantees no browser
+        //   session outlives the absolute cap even if the row check were bypassed.
+        // - `api` programmatic tokens and `app` desktop sessions: the token's own
+        //   `expired_at` (the chosen lifetime), or a far-future value when it never
+        //   expires. The browser absolute cap does not apply to them.
+        //
+        // Either way the row remains the authority for idle expiry and revocation;
+        // the JWT `exp` is a backstop.
+        let never_expires = || Timestamp::now() + Span::new().seconds(NEVER_EXPIRES_SECONDS);
+        let expires_at = match account_api_token.session_type {
+            ApiTokenType::Web => issued_at
+                .checked_add(Span::new().seconds(session::MAX_AGE.as_secs() as i64))
+                .unwrap_or_else(|_| never_expires()),
+            ApiTokenType::Api | ApiTokenType::App => account_api_token
+                .expired_at
+                .map_or_else(never_expires, Timestamp::from),
+        };
+
         Self {
             issued_by: Cow::Borrowed(Self::JWT_ISSUER),
             audience: Cow::Borrowed(Self::JWT_AUDIENCE),
             token_id: account_api_token.id,
             account_id: account_model.id,
-            issued_at: Timestamp::from(account_api_token.issued_at).as_second(),
-            expires_at: account_api_token
-                .expired_at
-                .map(|ts| Timestamp::from(ts).as_second())
-                .unwrap_or_else(|| Timestamp::now().as_second() + NEVER_EXPIRES_SECONDS),
+            issued_at: issued_at.as_second(),
+            expires_at: expires_at.as_second(),
             custom_claims,
             is_admin: account_model.is_admin,
         }
@@ -248,7 +271,8 @@ impl<T> AuthClaims<T>
 where
     T: Clone + for<'de> Deserialize<'de>,
 {
-    /// Parses and validates a JWT token from an Authorization header.
+    /// Parses and validates a raw JWT token string, regardless of the transport
+    /// it arrived on (session cookie or Authorization header).
     ///
     /// This method performs comprehensive validation including:
     /// - Signature verification using EdDSA
@@ -258,7 +282,7 @@ where
     ///
     /// # Arguments
     ///
-    /// * `auth_header` - The Authorization Bearer header
+    /// * `auth_token` - The raw JWT string
     /// * `decoding_key` - The public key for signature verification
     ///
     /// # Returns
@@ -268,12 +292,7 @@ where
     /// # Errors
     ///
     /// Returns various authentication errors for invalid tokens.
-    pub fn from_header(
-        auth_header: TypedHeader<Authorization<Bearer>>,
-        decoding_key: &DecodingKey,
-    ) -> Result<Self> {
-        let auth_token = auth_header.token();
-
+    pub fn from_token(auth_token: &str, decoding_key: &DecodingKey) -> Result<Self> {
         // Configure comprehensive JWT validation
         let mut validation = Validation::new(Algorithm::EdDSA);
         validation.validate_exp = true;
