@@ -138,3 +138,114 @@ impl WorkspaceRedactionRepository for PgConnection {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use jiff::{Span, Timestamp};
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::model::{NewWorkspaceDetection, NewWorkspaceRedaction};
+    use crate::query::{
+        WorkspaceDetectionRepository, WorkspacePipelineRepository, WorkspaceRedactionRepository,
+    };
+    use crate::test_util::TestDatabase;
+
+    /// Seeds a detection and returns `(account_id, workspace_id, pipeline_id,
+    /// detection_id)` — a redaction's FK parent plus the context tests scope on.
+    async fn seed_detection(db: &TestDatabase) -> anyhow::Result<(Uuid, Uuid, Uuid, Uuid)> {
+        let (account_id, workspace_id, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let mut conn = db.client.get_connection().await?;
+        let detection = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                pipeline_id,
+                account_id,
+                file_id,
+            ))
+            .await?;
+        Ok((account_id, workspace_id, pipeline_id, detection.id))
+    }
+
+    #[tokio::test]
+    async fn create_then_find_is_scoped_through_the_pipeline() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id, _pipeline, detection_id) = seed_detection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        let redaction = conn
+            .create_redaction(NewWorkspaceRedaction::test(detection_id, account_id))
+            .await?;
+
+        // Found within its own workspace.
+        assert!(
+            conn.find_redaction_in_workspace(workspace_id, redaction.id)
+                .await?
+                .is_some()
+        );
+        // Not found scoped to a different workspace.
+        assert!(
+            conn.find_redaction_in_workspace(Uuid::now_v7(), redaction.id)
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_soft_deleted_pipeline_hides_its_redactions() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id, pipeline_id, detection_id) = seed_detection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        let redaction = conn
+            .create_redaction(NewWorkspaceRedaction::test(detection_id, account_id))
+            .await?;
+        assert!(
+            conn.find_redaction_in_workspace(workspace_id, redaction.id)
+                .await?
+                .is_some()
+        );
+
+        // Soft-deleting the owning pipeline hides the redaction from the lookup.
+        conn.delete_workspace_pipeline(pipeline_id).await?;
+        assert!(
+            conn.find_redaction_in_workspace(workspace_id, redaction.id)
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cursor_list_returns_a_detections_redactions_newest_first() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, _ws, _pipeline, detection_id) = seed_detection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        // Insert `first` an hour old so the newest-first order is deterministic.
+        let mut first_new = NewWorkspaceRedaction::test(detection_id, account_id);
+        first_new.created_at = Some(jiff_diesel::Timestamp::from(
+            Timestamp::now() - Span::new().hours(1),
+        ));
+        let first = conn.create_redaction(first_new).await?;
+        let second = conn
+            .create_redaction(NewWorkspaceRedaction::test(detection_id, account_id))
+            .await?;
+
+        let page = conn
+            .cursor_list_detection_redactions(detection_id, CursorPagination::new(50))
+            .await?;
+        // Both belong to the detection, newest first.
+        assert_eq!(
+            page.items.iter().map(|r| r.id).collect::<Vec<_>>(),
+            vec![second.id, first.id]
+        );
+
+        // A different detection has none of them.
+        let empty = conn
+            .cursor_list_detection_redactions(Uuid::now_v7(), CursorPagination::new(50))
+            .await?;
+        assert!(empty.items.is_empty());
+        Ok(())
+    }
+}

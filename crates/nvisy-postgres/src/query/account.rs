@@ -81,25 +81,6 @@ pub trait AccountRepository {
         account_id: Uuid,
     ) -> impl Future<Output = Result<Option<Account>>> + Send;
 
-    /// Verifies an account by setting the verification status to true.
-    ///
-    /// Typically called after email verification is complete.
-    fn verify_account(&mut self, account_id: Uuid) -> impl Future<Output = Result<Account>> + Send;
-
-    /// Suspends an account by setting the suspension status to true.
-    ///
-    /// Suspended accounts cannot authenticate or access resources.
-    fn suspend_account(&mut self, account_id: Uuid)
-    -> impl Future<Output = Result<Account>> + Send;
-
-    /// Unsuspends an account by setting the suspension status to false.
-    ///
-    /// Restores normal access to a previously suspended account.
-    fn unsuspend_account(
-        &mut self,
-        account_id: Uuid,
-    ) -> impl Future<Output = Result<Account>> + Send;
-
     /// Checks if an email address is already registered in the system.
     ///
     /// Used during registration to prevent duplicate accounts.
@@ -262,39 +243,6 @@ impl AccountRepository for PgConnection {
         .await
     }
 
-    async fn verify_account(&mut self, account_id: Uuid) -> Result<Account> {
-        self.update_account(
-            account_id,
-            UpdateAccount {
-                is_verified: Some(true),
-                ..Default::default()
-            },
-        )
-        .await
-    }
-
-    async fn suspend_account(&mut self, account_id: Uuid) -> Result<Account> {
-        self.update_account(
-            account_id,
-            UpdateAccount {
-                is_suspended: Some(true),
-                ..Default::default()
-            },
-        )
-        .await
-    }
-
-    async fn unsuspend_account(&mut self, account_id: Uuid) -> Result<Account> {
-        self.update_account(
-            account_id,
-            UpdateAccount {
-                is_suspended: Some(false),
-                ..Default::default()
-            },
-        )
-        .await
-    }
-
     async fn email_exists(&mut self, email: &str) -> Result<bool> {
         use schema::accounts::{self, dsl};
 
@@ -359,5 +307,116 @@ impl AccountRepository for PgConnection {
             .map_err(Error::from)?;
 
         Ok(count > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::Context;
+
+    use crate::model::NewAccount;
+    use crate::query::AccountRepository;
+    use crate::test_util::TestDatabase;
+    use crate::types::Handle;
+
+    #[tokio::test]
+    async fn create_normalizes_email_and_lookup_is_case_insensitive() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let created = conn
+            .create_account(NewAccount::new(
+                Handle::test(),
+                "  Mixed.Case@Example.COM  ",
+            ))
+            .await?;
+        // Stored trimmed and lowercased.
+        assert_eq!(created.email_address, "mixed.case@example.com");
+
+        // A differently-cased, padded lookup still resolves to the same account.
+        let found = conn
+            .find_account_by_email("MIXED.CASE@example.com")
+            .await?
+            .context("account found by email")?;
+        assert_eq!(found.id, created.id);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_by_identifier_routes_email_vs_username() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let handle = Handle::test();
+        let created = conn
+            .create_account(NewAccount::new(handle.clone(), "id-route@example.com"))
+            .await?;
+
+        // An identifier containing `@` goes down the email path.
+        let by_email = conn
+            .find_account_by_identifier("id-route@example.com")
+            .await?
+            .context("found by email identifier")?;
+        assert_eq!(by_email.id, created.id);
+
+        // A bare, valid handle goes down the username path.
+        let by_username = conn
+            .find_account_by_identifier(handle.as_str())
+            .await?
+            .context("found by username identifier")?;
+        assert_eq!(by_username.id, created.id);
+
+        // A syntactically-invalid identifier (not an email, not a valid handle)
+        // resolves to nothing rather than erroring.
+        assert!(
+            conn.find_account_by_identifier("Not A Handle!")
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn email_exists_for_other_excludes_the_named_account() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let account = conn
+            .create_account(NewAccount::new(Handle::test(), "owner@example.com"))
+            .await?;
+
+        // The email exists in general.
+        assert!(conn.email_exists("owner@example.com").await?);
+        // But not "for another account" once the owner is excluded.
+        assert!(
+            !conn
+                .email_exists_for_other("owner@example.com", account.id)
+                .await?
+        );
+        // A different account id still sees it as taken.
+        assert!(
+            conn.email_exists_for_other("owner@example.com", uuid::Uuid::now_v7())
+                .await?
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_excludes_soft_deleted_accounts() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let account = conn.create_account(NewAccount::test()).await?;
+        conn.delete_account(account.id).await?;
+
+        assert!(conn.find_account_by_id(account.id).await?.is_none());
+        assert!(
+            conn.find_account_by_email(&account.email_address)
+                .await?
+                .is_none()
+        );
+        // The email frees up for reuse once soft-deleted.
+        assert!(!conn.email_exists(&account.email_address).await?);
+        Ok(())
     }
 }

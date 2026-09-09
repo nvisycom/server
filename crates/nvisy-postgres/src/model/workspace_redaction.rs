@@ -14,6 +14,7 @@ use crate::schema::workspace_redactions;
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_redactions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct WorkspaceRedaction {
     /// Unique redaction identifier.
     pub id: Uuid,
@@ -35,6 +36,7 @@ pub struct WorkspaceRedaction {
 #[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = workspace_redactions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceRedaction {
     /// Detection this redaction was produced from (required).
     pub detection_id: Uuid,
@@ -44,4 +46,22 @@ pub struct NewWorkspaceRedaction {
     pub review_file_id: Option<Uuid>,
     /// Redacted output document this redaction produced.
     pub output_file_id: Option<Uuid>,
+    /// Creation timestamp override, for tests only.
+    #[cfg(any(feature = "test_util", test))]
+    pub created_at: Option<Timestamp>,
+}
+
+impl NewWorkspaceRedaction {
+    /// A minimal redaction of `detection_id`, attributed to `account_id`, for
+    /// tests. It carries no review or output file.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(detection_id: Uuid, account_id: Uuid) -> Self {
+        Self {
+            detection_id,
+            account_id,
+            review_file_id: None,
+            output_file_id: None,
+            created_at: None,
+        }
+    }
 }

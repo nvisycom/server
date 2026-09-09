@@ -5,18 +5,16 @@ use std::future::Future;
 use diesel::dsl::now;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use pgtrgm::expression_methods::TrgmExpressionMethods;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspace, UpdateWorkspace, Workspace};
-use crate::query::search::ilike_contains;
-use crate::types::{AccountRefRow, OffsetPagination, WithAccountRef};
+use crate::types::{AccountRefRow, WithAccountRef};
 use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for workspace database operations.
 ///
-/// Handles workspace lifecycle management including creation, updates,
-/// and search functionality.
+/// Handles workspace lifecycle management: creation, lookup, updates, and
+/// soft-deletion.
 pub trait WorkspaceRepository {
     /// Creates a new workspace.
     ///
@@ -50,23 +48,6 @@ pub trait WorkspaceRepository {
 
     /// Soft deletes a workspace by setting the deletion timestamp.
     fn delete_workspace(&mut self, workspace_id: Uuid) -> impl Future<Output = Result<()>> + Send;
-
-    /// Lists workspaces.
-    ///
-    /// Returns workspaces ordered by update time with most recent first.
-    fn list_workspaces(
-        &mut self,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = Result<Vec<Workspace>>> + Send;
-
-    /// Searches workspaces by name or description.
-    ///
-    /// Performs case-insensitive search across workspace names and descriptions.
-    fn search_workspaces(
-        &mut self,
-        search_query: &str,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = Result<Vec<Workspace>>> + Send;
 }
 
 impl WorkspaceRepository for PgConnection {
@@ -157,45 +138,95 @@ impl WorkspaceRepository for PgConnection {
 
         Ok(())
     }
+}
 
-    async fn list_workspaces(&mut self, pagination: OffsetPagination) -> Result<Vec<Workspace>> {
-        use schema::workspaces::dsl::*;
+#[cfg(test)]
+mod tests {
+    use anyhow::Context;
 
-        let workspace_list = workspaces
-            .filter(deleted_at.is_null())
-            .select(Workspace::as_select())
-            .order(updated_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(Error::from)?;
+    use crate::model::{NewWorkspace, UpdateWorkspace};
+    use crate::query::WorkspaceRepository;
+    use crate::test_util::TestDatabase;
 
-        Ok(workspace_list)
+    #[tokio::test]
+    async fn create_then_find_by_id_and_slug_round_trip() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let account_id = db.seed_account().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let created = conn
+            .create_workspace(NewWorkspace::test(account_id))
+            .await?;
+
+        // By id.
+        let by_id = conn.find_workspace_by_id(created.id).await?;
+        assert_eq!(by_id.map(|w| w.id), Some(created.id));
+
+        // By slug, carrying the creator's account reference.
+        let by_slug = conn
+            .find_workspace_by_slug(created.slug.as_str())
+            .await?
+            .context("workspace found by slug")?;
+        assert_eq!(by_slug.item.id, created.id);
+        assert_eq!(by_slug.item.display_name, created.display_name);
+        Ok(())
     }
 
-    async fn search_workspaces(
-        &mut self,
-        search_query: &str,
-        pagination: OffsetPagination,
-    ) -> Result<Vec<Workspace>> {
-        use schema::workspaces::dsl::*;
+    #[tokio::test]
+    async fn find_by_id_returns_none_for_missing_or_deleted() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let account_id = db.seed_account().await;
+        let mut conn = db.client.get_connection().await?;
 
-        let workspace_list = workspaces
-            .filter(deleted_at.is_null())
-            .filter(
-                display_name
-                    .ilike(ilike_contains(search_query))
-                    .or(display_name.trgm_similar_to(search_query)),
+        // A random id is not found.
+        assert!(
+            conn.find_workspace_by_id(uuid::Uuid::now_v7())
+                .await?
+                .is_none()
+        );
+
+        // A soft-deleted workspace is excluded.
+        let ws = conn
+            .create_workspace(NewWorkspace::test(account_id))
+            .await?;
+        conn.delete_workspace(ws.id).await?;
+        assert!(conn.find_workspace_by_id(ws.id).await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_applies_changes_and_skips_deleted_rows() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let account_id = db.seed_account().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let ws = conn
+            .create_workspace(NewWorkspace::test(account_id))
+            .await?;
+
+        let updated = conn
+            .update_workspace(
+                ws.id,
+                UpdateWorkspace {
+                    display_name: Some("Renamed".to_owned()),
+                    ..Default::default()
+                },
             )
-            .select(Workspace::as_select())
-            .order(updated_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
+        assert_eq!(updated.display_name, "Renamed");
 
-        Ok(workspace_list)
+        // Updating a soft-deleted workspace matches no live row and errors.
+        conn.delete_workspace(ws.id).await?;
+        let after_delete = conn
+            .update_workspace(
+                ws.id,
+                UpdateWorkspace {
+                    display_name: Some("Nope".to_owned()),
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert!(after_delete.is_err());
+        Ok(())
     }
 }

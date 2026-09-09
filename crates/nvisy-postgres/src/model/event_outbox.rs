@@ -17,6 +17,7 @@ use crate::types::OutboxStatus;
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = event_outbox)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct EventOutbox {
     /// Unique outbox row identifier.
     pub id: Uuid,
@@ -48,6 +49,7 @@ pub struct EventOutbox {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = event_outbox)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewEventOutbox {
     /// Workspace the event was raised in.
     pub workspace_id: Uuid,
@@ -59,4 +61,19 @@ pub struct NewEventOutbox {
     pub user_agent: Option<String>,
     /// The serialized workspace event.
     pub event: serde_json::Value,
+}
+
+impl NewEventOutbox {
+    /// A minimal pending outbox row for `workspace_id` by `account_id`, with a
+    /// placeholder event payload, for tests.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(workspace_id: Uuid, account_id: Uuid) -> Self {
+        Self {
+            workspace_id,
+            account_id,
+            ip_address: None,
+            user_agent: None,
+            event: serde_json::json!({ "kind": "test" }),
+        }
+    }
 }

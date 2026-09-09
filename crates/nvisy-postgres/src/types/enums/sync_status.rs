@@ -34,3 +34,17 @@ impl SyncStatus {
         matches!(self, SyncStatus::Pending | SyncStatus::Running)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::SyncStatus::{Cancelled, Completed, Failed, Pending, Running};
+
+    #[test]
+    fn is_in_progress_covers_pending_and_running() {
+        assert!(Pending.is_in_progress());
+        assert!(Running.is_in_progress());
+        for done in [Completed, Failed, Cancelled] {
+            assert!(!done.is_in_progress(), "{done:?}");
+        }
+    }
+}

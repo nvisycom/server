@@ -102,3 +102,33 @@ impl WebhookEvent {
         self.into()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use strum::IntoEnumIterator;
+
+    use super::WebhookEvent;
+
+    #[test]
+    fn category_is_the_tag_prefix_for_every_event() {
+        // The category is exactly the first dotted segment of the event tag, so
+        // it stays in sync with the wire form for every variant.
+        for event in WebhookEvent::iter() {
+            let tag = event.as_subject();
+            let expected = tag.split('.').next().unwrap();
+            assert_eq!(event.category(), expected, "{event:?}");
+        }
+    }
+
+    #[test]
+    fn as_subject_is_the_wire_tag() {
+        assert_eq!(
+            WebhookEvent::ProviderCreated.as_subject(),
+            "provider.created"
+        );
+        assert_eq!(
+            WebhookEvent::ConnectionSyncFailed.as_subject(),
+            "connection.sync.failed"
+        );
+    }
+}

@@ -630,3 +630,307 @@ impl WorkspaceDetectionRepository for PgConnection {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use jiff::{Span, Timestamp};
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::model::{NewWorkspaceDetection, UpdateWorkspaceDetection};
+    use crate::query::WorkspaceDetectionRepository;
+    use crate::test_util::TestDatabase;
+    use crate::types::DetectionStatus;
+
+    #[tokio::test]
+    async fn claim_transitions_pending_and_honors_a_fresh_lease() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, _ws, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let detection = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                pipeline_id,
+                account_id,
+                file_id,
+            ))
+            .await?;
+        assert_eq!(detection.status, DetectionStatus::Pending);
+
+        // A fresh claim succeeds and moves it to Executing with a lease stamp.
+        let stale_before = Timestamp::now() - Span::new().minutes(5);
+        let claimed = conn
+            .claim_detection(detection.id, stale_before)
+            .await?
+            .expect("pending detection should claim");
+        assert_eq!(claimed.status, DetectionStatus::Executing);
+        assert!(claimed.claimed_at.is_some());
+
+        // A redelivered job (claim still fresh) is skipped.
+        assert!(
+            conn.claim_detection(detection.id, stale_before)
+                .await?
+                .is_none()
+        );
+
+        // Once the lease is considered stale, it can be re-claimed (dead worker).
+        let reclaimed = conn
+            .claim_detection(detection.id, Timestamp::now() + Span::new().minutes(5))
+            .await?;
+        assert!(reclaimed.is_some(), "a stale claim should be re-claimable");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn finalize_requires_holding_the_claim() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, _ws, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let detection = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                pipeline_id,
+                account_id,
+                file_id,
+            ))
+            .await?;
+        let claimed = conn
+            .claim_detection(detection.id, Timestamp::now() - Span::new().minutes(5))
+            .await?
+            .expect("claim");
+        let claimed_at = jiff::Timestamp::from(claimed.claimed_at.expect("claimed_at set"));
+
+        // Finalizing with a stale/wrong claim timestamp does nothing.
+        let wrong = claimed_at - Span::new().minutes(1);
+        assert!(
+            !conn
+                .finalize_detection(detection.id, wrong, UpdateWorkspaceDetection::default())
+                .await?
+        );
+
+        // Finalizing with the exact claim we hold succeeds.
+        assert!(
+            conn.finalize_detection(
+                detection.id,
+                claimed_at,
+                UpdateWorkspaceDetection::default()
+            )
+            .await?
+        );
+        let (done, _pipeline) = conn
+            .find_workspace_detection_by_id(_ws, detection.id)
+            .await?
+            .expect("detection present");
+        assert_eq!(done.status, DetectionStatus::Complete);
+        assert!(done.completed_at.is_some());
+
+        // Finalizing again is a no-op (no longer Executing).
+        assert!(
+            !conn
+                .finalize_detection(
+                    detection.id,
+                    claimed_at,
+                    UpdateWorkspaceDetection::default()
+                )
+                .await?
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fail_detection_uses_the_same_claim_guard() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, _ws, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let detection = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                pipeline_id,
+                account_id,
+                file_id,
+            ))
+            .await?;
+        let claimed = conn
+            .claim_detection(detection.id, Timestamp::now() - Span::new().minutes(5))
+            .await?
+            .expect("claim");
+        let claimed_at = jiff::Timestamp::from(claimed.claimed_at.expect("claimed_at set"));
+
+        assert!(
+            conn.fail_detection(
+                detection.id,
+                claimed_at,
+                UpdateWorkspaceDetection::default()
+            )
+            .await?
+        );
+        let (failed, _p) = conn
+            .find_workspace_detection_by_id(_ws, detection.id)
+            .await?
+            .expect("present");
+        assert_eq!(failed.status, DetectionStatus::Failed);
+        assert!(failed.completed_at.is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fail_pending_detection_only_while_unclaimed() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, _ws, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // A never-claimed detection can be failed by the enqueue-failure path.
+        let pending = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                pipeline_id,
+                account_id,
+                file_id,
+            ))
+            .await?;
+        assert!(
+            conn.fail_pending_detection(pending.id, UpdateWorkspaceDetection::default())
+                .await?
+        );
+
+        // A claimed (Executing) detection is owned by its worker: the pending-fail
+        // path is a no-op and does not clobber the outcome.
+        let claimed_det = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                pipeline_id,
+                account_id,
+                file_id,
+            ))
+            .await?;
+        let _ = conn
+            .claim_detection(claimed_det.id, Timestamp::now() - Span::new().minutes(5))
+            .await?
+            .expect("claim");
+        assert!(
+            !conn
+                .fail_pending_detection(claimed_det.id, UpdateWorkspaceDetection::default())
+                .await?
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_by_id_is_scoped_to_workspace_and_live_pipeline() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let detection = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                pipeline_id,
+                account_id,
+                file_id,
+            ))
+            .await?;
+
+        // Found within its own workspace.
+        assert!(
+            conn.find_workspace_detection_by_id(workspace_id, detection.id)
+                .await?
+                .is_some()
+        );
+        // Not found scoped to another workspace.
+        assert!(
+            conn.find_workspace_detection_by_id(Uuid::now_v7(), detection.id)
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn idempotency_key_lookup_is_scoped_to_the_pipeline() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, _ws, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let mut detection = NewWorkspaceDetection::test(pipeline_id, account_id, file_id);
+        detection.idempotency_key = Some("key-123".to_owned());
+        let detection = conn.create_workspace_detection(detection).await?;
+
+        let found = conn
+            .find_detection_by_idempotency_key(pipeline_id, "key-123")
+            .await?;
+        assert_eq!(found.map(|d| d.id), Some(detection.id));
+
+        // A different key does not match.
+        assert!(
+            conn.find_detection_by_idempotency_key(pipeline_id, "other")
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cursor_list_filters_by_status_and_names_the_input_file() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, _ws, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // A pending detection and a completed one on the same pipeline+file.
+        let pending = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                pipeline_id,
+                account_id,
+                file_id,
+            ))
+            .await?;
+        let to_complete = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                pipeline_id,
+                account_id,
+                file_id,
+            ))
+            .await?;
+        let claimed = conn
+            .claim_detection(to_complete.id, Timestamp::now() - Span::new().minutes(5))
+            .await?
+            .expect("claim");
+        let _ = conn
+            .finalize_detection(
+                to_complete.id,
+                jiff::Timestamp::from(claimed.claimed_at.expect("claimed")),
+                UpdateWorkspaceDetection::default(),
+            )
+            .await?;
+
+        // Filter to Pending: only the pending detection, and the input file is named.
+        let page = conn
+            .cursor_list_pipeline_detections(
+                pipeline_id,
+                CursorPagination::new(50),
+                &DetectionFilter {
+                    status: Some(DetectionStatus::Pending),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert_eq!(
+            page.items
+                .iter()
+                .map(|r| r.detection.id)
+                .collect::<Vec<_>>(),
+            vec![pending.id]
+        );
+        assert!(
+            page.items[0].input_file_name.is_some(),
+            "input file name should resolve through the join"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn record_detection_usage_is_a_noop_for_an_empty_slice() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // An empty usage slice writes nothing and does not error.
+        conn.record_detection_usage(&[]).await?;
+        Ok(())
+    }
+}

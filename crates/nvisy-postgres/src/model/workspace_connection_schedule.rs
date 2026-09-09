@@ -15,6 +15,7 @@ use crate::types::{SyncDeletionPolicy, SyncMode};
 #[diesel(table_name = workspace_connection_schedule)]
 #[diesel(primary_key(connection_id))]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct WorkspaceConnectionSchedule {
     /// The connection this schedule configures.
     pub connection_id: Uuid,
@@ -30,6 +31,7 @@ pub struct WorkspaceConnectionSchedule {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspace_connection_schedule)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceConnectionSchedule {
     /// The connection this schedule configures.
     pub connection_id: Uuid,
@@ -39,4 +41,19 @@ pub struct NewWorkspaceConnectionSchedule {
     pub schedule_cron: Option<String>,
     /// Deletion reconciliation policy (defaults to ignore).
     pub deletion_policy: Option<SyncDeletionPolicy>,
+}
+
+impl NewWorkspaceConnectionSchedule {
+    /// A minimal manual-only schedule for `connection_id`, for tests. The mode
+    /// and deletion policy take their database defaults (`import`, `ignore`) and
+    /// there is no cron, so the connection does not sync on a timer.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(connection_id: Uuid) -> Self {
+        Self {
+            connection_id,
+            sync_mode: None,
+            schedule_cron: None,
+            deletion_policy: None,
+        }
+    }
 }

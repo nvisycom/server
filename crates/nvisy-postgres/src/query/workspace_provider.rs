@@ -21,12 +21,6 @@ pub trait WorkspaceProviderRepository {
         new_provider: NewWorkspaceProvider,
     ) -> impl Future<Output = Result<WorkspaceProvider>> + Send;
 
-    /// Finds a provider by its unique identifier.
-    fn find_workspace_provider_by_id(
-        &mut self,
-        provider_id: Uuid,
-    ) -> impl Future<Output = Result<Option<WorkspaceProvider>>> + Send;
-
     /// Finds a provider by ID within a specific workspace.
     fn find_provider_in_workspace(
         &mut self,
@@ -78,12 +72,6 @@ pub trait WorkspaceProviderRepository {
         &mut self,
         provider_id: Uuid,
     ) -> impl Future<Output = Result<()>> + Send;
-
-    /// Counts providers in a workspace.
-    fn count_workspace_providers(
-        &mut self,
-        workspace_id: Uuid,
-    ) -> impl Future<Output = Result<i64>> + Send;
 }
 
 impl WorkspaceProviderRepository for PgConnection {
@@ -98,24 +86,6 @@ impl WorkspaceProviderRepository for PgConnection {
             .returning(WorkspaceProvider::as_returning())
             .get_result(self)
             .await
-            .map_err(Error::from)?;
-
-        Ok(provider)
-    }
-
-    async fn find_workspace_provider_by_id(
-        &mut self,
-        provider_id: Uuid,
-    ) -> Result<Option<WorkspaceProvider>> {
-        use schema::workspace_providers::{self, dsl};
-
-        let provider = workspace_providers::table
-            .filter(dsl::id.eq(provider_id))
-            .filter(dsl::deleted_at.is_null())
-            .select(WorkspaceProvider::as_select())
-            .first(self)
-            .await
-            .optional()
             .map_err(Error::from)?;
 
         Ok(provider)
@@ -326,18 +296,114 @@ impl WorkspaceProviderRepository for PgConnection {
 
         Ok(())
     }
+}
 
-    async fn count_workspace_providers(&mut self, workspace_id: Uuid) -> Result<i64> {
-        use schema::workspace_providers::{self, dsl};
+#[cfg(test)]
+mod tests {
+    use crate::model::{NewWorkspaceProvider, UpdateWorkspaceProvider};
+    use crate::query::WorkspaceProviderRepository;
+    use crate::test_util::TestDatabase;
+    use crate::types::{CursorPagination, ProviderType};
 
-        let count = workspace_providers::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(self)
-            .await
-            .map_err(Error::from)?;
+    #[tokio::test]
+    async fn find_by_type_returns_the_most_recent_active_provider() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
 
-        Ok(count)
+        // A disabled provider must never be returned, even if it is newer.
+        let older = conn
+            .create_workspace_provider(NewWorkspaceProvider::test(
+                workspace_id,
+                account_id,
+                ProviderType::Llm,
+            ))
+            .await?;
+        let disabled = NewWorkspaceProvider {
+            is_active: Some(false),
+            ..NewWorkspaceProvider::test(workspace_id, account_id, ProviderType::Llm)
+        };
+        let _ = conn.create_workspace_provider(disabled).await?;
+
+        let found = conn
+            .find_provider_by_type(workspace_id, ProviderType::Llm)
+            .await?;
+        assert_eq!(found.map(|p| p.id), Some(older.id));
+
+        // A different kind in the same workspace is not matched.
+        assert!(
+            conn.find_provider_by_type(workspace_id, ProviderType::Ner)
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_and_delete_are_scoped_to_live_rows() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let provider = conn
+            .create_workspace_provider(NewWorkspaceProvider::test(
+                workspace_id,
+                account_id,
+                ProviderType::Llm,
+            ))
+            .await?;
+
+        // Soft-delete it, then a second delete and an update both find no live row.
+        conn.delete_workspace_provider(provider.id).await?;
+        assert!(
+            conn.find_provider_in_workspace(workspace_id, provider.id)
+                .await?
+                .is_none()
+        );
+        // Updating the tombstoned row matches nothing, so it errors as not-found
+        // rather than reviving it.
+        let update = UpdateWorkspaceProvider {
+            display_name: Some("revived?".to_owned()),
+            ..Default::default()
+        };
+        assert!(
+            conn.update_workspace_provider(provider.id, update)
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cursor_list_filters_by_provider_and_paginates() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        for _ in 0..3 {
+            let _ = conn
+                .create_workspace_provider(NewWorkspaceProvider::test(
+                    workspace_id,
+                    account_id,
+                    ProviderType::Llm,
+                ))
+                .await?;
+        }
+
+        let page = conn
+            .cursor_list_workspace_providers(workspace_id, CursorPagination::new(50), &[])
+            .await?;
+        assert_eq!(page.items.len(), 3);
+
+        // A provider filter that matches nothing returns an empty page.
+        let none = conn
+            .cursor_list_workspace_providers(
+                workspace_id,
+                CursorPagination::new(50),
+                &["anthropic".to_owned()],
+            )
+            .await?;
+        assert!(none.items.is_empty());
+        Ok(())
     }
 }

@@ -8,7 +8,7 @@ use jiff::Timestamp;
 use uuid::Uuid;
 
 use crate::model::{AccountNotification, NewAccountNotification, UpdateAccountNotification};
-use crate::types::{CursorPage, CursorPagination, OffsetPagination};
+use crate::types::{CursorPage, CursorPagination};
 use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for account notification database operations.
@@ -28,15 +28,6 @@ pub trait AccountNotificationRepository {
         &mut self,
         new_notifications: Vec<NewAccountNotification>,
     ) -> impl Future<Output = Result<usize>> + Send;
-
-    /// Lists account notifications with offset pagination.
-    ///
-    /// Excludes expired notifications, ordered by creation date.
-    fn offset_list_account_notifications(
-        &mut self,
-        account_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = Result<Vec<AccountNotification>>> + Send;
 
     /// Lists account notifications with cursor pagination.
     ///
@@ -66,13 +57,6 @@ pub trait AccountNotificationRepository {
         account_id: Uuid,
         notification_id: Uuid,
     ) -> impl Future<Output = Result<bool>> + Send;
-
-    /// Deletes all expired account notifications system-wide.
-    ///
-    /// Returns the count of deleted notifications.
-    fn delete_expired_account_notifications(
-        &mut self,
-    ) -> impl Future<Output = Result<usize>> + Send;
 
     /// Counts unread account notifications.
     fn count_unread_account_notifications(
@@ -109,26 +93,6 @@ impl AccountNotificationRepository for PgConnection {
         diesel::insert_into(account_notifications::table)
             .values(&new_notifications)
             .execute(self)
-            .await
-            .map_err(Error::from)
-    }
-
-    async fn offset_list_account_notifications(
-        &mut self,
-        account_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> Result<Vec<AccountNotification>> {
-        use diesel::dsl::now;
-        use schema::account_notifications::{self, dsl};
-
-        account_notifications::table
-            .filter(dsl::account_id.eq(account_id))
-            .filter(dsl::expires_at.is_null().or(dsl::expires_at.gt(now)))
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(AccountNotification::as_select())
-            .load(self)
             .await
             .map_err(Error::from)
     }
@@ -234,20 +198,6 @@ impl AccountNotificationRepository for PgConnection {
         Ok(updated > 0)
     }
 
-    async fn delete_expired_account_notifications(&mut self) -> Result<usize> {
-        use diesel::dsl::now;
-        use schema::account_notifications::{self, dsl};
-
-        diesel::delete(
-            account_notifications::table
-                .filter(dsl::expires_at.is_not_null())
-                .filter(dsl::expires_at.lt(now)),
-        )
-        .execute(self)
-        .await
-        .map_err(Error::from)
-    }
-
     async fn count_unread_account_notifications(&mut self, account_id: Uuid) -> Result<i64> {
         use diesel::dsl::{count_star, now};
         use schema::account_notifications::{self, dsl};
@@ -260,5 +210,149 @@ impl AccountNotificationRepository for PgConnection {
             .get_result(self)
             .await
             .map_err(Error::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use jiff::{Span, Timestamp};
+    use uuid::Uuid;
+
+    use crate::PgConn;
+    use crate::model::{AccountNotification, NewAccountNotification};
+    use crate::query::AccountNotificationRepository;
+    use crate::test_util::TestDatabase;
+    use crate::types::CursorPagination;
+
+    /// Creates a notification already past its expiry: `created_at` two hours ago,
+    /// `expires_at` an hour after that (so it reads as expired against `now()`
+    /// while satisfying the `expires_at > created_at` check).
+    async fn expired_notification(
+        conn: &mut PgConn,
+        account_id: Uuid,
+    ) -> anyhow::Result<AccountNotification> {
+        let created = Timestamp::now() - Span::new().hours(2);
+        let mut new = NewAccountNotification::test(account_id);
+        new.created_at = Some(jiff_diesel::Timestamp::from(created));
+        new.expires_at = Some(jiff_diesel::Timestamp::from(created + Span::new().hours(1)));
+        Ok(conn.create_account_notification(new).await?)
+    }
+
+    /// Creates a notification whose `created_at` is an hour old, so two rows in one
+    /// test have a strict, deterministic newest-first order.
+    async fn old_notification(
+        conn: &mut PgConn,
+        account_id: Uuid,
+    ) -> anyhow::Result<AccountNotification> {
+        let mut new = NewAccountNotification::test(account_id);
+        new.created_at = Some(jiff_diesel::Timestamp::from(
+            Timestamp::now() - Span::new().hours(1),
+        ));
+        Ok(conn.create_account_notification(new).await?)
+    }
+
+    #[tokio::test]
+    async fn cursor_list_excludes_expired_and_orders_newest_first() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let account_id = db.seed_account().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // Two live notifications (the first inserted an hour old so the newest-first
+        // order is deterministic) and one already expired.
+        let first = old_notification(&mut conn, account_id).await?;
+        let second = conn
+            .create_account_notification(NewAccountNotification::test(account_id))
+            .await?;
+        let _expired = expired_notification(&mut conn, account_id).await?;
+
+        let page = conn
+            .cursor_list_account_notifications(account_id, CursorPagination::new(50))
+            .await?;
+
+        // The expired one is filtered out; the newest live one comes first.
+        let ids: Vec<_> = page.items.iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec![second.id, first.id]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_many_inserts_each_and_counts_them() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let account_id = db.seed_account().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let batch = vec![
+            NewAccountNotification::test(account_id),
+            NewAccountNotification::test(account_id),
+            NewAccountNotification::test(account_id),
+        ];
+        assert_eq!(conn.create_account_notifications(batch).await?, 3);
+        // An empty batch is a no-op, not an error.
+        assert_eq!(conn.create_account_notifications(vec![]).await?, 0);
+
+        assert_eq!(
+            conn.count_unread_account_notifications(account_id).await?,
+            3
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mark_as_read_is_scoped_to_the_owning_account() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let owner = db.seed_account().await;
+        let other = db.seed_account().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let notification = conn
+            .create_account_notification(NewAccountNotification::test(owner))
+            .await?;
+
+        // Another account cannot mark it read; nothing is updated.
+        assert!(
+            !conn
+                .mark_account_notification_as_read(other, notification.id)
+                .await?
+        );
+        assert_eq!(conn.count_unread_account_notifications(owner).await?, 1);
+
+        // The owner can, and the unread count drops to zero.
+        assert!(
+            conn.mark_account_notification_as_read(owner, notification.id)
+                .await?
+        );
+        assert_eq!(conn.count_unread_account_notifications(owner).await?, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mark_all_as_read_clears_only_the_accounts_unread() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let account_id = db.seed_account().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let _ = conn
+            .create_account_notifications(vec![
+                NewAccountNotification::test(account_id),
+                NewAccountNotification::test(account_id),
+            ])
+            .await?;
+
+        assert_eq!(
+            conn.mark_all_account_notifications_as_read(account_id)
+                .await?,
+            2
+        );
+        assert_eq!(
+            conn.count_unread_account_notifications(account_id).await?,
+            0
+        );
+        // A second call has nothing left to mark.
+        assert_eq!(
+            conn.mark_all_account_notifications_as_read(account_id)
+                .await?,
+            0
+        );
+        Ok(())
     }
 }

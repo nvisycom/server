@@ -4,15 +4,11 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use ipnet::IpNet;
-use jiff::{Span, Timestamp};
+use jiff::Timestamp;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceActivity, WorkspaceActivity};
-use crate::types::{
-    AccountRefRow, ActivityPayload, ActivityType, CursorPage, CursorPagination, Json,
-    OffsetPagination, WithAccountRef,
-};
+use crate::types::{AccountRefRow, ActivityType, CursorPage, CursorPagination, WithAccountRef};
 use crate::{Error, PgConnection, Result, schema};
 
 /// Predicates that narrow an activity listing, all optional (an empty filter
@@ -32,21 +28,6 @@ pub struct ActivityFilter {
     pub to: Option<Timestamp>,
 }
 
-/// Parameters for logging entity-specific activities.
-#[derive(Debug, Clone)]
-pub struct LogEntityActivityParams {
-    /// The account that performed the activity.
-    pub account_id: Uuid,
-    /// The type of activity being logged.
-    pub activity_type: ActivityType,
-    /// The self-describing tagged payload (its `activityType` + params).
-    pub params: Json<ActivityPayload>,
-    /// Client IP address.
-    pub ip_address: Option<IpNet>,
-    /// Client user agent string.
-    pub user_agent: Option<String>,
-}
-
 /// Repository for workspace activity log database operations.
 ///
 /// Handles activity logging, querying, and audit trail management.
@@ -56,13 +37,6 @@ pub trait WorkspaceActivityRepository {
         &mut self,
         activity: NewWorkspaceActivity,
     ) -> impl Future<Output = Result<WorkspaceActivity>> + Send;
-
-    /// Lists activities for a specific workspace with offset pagination.
-    fn offset_list_workspace_activity(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = Result<Vec<WorkspaceActivity>>> + Send;
 
     /// Lists a workspace's activities with cursor pagination, newest first, each
     /// paired with the handle and avatar of the account that performed it. The
@@ -86,78 +60,6 @@ pub trait WorkspaceActivityRepository {
         filter: ActivityFilter,
         limit: i64,
     ) -> impl Future<Output = Result<Vec<WithAccountRef<WorkspaceActivity>>>> + Send;
-
-    /// Gets recent activities across all workspaces for a specific user.
-    fn get_account_recent_activity(
-        &mut self,
-        account_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = Result<Vec<WorkspaceActivity>>> + Send;
-
-    /// Gets activities of a specific type within a workspace.
-    fn get_activity_by_type(
-        &mut self,
-        workspace_id: Uuid,
-        activity_type_filter: ActivityType,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = Result<Vec<WorkspaceActivity>>> + Send;
-
-    /// Gets recent activities for a user within a specified time window.
-    fn get_recent_account_activity(
-        &mut self,
-        account_id: Uuid,
-        hours: i64,
-    ) -> impl Future<Output = Result<Vec<WorkspaceActivity>>> + Send;
-
-    /// Logs integration-related activity using standardized parameters.
-    fn log_integration_activity(
-        &mut self,
-        workspace_id: Uuid,
-        params: LogEntityActivityParams,
-    ) -> impl Future<Output = Result<WorkspaceActivity>> + Send;
-
-    /// Logs workspace member-related activity using standardized parameters.
-    fn log_member_activity(
-        &mut self,
-        workspace_id: Uuid,
-        params: LogEntityActivityParams,
-    ) -> impl Future<Output = Result<WorkspaceActivity>> + Send;
-
-    /// Logs document-related activity using standardized parameters.
-    fn log_document_activity(
-        &mut self,
-        workspace_id: Uuid,
-        params: LogEntityActivityParams,
-    ) -> impl Future<Output = Result<WorkspaceActivity>> + Send;
-
-    /// Gets the most active users in a workspace ranked by activity count.
-    fn get_most_active_accounts(
-        &mut self,
-        workspace_id: Uuid,
-        hours: Option<i64>,
-        limit: i64,
-    ) -> impl Future<Output = Result<Vec<(Uuid, i64)>>> + Send;
-
-    /// Gets a breakdown of activities by type for analytical reporting.
-    fn get_activity_type_breakdown(
-        &mut self,
-        workspace_id: Uuid,
-        hours: Option<i64>,
-    ) -> impl Future<Output = Result<Vec<(ActivityType, i64)>>> + Send;
-
-    /// Gets activities originating from a specific IP address for security analysis.
-    fn get_activities_by_ip(
-        &mut self,
-        workspace_id: Uuid,
-        ip_addr: IpNet,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = Result<Vec<WorkspaceActivity>>> + Send;
-
-    /// Cleans up old activity logs to manage database size and performance.
-    fn cleanup_old_activities(
-        &mut self,
-        days_to_keep: i64,
-    ) -> impl Future<Output = Result<usize>> + Send;
 }
 
 impl WorkspaceActivityRepository for PgConnection {
@@ -172,26 +74,6 @@ impl WorkspaceActivityRepository for PgConnection {
             .map_err(Error::from)?;
 
         Ok(activity)
-    }
-
-    async fn offset_list_workspace_activity(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> Result<Vec<WorkspaceActivity>> {
-        use schema::workspace_activities::{self, dsl};
-
-        let activities = workspace_activities::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .select(WorkspaceActivity::as_select())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(activities)
     }
 
     async fn cursor_list_workspace_activity(
@@ -299,227 +181,6 @@ impl WorkspaceActivityRepository for PgConnection {
             .map(|(item, account)| WithAccountRef { item, account })
             .collect())
     }
-
-    async fn get_account_recent_activity(
-        &mut self,
-        account_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> Result<Vec<WorkspaceActivity>> {
-        use schema::workspace_activities::{self, dsl};
-
-        let activities = workspace_activities::table
-            .filter(dsl::account_id.eq(account_id))
-            .select(WorkspaceActivity::as_select())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(activities)
-    }
-
-    async fn get_activity_by_type(
-        &mut self,
-        workspace_id: Uuid,
-        activity_type_filter: ActivityType,
-        pagination: OffsetPagination,
-    ) -> Result<Vec<WorkspaceActivity>> {
-        use schema::workspace_activities::{self, dsl};
-
-        let activities = workspace_activities::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::activity_type.eq(activity_type_filter))
-            .select(WorkspaceActivity::as_select())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(activities)
-    }
-
-    async fn get_recent_account_activity(
-        &mut self,
-        account_id: Uuid,
-        hours: i64,
-    ) -> Result<Vec<WorkspaceActivity>> {
-        use schema::workspace_activities::{self, dsl};
-
-        let cutoff_time = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(hours));
-
-        let activities = workspace_activities::table
-            .filter(dsl::account_id.eq(account_id))
-            .filter(dsl::created_at.gt(cutoff_time))
-            .select(WorkspaceActivity::as_select())
-            .order(dsl::created_at.desc())
-            .limit(50)
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(activities)
-    }
-
-    async fn log_integration_activity(
-        &mut self,
-        workspace_id: Uuid,
-        params: LogEntityActivityParams,
-    ) -> Result<WorkspaceActivity> {
-        let activity = NewWorkspaceActivity {
-            workspace_id,
-            account_id: params.account_id,
-            activity_type: params.activity_type,
-            params: params.params,
-            ip_address: params.ip_address,
-            user_agent: params.user_agent,
-        };
-
-        self.log_activity(activity).await
-    }
-
-    async fn log_member_activity(
-        &mut self,
-        workspace_id: Uuid,
-        params: LogEntityActivityParams,
-    ) -> Result<WorkspaceActivity> {
-        let activity = NewWorkspaceActivity {
-            workspace_id,
-            account_id: params.account_id,
-            activity_type: params.activity_type,
-            params: params.params,
-            ip_address: params.ip_address,
-            user_agent: params.user_agent,
-        };
-
-        self.log_activity(activity).await
-    }
-
-    async fn log_document_activity(
-        &mut self,
-        workspace_id: Uuid,
-        params: LogEntityActivityParams,
-    ) -> Result<WorkspaceActivity> {
-        let activity = NewWorkspaceActivity {
-            workspace_id,
-            account_id: params.account_id,
-            activity_type: params.activity_type,
-            params: params.params,
-            ip_address: params.ip_address,
-            user_agent: params.user_agent,
-        };
-
-        self.log_activity(activity).await
-    }
-
-    async fn get_most_active_accounts(
-        &mut self,
-        workspace_id: Uuid,
-        hours: Option<i64>,
-        limit: i64,
-    ) -> Result<Vec<(Uuid, i64)>> {
-        use schema::workspace_activities::{self, dsl};
-
-        let results = if let Some(time_window) = hours {
-            let cutoff_time =
-                jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(time_window));
-            workspace_activities::table
-                .filter(dsl::workspace_id.eq(workspace_id))
-                .filter(dsl::created_at.gt(cutoff_time))
-                .group_by(dsl::account_id)
-                .select((dsl::account_id, diesel::dsl::count(dsl::id)))
-                .order(diesel::dsl::count(dsl::id).desc())
-                .limit(limit)
-                .load::<(Uuid, i64)>(self)
-                .await
-                .map_err(Error::from)?
-        } else {
-            workspace_activities::table
-                .filter(dsl::workspace_id.eq(workspace_id))
-                .group_by(dsl::account_id)
-                .select((dsl::account_id, diesel::dsl::count(dsl::id)))
-                .order(diesel::dsl::count(dsl::id).desc())
-                .limit(limit)
-                .load::<(Uuid, i64)>(self)
-                .await
-                .map_err(Error::from)?
-        };
-
-        Ok(results)
-    }
-
-    async fn get_activity_type_breakdown(
-        &mut self,
-        workspace_id: Uuid,
-        hours: Option<i64>,
-    ) -> Result<Vec<(ActivityType, i64)>> {
-        use schema::workspace_activities::{self, dsl};
-
-        let results = if let Some(time_window) = hours {
-            let cutoff_time =
-                jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(time_window));
-            workspace_activities::table
-                .filter(dsl::workspace_id.eq(workspace_id))
-                .filter(dsl::created_at.gt(cutoff_time))
-                .group_by(dsl::activity_type)
-                .select((dsl::activity_type, diesel::dsl::count(dsl::id)))
-                .order(diesel::dsl::count(dsl::id).desc())
-                .load::<(ActivityType, i64)>(self)
-                .await
-                .map_err(Error::from)?
-        } else {
-            workspace_activities::table
-                .filter(dsl::workspace_id.eq(workspace_id))
-                .group_by(dsl::activity_type)
-                .select((dsl::activity_type, diesel::dsl::count(dsl::id)))
-                .order(diesel::dsl::count(dsl::id).desc())
-                .load::<(ActivityType, i64)>(self)
-                .await
-                .map_err(Error::from)?
-        };
-
-        Ok(results)
-    }
-
-    async fn get_activities_by_ip(
-        &mut self,
-        workspace_id: Uuid,
-        ip_addr: IpNet,
-        pagination: OffsetPagination,
-    ) -> Result<Vec<WorkspaceActivity>> {
-        use schema::workspace_activities::{self, dsl};
-
-        let activities = workspace_activities::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::ip_address.eq(ip_addr))
-            .select(WorkspaceActivity::as_select())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(activities)
-    }
-
-    async fn cleanup_old_activities(&mut self, days_to_keep: i64) -> Result<usize> {
-        use schema::workspace_activities::dsl::*;
-
-        let cutoff_date =
-            jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().days(days_to_keep));
-
-        let deleted_count = diesel::delete(workspace_activities)
-            .filter(created_at.lt(cutoff_date))
-            .execute(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(deleted_count)
-    }
 }
 
 /// Applies an [`ActivityFilter`]'s predicates (type, actor, time window) to a
@@ -544,4 +205,150 @@ fn apply_activity_filter<'a>(
         query = query.filter(dsl::created_at.lt(jiff_diesel::Timestamp::from(to)));
     }
     query
+}
+
+#[cfg(test)]
+mod tests {
+    use jiff::{Span, Timestamp};
+
+    use super::*;
+    use crate::PgConn;
+    use crate::model::{NewAccount, NewWorkspaceActivity};
+    use crate::query::{AccountRepository, WorkspaceActivityRepository};
+    use crate::test_util::TestDatabase;
+
+    /// Logs an activity of `activity_type` for `workspace_id` by `account_id`,
+    /// overriding the type on the default test payload so the type filter has a
+    /// distinguishable value. `age` backdates its `created_at` so ordering is
+    /// deterministic.
+    async fn log(
+        conn: &mut PgConn,
+        workspace_id: Uuid,
+        account_id: Uuid,
+        activity_type: ActivityType,
+        age: Option<Span>,
+    ) -> anyhow::Result<WorkspaceActivity> {
+        let mut activity = NewWorkspaceActivity::test(workspace_id, account_id);
+        activity.activity_type = activity_type;
+        activity.created_at = age.map(|span| jiff_diesel::Timestamp::from(Timestamp::now() - span));
+        Ok(conn.log_activity(activity).await?)
+    }
+
+    #[tokio::test]
+    async fn feed_lists_newest_first_and_export_lists_oldest_first() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // `first` is an hour old so the newest-first / oldest-first orders are
+        // deterministic against `second`.
+        let first = log(
+            &mut conn,
+            workspace_id,
+            account_id,
+            ActivityType::WorkspaceCreated,
+            Some(Span::new().hours(1)),
+        )
+        .await?;
+        let second = log(
+            &mut conn,
+            workspace_id,
+            account_id,
+            ActivityType::WorkspaceUpdated,
+            None,
+        )
+        .await?;
+
+        // The paginated feed is newest first.
+        let feed = conn
+            .cursor_list_workspace_activity(
+                workspace_id,
+                ActivityFilter::default(),
+                CursorPagination::new(50),
+            )
+            .await?;
+        assert_eq!(
+            feed.items.iter().map(|a| a.item.id).collect::<Vec<_>>(),
+            vec![second.id, first.id]
+        );
+
+        // The export is oldest first.
+        let export = conn
+            .list_workspace_activity_for_export(workspace_id, ActivityFilter::default(), 50)
+            .await?;
+        assert_eq!(
+            export.iter().map(|a| a.item.id).collect::<Vec<_>>(),
+            vec![first.id, second.id]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn filter_by_type_and_actor() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (owner_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // A second actor in the same workspace.
+        let other_id = conn.create_account(NewAccount::test()).await?.id;
+
+        let created = log(
+            &mut conn,
+            workspace_id,
+            owner_id,
+            ActivityType::WorkspaceCreated,
+            None,
+        )
+        .await?;
+        let _updated = log(
+            &mut conn,
+            workspace_id,
+            owner_id,
+            ActivityType::WorkspaceUpdated,
+            None,
+        )
+        .await?;
+        let by_other = log(
+            &mut conn,
+            workspace_id,
+            other_id,
+            ActivityType::WorkspaceCreated,
+            None,
+        )
+        .await?;
+
+        // Type filter keeps only WorkspaceCreated (from either actor).
+        let created_only = conn
+            .cursor_list_workspace_activity(
+                workspace_id,
+                ActivityFilter {
+                    types: vec![ActivityType::WorkspaceCreated],
+                    ..Default::default()
+                },
+                CursorPagination::new(50),
+            )
+            .await?;
+        let mut ids: Vec<_> = created_only.items.iter().map(|a| a.item.id).collect();
+        ids.sort();
+        let mut expected = vec![created.id, by_other.id];
+        expected.sort();
+        assert_eq!(ids, expected);
+
+        // Actor filter keeps only the other actor's activity.
+        let others = conn
+            .cursor_list_workspace_activity(
+                workspace_id,
+                ActivityFilter {
+                    actor: Some(other_id),
+                    ..Default::default()
+                },
+                CursorPagination::new(50),
+            )
+            .await?;
+        assert_eq!(
+            others.items.iter().map(|a| a.item.id).collect::<Vec<_>>(),
+            vec![by_other.id]
+        );
+        Ok(())
+    }
 }

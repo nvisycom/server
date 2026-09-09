@@ -64,3 +64,26 @@ impl Ord for WorkspaceRole {
         self.hierarchy_level().cmp(&other.hierarchy_level())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::WorkspaceRole::{Admin, Editor, Owner, Reviewer};
+
+    #[test]
+    fn ordering_follows_the_permission_hierarchy() {
+        assert!(Owner > Admin);
+        assert!(Admin > Editor);
+        assert!(Editor > Reviewer);
+        // A sort orders least- to most-privileged.
+        let mut roles = [Admin, Reviewer, Owner, Editor];
+        roles.sort();
+        assert_eq!(roles, [Reviewer, Editor, Admin, Owner]);
+    }
+
+    #[test]
+    fn has_permission_level_of_is_ge_on_the_hierarchy() {
+        assert!(Admin.has_permission_level_of(Editor));
+        assert!(Owner.has_permission_level_of(Owner));
+        assert!(!Editor.has_permission_level_of(Admin));
+    }
+}

@@ -141,3 +141,174 @@ impl ChatMessage {
         path
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use jiff::{Span, Timestamp};
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::PgConn;
+    use crate::model::{NewChatMessage, NewChatSession};
+    use crate::query::{ChatMessageRepository, ChatSessionRepository};
+    use crate::test_util::TestDatabase;
+    use crate::types::ChatRole;
+
+    /// Seeds a chat session and returns its id.
+    async fn seed_session(db: &TestDatabase) -> anyhow::Result<Uuid> {
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+        let session = conn
+            .create_chat_session(NewChatSession::test(workspace_id, account_id))
+            .await?;
+        Ok(session.id)
+    }
+
+    /// Appends a message with an explicit `created_at`, so oldest-first ordering
+    /// is deterministic across messages in one test.
+    async fn append_at(
+        conn: &mut PgConn,
+        session_id: Uuid,
+        parent_id: Option<Uuid>,
+        role: ChatRole,
+        age: Span,
+    ) -> anyhow::Result<ChatMessage> {
+        let mut new = NewChatMessage::test(session_id, role);
+        new.parent_id = parent_id;
+        new.created_at = Some(jiff_diesel::Timestamp::from(Timestamp::now() - age));
+        Ok(conn
+            .append_chat_message(new, AppendSessionUpdate::default())
+            .await?)
+    }
+
+    #[tokio::test]
+    async fn append_advances_the_session_leaf_and_sets_the_title() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+        let session = conn
+            .create_chat_session(NewChatSession::test(workspace_id, account_id))
+            .await?;
+        assert!(session.current_message_id.is_none());
+
+        let message = conn
+            .append_chat_message(
+                NewChatMessage::test(session.id, ChatRole::User),
+                AppendSessionUpdate {
+                    advance_leaf: true,
+                    title: Some("Seeded Title".to_owned()),
+                },
+            )
+            .await?;
+
+        // The session's active leaf now points at the appended message, and the
+        // title was set — both in the same transaction as the insert.
+        let reread = conn
+            .find_chat_session_in_workspace(workspace_id, session.id)
+            .await?
+            .expect("session present");
+        assert_eq!(reread.current_message_id, Some(message.id));
+        assert_eq!(reread.title, "Seeded Title");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_in_session_is_scoped_and_list_is_oldest_first() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let session_id = seed_session(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        // A root and a reply, root older so the oldest-first order is deterministic.
+        let root = append_at(
+            &mut conn,
+            session_id,
+            None,
+            ChatRole::User,
+            Span::new().hours(1),
+        )
+        .await?;
+        let reply = append_at(
+            &mut conn,
+            session_id,
+            Some(root.id),
+            ChatRole::Assistant,
+            Span::new().minutes(1),
+        )
+        .await?;
+
+        // Found within its session, not under a different session id.
+        assert!(
+            conn.find_chat_message_in_session(session_id, root.id)
+                .await?
+                .is_some()
+        );
+        assert!(
+            conn.find_chat_message_in_session(Uuid::now_v7(), root.id)
+                .await?
+                .is_none()
+        );
+
+        // The listing is the whole tree, oldest first.
+        let messages = conn.list_chat_messages(session_id).await?;
+        assert_eq!(
+            messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+            vec![root.id, reply.id]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn path_to_walks_from_root_to_leaf() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let session_id = seed_session(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        // Build root -> a -> b, plus a sibling branch off root that is NOT on the path.
+        let root = append_at(
+            &mut conn,
+            session_id,
+            None,
+            ChatRole::User,
+            Span::new().hours(3),
+        )
+        .await?;
+        let a = append_at(
+            &mut conn,
+            session_id,
+            Some(root.id),
+            ChatRole::Assistant,
+            Span::new().hours(2),
+        )
+        .await?;
+        let b = append_at(
+            &mut conn,
+            session_id,
+            Some(a.id),
+            ChatRole::User,
+            Span::new().hours(1),
+        )
+        .await?;
+        let _sibling = append_at(
+            &mut conn,
+            session_id,
+            Some(root.id),
+            ChatRole::Assistant,
+            Span::new().minutes(1),
+        )
+        .await?;
+
+        let messages = conn.list_chat_messages(session_id).await?;
+
+        // The path to `b` is root -> a -> b, excluding the sibling branch.
+        let path = ChatMessage::path_to(&messages, Some(b.id));
+        assert_eq!(
+            path.iter().map(|m| m.id).collect::<Vec<_>>(),
+            vec![root.id, a.id, b.id]
+        );
+
+        // A None leaf, or a leaf not in the set, yields an empty path.
+        assert!(ChatMessage::path_to(&messages, None).is_empty());
+        assert!(ChatMessage::path_to(&messages, Some(Uuid::now_v7())).is_empty());
+        Ok(())
+    }
+}

@@ -20,6 +20,7 @@ use crate::types::{ActivityPayload, ActivityType, Json};
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_activities)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct WorkspaceActivity {
     /// Unique activity log entry identifier.
     pub id: Uuid,
@@ -46,6 +47,7 @@ pub struct WorkspaceActivity {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspace_activities)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceActivity {
     /// Reference to the workspace where the activity occurred.
     pub workspace_id: Uuid,
@@ -59,4 +61,30 @@ pub struct NewWorkspaceActivity {
     pub ip_address: Option<IpNet>,
     /// User agent string from the client request.
     pub user_agent: Option<String>,
+    /// Creation timestamp override, for tests only.
+    #[cfg(any(feature = "test_util", test))]
+    pub created_at: Option<Timestamp>,
+}
+
+impl NewWorkspaceActivity {
+    /// A minimal `workspace.created` activity in `workspace_id`, performed by
+    /// `account_id`, for tests. The type and params are kept consistent by
+    /// deriving the type from the payload.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(workspace_id: Uuid, account_id: Uuid) -> Self {
+        use crate::types::{Handle, WorkspaceActivityParams};
+
+        let payload = ActivityPayload::WorkspaceCreated(WorkspaceActivityParams {
+            workspace_slug: Handle::test(),
+        });
+        Self {
+            workspace_id,
+            account_id,
+            activity_type: payload.activity_type(),
+            params: Json::encode(&payload),
+            ip_address: None,
+            user_agent: None,
+            created_at: None,
+        }
+    }
 }

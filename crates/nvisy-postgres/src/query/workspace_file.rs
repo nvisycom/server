@@ -2,7 +2,6 @@
 
 use std::future::Future;
 
-use bigdecimal::BigDecimal;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use pgtrgm::expression_methods::TrgmExpressionMethods;
@@ -14,8 +13,8 @@ use crate::model::{
 };
 use crate::query::search::ilike_contains;
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, DetectionStatus, FileFilter, FileKind, FileSortBy,
-    FileSortField, OffsetPagination, SortOrder, WithAccountRef,
+    AccountRefRow, CursorPage, CursorPagination, DetectionStatus, FileFilter, FileKind,
+    WithAccountRef,
 };
 use crate::{Error, PgConnection, Result, schema};
 
@@ -166,13 +165,6 @@ pub trait WorkspaceFileRepository {
         expires_at: Option<jiff::Timestamp>,
     ) -> impl Future<Output = Result<usize>> + Send;
 
-    /// Lists all files uploaded by a specific account with offset pagination.
-    fn offset_list_account_files(
-        &mut self,
-        account_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = Result<Vec<WorkspaceFile>>> + Send;
-
     /// Updates a workspace file with new metadata or settings.
     fn update_workspace_file(
         &mut self,
@@ -183,17 +175,6 @@ pub trait WorkspaceFileRepository {
     /// Soft deletes a workspace file by setting the deletion timestamp.
     fn delete_workspace_file(&mut self, file_id: Uuid) -> impl Future<Output = Result<()>> + Send;
 
-    /// Lists all files in a workspace with sorting and filtering options.
-    ///
-    /// Supports filtering by file format and sorting by name, date, or size.
-    fn offset_list_workspace_files(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: OffsetPagination,
-        sort_by: FileSortBy,
-        filter: FileFilter,
-    ) -> impl Future<Output = Result<Vec<WorkspaceFile>>> + Send;
-
     /// Lists all files in a workspace with cursor pagination and optional
     /// filtering, each paired with the handle and avatar of the account that
     /// uploaded it.
@@ -203,18 +184,6 @@ pub trait WorkspaceFileRepository {
         pagination: CursorPagination,
         filter: FileFilter,
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceFile>>>> + Send;
-
-    /// Finds workspace files with a matching SHA-256 hash.
-    fn find_workspace_files_by_hash(
-        &mut self,
-        file_hash: &[u8],
-    ) -> impl Future<Output = Result<Vec<WorkspaceFile>>> + Send;
-
-    /// Calculates total storage usage for an account.
-    fn get_account_storage_usage(
-        &mut self,
-        account_id: Uuid,
-    ) -> impl Future<Output = Result<BigDecimal>> + Send;
 
     /// Soft-deletes the live files among `file_ids` that belong to
     /// `workspace_id`, returning the rows it actually transitioned.
@@ -233,29 +202,6 @@ pub trait WorkspaceFileRepository {
         workspace_id: Uuid,
         file_ids: &[Uuid],
     ) -> impl Future<Output = Result<Vec<WorkspaceFile>>> + Send;
-
-    /// Lists all versions of a file (the file itself and all files that have it as parent).
-    ///
-    /// Returns files ordered by version_number descending (newest first).
-    fn list_workspace_file_versions(
-        &mut self,
-        file_id: Uuid,
-    ) -> impl Future<Output = Result<Vec<WorkspaceFile>>> + Send;
-
-    /// Finds the latest version of a file by traversing the version chain.
-    ///
-    /// Starting from a file, follows the chain of files where parent_id points
-    /// to the previous version and returns the one with the highest version_number.
-    fn find_latest_workspace_file_version(
-        &mut self,
-        file_id: Uuid,
-    ) -> impl Future<Output = Result<Option<WorkspaceFile>>> + Send;
-
-    /// Gets the next version number for creating a new version of a file.
-    fn get_next_workspace_file_version_number(
-        &mut self,
-        file_id: Uuid,
-    ) -> impl Future<Output = Result<i32>> + Send;
 }
 
 impl WorkspaceFileRepository for PgConnection {
@@ -618,27 +564,6 @@ impl WorkspaceFileRepository for PgConnection {
         Ok(row.map(|(item, account)| WithAccountRef { item, account }))
     }
 
-    async fn offset_list_account_files(
-        &mut self,
-        account_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> Result<Vec<WorkspaceFile>> {
-        use schema::workspace_files::{self, dsl};
-
-        let files = workspace_files::table
-            .filter(dsl::account_id.eq(account_id))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(WorkspaceFile::as_select())
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(files)
-    }
-
     async fn update_workspace_file(
         &mut self,
         file_id: Uuid,
@@ -689,64 +614,6 @@ impl WorkspaceFileRepository for PgConnection {
             Ok::<_, Error>(())
         })
         .await
-    }
-
-    async fn offset_list_workspace_files(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: OffsetPagination,
-        sort_by: FileSortBy,
-        filter: FileFilter,
-    ) -> Result<Vec<WorkspaceFile>> {
-        use schema::workspace_files::{self, dsl};
-
-        // Build base query
-        let mut query = workspace_files::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .filter(dsl::file_kind.eq_any(FileKind::DOCUMENTS))
-            .into_boxed();
-
-        // Hybrid name search: ILIKE substring (works for short queries) OR
-        // trigram similarity (typo tolerance); both served by the trgm index.
-        if let Some(term) = &filter.search {
-            query = query.filter(
-                dsl::display_name
-                    .ilike(ilike_contains(term))
-                    .or(dsl::display_name.trgm_similar_to(term)),
-            );
-        }
-
-        // Apply the extension constraint. A present-but-empty set matches
-        // nothing (an active facet with no members), so apply whenever `Some`.
-        if let Some(extensions) = &filter.extensions {
-            query = query.filter(dsl::file_extension.eq_any(extensions.clone()));
-        }
-
-        // Apply the exact content-hash constraint (dedup lookup).
-        if let Some(hash) = &filter.hash {
-            query = query.filter(dsl::file_hash_sha256.eq(hash.clone()));
-        }
-
-        // Apply sorting
-        let query = match (sort_by.field, sort_by.order) {
-            (FileSortField::Name, SortOrder::Asc) => query.order(dsl::display_name.asc()),
-            (FileSortField::Name, SortOrder::Desc) => query.order(dsl::display_name.desc()),
-            (FileSortField::Date, SortOrder::Asc) => query.order(dsl::created_at.asc()),
-            (FileSortField::Date, SortOrder::Desc) => query.order(dsl::created_at.desc()),
-            (FileSortField::Size, SortOrder::Asc) => query.order(dsl::file_size_bytes.asc()),
-            (FileSortField::Size, SortOrder::Desc) => query.order(dsl::file_size_bytes.desc()),
-        };
-
-        let files = query
-            .select(WorkspaceFile::as_select())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(files)
     }
 
     async fn cursor_list_workspace_files(
@@ -886,37 +753,6 @@ impl WorkspaceFileRepository for PgConnection {
         }))
     }
 
-    async fn find_workspace_files_by_hash(
-        &mut self,
-        file_hash: &[u8],
-    ) -> Result<Vec<WorkspaceFile>> {
-        use schema::workspace_files::{self, dsl};
-
-        let files = workspace_files::table
-            .filter(dsl::file_hash_sha256.eq(file_hash))
-            .filter(dsl::deleted_at.is_null())
-            .select(WorkspaceFile::as_select())
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(files)
-    }
-
-    async fn get_account_storage_usage(&mut self, account_id: Uuid) -> Result<BigDecimal> {
-        use schema::workspace_files::{self, dsl};
-
-        let usage: Option<BigDecimal> = workspace_files::table
-            .filter(dsl::account_id.eq(account_id))
-            .filter(dsl::deleted_at.is_null())
-            .select(diesel::dsl::sum(dsl::file_size_bytes))
-            .first(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(usage.unwrap_or_else(|| BigDecimal::from(0)))
-    }
-
     async fn delete_files_in_workspace(
         &mut self,
         workspace_id: Uuid,
@@ -974,58 +810,317 @@ impl WorkspaceFileRepository for PgConnection {
 
         Ok(deleted)
     }
+}
 
-    async fn list_workspace_file_versions(&mut self, file_id: Uuid) -> Result<Vec<WorkspaceFile>> {
-        use schema::workspace_files::{self, dsl};
+#[cfg(test)]
+mod tests {
+    use jiff::{Span, Timestamp};
+    use uuid::Uuid;
 
-        // Get the original file and all files that have it (or its descendants) as parent
-        // This query gets the file itself plus all files where parent_id = file_id
-        let files = workspace_files::table
-            .filter(dsl::id.eq(file_id).or(dsl::parent_id.eq(file_id)))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::version_number.desc())
-            .select(WorkspaceFile::as_select())
-            .load(self)
-            .await
-            .map_err(Error::from)?;
+    use super::*;
+    use crate::PgConn;
+    use crate::model::{NewWorkspaceConnection, NewWorkspaceDetection, NewWorkspaceFile};
+    use crate::query::{
+        WorkspaceConnectionRepository, WorkspaceDetectionRepository, WorkspaceFileRepository,
+    };
+    use crate::test_util::TestDatabase;
 
-        Ok(files)
+    /// Creates a file that is already past its retention window: its `created_at`
+    /// is two hours ago and its `expires_at` an hour after that (so the
+    /// `expires_at >= created_at` check holds while `expires_at < now()`).
+    async fn expired_file(
+        conn: &mut PgConn,
+        workspace_id: Uuid,
+        account_id: Uuid,
+    ) -> anyhow::Result<WorkspaceFile> {
+        let created = Timestamp::now() - Span::new().hours(2);
+        let mut new = NewWorkspaceFile::test(workspace_id, account_id);
+        new.created_at = Some(jiff_diesel::Timestamp::from(created));
+        new.expires_at = Some(jiff_diesel::Timestamp::from(created + Span::new().hours(1)));
+        Ok(conn.create_workspace_file(new).await?)
     }
 
-    async fn find_latest_workspace_file_version(
-        &mut self,
-        file_id: Uuid,
-    ) -> Result<Option<WorkspaceFile>> {
-        use schema::workspace_files::{self, dsl};
+    #[tokio::test]
+    async fn create_and_scoped_lookups_exclude_soft_deleted() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
 
-        // Find the file with highest version_number that has file_id as parent,
-        // or the file itself if no newer versions exist
-        let latest = workspace_files::table
-            .filter(dsl::id.eq(file_id).or(dsl::parent_id.eq(file_id)))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::version_number.desc())
-            .select(WorkspaceFile::as_select())
-            .first(self)
-            .await
-            .optional()
-            .map_err(Error::from)?;
+        let file = conn
+            .create_workspace_file(NewWorkspaceFile::test(workspace_id, account_id))
+            .await?;
 
-        Ok(latest)
+        assert!(conn.find_workspace_file_by_id(file.id).await?.is_some());
+        assert!(
+            conn.find_file_in_workspace(workspace_id, file.id)
+                .await?
+                .is_some()
+        );
+        assert!(
+            conn.find_file_in_workspace_with_creator(workspace_id, file.id)
+                .await?
+                .is_some()
+        );
+        // Scoped to another workspace: not found.
+        assert!(
+            conn.find_file_in_workspace(Uuid::now_v7(), file.id)
+                .await?
+                .is_none()
+        );
+
+        // Soft delete hides it from every read.
+        conn.delete_workspace_file(file.id).await?;
+        assert!(conn.find_workspace_file_by_id(file.id).await?.is_none());
+        assert!(
+            conn.find_file_in_workspace(workspace_id, file.id)
+                .await?
+                .is_none()
+        );
+        Ok(())
     }
 
-    async fn get_next_workspace_file_version_number(&mut self, file_id: Uuid) -> Result<i32> {
-        use diesel::dsl::max;
-        use schema::workspace_files::{self, dsl};
+    #[tokio::test]
+    async fn cursor_list_only_documents_and_filters_by_extension_and_hash() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
 
-        // Get the max version_number from the file and its versions
-        let max_version: Option<i32> = workspace_files::table
-            .filter(dsl::id.eq(file_id).or(dsl::parent_id.eq(file_id)))
-            .filter(dsl::deleted_at.is_null())
-            .select(max(dsl::version_number))
-            .first(self)
-            .await
-            .map_err(Error::from)?;
+        // A pdf original document, a txt original, and an audit blob (not a document).
+        let mut pdf = NewWorkspaceFile::test(workspace_id, account_id);
+        pdf.file_extension = Some("pdf".to_owned());
+        pdf.file_hash_sha256 = vec![7u8; 32];
+        let pdf = conn.create_workspace_file(pdf).await?;
+        let txt = conn
+            .create_workspace_file(NewWorkspaceFile::test(workspace_id, account_id))
+            .await?;
+        let mut audit = NewWorkspaceFile::test(workspace_id, account_id);
+        audit.file_kind = Some(FileKind::Audit);
+        let audit = conn.create_workspace_file(audit).await?;
 
-        Ok(max_version.unwrap_or(0) + 1)
+        // The document listing excludes the audit blob.
+        let all = conn
+            .cursor_list_workspace_files(
+                workspace_id,
+                CursorPagination::new(50),
+                FileFilter::default(),
+            )
+            .await?;
+        let ids: Vec<_> = all.items.iter().map(|f| f.item.id).collect();
+        assert!(ids.contains(&pdf.id) && ids.contains(&txt.id));
+        assert!(!ids.contains(&audit.id), "audit blobs are not documents");
+
+        // Extension filter narrows to the pdf.
+        let pdfs = conn
+            .cursor_list_workspace_files(
+                workspace_id,
+                CursorPagination::new(50),
+                FileFilter {
+                    extensions: Some(vec!["pdf".to_owned()]),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert_eq!(
+            pdfs.items.iter().map(|f| f.item.id).collect::<Vec<_>>(),
+            vec![pdf.id]
+        );
+
+        // Exact-hash filter (dedup lookup) finds the pdf by its content hash.
+        let by_hash = conn
+            .cursor_list_workspace_files(
+                workspace_id,
+                CursorPagination::new(50),
+                FileFilter {
+                    hash: Some(vec![7u8; 32]),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert_eq!(
+            by_hash.items.iter().map(|f| f.item.id).collect::<Vec<_>>(),
+            vec![pdf.id]
+        );
+
+        // A present-but-empty extension set matches nothing (an active facet).
+        let none = conn
+            .cursor_list_workspace_files(
+                workspace_id,
+                CursorPagination::new(50),
+                FileFilter {
+                    extensions: Some(vec![]),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert!(none.items.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn import_origin_round_trips_and_is_dropped_on_delete() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+        let connection = conn
+            .create_workspace_connection(NewWorkspaceConnection::test(workspace_id, account_id))
+            .await?;
+
+        let file = conn
+            .record_imported_file(
+                NewWorkspaceFile::test(workspace_id, account_id),
+                connection.id,
+                "remote/key.pdf".to_owned(),
+            )
+            .await?;
+
+        // The imported source key is reported for the connection.
+        assert_eq!(
+            conn.imported_keys_for_connection(connection.id).await?,
+            vec!["remote/key.pdf".to_owned()]
+        );
+        assert_eq!(
+            conn.imported_files_for_connection(connection.id)
+                .await?
+                .len(),
+            1
+        );
+
+        // Deleting the file drops its import origin, so the key frees up for re-import.
+        conn.delete_workspace_file(file.id).await?;
+        assert!(
+            conn.imported_keys_for_connection(connection.id)
+                .await?
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn redacted_files_not_exported_excludes_already_exported() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+        let connection = conn
+            .create_workspace_connection(NewWorkspaceConnection::test(workspace_id, account_id))
+            .await?;
+
+        // Two redacted files; one already exported to the connection.
+        let mut a = NewWorkspaceFile::test(workspace_id, account_id);
+        a.file_kind = Some(FileKind::Redacted);
+        let a = conn.create_workspace_file(a).await?;
+        let mut b = NewWorkspaceFile::test(workspace_id, account_id);
+        b.file_kind = Some(FileKind::Redacted);
+        let b = conn.create_workspace_file(b).await?;
+        conn.record_exported_file(a.id, connection.id, "out/a.pdf".to_owned())
+            .await?;
+
+        // Only the not-yet-exported redacted file is returned.
+        let pending = conn
+            .redacted_files_not_exported(workspace_id, connection.id)
+            .await?;
+        assert_eq!(pending.iter().map(|f| f.id).collect::<Vec<_>>(), vec![b.id]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn expiry_sweep_holds_files_of_in_progress_detections() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id, pipeline_id, _seed_file) = db.seed_pipeline_and_file().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // A free expired file: eligible for the sweep.
+        let free = expired_file(&mut conn, workspace_id, account_id).await?;
+
+        // An expired file that is the input of a Pending detection.
+        let held_file = expired_file(&mut conn, workspace_id, account_id).await?;
+        let _detection = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                pipeline_id,
+                account_id,
+                held_file.id,
+            ))
+            .await?;
+
+        // The sweep returns the free file but holds the in-progress detection's input.
+        let due = conn.files_due_for_expiry(50).await?;
+        let ids: Vec<_> = due.iter().map(|f| f.id).collect();
+        assert!(ids.contains(&free.id));
+        assert!(
+            !ids.contains(&held_file.id),
+            "an in-progress input is held back"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn purge_lifecycle_lists_then_stamps() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let file = conn
+            .create_workspace_file(NewWorkspaceFile::test(workspace_id, account_id))
+            .await?;
+
+        // A live file is not pending purge.
+        assert!(
+            !conn
+                .files_pending_purge(50)
+                .await?
+                .iter()
+                .any(|f| f.id == file.id)
+        );
+
+        // After a soft delete it is pending purge (object not yet reclaimed).
+        conn.delete_workspace_file(file.id).await?;
+        assert!(
+            conn.files_pending_purge(50)
+                .await?
+                .iter()
+                .any(|f| f.id == file.id)
+        );
+
+        // Marking it purged takes it out of the pending set.
+        conn.mark_file_purged(file.id).await?;
+        assert!(
+            !conn
+                .files_pending_purge(50)
+                .await?
+                .iter()
+                .any(|f| f.id == file.id)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn delete_files_in_workspace_transitions_only_live_scoped_rows() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let a = conn
+            .create_workspace_file(NewWorkspaceFile::test(workspace_id, account_id))
+            .await?;
+        let b = conn
+            .create_workspace_file(NewWorkspaceFile::test(workspace_id, account_id))
+            .await?;
+
+        // Deleting [a, b, unknown] returns exactly the two live rows it changed.
+        let deleted = conn
+            .delete_files_in_workspace(workspace_id, &[a.id, b.id, Uuid::now_v7()])
+            .await?;
+        let mut deleted_ids: Vec<_> = deleted.iter().map(|f| f.id).collect();
+        deleted_ids.sort();
+        let mut expected = vec![a.id, b.id];
+        expected.sort();
+        assert_eq!(deleted_ids, expected);
+
+        // A second call transitions nothing (already deleted).
+        assert!(
+            conn.delete_files_in_workspace(workspace_id, &[a.id, b.id])
+                .await?
+                .is_empty()
+        );
+        Ok(())
     }
 }

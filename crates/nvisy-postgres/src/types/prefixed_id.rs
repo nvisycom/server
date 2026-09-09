@@ -192,4 +192,18 @@ mod tests {
             Err(PrefixedIdError::Prefix("conn"))
         );
     }
+
+    #[test]
+    fn provider_id_uses_its_own_prefix() {
+        let uuid = Uuid::from_u128(2);
+        let id = ProviderId::from_uuid(uuid);
+        assert!(id.to_string().starts_with("prov_"));
+        assert_eq!(ProviderId::parse(&id.to_string()).unwrap(), id);
+        // A prov_ id and a conn_ id do not cross-parse.
+        let conn = ConnectionId::from_uuid(uuid).to_string();
+        assert_eq!(
+            ProviderId::parse(&conn),
+            Err(PrefixedIdError::Prefix("prov"))
+        );
+    }
 }

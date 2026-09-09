@@ -18,6 +18,7 @@ use crate::types::{SyncStatus, SyncTriggerType};
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_connection_syncs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct WorkspaceConnectionSync {
     /// Unique sync identifier.
     pub id: Uuid,
@@ -48,6 +49,7 @@ pub struct WorkspaceConnectionSync {
 #[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = workspace_connection_syncs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceConnectionSync {
     /// Connection ID (required).
     pub connection_id: Uuid,
@@ -63,12 +65,30 @@ pub struct NewWorkspaceConnectionSync {
     pub attempt: Option<i32>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<JsonValue>,
+    /// Start timestamp override, for tests only.
+    #[cfg(any(feature = "test_util", test))]
+    pub started_at: Option<Timestamp>,
+}
+
+impl NewWorkspaceConnectionSync {
+    /// A minimal sync for `connection_id`, attributed to `account_id`, for tests.
+    /// The trigger, status, records, and attempt take their database defaults
+    /// (`on_demand`, `running`, `0`, `1`), so the sync starts in an active state.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(connection_id: Uuid, account_id: Uuid) -> Self {
+        Self {
+            connection_id,
+            account_id,
+            ..Default::default()
+        }
+    }
 }
 
 /// Data for updating a workspace connection sync.
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = workspace_connection_syncs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateWorkspaceConnectionSync {
     /// Sync status.
     pub status: Option<SyncStatus>,

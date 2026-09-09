@@ -9,6 +9,8 @@ use diesel::expression::AsExpression;
 use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::Text;
 use serde::{Deserialize, Serialize};
+#[cfg(any(feature = "test_util", test))]
+use uuid::Uuid;
 
 /// Minimum length of a handle, in characters.
 pub const HANDLE_MIN_LENGTH: usize = 3;
@@ -81,6 +83,20 @@ impl Handle {
     #[must_use]
     pub fn into_inner(self) -> String {
         self.0
+    }
+
+    /// A fresh, valid handle for tests, unique per call.
+    ///
+    /// Seeding many rows in one test needs distinct handles that always satisfy
+    /// the length and format invariants; this composes a short unique suffix so a
+    /// caller never has to hand-format one or worry about the bound. Available in
+    /// this crate's own tests and, via the `test_util` feature, to downstream
+    /// integration tests; never in normal builds.
+    #[cfg(any(feature = "test_util", test))]
+    #[must_use]
+    pub fn test() -> Self {
+        let suffix = &Uuid::now_v7().simple().to_string()[..12];
+        Self::parse(format!("h-{suffix}")).expect("composed test handle is valid")
     }
 
     /// Checks the handle invariants without allocating.

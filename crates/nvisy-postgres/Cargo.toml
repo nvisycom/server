@@ -35,6 +35,12 @@ schema = ["dep:schemars"]
 # from flags/env directly, keeping the dependency optional for library users.
 cli = ["dep:clap", "dep:humantime"]
 
+# Test utilities: an ephemeral-container database fixture and test-only
+# constructors (e.g. `Handle::test`), so downstream crates can reuse the same
+# harness in their own integration tests. Off by default; pulls in the container
+# runtime and the Tokio features the fixture needs.
+test_util = ["dep:testcontainers-modules", "tokio/macros", "tokio/rt-multi-thread"]
+
 [dependencies]
 # Internal crates
 nvisy-core = { workspace = true }
@@ -79,3 +85,13 @@ jiff-diesel = { workspace = true, features = ["postgres"] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 ipnet = { workspace = true, features = ["serde"] }
 bigdecimal = { workspace = true, features = ["serde"] }
+
+# Testing utilities
+testcontainers-modules = { workspace = true, features = ["postgres"], optional = true }
+
+[dev-dependencies]
+# Internal crates
+nvisy-postgres = { workspace = true, features = ["test_util"] }
+
+# Derive macros & utilities
+anyhow = { workspace = true, features = [] }

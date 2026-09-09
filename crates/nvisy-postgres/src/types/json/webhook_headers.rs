@@ -131,3 +131,61 @@ fn is_valid_header_value(value: &str) -> bool {
         .bytes()
         .all(|b| b == b'\t' || (b' '..=b'~').contains(&b))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::WebhookHeaders;
+
+    fn make(name: &str, value: &str) -> Result<WebhookHeaders, super::InvalidHeader> {
+        WebhookHeaders::try_new([(name.to_owned(), value.to_owned())])
+    }
+
+    #[test]
+    fn accepts_a_well_formed_header() {
+        let headers = make("X-Custom-Token", "abc 123\ttab").expect("valid");
+        assert_eq!(
+            headers.iter().collect::<Vec<_>>(),
+            vec![("X-Custom-Token", "abc 123\ttab")]
+        );
+    }
+
+    #[test]
+    fn rejects_a_malformed_name() {
+        // Empty, and names containing separators/control bytes, are not tokens.
+        assert_eq!(
+            make("", "v").unwrap_err().reason,
+            "not a valid HTTP header name"
+        );
+        assert_eq!(
+            make("bad name", "v").unwrap_err().reason,
+            "not a valid HTTP header name"
+        );
+        assert_eq!(
+            make("colon:name", "v").unwrap_err().reason,
+            "not a valid HTTP header name"
+        );
+    }
+
+    #[test]
+    fn rejects_a_value_that_would_inject_a_second_header() {
+        // A CRLF (or bare newline / NUL) in the value could split the header line;
+        // it must be rejected as a control character.
+        for injection in ["v\r\nEvil: 1", "v\nEvil: 1", "v\0"] {
+            let err = make("X-Test", injection).unwrap_err();
+            assert_eq!(err.reason, "value contains control characters");
+            assert_eq!(err.name, "X-Test");
+        }
+    }
+
+    #[test]
+    fn into_column_is_none_when_empty_and_some_otherwise() {
+        let empty = WebhookHeaders::default();
+        assert!(empty.is_empty());
+        assert!(empty.into_column().is_none());
+
+        let populated = make("X-A", "1").expect("valid");
+        let column = populated.into_column().expect("some for non-empty");
+        // The stored blob decodes back to the same headers.
+        assert_eq!(column.strict().unwrap(), make("X-A", "1").unwrap());
+    }
+}

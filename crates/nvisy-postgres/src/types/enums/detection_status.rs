@@ -63,3 +63,30 @@ impl DetectionStatus {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::DetectionStatus::{self, Complete, Executing, Failed, Pending};
+
+    #[test]
+    fn is_detecting_covers_pending_and_executing() {
+        assert!(Pending.is_detecting());
+        assert!(Executing.is_detecting());
+        assert!(!Complete.is_detecting());
+        assert!(!Failed.is_detecting());
+    }
+
+    #[test]
+    fn phase_is_monotonic_and_terminals_share_the_top_rank() {
+        assert!(Pending.phase() < Executing.phase());
+        assert!(Executing.phase() < Complete.phase());
+        // Both terminal states rank equal, so neither moves the phase backwards.
+        assert_eq!(Complete.phase(), Failed.phase());
+    }
+
+    #[test]
+    fn in_progress_and_terminal_partition_the_statuses() {
+        assert_eq!(DetectionStatus::IN_PROGRESS, [Pending, Executing]);
+        assert_eq!(DetectionStatus::TERMINAL, [Complete, Failed]);
+    }
+}

@@ -136,3 +136,121 @@ impl EventOutboxRepository for PgConnection {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use diesel::{ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper};
+    use diesel_async::RunQueryDsl;
+    use uuid::Uuid;
+
+    use super::{EventOutboxRepository, OutboxStatus, schema};
+    use crate::model::{EventOutbox, NewEventOutbox};
+    use crate::test_util::TestDatabase;
+    use crate::{AsyncConnection, PgConn, Result};
+
+    /// Re-reads an outbox row by id, bypassing the repository (which has no
+    /// single-row getter) so tests can assert on its post-transition state.
+    async fn reread(conn: &mut PgConn, id: Uuid) -> anyhow::Result<Option<EventOutbox>> {
+        use schema::event_outbox::dsl;
+
+        let row = dsl::event_outbox
+            .filter(dsl::id.eq(id))
+            .select(EventOutbox::as_select())
+            .first(conn)
+            .await
+            .optional()?;
+        Ok(row)
+    }
+
+    #[tokio::test]
+    async fn claim_then_process_removes_the_row_from_the_pending_set() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let row = conn
+            .insert_event_outbox(NewEventOutbox::test(workspace_id, account_id))
+            .await?;
+
+        // The drainer claims and processes in one transaction.
+        let processed = conn
+            .transaction(async |conn| -> Result<Uuid> {
+                let batch = conn.claim_outbox_batch(10).await?;
+                assert_eq!(batch.len(), 1);
+                assert_eq!(batch[0].id, row.id);
+                conn.mark_outbox_processed(batch[0].id).await?;
+                Ok(batch[0].id)
+            })
+            .await?;
+        assert_eq!(processed, row.id);
+
+        // Nothing is due any more.
+        let empty = conn
+            .transaction(async |conn| conn.claim_outbox_batch(10).await)
+            .await?;
+        assert!(empty.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn defer_pushes_the_row_out_of_the_due_window() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let row = conn
+            .insert_event_outbox(NewEventOutbox::test(workspace_id, account_id))
+            .await?;
+
+        // Claim, then defer the attempt an hour into the future.
+        conn.transaction(async |conn| -> Result<()> {
+            let batch = conn.claim_outbox_batch(10).await?;
+            assert_eq!(batch.len(), 1);
+            conn.defer_outbox_attempt(batch[0].id, 3600).await?;
+            Ok(())
+        })
+        .await?;
+
+        // It is still pending but no longer due, so a later claim skips it.
+        let due = conn
+            .transaction(async |conn| conn.claim_outbox_batch(10).await)
+            .await?;
+        assert!(due.is_empty(), "deferred row must not be due yet");
+
+        let reread = reread(&mut conn, row.id).await?.expect("row exists");
+        assert_eq!(reread.status, OutboxStatus::Pending);
+        assert_eq!(reread.attempts, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mark_failed_dead_letters_the_row() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let row = conn
+            .insert_event_outbox(NewEventOutbox::test(workspace_id, account_id))
+            .await?;
+
+        conn.transaction(async |conn| -> Result<()> {
+            let batch = conn.claim_outbox_batch(10).await?;
+            conn.mark_outbox_failed(batch[0].id).await?;
+            Ok(())
+        })
+        .await?;
+
+        // A dead-lettered row is out of the pending set for good.
+        let due = conn
+            .transaction(async |conn| conn.claim_outbox_batch(10).await)
+            .await?;
+        assert!(due.is_empty());
+
+        let reread = reread(&mut conn, row.id)
+            .await?
+            .expect("row retained for inspection");
+        assert_eq!(reread.status, OutboxStatus::Failed);
+        assert_eq!(reread.attempts, 1);
+        Ok(())
+    }
+}

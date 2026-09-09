@@ -17,6 +17,7 @@ use crate::types::ProviderType;
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_providers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct WorkspaceProvider {
     /// Unique provider identifier.
     pub id: Uuid,
@@ -49,6 +50,7 @@ pub struct WorkspaceProvider {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspace_providers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceProvider {
     /// Workspace ID (required).
     pub workspace_id: Uuid,
@@ -68,10 +70,33 @@ pub struct NewWorkspaceProvider {
     pub metadata: Option<JsonValue>,
 }
 
+impl NewWorkspaceProvider {
+    /// A minimal active OpenAI-LLM-style provider for `workspace_id`, for tests.
+    ///
+    /// The display name is unique per call, so several test providers can be
+    /// seeded into one workspace without colliding on the per-workspace
+    /// display-name unique index.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(workspace_id: Uuid, account_id: Uuid, provider_type: ProviderType) -> Self {
+        let suffix = &Uuid::now_v7().simple().to_string()[..12];
+        Self {
+            workspace_id,
+            account_id,
+            display_name: format!("Test Provider {suffix}"),
+            provider: "openai".to_owned(),
+            provider_type,
+            encrypted_data: vec![1, 2, 3],
+            is_active: Some(true),
+            metadata: None,
+        }
+    }
+}
+
 /// Data for updating a workspace provider.
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = workspace_providers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateWorkspaceProvider {
     /// Provider display name.
     pub display_name: Option<String>,

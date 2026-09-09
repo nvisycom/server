@@ -176,3 +176,129 @@ impl From<DeadpoolError> for Error {
 /// This is a convenience alias that uses [`Error`] as the error type,
 /// making database operation signatures cleaner and more consistent.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use diesel::result::{DatabaseErrorInformation, DatabaseErrorKind};
+
+    use super::*;
+    use crate::types::ConstraintViolation;
+
+    /// A minimal [`DatabaseErrorInformation`] that reports a constraint name, so a
+    /// constraint-violation `DieselError` can be built without a live database.
+    struct MockDbError {
+        constraint: Option<&'static str>,
+    }
+
+    impl DatabaseErrorInformation for MockDbError {
+        fn message(&self) -> &str {
+            "mock database error"
+        }
+
+        fn details(&self) -> Option<&str> {
+            None
+        }
+
+        fn hint(&self) -> Option<&str> {
+            None
+        }
+
+        fn table_name(&self) -> Option<&str> {
+            None
+        }
+
+        fn column_name(&self) -> Option<&str> {
+            None
+        }
+
+        fn constraint_name(&self) -> Option<&str> {
+            self.constraint
+        }
+
+        fn statement_position(&self) -> Option<i32> {
+            None
+        }
+    }
+
+    /// Builds a query error carrying a constraint violation with `name`.
+    fn constraint_error(name: &'static str) -> Error {
+        Error::Query(DieselError::DatabaseError(
+            DatabaseErrorKind::UniqueViolation,
+            Box::new(MockDbError {
+                constraint: Some(name),
+            }),
+        ))
+    }
+
+    #[test]
+    fn is_not_found_only_for_the_not_found_query() {
+        assert!(Error::Query(DieselError::NotFound).is_not_found());
+        // A different query error is not a not-found.
+        assert!(!constraint_error("accounts_email_format").is_not_found());
+        // Neither is a non-query error.
+        assert!(!Error::Timeout(TimeoutType::Wait).is_not_found());
+    }
+
+    #[test]
+    fn transient_covers_timeout_and_bad_connection_only() {
+        assert!(Error::Timeout(TimeoutType::Wait).is_transient());
+        assert!(Error::Connection(ConnectionError::BadConnection("dropped".into())).is_transient());
+        // A query error (constraint, syntax, not-found) is permanent.
+        assert!(!Error::Query(DieselError::NotFound).is_transient());
+        assert!(!constraint_error("accounts_email_format").is_transient());
+    }
+
+    #[test]
+    fn permanent_is_the_negation_of_transient() {
+        let transient = Error::Timeout(TimeoutType::Create);
+        let permanent = Error::Query(DieselError::NotFound);
+        assert_eq!(transient.is_permanent(), !transient.is_transient());
+        assert_eq!(permanent.is_permanent(), !permanent.is_transient());
+        assert!(permanent.is_permanent());
+        assert!(!transient.is_permanent());
+    }
+
+    #[test]
+    fn constraint_extracts_the_name_only_from_a_constraint_query() {
+        assert_eq!(
+            constraint_error("accounts_email_format").constraint(),
+            Some("accounts_email_format"),
+        );
+        // A database error without a constraint name yields `None`.
+        let no_name = Error::Query(DieselError::DatabaseError(
+            DatabaseErrorKind::Unknown,
+            Box::new(MockDbError { constraint: None }),
+        ));
+        assert_eq!(no_name.constraint(), None);
+        // A non-database query error, and a non-query error, both yield `None`.
+        assert_eq!(Error::Query(DieselError::NotFound).constraint(), None);
+        assert_eq!(Error::Timeout(TimeoutType::Wait).constraint(), None);
+    }
+
+    #[test]
+    fn constraint_violation_maps_a_known_name_and_ignores_others() {
+        // A recognized constraint name resolves to a structured violation.
+        assert_eq!(
+            constraint_error("account_identities_account_provider_unique_idx")
+                .constraint_violation(),
+            ConstraintViolation::new("account_identities_account_provider_unique_idx"),
+        );
+        // An unrecognized name is a constraint error but no known violation.
+        let unknown = constraint_error("some_unknown_constraint");
+        assert_eq!(unknown.constraint(), Some("some_unknown_constraint"));
+        assert_eq!(unknown.constraint_violation(), None);
+    }
+
+    #[test]
+    fn deadpool_timeout_maps_to_timeout() {
+        let err: Error = DeadpoolError::Timeout(TimeoutType::Wait).into();
+        assert!(matches!(err, Error::Timeout(TimeoutType::Wait)));
+        assert!(err.is_transient());
+    }
+
+    #[test]
+    fn deadpool_closed_maps_to_a_connection_error() {
+        let err: Error = DeadpoolError::Closed.into();
+        assert!(matches!(err, Error::Connection(_)));
+    }
+}

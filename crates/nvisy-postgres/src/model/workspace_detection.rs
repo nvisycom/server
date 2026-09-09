@@ -15,6 +15,7 @@ use crate::types::{DetectionMetadata, DetectionStatus, Json, PipelineTriggerType
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_detections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct WorkspaceDetection {
     /// Unique detection identifier.
     pub id: Uuid,
@@ -54,6 +55,7 @@ pub struct WorkspaceDetection {
 #[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = workspace_detections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceDetection {
     /// Pipeline ID (required).
     pub pipeline_id: Uuid,
@@ -74,12 +76,34 @@ pub struct NewWorkspaceDetection {
     pub idempotency_key: Option<String>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<Json<DetectionMetadata>>,
+    /// Start timestamp override, for tests only.
+    #[cfg(any(feature = "test_util", test))]
+    pub started_at: Option<Timestamp>,
+    /// Completion timestamp override, for tests only.
+    #[cfg(any(feature = "test_util", test))]
+    pub completed_at: Option<Timestamp>,
+}
+
+impl NewWorkspaceDetection {
+    /// A minimal detection of `input_file_id` through `pipeline_id`, for tests.
+    /// The trigger and status take their database defaults (`user`, `pending`),
+    /// so the detection starts unclaimed and claimable.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(pipeline_id: Uuid, account_id: Uuid, input_file_id: Uuid) -> Self {
+        Self {
+            pipeline_id,
+            account_id,
+            input_file_id,
+            ..Default::default()
+        }
+    }
 }
 
 /// Data for updating a workspace detection.
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = workspace_detections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateWorkspaceDetection {
     /// Detection status.
     pub status: Option<DetectionStatus>,

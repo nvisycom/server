@@ -15,6 +15,7 @@ use crate::types::Handle;
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct WorkspacePolicy {
     /// Unique policy identifier.
     pub id: Uuid,
@@ -44,6 +45,7 @@ pub struct WorkspacePolicy {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspace_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspacePolicy {
     /// Workspace ID (required).
     pub workspace_id: Uuid,
@@ -59,12 +61,38 @@ pub struct NewWorkspacePolicy {
     pub definition: Vec<u8>,
     /// Metadata for filtering/display.
     pub metadata: Option<JsonValue>,
+    /// Creation timestamp override, for tests only.
+    #[cfg(any(feature = "test_util", test))]
+    pub created_at: Option<Timestamp>,
+}
+
+impl NewWorkspacePolicy {
+    /// A minimal policy for `workspace_id`, for tests.
+    ///
+    /// Both the slug and the display name are unique per call, so several test
+    /// policies fit in one workspace without colliding on the per-workspace
+    /// unique indexes. The definition is a non-empty placeholder blob.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(workspace_id: Uuid, account_id: Uuid) -> Self {
+        let suffix = &Uuid::now_v7().simple().to_string()[..12];
+        Self {
+            workspace_id,
+            account_id,
+            slug: Handle::test(),
+            display_name: format!("Test Policy {suffix}"),
+            description: None,
+            definition: vec![1, 2, 3],
+            metadata: None,
+            created_at: None,
+        }
+    }
 }
 
 /// Data for updating a workspace policy.
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = workspace_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateWorkspacePolicy {
     /// Policy display name.
     pub display_name: Option<String>,

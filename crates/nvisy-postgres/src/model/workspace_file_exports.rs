@@ -16,6 +16,7 @@ use crate::schema::workspace_file_exports;
 #[diesel(table_name = workspace_file_exports)]
 #[diesel(primary_key(file_id, connection_id))]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct WorkspaceFileExport {
     /// The workspace file that was exported.
     pub file_id: Uuid,
@@ -31,6 +32,7 @@ pub struct WorkspaceFileExport {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspace_file_exports)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceFileExport {
     /// The workspace file that was exported.
     pub file_id: Uuid,

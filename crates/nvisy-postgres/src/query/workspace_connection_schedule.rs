@@ -123,3 +123,97 @@ impl WorkspaceConnectionScheduleRepository for PgConnection {
         Ok(schedules)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use crate::model::{NewWorkspaceConnection, NewWorkspaceConnectionSchedule};
+    use crate::query::{WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository};
+    use crate::test_util::TestDatabase;
+    use crate::types::{SyncDeletionPolicy, SyncMode};
+
+    /// Seeds a connection in the fixture's workspace and returns its id — the FK
+    /// parent a schedule row requires.
+    async fn seed_connection(db: &TestDatabase) -> anyhow::Result<Uuid> {
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+        let connection = conn
+            .create_workspace_connection(NewWorkspaceConnection::test(workspace_id, account_id))
+            .await?;
+        Ok(connection.id)
+    }
+
+    #[tokio::test]
+    async fn create_applies_database_defaults() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let connection_id = seed_connection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        let schedule = conn
+            .create_connection_schedule(NewWorkspaceConnectionSchedule::test(connection_id))
+            .await?;
+
+        // The mode and deletion policy default; there is no cron (manual-only).
+        assert_eq!(schedule.sync_mode, SyncMode::Import);
+        assert_eq!(schedule.deletion_policy, SyncDeletionPolicy::Ignore);
+        assert!(schedule.schedule_cron.is_none());
+
+        let found = conn.find_connection_schedule(connection_id).await?;
+        assert_eq!(found.map(|s| s.connection_id), Some(connection_id));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn upsert_replaces_an_existing_schedule() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let connection_id = seed_connection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        // First upsert inserts an import schedule with a cron.
+        let mut first = NewWorkspaceConnectionSchedule::test(connection_id);
+        first.schedule_cron = Some("0 * * * *".to_owned());
+        let first = conn.upsert_connection_schedule(first).await?;
+        assert_eq!(first.sync_mode, SyncMode::Import);
+
+        // Second upsert on the same connection replaces every field.
+        let mut second = NewWorkspaceConnectionSchedule::test(connection_id);
+        second.sync_mode = Some(SyncMode::Export);
+        second.schedule_cron = None;
+        second.deletion_policy = Some(SyncDeletionPolicy::Delete);
+        let second = conn.upsert_connection_schedule(second).await?;
+        assert_eq!(second.sync_mode, SyncMode::Export);
+        assert_eq!(second.deletion_policy, SyncDeletionPolicy::Delete);
+        assert!(second.schedule_cron.is_none());
+
+        // Still exactly one row for the connection.
+        let all = conn.find_schedules(&[connection_id]).await?;
+        assert_eq!(all.len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_schedules_returns_only_the_present_ones() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let scheduled = seed_connection(&db).await?;
+        let unscheduled = seed_connection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        let _ = conn
+            .create_connection_schedule(NewWorkspaceConnectionSchedule::test(scheduled))
+            .await?;
+
+        // The batch query returns only the connection that has a schedule.
+        let found = conn
+            .find_schedules(&[scheduled, unscheduled, Uuid::now_v7()])
+            .await?;
+        assert_eq!(
+            found.iter().map(|s| s.connection_id).collect::<Vec<_>>(),
+            vec![scheduled]
+        );
+
+        // An empty input is a no-op, not a full-table scan.
+        assert!(conn.find_schedules(&[]).await?.is_empty());
+        Ok(())
+    }
+}

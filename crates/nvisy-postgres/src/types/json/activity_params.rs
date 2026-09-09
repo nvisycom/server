@@ -484,6 +484,88 @@ mod tests {
         assert_eq!(p.object_label(), Some("alice".to_owned()));
     }
 
+    /// A small sample of payloads spanning every mapping shape (id-only,
+    /// label-only, both) and the provider variants added with the split.
+    fn sample_payloads() -> Vec<ActivityPayload> {
+        let provider = || ProviderActivityParams {
+            provider_id: ProviderId::from_uuid(Uuid::now_v7()),
+            provider_name: "OpenAI".to_owned(),
+        };
+        let connection = || ConnectionActivityParams {
+            connection_id: ConnectionId::from_uuid(Uuid::now_v7()),
+            connection_name: "Prod S3".to_owned(),
+        };
+        vec![
+            ActivityPayload::ProviderCreated(provider()),
+            ActivityPayload::ProviderUpdated(provider()),
+            ActivityPayload::ProviderDeleted(provider()),
+            ActivityPayload::ConnectionCreated(connection()),
+            ActivityPayload::MemberAdded(MemberActivityParams {
+                member_username: Handle::from_str("alice").unwrap(),
+            }),
+        ]
+    }
+
+    #[test]
+    fn activity_type_tag_matches_the_serde_tag() {
+        // The hand-written payload -> ActivityType map must agree with the serde
+        // `type` tag the payload serializes under, or a row's stored type would
+        // disagree with its body.
+        for payload in sample_payloads() {
+            let serde_tag = serde_json::to_value(&payload).unwrap()["type"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            assert_eq!(payload.activity_type().as_tag(), serde_tag, "{payload:?}");
+        }
+    }
+
+    #[test]
+    fn provider_events_map_to_the_matching_webhook_event() {
+        use crate::types::WebhookEvent;
+        let cases = [
+            (
+                ActivityPayload::ProviderCreated(ProviderActivityParams {
+                    provider_id: ProviderId::from_uuid(Uuid::now_v7()),
+                    provider_name: "x".to_owned(),
+                }),
+                WebhookEvent::ProviderCreated,
+            ),
+            (
+                ActivityPayload::ProviderDeleted(ProviderActivityParams {
+                    provider_id: ProviderId::from_uuid(Uuid::now_v7()),
+                    provider_name: "x".to_owned(),
+                }),
+                WebhookEvent::ProviderDeleted,
+            ),
+        ];
+        for (payload, expected) in cases {
+            assert_eq!(payload.webhook_event(), Some(expected), "{payload:?}");
+        }
+    }
+
+    #[test]
+    fn provider_object_has_prefixed_id_and_name_label() {
+        let provider_id = ProviderId::from_uuid(Uuid::now_v7());
+        let p = ActivityPayload::ProviderUpdated(ProviderActivityParams {
+            provider_id,
+            provider_name: "OpenAI GPT-4".to_owned(),
+        });
+        assert_eq!(p.object_id(), Some(provider_id.to_string()));
+        assert!(p.object_id().unwrap().starts_with("prov_"));
+        assert_eq!(p.object_label(), Some("OpenAI GPT-4".to_owned()));
+    }
+
+    #[test]
+    fn workspace_events_carry_no_webhook() {
+        // The workspace lifecycle is not a webhook event; `webhook_event` returns
+        // `None` so the drainer does not emit one.
+        let p = ActivityPayload::WorkspaceCreated(WorkspaceActivityParams {
+            workspace_slug: Handle::from_str("acme").unwrap(),
+        });
+        assert_eq!(p.webhook_event(), None);
+    }
+
     #[test]
     fn object_with_both_id_and_label() {
         let id = Uuid::now_v7();

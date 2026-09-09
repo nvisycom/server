@@ -28,3 +28,15 @@ impl IdentityProvider {
         !matches!(self, Self::Password)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::IdentityProvider::{Google, Microsoft, Password};
+
+    #[test]
+    fn is_oidc_for_external_providers_only() {
+        assert!(!Password.is_oidc());
+        assert!(Google.is_oidc());
+        assert!(Microsoft.is_oidc());
+    }
+}

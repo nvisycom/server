@@ -17,6 +17,7 @@ use crate::types::IdentityProvider;
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = account_identities)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct AccountIdentity {
     /// Unique identity identifier.
     pub id: Uuid,
@@ -40,6 +41,7 @@ pub struct AccountIdentity {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = account_identities)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewAccountIdentity {
     /// Account this identity authenticates.
     pub account_id: Uuid,
@@ -55,7 +57,6 @@ pub struct NewAccountIdentity {
 
 impl NewAccountIdentity {
     /// Builds a local password identity holding an Argon2 hash.
-    #[must_use]
     pub fn password(account_id: Uuid, secret: String) -> Self {
         Self {
             account_id,
@@ -67,7 +68,6 @@ impl NewAccountIdentity {
     }
 
     /// Builds an OIDC identity keyed by the provider's subject claim.
-    #[must_use]
     pub fn oidc(
         account_id: Uuid,
         provider: IdentityProvider,
