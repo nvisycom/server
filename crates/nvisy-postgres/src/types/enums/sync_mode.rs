@@ -13,7 +13,7 @@ db_enum! {
     /// and pulls the whole listing on a timer. A file service is not enumerated on
     /// a timer — its import is picker-driven and request-time — so only `Export`
     /// is scheduled for a file service.
-    pub enum SyncMode: Default = Import, "crate::schema::sql_types::SyncMode" {
+    pub enum SyncMode = "crate::schema::sql_types::SyncMode" {
         /// Fetch objects from the connection into the workspace.
         Import = "import",
         /// Push workspace files out to the connection.
