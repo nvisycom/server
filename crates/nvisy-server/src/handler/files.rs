@@ -616,18 +616,13 @@ async fn download_file(
             ErrorKind::NotFound.with_message("File content not found")
         })?;
 
-    // The display name is user-controlled, so strip characters that are invalid
-    // in a quoted header value to avoid header injection and a failed parse
-    // before it goes into the (server-trusting) attachment header.
-    let safe_name: String = file
-        .display_name
-        .chars()
-        .filter(|c| !c.is_control() && *c != '"' && *c != '\\')
-        .collect();
-    // Content-length is the plaintext size from the record; storage holds the
-    // larger ciphertext, which the decrypting reader unwraps as it streams.
+    // `attachment_headers` handles the user-controlled name safely (escapes it,
+    // and carries a non-ASCII name via RFC 6266 `filename*`), so it is passed
+    // through as-is. Content-length is the plaintext size from the record;
+    // storage holds the larger ciphertext, which the decrypting reader unwraps as
+    // it streams.
     let headers = attachment_headers(
-        &safe_name,
+        &file.display_name,
         HeaderValue::from_static("application/octet-stream"),
         file.file_size_bytes as u64,
     );

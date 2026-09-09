@@ -24,7 +24,7 @@ use aide::axum::routing::post_with;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::Redirect;
+use axum::response::Response;
 use axum::routing::get;
 use nvisy_file_service::FileService;
 use nvisy_file_service::provider::{ConnectionSettings, FileServiceConfig, FileServiceProvider};
@@ -158,7 +158,7 @@ async fn oauth_callback(
     State(redirect): State<FileServiceRedirect>,
     security: SecurityContext,
     Query(query): Query<OAuthCallbackQuery>,
-) -> Redirect {
+) -> Response {
     tracing::debug!(target: TRACING_TARGET, "Completing cloud file OAuth");
 
     // The callback is a top-level browser navigation, so its outcome is conveyed

@@ -116,13 +116,15 @@ impl RedirectResult<'_> {
 /// A `{workspaceSlug}` placeholder in the configured base is substituted with
 /// `workspace_slug` when known (i.e. on success), so a base like
 /// `https://app/w/{workspaceSlug}/integrations` lands on the workspace's page.
-/// The outcome is appended as a `connection=success|error` query. Falls back to a
-/// self-describing data page when no frontend URL is configured.
+/// The outcome is appended as a `connection=success|error` query. When no
+/// frontend URL is configured, renders a minimal in-page result instead of a
+/// redirect — a browser blocks a top-level navigation to a `data:` URL, so a
+/// `data:` `Location` would show the user nothing.
 pub(crate) fn connection_result_redirect(
     base: Option<&str>,
     status: &str,
     workspace_slug: Option<&str>,
-) -> Redirect {
+) -> Response {
     match base {
         Some(base) => {
             let base = match workspace_slug {
@@ -130,10 +132,11 @@ pub(crate) fn connection_result_redirect(
                 None => base.to_owned(),
             };
             let separator = if base.contains('?') { '&' } else { '?' };
-            Redirect::to(&format!("{base}{separator}connection={status}"))
+            Redirect::to(&format!("{base}{separator}connection={status}")).into_response()
         }
-        None => Redirect::to(&format!(
-            "data:text/plain,cloud%20file%20connection%20{status}"
-        )),
+        None => {
+            let body = format!("Cloud file connection {status}. You can close this window.");
+            (StatusCode::OK, body).into_response()
+        }
     }
 }
