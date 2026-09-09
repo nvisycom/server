@@ -11,6 +11,7 @@ use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::http::Method;
 use axum::http::header::{self, HeaderName, HeaderValue};
+use axum_client_ip::ClientIpSource;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -33,6 +34,7 @@ pub trait RouterSecurityExt<S> {
         cors: &CorsConfig,
         upload: &UploadConfig,
         headers: &SecurityHeadersConfig,
+        client_ip_source: &ClientIpSource,
     ) -> Self;
 
     /// Layers security middlewares with default configurations.
@@ -52,6 +54,7 @@ where
         cors: &CorsConfig,
         upload: &UploadConfig,
         headers: &SecurityHeadersConfig,
+        client_ip_source: &ClientIpSource,
     ) -> Self {
         let cors_layer = CorsLayer::new()
             .allow_origin(cors.to_header_values())
@@ -75,6 +78,10 @@ where
             .max_age(cors.max_age);
 
         let mut router = self
+            // Tells the `ClientIp` extractor where to read the caller's IP from
+            // (the connection peer, or a named proxy header). Without this the
+            // extractor cannot resolve an IP and `SecurityContext` records none.
+            .layer(client_ip_source.clone().into_extension())
             .layer(DefaultBodyLimit::max(upload.max_body_bytes))
             // The router-wide hard ceiling must not sit below any per-route
             // default, or an ordinary request within `max_body_bytes` would be
@@ -115,6 +122,7 @@ where
             &CorsConfig::default(),
             &UploadConfig::default(),
             &SecurityHeadersConfig::default(),
+            &ClientIpSource::ConnectInfo,
         )
     }
 }

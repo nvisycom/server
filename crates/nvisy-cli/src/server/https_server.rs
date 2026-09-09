@@ -1,11 +1,11 @@
 //! HTTPS server implementation using enhanced lifecycle management.
 
 use std::io;
+use std::net::SocketAddr;
 use std::path::Path;
 
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
-use nvisy_server::extract::AppConnectInfo;
 use tokio_util::sync::CancellationToken;
 
 use super::TRACING_TARGET_STARTUP;
@@ -68,7 +68,7 @@ pub async fn serve_https(
 
         axum_server::bind_rustls(server_addr, tls_config)
             .handle(handle)
-            .serve(app.into_make_service_with_connect_info::<AppConnectInfo>())
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
             .await
     })
     .await

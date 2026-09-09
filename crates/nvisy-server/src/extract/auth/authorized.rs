@@ -13,14 +13,15 @@ use std::marker::PhantomData;
 use aide::OperationInput;
 use aide::generate::GenContext;
 use aide::openapi::{Operation, Response};
-use axum::extract::FromRequestParts;
+use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
+use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Workspace, WorkspaceMember};
 use uuid::Uuid;
 
 use super::{AuthState, Permission};
-use crate::extract::{PgPool, WorkspaceContext};
-use crate::handler::Error;
+use crate::extract::WorkspaceContext;
+use crate::handler::{Error, ErrorKind};
 
 /// A workspace permission required by a handler, expressed as a marker type so it
 /// can parameterize [`Authorized`]. Implemented for one zero-sized type per
@@ -53,25 +54,36 @@ impl<P, S> FromRequestParts<S> for Authorized<P>
 where
     P: RequiredPermission,
     S: Sync + Send + 'static,
+    PgClient: FromRef<S>,
     AuthState: FromRequestParts<S, Rejection = Error<'static>>,
     WorkspaceContext: FromRequestParts<S, Rejection = Error<'static>>,
-    PgPool: FromRequestParts<S, Rejection = Error<'static>>,
 {
     type Rejection = Error<'static>;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        // Each collaborator resolves independently: AuthState verifies the token
-        // (cached in extensions), WorkspaceContext resolves the slug, PgPool hands
-        // us a pooled connection for the membership/role check.
+        // AuthState verifies the token (cached in extensions) and WorkspaceContext
+        // resolves the slug. The membership/role check needs a connection only for
+        // its own duration, so acquire one here and drop it before returning —
+        // never hand a pooled connection to the handler body, which would pin it
+        // for the request's whole lifetime and exhaust the pool under load.
         let auth = AuthState::from_request_parts(parts, state).await?;
         let WorkspaceContext(workspace) =
             WorkspaceContext::from_request_parts(parts, state).await?;
-        let PgPool(mut conn) = PgPool::from_request_parts(parts, state).await?;
 
         let account_id = auth.account_id;
-        let member = auth
-            .authorize_workspace(&mut conn, workspace.id, P::PERMISSION)
-            .await?;
+        let member = {
+            let mut conn = PgClient::from_ref(state)
+                .get_connection()
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, "Failed to acquire database connection");
+                    ErrorKind::InternalServerError
+                        .with_message("Database connection unavailable")
+                        .with_context(e.to_string())
+                })?;
+            auth.authorize_workspace(&mut conn, workspace.id, P::PERMISSION)
+                .await?
+        };
 
         Ok(Self {
             account_id,

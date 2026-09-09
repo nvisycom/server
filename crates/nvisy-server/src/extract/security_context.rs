@@ -9,11 +9,10 @@ use aide::generate::GenContext;
 use aide::openapi::Operation;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
+use axum_client_ip::ClientIp;
 use axum_extra::TypedHeader;
 use axum_extra::headers::UserAgent;
 use ipnet::IpNet;
-
-use crate::extract::ClientIp;
 
 /// The caller's client IP and user agent, for stamping onto security-relevant
 /// records. Both are best-effort: a missing or unreadable value is `None` rather

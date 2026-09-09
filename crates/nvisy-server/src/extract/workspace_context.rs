@@ -33,29 +33,6 @@ use crate::handler::{Error, ErrorKind};
 #[derive(Debug, Clone)]
 pub struct WorkspaceContext(pub Workspace);
 
-impl WorkspaceContext {
-    /// Returns the resolved workspace.
-    #[inline]
-    #[must_use]
-    pub fn workspace(&self) -> &Workspace {
-        &self.0
-    }
-
-    /// Returns the resolved workspace's identifier.
-    #[inline]
-    #[must_use]
-    pub fn id(&self) -> uuid::Uuid {
-        self.0.id
-    }
-
-    /// Consumes the context, returning the owned workspace.
-    #[inline]
-    #[must_use]
-    pub fn into_inner(self) -> Workspace {
-        self.0
-    }
-}
-
 /// The `{workspaceSlug}` path segment. Named to match the OpenAPI parameter and
 /// the route definition.
 #[derive(Debug, Deserialize, JsonSchema)]

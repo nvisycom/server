@@ -14,6 +14,7 @@
 
 use aide::axum::ApiRouter;
 use axum::Router;
+use axum_client_ip::ClientIpSource;
 
 use crate::args::TRACING_TARGET_CONFIG;
 use crate::middleware::{
@@ -24,7 +25,7 @@ use crate::middleware::{
 /// The HTTP-middleware configs applied to the router.
 ///
 /// The `clap::Args` derive is gated on the `cli` feature.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 #[must_use = "config does nothing unless you use it"]
 pub struct MiddlewareArgs {
@@ -39,6 +40,34 @@ pub struct MiddlewareArgs {
     /// Recovery (timeout/panic-handling) middleware configuration.
     #[cfg_attr(feature = "cli", clap(flatten))]
     pub recovery: RecoveryConfig,
+
+    /// Where the client-IP extractor reads the caller's IP from (feeding
+    /// [`SecurityContext`](crate::extract::SecurityContext)). Defaults to the
+    /// connection peer (`ConnectInfo`), which cannot be spoofed; a deployment
+    /// behind a proxy that sets a forwarding header must set this to the matching
+    /// source (e.g. `RightmostXForwardedFor`) or the recorded IP will be the
+    /// proxy's.
+    #[cfg_attr(
+        feature = "cli",
+        arg(
+            long,
+            env = "CLIENT_IP_SOURCE",
+            default_value = "ConnectInfo",
+            value_parser = <ClientIpSource as std::str::FromStr>::from_str,
+        )
+    )]
+    pub client_ip_source: ClientIpSource,
+}
+
+impl Default for MiddlewareArgs {
+    fn default() -> Self {
+        Self {
+            cors: CorsConfig::default(),
+            openapi: OpenApiConfig::default(),
+            recovery: RecoveryConfig::default(),
+            client_ip_source: ClientIpSource::ConnectInfo,
+        }
+    }
 }
 
 impl MiddlewareArgs {
@@ -67,6 +96,12 @@ impl MiddlewareArgs {
             request_timeout = ?self.recovery.request_timeout,
             "Recovery configuration"
         );
+
+        tracing::info!(
+            target: TRACING_TARGET_CONFIG,
+            client_ip_source = %self.client_ip_source,
+            "Client IP source configuration"
+        );
     }
 }
 
@@ -90,7 +125,12 @@ where
     fn with_middleware(self, middleware: &MiddlewareArgs, upload: &UploadConfig) -> Router<S> {
         self.with_open_api(&middleware.openapi)
             .with_metrics()
-            .with_security(&middleware.cors, upload, &SecurityHeadersConfig::default())
+            .with_security(
+                &middleware.cors,
+                upload,
+                &SecurityHeadersConfig::default(),
+                &middleware.client_ip_source,
+            )
             .with_observability()
             .with_recovery(&middleware.recovery)
     }
