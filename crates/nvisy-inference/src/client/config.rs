@@ -156,3 +156,51 @@ impl LlmConfig {
         Ok(client)
     }
 }
+
+/// A fully-typed inference connection configuration, across every inference kind.
+///
+/// Inference is a family: a language model for chat today, and other model kinds
+/// (e.g. named-entity recognition) as they are added. Each kind owns its own
+/// config with its own `provider` tag, and this enum is untagged, so the flat
+/// payload's `provider` remains the sole discriminator — an inference kind is
+/// added as a new variant with no change to the wire format or storage.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(untagged)]
+pub enum InferenceConfig {
+    /// A language model (chat/completion) connection.
+    Llm(LlmConfig),
+}
+
+impl InferenceConfig {
+    /// The provider identifier for this config, matching the serialized `provider`
+    /// tag and used for the stored `provider` column and for filtering.
+    #[must_use]
+    pub fn provider_id(&self) -> &'static str {
+        match self {
+            Self::Llm(config) => config.provider_id(),
+        }
+    }
+
+    /// The caller-supplied base URL, if any — the endpoint the deployment policy
+    /// must validate before the config is stored.
+    #[must_use]
+    pub fn base_url(&self) -> Option<&str> {
+        match self {
+            Self::Llm(config) => config.base_url(),
+        }
+    }
+
+    /// Validates this config by building its provider client and verifying the
+    /// credentials against the provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`](crate::Error) describing the build or verification
+    /// failure when the provider does not accept the credentials.
+    pub async fn validate(&self) -> Result<()> {
+        match self {
+            Self::Llm(config) => config.validate().await,
+        }
+    }
+}

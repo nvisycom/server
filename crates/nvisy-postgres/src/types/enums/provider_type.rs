@@ -1,33 +1,29 @@
-//! Provider capability-category enumeration.
+//! Inference provider-type enumeration.
 
 use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-/// The capability category of a connection's provider.
+/// The inference model type backing a workspace provider.
 ///
-/// Corresponds to the `PROVIDER_TYPE` PostgreSQL enum. A stable, closed set:
-/// the concrete provider (the `provider` column, e.g. `s3` or `anthropic`) stays
-/// open and extensible, while its capability is one of these types. Lets a
-/// connection be found by what it can do — e.g. a workspace's language model —
-/// without decrypting its config.
+/// Corresponds to the `PROVIDER_TYPE` PostgreSQL enum. A workspace provider is an
+/// inference service the platform calls; this says which kind of model it is — a
+/// language model for chat, or a named-entity-recognition model for extraction.
+/// The concrete vendor (the `provider` column, e.g. `openai`) is orthogonal and
+/// stays open; this type is a stable, closed set used to find a workspace's
+/// provider of a given type without decrypting its config.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
 #[ExistingTypePath = "crate::schema::sql_types::ProviderType"]
 pub enum ProviderType {
-    /// External object storage (s3, azure, gcs, ...).
-    #[db_rename = "object_store"]
-    #[serde(rename = "object_store")]
-    ObjectStore,
+    /// A language model (chat / completion).
+    #[db_rename = "llm"]
+    #[serde(rename = "llm")]
+    Llm,
 
-    /// LLM inference (openai, ollama, anthropic, ...).
-    #[db_rename = "language_model"]
-    #[serde(rename = "language_model")]
-    LanguageModel,
-
-    /// External file service (google_drive, dropbox, ...).
-    #[db_rename = "file_service"]
-    #[serde(rename = "file_service")]
-    FileService,
+    /// A named-entity-recognition model (entity extraction).
+    #[db_rename = "ner"]
+    #[serde(rename = "ner")]
+    Ner,
 }

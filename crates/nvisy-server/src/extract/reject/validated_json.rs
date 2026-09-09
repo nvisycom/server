@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use aide::OperationInput;
 use aide::generate::GenContext;
 use aide::openapi::{Operation, Response};
-use axum::extract::{FromRequest, Request};
+use axum::extract::{FromRequest, OptionalFromRequest, Request};
 use derive_more::{Deref, DerefMut, From};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -60,6 +60,29 @@ where
         // Then validate the deserialized data
         data.validate()?;
         Ok(Self::new(data))
+    }
+}
+
+impl<T, S> OptionalFromRequest<S> for ValidateJson<T>
+where
+    T: DeserializeOwned + Validate + 'static,
+    S: Send + Sync,
+{
+    type Rejection = Error<'static>;
+
+    /// Extracts and validates a body when one is present; an absent or malformed
+    /// body yields `None`. Mirrors [`Json`]'s optional semantics: only a server
+    /// error propagates, so a missing optional body is not an error.
+    async fn from_request(req: Request, state: &S) -> Result<Option<Self>, Self::Rejection> {
+        match <Self as FromRequest<S>>::from_request(req, state).await {
+            Ok(validated) => Ok(Some(validated)),
+            // For optional extraction, only propagate server errors; client errors
+            // (absent body, malformed JSON, validation failure) result in `None`.
+            Err(error) => match error.kind() {
+                ErrorKind::InternalServerError => Err(error),
+                _ => Ok(None),
+            },
+        }
     }
 }
 

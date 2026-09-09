@@ -38,11 +38,18 @@ const EXPORT_PREFIX_SELECTED: &str = "exports/";
 pub(super) struct Exporter {
     infra: Infra,
     connector: Connector,
+    /// Maximum files uploaded concurrently within a single export batch.
+    export_concurrency: usize,
 }
 
 impl Exporter {
-    pub(super) fn new(infra: Infra, connector: Connector) -> Self {
-        Self { infra, connector }
+    pub(super) fn new(infra: Infra, connector: Connector, export_concurrency: usize) -> Self {
+        Self {
+            infra,
+            connector,
+            // At least one, so a misconfigured zero never stalls the pipeline.
+            export_concurrency: export_concurrency.max(1),
+        }
     }
 
     /// Exports a caller-selected set of workspace files to the connection, each
@@ -123,10 +130,16 @@ impl Exporter {
     /// exports never overwrite imported originals. A single file failing is logged
     /// and skipped rather than aborting the run. Returns the number exported.
     ///
+    /// Files are uploaded with bounded concurrency (up to `export_concurrency` at
+    /// once), mirroring the import pipeline. Each export is independent (its own
+    /// read/decrypt/upload/record), so concurrency preserves the per-file
+    /// skip-on-failure behavior.
+    ///
     /// The provider source is connected once for the whole batch (validating the
-    /// endpoint and refreshing an OAuth token at most once), not per file. A
-    /// connect failure is a batch-wide fault and is propagated, so the run is
-    /// recorded as failed rather than silently reporting zero exports.
+    /// endpoint and refreshing an OAuth token at most once), not per file, and is
+    /// shared by the concurrent uploads. A connect failure is a batch-wide fault
+    /// and is propagated, so the run is recorded as failed rather than silently
+    /// reporting zero exports.
     async fn export_files(
         &self,
         connection: &WorkspaceConnection,
@@ -134,26 +147,33 @@ impl Exporter {
         files: Vec<WorkspaceFile>,
         object_prefix: &str,
     ) -> Result<u64> {
+        use futures::stream::{self, StreamExt};
+
         let source = self.connector.file_source(connection, config).await?;
+        let source = source.as_ref();
         let object_store = matches!(config, ConnectionConfig::ObjectStore(_));
 
-        let mut exported = 0u64;
-        for file in files {
-            let remote_key = export_key(&file, object_store, object_prefix);
-            match self
-                .export_one(source.as_ref(), connection, &file, &remote_key)
-                .await
-            {
-                Ok(()) => exported += 1,
-                Err(err) => {
-                    tracing::warn!(
-                        target: TRACING_TARGET,
-                        file_id = %file.id, error = %err,
-                        "Skipping file that failed to export",
-                    );
+        let exported = stream::iter(files)
+            .map(|file| async move {
+                let remote_key = export_key(&file, object_store, object_prefix);
+                match self
+                    .export_one(source, connection, &file, &remote_key)
+                    .await
+                {
+                    Ok(()) => 1u64,
+                    Err(err) => {
+                        tracing::warn!(
+                            target: TRACING_TARGET,
+                            file_id = %file.id, error = %err,
+                            "Skipping file that failed to export",
+                        );
+                        0
+                    }
                 }
-            }
-        }
+            })
+            .buffer_unordered(self.export_concurrency)
+            .fold(0u64, |total, exported| std::future::ready(total + exported))
+            .await;
         Ok(exported)
     }
 

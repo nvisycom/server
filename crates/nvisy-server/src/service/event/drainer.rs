@@ -24,8 +24,8 @@ use nvisy_postgres::types::{
     ConnectionSyncFailedParams, DetectionActivityParams, DetectionCompletedParams,
     DetectionFailedParams, DetectionId, FileActivityParams, Handle, InviteActivityParams, Json,
     MemberActivityParams, NotificationPayload, PipelineActivityParams, PolicyActivityParams,
-    RedactionActivityParams, RedactionCreatedParams, RedactionId, WebhookActivityParams,
-    WebhookEvent, WebhookId, WorkspaceActivityParams,
+    ProviderActivityParams, ProviderId, RedactionActivityParams, RedactionCreatedParams,
+    RedactionId, WebhookActivityParams, WebhookEvent, WebhookId, WorkspaceActivityParams,
 };
 use nvisy_postgres::{AsyncConnection, PgConn};
 use serde_json::Value;
@@ -34,7 +34,7 @@ use uuid::Uuid;
 
 use crate::handler::{Error, Result};
 use crate::service::event::{
-    ConnectionRef, DetectionRef, FileRef, InviteRef, MemberRef, PolicyRef, WebhookRef,
+    ConnectionRef, DetectionRef, FileRef, InviteRef, MemberRef, PolicyRef, ProviderRef, WebhookRef,
     WorkspaceEvent, WorkspaceRef,
 };
 use crate::service::{Infra, NotificationEmitter, WebhookEmitter, Worker};
@@ -315,6 +315,10 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
         connection_id: ConnectionId::from_uuid(connection_id),
         connection_name: connection_name.to_owned(),
     };
+    let provider = |p: &ProviderRef| ProviderActivityParams {
+        provider_id: ProviderId::from_uuid(p.provider_id),
+        provider_name: p.provider_name.clone(),
+    };
     let webhook = |w: &WebhookRef| WebhookActivityParams {
         webhook_id: WebhookId::from_uuid(w.webhook_id),
         webhook_name: w.webhook_name.clone(),
@@ -369,6 +373,9 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
         } => {
             ActivityPayload::ConnectionSyncFailed(connection_sync(*connection_id, connection_name))
         }
+        E::ProviderCreated(p) => ActivityPayload::ProviderCreated(provider(p)),
+        E::ProviderUpdated(p) => ActivityPayload::ProviderUpdated(provider(p)),
+        E::ProviderDeleted(p) => ActivityPayload::ProviderDeleted(provider(p)),
         E::WebhookCreated(w) => ActivityPayload::WebhookCreated(webhook(w)),
         E::WebhookUpdated(w) => ActivityPayload::WebhookUpdated(webhook(w)),
         E::WebhookDeleted(w) => ActivityPayload::WebhookDeleted(webhook(w)),
@@ -408,6 +415,9 @@ fn webhook_of(event: &WorkspaceEvent) -> Option<(WebhookEvent, Option<Value>)> {
         E::ConnectionSyncStarted(..) => (WebhookEvent::ConnectionSyncStarted, None),
         E::ConnectionSyncCompleted { .. } => (WebhookEvent::ConnectionSyncCompleted, None),
         E::ConnectionSyncFailed { .. } => (WebhookEvent::ConnectionSyncFailed, None),
+        E::ProviderCreated(..) => (WebhookEvent::ProviderCreated, None),
+        E::ProviderUpdated(..) => (WebhookEvent::ProviderUpdated, None),
+        E::ProviderDeleted(..) => (WebhookEvent::ProviderDeleted, None),
         E::FileCreated {
             file,
             file_size_bytes,
@@ -540,6 +550,9 @@ fn notification_of(event: WorkspaceEvent) -> Option<(Uuid, NotificationPayload)>
         | E::ConnectionUpdated(_)
         | E::ConnectionDeleted(_)
         | E::ConnectionSyncStarted(_)
+        | E::ProviderCreated(_)
+        | E::ProviderUpdated(_)
+        | E::ProviderDeleted(_)
         | E::WebhookCreated(_)
         | E::WebhookUpdated(_)
         | E::WebhookDeleted(_)
@@ -573,6 +586,7 @@ fn resource_id_of(event: &WorkspaceEvent) -> Uuid {
         | E::ConnectionSyncStarted(c) => c.connection_id,
         E::ConnectionSyncCompleted { connection_id, .. }
         | E::ConnectionSyncFailed { connection_id, .. } => *connection_id,
+        E::ProviderCreated(p) | E::ProviderUpdated(p) | E::ProviderDeleted(p) => p.provider_id,
         E::WebhookCreated(w) | E::WebhookUpdated(w) | E::WebhookDeleted(w) => w.webhook_id,
         E::FileCreated { file, .. } => file.file_id,
         E::FileUpdated(f) | E::FileDeleted(f) => f.file_id,

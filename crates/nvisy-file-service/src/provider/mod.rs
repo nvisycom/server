@@ -1,6 +1,6 @@
 //! Typed cloud file-service configuration and provider dispatch.
 //!
-//! [`Provider`] is the single enum of supported providers; it owns each
+//! [`FileServiceProvider`] is the single enum of supported providers; it owns each
 //! provider's identity, OAuth endpoints, and client construction, so no caller
 //! re-derives per-provider facts. [`FileServiceConfig`] pairs a provider with its
 //! [`ConnectionSettings`] (OAuth tokens + sync root) and is what a connection
@@ -19,8 +19,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::EnumIter;
 
-use crate::client::{ByteStream, FileServiceClient};
-use crate::error::{Error, Result, kind_for_status};
+use crate::client::{ByteStream, FileService, FileServiceClient, PickerAccessToken};
+use crate::error::{Error, ErrorKind, Result, kind_for_status};
 use crate::oauth::{OAuthProvider, OAuthTokens};
 
 /// Tracing target for provider requests.
@@ -68,7 +68,7 @@ impl ProviderRequest for reqwest::RequestBuilder {
         tracing::warn!(
             target: TRACING_TARGET,
             %provider, status = status.as_u16(), body = %body,
-            "Provider request failed",
+            "FileServiceProvider request failed",
         );
         let detail: String = body.trim().chars().take(300).collect();
         let message = if detail.is_empty() {
@@ -123,7 +123,7 @@ fn encode_path_segment(segment: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, EnumIter)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
-pub enum Provider {
+pub enum FileServiceProvider {
     /// Google Drive.
     GoogleDrive,
     /// Dropbox.
@@ -134,7 +134,7 @@ pub enum Provider {
     Box,
 }
 
-impl Provider {
+impl FileServiceProvider {
     /// The stable identifier stored in the connection's `provider` column and
     /// matching the serialized tag.
     #[must_use]
@@ -187,6 +187,55 @@ impl Provider {
             Self::Box => Box::new(box_provider::BoxClient::new(http, access_token, root)),
         }
     }
+
+    /// Mints a browser file-picker token for a connection of this provider,
+    /// dispatching to the provider's picker-token behavior.
+    ///
+    /// OneDrive mints a SharePoint-audience token (its picker requires one,
+    /// distinct from the Graph token the connector uses); Google Drive and Box
+    /// return their ordinary access token, refreshed if stale; Dropbox's Chooser
+    /// uses a client-side app key and has no server token.
+    ///
+    /// The provider-specific logic lives in each provider module (e.g.
+    /// [`onedrive::mint_picker_token`]); this is the dispatch, kept here beside
+    /// [`connect`](Self::connect) so the generic [`FileService`] stays
+    /// provider-neutral.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider's picker does not use a server token, the
+    /// account is unsupported (e.g. a personal OneDrive account), or the token
+    /// cannot be minted.
+    pub(crate) async fn mint_picker_token(
+        self,
+        service: &FileService,
+        config: &FileServiceConfig,
+        resource: Option<&str>,
+    ) -> Result<PickerAccessToken> {
+        match self {
+            Self::OneDrive => onedrive::mint_picker_token(service, config, resource).await,
+            // Google Drive and Box pickers take the provider's ordinary access
+            // token, refreshed if stale.
+            Self::GoogleDrive | Self::Box => {
+                let fresh = service.ensure_fresh(config).await?;
+                let expires_at = fresh
+                    .refreshed
+                    .as_ref()
+                    .unwrap_or(config)
+                    .tokens()
+                    .expires_at;
+                Ok(PickerAccessToken {
+                    access_token: fresh.access_token,
+                    expires_at,
+                    refreshed: fresh.refreshed,
+                })
+            }
+            Self::Dropbox => Err(Error::new(
+                ErrorKind::BadRequest,
+                "this provider's picker uses a client-side app key, not a server token",
+            )),
+        }
+    }
 }
 
 /// The per-connection settings shared by every provider: the OAuth token set and
@@ -212,7 +261,7 @@ pub struct ConnectionSettings {
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct FileServiceConfig {
     /// Which provider backs this connection.
-    pub provider: Provider,
+    pub provider: FileServiceProvider,
     /// The connection's tokens and sync root.
     #[serde(flatten)]
     pub settings: ConnectionSettings,
@@ -221,7 +270,7 @@ pub struct FileServiceConfig {
 impl FileServiceConfig {
     /// Creates a config for `provider` with the given settings.
     #[must_use]
-    pub fn new(provider: Provider, settings: ConnectionSettings) -> Self {
+    pub fn new(provider: FileServiceProvider, settings: ConnectionSettings) -> Self {
         Self { provider, settings }
     }
 
@@ -265,7 +314,7 @@ mod tests {
     /// different columns of the same connection and are later compared.
     #[test]
     fn provider_id_matches_serde_tag() {
-        for provider in Provider::iter() {
+        for provider in FileServiceProvider::iter() {
             let tag = serde_json::to_value(provider)
                 .unwrap()
                 .as_str()

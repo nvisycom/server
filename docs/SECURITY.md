@@ -24,11 +24,25 @@ inputs (email, name) to estimate crack time. Verification uses constant-time
 comparison, and failed account lookups still execute a dummy hash to prevent
 timing-based account enumeration.
 
-**SSO integration** supports SAML 2.0 and OIDC for enterprise identity
-providers. Organizations can enforce SSO-only authentication, disabling
-password-based login for their workspace members. SSO sessions produce the
-same JWT tokens used by password authentication, keeping downstream
-authorization consistent.
+**SSO integration** supports OIDC sign-in with Google and Microsoft (and, by
+configuration, any OIDC provider). An account's authentication methods are
+decoupled from the account itself — a password and any linked providers are
+stored as separate identities — so an account can be password-only, SSO-only, or
+both. Sign-in verifies the provider's ID token (signature, audience, issuer, and
+nonce) and issues the same JWT session that password authentication does, keeping
+downstream authorization consistent. Enforcing SSO-only authentication per
+organization, and SAML 2.0, are planned on top of this foundation.
+
+**Account identities.** A password and each linked provider are stored as
+separate identity records; the account row itself holds no credential. An account
+must always keep at least one identity, so a delete of the last sign-in method is
+refused. On first OIDC sign-in an account is provisioned, or linked to an existing
+account when the provider asserts a matching *verified* email (an unverified email
+never links, so it cannot attach a provider identity to someone else's account).
+Adding a credential — setting a first password, or linking a provider — requires
+**step-up re-authentication**: a fresh proof of control of an identity already on
+the account, so a merely-stolen session cannot plant a durable new credential.
+Changing an existing password still requires the current password.
 
 **SCIM provisioning** automates user lifecycle management. Enterprise identity
 providers can create, update, deactivate, and remove accounts through the

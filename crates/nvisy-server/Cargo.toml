@@ -70,7 +70,7 @@ pin-project-lite = { workspace = true, features = [] }
 # HTTP server & middleware
 axum = { workspace = true, features = ["http2", "macros", "multipart"] }
 axum-client-ip = { workspace = true, features = [] }
-axum-extra = { workspace = true, features = ["typed-header", "attachment", "query"] }
+axum-extra = { workspace = true, features = ["typed-header", "attachment", "query", "cookie"] }
 tower = { workspace = true, features = [] }
 tower-http = { workspace = true, features = [] }
 
@@ -83,6 +83,7 @@ jsonwebtoken = { workspace = true, features = [] }
 argon2 = { workspace = true, features = [] }
 zxcvbn = { workspace = true, features = [] }
 sha2 = { workspace = true, features = [] }
+openidconnect = { workspace = true, features = ["reqwest", "rustls-tls"] }
 
 # Encryption & Cryptography
 chacha20poly1305 = { workspace = true, features = [] }
@@ -90,6 +91,7 @@ aead-stream = { workspace = true, features = ["alloc"] }
 hkdf = { workspace = true, features = [] }
 
 # Encoding
+base64 = { workspace = true, features = ["std"] }
 hex = { workspace = true, features = [] }
 mime_guess = { workspace = true }
 
@@ -124,6 +126,7 @@ anyhow = { workspace = true, features = [] }
 # Primitive datatypes
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
+time = { workspace = true, features = [] }
 ipnet = { workspace = true, features = [] }
 
 # Image processing

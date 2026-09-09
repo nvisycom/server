@@ -15,6 +15,7 @@
 
 mod account;
 mod account_api_token;
+mod account_identity;
 mod account_notification;
 mod analytics;
 mod chat_message;
@@ -34,11 +35,13 @@ mod workspace_invite;
 mod workspace_member;
 mod workspace_pipeline;
 mod workspace_policy;
+mod workspace_provider;
 mod workspace_redaction;
 mod workspace_webhook;
 
 pub use account::AccountRepository;
 pub use account_api_token::AccountApiTokenRepository;
+pub use account_identity::{AccountIdentityRepository, DeleteIdentityOutcome, LinkIdentityOutcome};
 pub use account_notification::AccountNotificationRepository;
 pub use analytics::{
     AnalyticsSnapshot, DetectionDayPoint, DetectionDurations, DetectionStatusCount, StorageByKind,
@@ -60,5 +63,6 @@ pub use workspace_invite::WorkspaceInviteRepository;
 pub use workspace_member::WorkspaceMemberRepository;
 pub use workspace_pipeline::WorkspacePipelineRepository;
 pub use workspace_policy::WorkspacePolicyRepository;
+pub use workspace_provider::WorkspaceProviderRepository;
 pub use workspace_redaction::WorkspaceRedactionRepository;
 pub use workspace_webhook::WorkspaceWebhookRepository;

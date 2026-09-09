@@ -1,11 +1,12 @@
--- Connections: encrypted provider connections scoped to workspaces.
+-- Connections: encrypted transfer-connection credentials scoped to workspaces.
 --
--- A connection is a generic, capability-agnostic credential holder: any
--- external provider (object store, LLM, ...) is a row here, distinguished only
--- by its `provider` and the shape of its encrypted config. Capabilities are
--- normalized into satellite tables — a connection that can sync has a
--- `workspace_connection_schedule` row and accrues `workspace_connection_syncs`
--- executions; a connection without those is just stored credentials.
+-- A connection is an external data source/sink the workspace transfers files
+-- with: an object store or a file service, distinguished by its `provider` and
+-- the shape of its encrypted config. Its `connection_type` is the capability
+-- category. Sync executions accrue in `workspace_connection_syncs`. Scheduled
+-- (cron) sync config lives in the `workspace_connection_schedule` satellite,
+-- present for connections that run on a timer. Inference services the platform
+-- calls (an LLM, an NER model) are a separate resource, `workspace_providers`.
 
 -- Execution status of a connection sync.
 CREATE TYPE SYNC_STATUS AS ENUM (
@@ -20,9 +21,8 @@ COMMENT ON TYPE SYNC_STATUS IS 'Execution status for connection syncs.';
 
 -- How a connection sync was initiated.
 CREATE TYPE SYNC_TRIGGER_TYPE AS ENUM (
-    'manual',       -- Manually triggered by a user
-    'scheduled',    -- Triggered by the connection's schedule
-    'webhook'       -- Triggered by an inbound webhook
+    'on_demand',    -- Triggered outside the schedule: a user, the SDK, or an external automation
+    'scheduled'     -- Triggered by the connection's schedule
 );
 
 COMMENT ON TYPE SYNC_TRIGGER_TYPE IS 'How a connection sync was initiated.';
@@ -47,13 +47,16 @@ COMMENT ON TYPE SYNC_DELETION_POLICY IS 'How an import reconciles files whose so
 -- concrete provider (`provider` column) stays open and extensible, but its
 -- capability is one of these types. Lets a connection be found by what it can do
 -- (e.g. the workspace's language model) without decrypting its config.
-CREATE TYPE PROVIDER_TYPE AS ENUM (
+-- Capability category of a transfer connection. Stable, closed set: the concrete
+-- provider (`provider` column) stays open, but its capability is one of these.
+-- Both categories transfer files; inference services are a separate resource
+-- (workspace_providers), not a connection.
+CREATE TYPE CONNECTION_TYPE AS ENUM (
     'object_store',     -- External object storage (s3, azure, gcs)
-    'language_model',   -- LLM inference (openai, ollama, anthropic)
     'file_service'      -- External file service (google_drive, dropbox, ...)
 );
 
-COMMENT ON TYPE PROVIDER_TYPE IS 'Capability category of a connection provider (object store, language model, ...).';
+COMMENT ON TYPE CONNECTION_TYPE IS 'Capability category of a transfer connection (object store, file service).';
 
 -- Workspace connections table: generic encrypted provider credentials.
 CREATE TABLE workspace_connections (
@@ -71,12 +74,12 @@ CREATE TABLE workspace_connections (
     display_name    TEXT            NOT NULL,
     CONSTRAINT workspace_connections_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 255),
 
-    -- The concrete provider (open, extensible: 's3', 'anthropic', ...) and its
-    -- capability category (a stable, closed enum). The category lets a connection
-    -- be found by what it can do without decrypting its config.
+    -- The concrete provider (open, extensible: 's3', 'gcs', ...) and its capability
+    -- category (a stable, closed enum). The category lets a connection be found by
+    -- what it can do without decrypting its config.
     provider        TEXT            NOT NULL,
     CONSTRAINT workspace_connections_provider_length CHECK (length(trim(provider)) BETWEEN 1 AND 64),
-    provider_type   PROVIDER_TYPE   NOT NULL,
+    connection_type CONNECTION_TYPE NOT NULL,
 
     -- Encrypted connection config (XChaCha20-Poly1305 encrypted JSON): the
     -- provider tag, credentials, and any provider-specific settings.
@@ -112,10 +115,10 @@ CREATE INDEX workspace_connections_provider_idx
     ON workspace_connections (provider, workspace_id)
     WHERE deleted_at IS NULL;
 
--- Find a workspace's connection of a given capability (e.g. its language model),
--- most recently updated first.
-CREATE INDEX workspace_connections_provider_type_idx
-    ON workspace_connections (workspace_id, provider_type, updated_at DESC)
+-- Find a workspace's connection of a given capability (object store vs file
+-- service), most recently updated first.
+CREATE INDEX workspace_connections_connection_type_idx
+    ON workspace_connections (workspace_id, connection_type, updated_at DESC)
     WHERE deleted_at IS NULL;
 
 -- Enforce a unique display name per workspace among live connections.
@@ -128,13 +131,13 @@ CREATE INDEX workspace_connections_active_idx
     ON workspace_connections (workspace_id, is_active)
     WHERE deleted_at IS NULL AND is_active = TRUE;
 
-COMMENT ON TABLE workspace_connections IS 'Generic encrypted provider connections scoped to workspaces. Capabilities live in satellite tables.';
+COMMENT ON TABLE workspace_connections IS 'Encrypted transfer-connection credentials scoped to workspaces. Sync capability lives in satellite tables.';
 COMMENT ON COLUMN workspace_connections.id IS 'Unique connection identifier';
 COMMENT ON COLUMN workspace_connections.workspace_id IS 'Workspace this connection belongs to';
 COMMENT ON COLUMN workspace_connections.account_id IS 'Account that created the connection';
 COMMENT ON COLUMN workspace_connections.display_name IS 'Human-readable connection display name (1-255 chars)';
 COMMENT ON COLUMN workspace_connections.provider IS 'Concrete provider identifier (e.g. s3, azure, gcs, openai, ollama, anthropic, google_drive, dropbox)';
-COMMENT ON COLUMN workspace_connections.provider_type IS 'Capability category of the provider (object_store, language_model, file_service)';
+COMMENT ON COLUMN workspace_connections.connection_type IS 'Capability category of the connection (object_store, file_service)';
 COMMENT ON COLUMN workspace_connections.encrypted_data IS 'XChaCha20-Poly1305 encrypted JSON: provider config + credentials';
 COMMENT ON COLUMN workspace_connections.is_active IS 'Whether the connection is enabled';
 COMMENT ON COLUMN workspace_connections.metadata IS 'Non-encrypted metadata for filtering/display';
@@ -142,9 +145,9 @@ COMMENT ON COLUMN workspace_connections.created_at IS 'Connection creation times
 COMMENT ON COLUMN workspace_connections.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN workspace_connections.deleted_at IS 'Soft-deletion timestamp; NULL means live';
 
--- Connection schedule table (satellite): the sync capability's configuration.
--- Present only for connections that synchronize (e.g. object stores); its
--- presence is what makes a connection sync-capable.
+-- Connection schedule table (satellite): a connection's scheduled-sync
+-- configuration. Present for connections that sync on a timer. Which connections
+-- may be scheduled is decided at the application layer (today, object stores).
 CREATE TABLE workspace_connection_schedule (
     -- One schedule per connection; the connection id is the primary key.
     connection_id   UUID PRIMARY KEY REFERENCES workspace_connections (id) ON DELETE CASCADE,
@@ -156,29 +159,31 @@ CREATE TABLE workspace_connection_schedule (
     schedule_cron   TEXT                    DEFAULT NULL,
     CONSTRAINT workspace_connection_schedule_cron_length CHECK (schedule_cron IS NULL OR length(schedule_cron) BETWEEN 9 AND 100),
 
-    -- What an import does when a source object it previously imported is gone.
+    -- What a whole-listing import does when a source object it previously
+    -- imported is gone.
     deletion_policy SYNC_DELETION_POLICY    NOT NULL DEFAULT 'ignore'
 );
 
-COMMENT ON TABLE workspace_connection_schedule IS 'Sync configuration for sync-capable connections. Its presence marks a connection as sync-capable.';
+COMMENT ON TABLE workspace_connection_schedule IS 'Scheduled-sync configuration for a connection; present only for connections that sync on a timer.';
 COMMENT ON COLUMN workspace_connection_schedule.connection_id IS 'The connection this schedule configures';
 COMMENT ON COLUMN workspace_connection_schedule.sync_mode IS 'Whether the connection imports data in or exports data out';
 COMMENT ON COLUMN workspace_connection_schedule.schedule_cron IS 'Cron expression for scheduled syncs; NULL means manual-only';
 COMMENT ON COLUMN workspace_connection_schedule.deletion_policy IS 'How an import reconciles files whose source object was deleted';
 
--- Connection syncs table: one synchronization execution of a sync-capable
--- connection. References the schedule (not the bare connection), so a sync can
--- only exist for a connection that is sync-capable.
+-- Connection syncs table: one synchronization execution of a connection. Any
+-- transfer-capable connection accrues syncs — scheduled or manual, whole-listing
+-- or per-file — so this references the connection directly, not the schedule
+-- (which is present only for connections that run on a timer).
 CREATE TABLE workspace_connection_syncs (
     -- Primary identifier
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References
-    connection_id   UUID                NOT NULL REFERENCES workspace_connection_schedule (connection_id) ON DELETE CASCADE,
+    connection_id   UUID                NOT NULL REFERENCES workspace_connections (id) ON DELETE CASCADE,
     account_id      UUID                NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- How the sync was initiated and where it currently stands.
-    trigger_type    SYNC_TRIGGER_TYPE   NOT NULL DEFAULT 'manual',
+    trigger_type    SYNC_TRIGGER_TYPE   NOT NULL DEFAULT 'on_demand',
     status          SYNC_STATUS         NOT NULL DEFAULT 'running',
 
     -- Number of records processed by this sync. An import lists the source and

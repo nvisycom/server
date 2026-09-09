@@ -5,10 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspaces;
-use crate::types::{
-    Handle, HasCreatedAt, HasDeletedAt, HasOwnership, HasUpdatedAt, Json, WorkspaceMetadata,
-    WorkspaceSettings,
-};
+use crate::types::{Handle, Json, WorkspaceMetadata, WorkspaceSettings};
 
 /// Main workspace model representing a workspace workspace.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -75,28 +72,4 @@ pub struct UpdateWorkspace {
     pub metadata: Option<Json<WorkspaceMetadata>>,
     /// Settings.
     pub settings: Option<Json<WorkspaceSettings>>,
-}
-
-impl HasCreatedAt for Workspace {
-    fn created_at(&self) -> jiff::Timestamp {
-        self.created_at.into()
-    }
-}
-
-impl HasUpdatedAt for Workspace {
-    fn updated_at(&self) -> jiff::Timestamp {
-        self.updated_at.into()
-    }
-}
-
-impl HasDeletedAt for Workspace {
-    fn deleted_at(&self) -> Option<jiff::Timestamp> {
-        self.deleted_at.map(Into::into)
-    }
-}
-
-impl HasOwnership for Workspace {
-    fn created_by(&self) -> Uuid {
-        self.created_by
-    }
 }

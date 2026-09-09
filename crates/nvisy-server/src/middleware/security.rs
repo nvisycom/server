@@ -10,13 +10,14 @@ use std::time::Duration;
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::http::Method;
-use axum::http::header::{self, HeaderValue};
+use axum::http::header::{self, HeaderName, HeaderValue};
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 
 use super::constants::{DEFAULT_MAX_BODY_SIZE, DEFAULT_MAX_FILE_BODY_SIZE};
+use crate::extract::CSRF_HEADER_NAME;
 
 /// Extension trait for `axum::`[`Router`] to apply security middleware.
 ///
@@ -61,7 +62,14 @@ where
                 Method::PATCH,
                 Method::DELETE,
             ])
-            .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::ACCEPT])
+            .allow_headers([
+                header::AUTHORIZATION,
+                header::CONTENT_TYPE,
+                header::ACCEPT,
+                // The CSRF token header a cookie-authenticated browser client
+                // echoes on state-changing requests (double-submit check).
+                HeaderName::from_static(CSRF_HEADER_NAME),
+            ])
             .expose_headers([header::AUTHORIZATION])
             .allow_credentials(cors.allow_credentials)
             .max_age(cors.max_age);

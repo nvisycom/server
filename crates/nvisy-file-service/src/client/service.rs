@@ -20,7 +20,7 @@ use super::apps::OAuthApps;
 use super::connected::ConnectedFileService;
 use crate::error::{Error, ErrorKind, Result};
 use crate::oauth::{OAuthClient, OAuthTokens};
-use crate::provider::{FileServiceConfig, Provider};
+use crate::provider::{FileServiceConfig, FileServiceProvider};
 
 /// Tracing target for cloud file-service operations.
 const TRACING_TARGET: &str = "nvisy_file_service::client";
@@ -73,14 +73,14 @@ impl FileService {
     /// whether it can be connected. Lets callers surface availability without
     /// attempting a flow that would fail.
     #[must_use]
-    pub fn is_configured(&self, provider: Provider) -> bool {
+    pub fn is_configured(&self, provider: FileServiceProvider) -> bool {
         self.apps.for_provider(provider).is_some()
     }
 
     /// An [`OAuthClient`] for `provider`, resolving its configured app, or an
     /// error if the host has not configured one. This is the handle for the
     /// authorize URL and the code/token exchanges.
-    pub fn oauth_client(&self, provider: Provider) -> Result<OAuthClient> {
+    pub fn oauth_client(&self, provider: FileServiceProvider) -> Result<OAuthClient> {
         let app = self.apps.for_provider(provider).ok_or_else(|| {
             Error::new(
                 ErrorKind::BadRequest,
@@ -94,19 +94,23 @@ impl FileService {
         ))
     }
 
-    /// Refreshes the OAuth access token for `config` if it is expired, returning
-    /// the access token to use and, when a refresh happened, the updated config.
+    /// Ensures `config` has a usable access token, refreshing it if expired.
     ///
     /// The refresh token is required; a config without one that has expired
     /// cannot be renewed and must be reconnected by the user.
-    pub async fn ensure_fresh(
-        &self,
-        config: &FileServiceConfig,
-    ) -> Result<(String, Option<FileServiceConfig>)> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::Unauthenticated`] if the token is expired and there is
+    /// no refresh token, or the refresh is rejected.
+    pub async fn ensure_fresh(&self, config: &FileServiceConfig) -> Result<FreshToken> {
         let now = jiff::Timestamp::now().as_second();
         let tokens = config.tokens();
         if !tokens.is_expired(now, REFRESH_SKEW_SECS) {
-            return Ok((tokens.access_token.clone(), None));
+            return Ok(FreshToken {
+                access_token: tokens.access_token.clone(),
+                refreshed: None,
+            });
         }
 
         let refresh_token = tokens.refresh_token.clone().ok_or_else(|| {
@@ -125,16 +129,100 @@ impl FileService {
 
         let mut refreshed = config.clone();
         refreshed.set_tokens(new_tokens);
-        Ok((access_token, Some(refreshed)))
+        Ok(FreshToken {
+            access_token,
+            refreshed: Some(refreshed),
+        })
+    }
+
+    /// The shared HTTP client, for provider-specific helpers within this crate
+    /// that need a raw request (e.g. resolving a picker's target resource).
+    pub(crate) fn http(&self) -> &reqwest::Client {
+        &self.http
+    }
+
+    /// Mints an access token for `config` scoped to `scopes` (a subset of the
+    /// original grant), from the stored refresh token, without disturbing the
+    /// connection's primary token. Crate-internal building block for provider
+    /// picker-token helpers.
+    pub(crate) async fn mint_scoped_token(
+        &self,
+        config: &FileServiceConfig,
+        scopes: &[String],
+    ) -> Result<OAuthTokens> {
+        let refresh_token = config.tokens().refresh_token.clone().ok_or_else(|| {
+            Error::new(
+                ErrorKind::Unauthenticated,
+                "the connection has expired and must be reconnected",
+            )
+        })?;
+        self.oauth_client(config.provider)?
+            .refresh_with_scopes(&refresh_token, scopes)
+            .await
+    }
+
+    /// Mints a short-lived access token for a provider's browser file picker.
+    ///
+    /// FileServiceProvider-neutral entry point: the caller passes the connection config and,
+    /// when the picker asked for a specific resource, that `resource`; this
+    /// dispatches to the provider's picker-token logic. OneDrive mints a
+    /// SharePoint-audience token (its picker requires one, distinct from the Graph
+    /// token the connector uses); Google Drive and Box return their ordinary
+    /// provider token. The connection's primary token is not disturbed; a rotated
+    /// refresh token is returned via [`PickerAccessToken::refreshed`] to persist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider's picker does not use a server token, if
+    /// the account is unsupported (e.g. a personal OneDrive account), or if the
+    /// token cannot be minted.
+    pub async fn mint_picker_token(
+        &self,
+        config: &FileServiceConfig,
+        resource: Option<&str>,
+    ) -> Result<PickerAccessToken> {
+        // FileServiceProvider dispatch lives on `FileServiceProvider` (beside `connect`), so this stays
+        // provider-neutral.
+        config
+            .provider
+            .mint_picker_token(self, config, resource)
+            .await
     }
 
     /// Connects to the file service described by `config`, refreshing its OAuth
     /// token first if needed.
     pub async fn connect(&self, config: &FileServiceConfig) -> Result<ConnectedFileService> {
-        let (access_token, refreshed) = self.ensure_fresh(config).await?;
-        let client = config.connect(self.http.clone(), access_token);
-        Ok(ConnectedFileService { client, refreshed })
+        let fresh = self.ensure_fresh(config).await?;
+        let client = config.connect(self.http.clone(), fresh.access_token);
+        Ok(ConnectedFileService {
+            client,
+            refreshed: fresh.refreshed,
+        })
     }
+}
+
+/// A usable access token for a connection, from [`FileService::ensure_fresh`]:
+/// the access token to use, plus the updated config to persist when a refresh
+/// produced new tokens (`None` when the stored token was still valid).
+#[must_use]
+pub struct FreshToken {
+    /// The access token to use for the request.
+    pub access_token: String,
+    /// The updated config to persist, present only if a refresh happened.
+    pub refreshed: Option<FileServiceConfig>,
+}
+
+/// A minted browser file-picker access token: the token, its expiry (Unix
+/// seconds, if the provider returned one), and — when minting rotated the
+/// connection's refresh token — the updated config for the caller to persist.
+#[must_use]
+pub struct PickerAccessToken {
+    /// The access token to hand to the picker.
+    pub access_token: String,
+    /// Expiry as a Unix timestamp, if known.
+    pub expires_at: Option<i64>,
+    /// The updated config to persist, present only if the refresh token rotated.
+    pub refreshed: Option<FileServiceConfig>,
 }
 
 /// A byte stream, the shape both directions of a transfer move data in.
@@ -158,7 +246,7 @@ pub struct FileUpload<'a> {
     pub body: ByteStream,
 }
 
-/// Provider-neutral read/write access to a connected file service.
+/// FileServiceProvider-neutral read/write access to a connected file service.
 #[async_trait::async_trait]
 pub trait FileServiceClient: Send + Sync {
     /// Verifies the connection is reachable with the current credentials,

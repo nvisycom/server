@@ -5,9 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_pipelines;
-use crate::types::{
-    Handle, HasCreatedAt, HasDeletedAt, HasUpdatedAt, Json, PipelineMetadata, PipelineStatus,
-};
+use crate::types::{Handle, Json, PipelineMetadata, PipelineStatus};
 
 /// Workspace pipeline model representing a workflow definition in the system.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -80,22 +78,4 @@ pub struct UpdateWorkspacePipeline {
     pub metadata: Option<Json<PipelineMetadata>>,
     /// Soft delete timestamp.
     pub deleted_at: Option<Option<Timestamp>>,
-}
-
-impl HasCreatedAt for WorkspacePipeline {
-    fn created_at(&self) -> jiff::Timestamp {
-        self.created_at.into()
-    }
-}
-
-impl HasUpdatedAt for WorkspacePipeline {
-    fn updated_at(&self) -> jiff::Timestamp {
-        self.updated_at.into()
-    }
-}
-
-impl HasDeletedAt for WorkspacePipeline {
-    fn deleted_at(&self) -> Option<jiff::Timestamp> {
-        self.deleted_at.map(Into::into)
-    }
 }

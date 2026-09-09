@@ -8,7 +8,7 @@ use derive_more::Display;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use super::core::{KvBucket, KvKey};
+use super::core::{InvalidKvKey, KvBucket, KvKey, validate_kv_key};
 
 /// The CSRF-state key for an in-flight OAuth authorization. The value is the
 /// opaque state token the provider echoes back to the callback.
@@ -21,28 +21,12 @@ use super::core::{KvBucket, KvKey};
 pub struct OAuthStateKey(pub String);
 
 impl FromStr for OAuthStateKey {
-    type Err = InvalidOAuthStateKey;
+    type Err = InvalidKvKey;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.is_empty() {
-            return Err(InvalidOAuthStateKey);
-        }
-        let valid = s
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'/' | b'_' | b'=' | b'.'));
-        if valid {
-            Ok(Self(s.to_owned()))
-        } else {
-            Err(InvalidOAuthStateKey)
-        }
+        validate_kv_key(s).map(Self)
     }
 }
-
-/// Returned when a string is not a valid [`OAuthStateKey`] (empty, or containing
-/// characters NATS KV keys disallow).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("invalid OAuth state key")]
-pub struct InvalidOAuthStateKey;
 
 impl KvKey for OAuthStateKey {}
 
@@ -72,26 +56,4 @@ where
     const DESCRIPTION: &'static str = "In-flight OAuth authorization state";
     const NAME: &'static str = "oauth_state";
     const TTL: Option<Duration> = Some(Duration::from_secs(10 * 60)); // 10 minutes
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn oauth_state_key_roundtrip() {
-        // A URL-safe base64 OAuth state (with padding) round-trips.
-        let key = OAuthStateKey("abc-123_XYZ=".to_owned());
-        let parsed: OAuthStateKey = key.to_string().parse().unwrap();
-        assert_eq!(key, parsed);
-    }
-
-    #[test]
-    fn oauth_state_key_rejects_invalid() {
-        // Empty and characters outside the NATS KV key set are rejected.
-        assert!("".parse::<OAuthStateKey>().is_err());
-        assert!("has space".parse::<OAuthStateKey>().is_err());
-        assert!("bad*char".parse::<OAuthStateKey>().is_err());
-        assert!("newline\n".parse::<OAuthStateKey>().is_err());
-    }
 }

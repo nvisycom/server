@@ -1,21 +1,21 @@
 //! Assistant chat service.
 //!
-//! [`ChatService`] resolves a workspace's language-model connection into an
+//! [`ChatService`] resolves a workspace's language-model provider into an
 //! [`InferenceClient`], persists a session's messages (encrypting their content
 //! under the workspace key), and drives a streaming chat turn against the
 //! session's history.
 
-use nvisy_inference::{ChatTurn, InferenceClient, TokenStream};
+use nvisy_inference::{ChatTurn, InferenceClient, InferenceConfig, TokenStream};
 use nvisy_postgres::PgConn;
 use nvisy_postgres::model::{ChatMessage, NewChatMessage};
 use nvisy_postgres::query::{
-    AppendSessionUpdate, ChatMessageRepository, WorkspaceConnectionRepository,
+    AppendSessionUpdate, ChatMessageRepository, WorkspaceProviderRepository,
 };
 use nvisy_postgres::types::{ChatRole, ProviderType};
 use uuid::Uuid;
 
 use crate::handler::{ErrorKind, Result};
-use crate::service::{ConnectionConfig, Infra};
+use crate::service::{Infra, ProviderConfig};
 
 /// Where in a conversation a turn happens: the workspace and session it belongs
 /// to, and the message it extends (its parent in the tree; `None` starts a new
@@ -66,23 +66,24 @@ impl ChatService {
         conn: &mut PgConn,
         workspace_id: Uuid,
     ) -> Result<InferenceClient> {
-        let connection = conn
-            .find_connection_by_type(workspace_id, ProviderType::LanguageModel)
+        let provider = conn
+            .find_provider_by_type(workspace_id, ProviderType::Llm)
             .await?
             .ok_or_else(|| {
                 ErrorKind::Conflict
-                    .with_message("This workspace has no language model connection configured")
-                    .with_resource("connection")
+                    .with_message("This workspace has no language model provider configured")
+                    .with_resource("provider")
             })?;
 
-        let config: ConnectionConfig = self
+        let config: ProviderConfig = self
             .infra
             .crypto
-            .decrypt_json(workspace_id, &connection.encrypted_data)?;
+            .decrypt_json(workspace_id, &provider.encrypted_data)?;
 
-        let ConnectionConfig::Inference(llm) = config else {
-            return Err(ErrorKind::InternalServerError
-                .with_message("Connection is not a language model connection"));
+        // The lookup filtered to the LLM provider type, so the stored config must
+        // be an LLM; any other kind is a stored-data inconsistency.
+        let llm = match config {
+            ProviderConfig::Inference(InferenceConfig::Llm(llm)) => llm,
         };
 
         llm.connect(None).map_err(|err| {

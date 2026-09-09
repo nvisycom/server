@@ -88,6 +88,25 @@ pub enum WebhookEvent {
     #[strum(serialize = "connection.sync.failed")]
     ConnectionSyncFailed,
 
+    // Provider events
+    /// A provider was created
+    #[db_rename = "provider.created"]
+    #[serde(rename = "provider.created")]
+    #[strum(serialize = "provider.created")]
+    ProviderCreated,
+
+    /// A provider was updated
+    #[db_rename = "provider.updated"]
+    #[serde(rename = "provider.updated")]
+    #[strum(serialize = "provider.updated")]
+    ProviderUpdated,
+
+    /// A provider was deleted
+    #[db_rename = "provider.deleted"]
+    #[serde(rename = "provider.deleted")]
+    #[strum(serialize = "provider.deleted")]
+    ProviderDeleted,
+
     // Pipeline events
     /// A pipeline was created
     #[db_rename = "pipeline.created"]
@@ -167,6 +186,9 @@ impl WebhookEvent {
             | WebhookEvent::ConnectionSyncStarted
             | WebhookEvent::ConnectionSyncCompleted
             | WebhookEvent::ConnectionSyncFailed => "connection",
+            WebhookEvent::ProviderCreated
+            | WebhookEvent::ProviderUpdated
+            | WebhookEvent::ProviderDeleted => "provider",
             WebhookEvent::PipelineCreated
             | WebhookEvent::PipelineUpdated
             | WebhookEvent::PipelineDeleted

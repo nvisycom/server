@@ -103,7 +103,13 @@ run: ## Runs the server with .env loaded (starts Postgres, NATS, and RustFS firs
 	@$(call log,Provisioning the blob store bucket...)
 	@docker compose -f ./docker/docker-compose.dev.yml up --exit-code-from rustfs-init rustfs-init
 	@$(call log,Starting server... (output also written to latest.log))
-	@bash -o pipefail -c 'cargo run --features dotenv --bin nvisy-cli 2>&1 | tee latest.log'
+	@# Tee via process substitution rather than a pipe: a pipe would put `tee`
+	@# in the foreground process group, so Ctrl+C (SIGINT) kills `tee` first and
+	@# the server's stdout becomes a broken pipe — its graceful-shutdown logs are
+	@# then lost and, under `pipefail`, the recipe reports exit 130. With `> >(tee)`
+	@# the server owns the terminal and receives the signal directly; its shutdown
+	@# runs and is logged, and the process exits cleanly.
+	@bash -c 'cargo run --features dotenv --bin nvisy-cli > >(tee latest.log) 2>&1'
 
 .PHONY: generate-all
 generate-all: generate-env generate-keys generate-migrations

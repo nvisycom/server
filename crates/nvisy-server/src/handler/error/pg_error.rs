@@ -18,6 +18,7 @@ impl From<ConstraintViolation> for Error<'static> {
     fn from(constraint: ConstraintViolation) -> Self {
         match constraint {
             ConstraintViolation::Account(c) => c.into(),
+            ConstraintViolation::AccountIdentity(c) => c.into(),
             ConstraintViolation::AccountNotification(c) => c.into(),
             ConstraintViolation::AccountApiToken(c) => c.into(),
             ConstraintViolation::ChatSession(c) => c.into(),

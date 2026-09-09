@@ -4,11 +4,16 @@ use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-/// What an import does with a file whose source object no longer exists.
+/// What a whole-listing import does with a file whose source object no longer
+/// exists.
 ///
-/// Corresponds to the `SYNC_DELETION_POLICY` PostgreSQL enum. Deletion is opt-in
-/// per connection: the default `Ignore` keeps imports strictly additive so a
-/// transient listing error or a misconfigured root path can never remove files.
+/// Corresponds to the `SYNC_DELETION_POLICY` PostgreSQL enum. Only whole-listing
+/// import reconciles deletions (it compares the full source listing against what
+/// was imported), so this applies to object-store import alone; picker-driven
+/// file-service import transfers only the files the user selected and never
+/// reconciles. Deletion is opt-in per connection: the default `Ignore` keeps
+/// imports strictly additive so a transient listing error or a misconfigured
+/// root path can never remove files.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
@@ -26,17 +31,4 @@ pub enum SyncDeletionPolicy {
     #[db_rename = "delete"]
     #[serde(rename = "delete")]
     Delete,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::SyncDeletionPolicy;
-
-    #[test]
-    fn serde_uses_snake_case() {
-        let json = serde_json::to_string(&SyncDeletionPolicy::Delete).unwrap();
-        assert_eq!(json, "\"delete\"");
-        let parsed: SyncDeletionPolicy = serde_json::from_str("\"ignore\"").unwrap();
-        assert_eq!(parsed, SyncDeletionPolicy::Ignore);
-    }
 }

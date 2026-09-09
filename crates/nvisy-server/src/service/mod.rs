@@ -11,6 +11,7 @@ mod health;
 mod infra;
 mod integration;
 mod notification;
+mod oidc;
 mod password;
 mod run_blob_store;
 mod session_keys;
@@ -31,6 +32,7 @@ pub use nvisy_s3::S3Config;
 use nvisy_webhook::WebhookService;
 use tokio_util::sync::CancellationToken;
 
+use crate::handler::CookieConfig;
 use crate::middleware::UploadConfig;
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::chat::{ChatService, TurnLocation};
@@ -44,17 +46,21 @@ pub use crate::service::detection::{
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::event::{
     ConnectionRef, DetectionRef, EventEmitter, EventOrigin, EventOutboxDrainer, FileRef, InviteRef,
-    MemberRef, PipelineRef, PolicyRef, WebhookRef, WorkspaceEvent, WorkspaceRef, event_outbox_row,
+    MemberRef, PipelineRef, PolicyRef, ProviderRef, WebhookRef, WorkspaceEvent, WorkspaceRef,
+    event_outbox_row,
 };
 pub use crate::service::file_reaper::FileReaper;
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::infra::Infra;
 pub use crate::service::integration::{
     ConnectionConfig, ConnectionSyncJob, ConnectionSyncService, ConnectionSyncWorker,
-    FileConnectorsConfig, FileServiceRedirect, IntegrationConfig, SourceEntry,
+    FileConnectorsConfig, FileServiceRedirect, IntegrationConfig, ProviderConfig, SourceEntry,
     StandardCronSchedule, TransferKind, TransferRequest, persist_refreshed_tokens,
 };
 pub use crate::service::notification::{NotificationEmitter, UnreadCountEvent};
+pub use crate::service::oidc::{
+    OidcAuthorization, OidcConfig, OidcError, OidcIdentity, OidcService, RedirectKind,
+};
 pub use crate::service::password::PasswordService;
 pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
@@ -62,6 +68,9 @@ pub use crate::service::user_agent::UserAgentParser;
 pub use crate::service::webhook::{WebhookDeliveryWorker, WebhookEmitter};
 pub use crate::service::worker::{Worker, WorkerSet};
 use crate::{Error, Result};
+
+/// Tracing target for service-state initialization.
+const TRACING_TARGET: &str = "nvisy_server::service";
 
 /// Application state.
 ///
@@ -109,10 +118,14 @@ pub struct ServiceState {
     // Security services:
     pub password: PasswordService,
     pub session_keys: SessionKeys,
+    pub oidc: OidcService,
     pub user_agent_parser: UserAgentParser,
 
     // Request body size limits (server-wide hard caps):
     pub upload: UploadConfig,
+
+    // Session-cookie policy (the `Secure` attribute) for browser clients.
+    pub cookie: CookieConfig,
 }
 
 impl ServiceState {
@@ -128,8 +141,10 @@ impl ServiceState {
         health_config: HealthConfig,
         integration_config: IntegrationConfig,
         file_connectors_config: FileConnectorsConfig,
+        oidc_config: OidcConfig,
         webhook_service: WebhookService,
         upload_config: UploadConfig,
+        cookie_config: CookieConfig,
         s3_config: S3Config,
     ) -> Result<Self> {
         let postgres_client = connect_postgres(postgres_config).await?;
@@ -141,6 +156,20 @@ impl ServiceState {
 
         let engine = EngineService::from_config(engine_config).await?;
         let session_keys = SessionKeys::from_config(&session_config).await?;
+        let oidc = OidcService::from_config(&oidc_config)?;
+
+        // Session cookies without `Secure` are only safe over plain HTTP on a
+        // trusted network (local development or trusted-network self-hosting); a
+        // browser will not even store them over HTTPS. Warn loudly so an
+        // accidental production misconfiguration is visible.
+        if !cookie_config.secure {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                "COOKIE_SECURE is disabled: session cookies are sent without the Secure \
+                 attribute. Only use this for local HTTP development or trusted-network \
+                 self-hosting, never for an internet-facing deployment.",
+            );
+        }
 
         let health_checkers: Vec<Arc<dyn HealthCheck>> = vec![
             Arc::new(infra.postgres.clone()),
@@ -160,6 +189,7 @@ impl ServiceState {
             ExternalObjectStore::new(endpoint_policy),
             file_service.clone(),
             integration_config.import_concurrency,
+            integration_config.export_concurrency,
         );
 
         let service_state = Self {
@@ -175,8 +205,10 @@ impl ServiceState {
             health_cache: HealthCache::new(&health_config, health_checkers),
             password: PasswordService::new(),
             session_keys,
+            oidc,
             user_agent_parser: UserAgentParser::new(),
             upload: upload_config,
+            cookie: cookie_config,
         };
 
         Ok(service_state)
@@ -324,8 +356,10 @@ impl_di_field!(
     health_cache: HealthCache,
     password: PasswordService,
     session_keys: SessionKeys,
+    oidc: OidcService,
     user_agent_parser: UserAgentParser,
     upload: UploadConfig,
+    cookie: CookieConfig,
 );
 
 // Stateless services, composed from `Infra` on extraction:

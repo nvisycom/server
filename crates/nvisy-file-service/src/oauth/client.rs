@@ -96,9 +96,28 @@ impl OAuthClient {
 
     /// Refreshes the access token using a stored refresh token.
     pub async fn refresh_tokens(&self, refresh_token: &str) -> Result<OAuthTokens> {
-        let response = self
-            .build()?
-            .exchange_refresh_token(&RefreshToken::new(refresh_token.to_owned()))
+        self.refresh_with_scopes(refresh_token, &[]).await
+    }
+
+    /// Refreshes the access token for a specific set of `scopes` (a subset of the
+    /// original grant), yielding a token whose audience matches those scopes.
+    ///
+    /// Used to mint a resource-specific token from the same refresh token without
+    /// re-consent — e.g. a SharePoint-audience token for the OneDrive file picker,
+    /// distinct from the Graph token the connector uses. An empty `scopes` refreshes
+    /// with the originally granted scopes (see [`refresh_tokens`](Self::refresh_tokens)).
+    pub async fn refresh_with_scopes(
+        &self,
+        refresh_token: &str,
+        scopes: &[String],
+    ) -> Result<OAuthTokens> {
+        let client = self.build()?;
+        let refresh = RefreshToken::new(refresh_token.to_owned());
+        let mut request = client.exchange_refresh_token(&refresh);
+        for scope in scopes {
+            request = request.add_scope(Scope::new(scope.clone()));
+        }
+        let response = request
             .request_async(&OAuthHttpClient::new(self.http.clone()))
             .await
             .map_err(|err| {

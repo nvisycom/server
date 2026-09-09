@@ -445,16 +445,10 @@ impl ConnectionSyncWorker {
         connection: WorkspaceConnection,
         attempt: i32,
     ) -> Result<Option<TransferRequest>> {
-        // Only sync-capable connections are enqueued; a non-sync config here
-        // would be a scheduling bug.
         let config = self.infra.crypto.decrypt_json::<ConnectionConfig>(
             connection.workspace_id,
             &connection.encrypted_data,
         )?;
-        if !config.supports_transfer() {
-            return Err(ErrorKind::InternalServerError
-                .with_message("scheduled sync for a non-sync connection"));
-        }
 
         let mut conn = self.infra.postgres.get_connection().await?;
         // Re-read the schedule: the direction/cron may have changed (or the
@@ -468,6 +462,15 @@ impl ConnectionSyncWorker {
             return Ok(None);
         }
 
+        // Only object stores are scheduled (a file service is request-time only
+        // and has no schedule row, so it is never listed as due), and an object
+        // store is enumerable in either direction. A non-object-store here would
+        // mean a schedule row on a connection that cannot have one — a scheduling
+        // bug, not a runtime input — so it is rejected rather than dispatched.
+        if !matches!(config, ConnectionConfig::ObjectStore(_)) {
+            return Err(ErrorKind::InternalServerError
+                .with_message("scheduled sync for a non-object-store connection"));
+        }
         let kind = if schedule.sync_mode.is_export() {
             TransferKind::ExportRedacted
         } else {

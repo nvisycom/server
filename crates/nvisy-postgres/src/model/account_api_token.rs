@@ -6,7 +6,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::account_api_tokens;
-use crate::types::{ApiTokenType, HasCreatedAt, HasExpiresAt, HasSecurityContext};
+use crate::types::ApiTokenType;
 
 /// Account API token model representing an authentication token.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -63,6 +63,8 @@ pub struct NewAccountApiToken {
 #[diesel(table_name = account_api_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpdateAccountApiToken {
+    /// Timestamp of token creation (the absolute-cap anchor).
+    pub issued_at: Option<Timestamp>,
     /// Timestamp of most recent token activity.
     pub last_used_at: Option<Option<Timestamp>>,
     /// Updated display name for the API token.
@@ -73,26 +75,4 @@ pub struct UpdateAccountApiToken {
     pub expired_at: Option<Option<Timestamp>>,
     /// Timestamp when the token was soft-deleted.
     pub deleted_at: Option<Option<Timestamp>>,
-}
-
-impl HasCreatedAt for AccountApiToken {
-    fn created_at(&self) -> jiff::Timestamp {
-        self.issued_at.into()
-    }
-}
-
-impl HasExpiresAt for AccountApiToken {
-    fn expires_at(&self) -> Option<jiff::Timestamp> {
-        self.expired_at.map(Into::into)
-    }
-}
-
-impl HasSecurityContext for AccountApiToken {
-    fn ip_address(&self) -> Option<IpNet> {
-        self.ip_address
-    }
-
-    fn user_agent(&self) -> Option<&str> {
-        self.user_agent.as_deref()
-    }
 }

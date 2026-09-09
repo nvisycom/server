@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_members;
-use crate::types::{HasCreatedAt, HasOwnership, HasUpdatedAt, NotificationEvent, WorkspaceRole};
+use crate::types::{NotificationEvent, WorkspaceRole};
 
 /// Workspace member model representing a user's membership in a workspace.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -108,27 +108,5 @@ impl WorkspaceMember {
             .iter()
             .filter_map(|e| *e)
             .collect()
-    }
-}
-
-impl HasCreatedAt for WorkspaceMember {
-    fn created_at(&self) -> jiff::Timestamp {
-        self.created_at.into()
-    }
-}
-
-impl HasUpdatedAt for WorkspaceMember {
-    fn updated_at(&self) -> jiff::Timestamp {
-        self.updated_at.into()
-    }
-}
-
-impl HasOwnership for WorkspaceMember {
-    fn created_by(&self) -> Uuid {
-        self.created_by
-    }
-
-    fn updated_by(&self) -> Option<Uuid> {
-        Some(self.updated_by)
     }
 }

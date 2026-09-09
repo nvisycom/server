@@ -20,7 +20,9 @@ use nvisy_postgres::query::{
     WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
     WorkspaceConnectionSyncRepository,
 };
-use nvisy_postgres::types::{ConnectionId, SyncMode, SyncStatus, SyncTriggerType};
+use nvisy_postgres::types::{
+    ConnectionId, SyncDeletionPolicy, SyncMode, SyncStatus, SyncTriggerType,
+};
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
@@ -84,31 +86,31 @@ async fn sync_connection(
         return Err(ErrorKind::Conflict.with_message("A sync is already in progress"));
     }
 
-    // Only transfer-capable connections have a schedule; its presence gates
-    // syncing and carries the sync direction.
-    let schedule = conn
-        .find_connection_schedule(connection.id)
-        .await?
-        .ok_or_else(|| ErrorKind::BadRequest.with_message("Connection does not support syncing"))?;
-
     let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
-    if !config.supports_transfer() {
-        return Err(ErrorKind::BadRequest.with_message("Connection does not support syncing"));
-    }
-    // Listing-based sync is the object-store model. A file service imports
-    // through the picker and exports per file, so it has no whole-listing sync.
-    if config.is_file_service() {
+    // This endpoint runs a whole-listing sync, which is the object-store model. A
+    // file service transfers on demand (picker import, per-file export) and has no
+    // whole-listing sync, so it is rejected here — schedulability is exactly the
+    // "can be run as a whole-listing/scheduled sync" capability.
+    if !config.supports_schedule() {
         return Err(ErrorKind::BadRequest.with_message(
-            "File-service connections sync per file: import via the picker, export per file",
+            "This connection has no whole-listing sync; file services import via the \
+             picker and export per file",
         ));
     }
 
+    // The direction and deletion policy come from the connection's schedule when
+    // it has one; an object store created without a `sync` block has no schedule
+    // row, so a manual run falls back to the defaults (import, ignore deletions).
+    let schedule = conn.find_connection_schedule(connection.id).await?;
+    let sync_mode = schedule.as_ref().map_or(SyncMode::Import, |s| s.sync_mode);
+    let deletion_policy = schedule
+        .as_ref()
+        .map_or(SyncDeletionPolicy::Ignore, |s| s.deletion_policy);
+
     // A manual trigger runs the connection's configured direction: import pulls
     // the whole listing; export pushes every redacted output not yet exported.
-    let kind = match schedule.sync_mode {
-        SyncMode::Import => TransferKind::ImportAll {
-            deletion_policy: schedule.deletion_policy,
-        },
+    let kind = match sync_mode {
+        SyncMode::Import => TransferKind::ImportAll { deletion_policy },
         SyncMode::Export => TransferKind::ExportRedacted,
     };
     let sync = open_run_and_transfer(
@@ -271,9 +273,6 @@ async fn export_files(
     }
 
     let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
-    if !config.supports_transfer() {
-        return Err(ErrorKind::BadRequest.with_message("Connection does not support syncing"));
-    }
 
     // The files are resolved (and missing ids skipped) inside the transfer.
     let kind = TransferKind::ExportSelected {
@@ -320,7 +319,7 @@ async fn open_run_and_transfer(
     let new_run = NewWorkspaceConnectionSync {
         connection_id: connection.id,
         account_id,
-        trigger_type: Some(SyncTriggerType::Manual),
+        trigger_type: Some(SyncTriggerType::OnDemand),
         status: Some(SyncStatus::Running),
         records_synced: Some(0),
         attempt: Some(1),

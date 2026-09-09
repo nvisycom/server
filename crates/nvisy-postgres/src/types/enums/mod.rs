@@ -6,6 +6,7 @@
 
 // Account-related enumerations
 pub mod api_token_type;
+pub mod identity_provider;
 pub mod notification_event;
 pub mod outbox_status;
 
@@ -13,6 +14,7 @@ pub mod outbox_status;
 pub mod chat_role;
 
 // Connection-related enumerations
+pub mod connection_type;
 pub mod provider_type;
 
 // Workspace-related enumerations
@@ -37,8 +39,10 @@ pub mod pipeline_trigger_type;
 pub use activity_type::ActivityType;
 pub use api_token_type::ApiTokenType;
 pub use chat_role::ChatRole;
+pub use connection_type::ConnectionType;
 pub use detection_status::DetectionStatus;
 pub use file_kind::FileKind;
+pub use identity_provider::IdentityProvider;
 pub use invite_status::InviteStatus;
 pub use notification_event::NotificationEvent;
 pub use outbox_status::OutboxStatus;

@@ -60,16 +60,13 @@ impl Connector {
                 }
                 Ok(Arc::new(FileServiceSource(connected.client)))
             }
-            ConnectionConfig::Inference(_) => {
-                Err(ErrorKind::BadRequest.with_message("Connection does not support file transfer"))
-            }
         }
     }
 
     /// Connects an object-store source, the only family that supports a
     /// whole-listing import. A non-object-store config is rejected: the
     /// listing-based import path is never reached for a file service (it imports
-    /// through the picker) or an LLM connection.
+    /// through the picker).
     pub(super) async fn object_source(
         &self,
         config: &ConnectionConfig,

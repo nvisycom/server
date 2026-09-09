@@ -5,10 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::account_notifications;
-use crate::types::{
-    DEFAULT_RETENTION_DAYS, HasCreatedAt, HasExpiresAt, Json, NotificationEvent,
-    NotificationPayload,
-};
+use crate::types::{Json, NotificationEvent, NotificationPayload};
 
 /// Account notification model representing a notification sent to a user.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -53,22 +50,4 @@ pub struct NewAccountNotification {
 pub struct UpdateAccountNotification {
     /// Read timestamp: `Some(Some(ts))` marks read, `Some(None)` marks unread.
     pub read_at: Option<Option<Timestamp>>,
-}
-
-impl HasCreatedAt for AccountNotification {
-    fn created_at(&self) -> jiff::Timestamp {
-        self.created_at.into()
-    }
-}
-
-impl HasExpiresAt for AccountNotification {
-    fn expires_at(&self) -> Option<jiff::Timestamp> {
-        Some(
-            self.expires_at.map(Into::into).unwrap_or(
-                jiff::Timestamp::now()
-                    .checked_add(jiff::Span::new().hours(DEFAULT_RETENTION_DAYS as i64 * 24))
-                    .expect("valid notification expiry"),
-            ),
-        )
-    }
 }

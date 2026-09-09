@@ -141,6 +141,8 @@ authz_permissions! {
     ViewConnections => Permission::ViewConnections,
     ManageConnections => Permission::ManageConnections,
     RunConnectionSyncs => Permission::RunConnectionSyncs,
+    ViewProviders => Permission::ViewProviders,
+    ManageProviders => Permission::ManageProviders,
     ViewPolicies => Permission::ViewPolicies,
     ManagePolicies => Permission::ManagePolicies,
     ViewWebhooks => Permission::ViewWebhooks,

@@ -164,6 +164,48 @@ impl<B: KvBucket> KvStore<B> {
         Ok(self.get(key).await?.map(|kv| kv.value))
     }
 
+    /// Atomically consume a single-use entry: read its value and delete it in a
+    /// way that only one caller can win.
+    ///
+    /// Returns `Some(value)` to exactly one caller and `None` to everyone else,
+    /// even under concurrent calls for the same key. The delete is conditioned on
+    /// the revision the value was read at (`purge_expect_revision`), so a second
+    /// racer whose read saw the same revision fails the conditional purge and gets
+    /// `None` rather than re-consuming the entry. Use this for one-time tokens
+    /// (OAuth/OIDC state, step-up proofs) where a plain get-then-delete would leave
+    /// a replay window.
+    #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
+    pub async fn take(&self, key: &B::Key) -> Result<Option<B::Value>> {
+        use async_nats::jetstream::kv::PurgeErrorKind;
+
+        let Some(entry) = self.get(key).await? else {
+            return Ok(None);
+        };
+        let key_str = key.to_string();
+        match self
+            .store
+            .purge_expect_revision(&key_str, Some(entry.revision))
+            .await
+        {
+            Ok(()) => Ok(Some(entry.value)),
+            // A concurrent caller consumed it first (the revision moved), so this
+            // caller loses the race and sees nothing to consume. Only a revision
+            // mismatch means "lost the race"; any other failure (network, ack,
+            // publish) is a real error and must propagate — masking it as `None`
+            // would silently leave a single-use token unconsumed and replayable.
+            Err(err) if err.kind() == PurgeErrorKind::WrongLastRevision => {
+                tracing::debug!(
+                    target: TRACING_TARGET_KV,
+                    key = %key_str,
+                    error = %err,
+                    "Single-use take lost the race; entry already consumed",
+                );
+                Ok(None)
+            }
+            Err(err) => Err(Error::operation("kv_take", err.to_string())),
+        }
+    }
+
     /// Delete a key from the store.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
     pub async fn delete(&self, key: &B::Key) -> Result<()> {

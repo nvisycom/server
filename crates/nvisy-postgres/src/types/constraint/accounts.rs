@@ -17,10 +17,6 @@ pub enum AccountConstraints {
     EmailFormat,
     #[strum(serialize = "accounts_email_length_max")]
     EmailLengthMax,
-    #[strum(serialize = "accounts_password_hash_not_empty")]
-    PasswordHashNotEmpty,
-    #[strum(serialize = "accounts_password_hash_length_min")]
-    PasswordHashLengthMin,
     #[strum(serialize = "accounts_timezone_format")]
     TimezoneFormat,
     #[strum(serialize = "accounts_locale_format")]

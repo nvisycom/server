@@ -27,12 +27,11 @@ use axum::http::StatusCode;
 use axum::response::Redirect;
 use axum::routing::get;
 use nvisy_file_service::FileService;
-use nvisy_file_service::provider::{ConnectionSettings, FileServiceConfig, Provider};
+use nvisy_file_service::provider::{ConnectionSettings, FileServiceConfig, FileServiceProvider};
 use nvisy_nats::NatsClient;
 use nvisy_nats::kv::{OAuthStateBucket as OAuthStateKvBucket, OAuthStateKey};
-use nvisy_postgres::model::{NewWorkspaceConnection, NewWorkspaceConnectionSchedule};
-use nvisy_postgres::query::{WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository};
-use nvisy_postgres::types::{SyncDeletionPolicy, SyncMode};
+use nvisy_postgres::model::NewWorkspaceConnection;
+use nvisy_postgres::query::WorkspaceConnectionRepository;
 use nvisy_postgres::{AsyncConnection, PgClient};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -63,7 +62,7 @@ struct OAuthFlowState {
     /// Account that started the flow; the connection is attributed to it.
     account_id: Uuid,
     /// The provider being connected.
-    provider: Provider,
+    provider: FileServiceProvider,
     /// Display name for the connection to create.
     display_name: String,
     /// Optional sync root (folder id or path) to scope the sync to.
@@ -229,7 +228,7 @@ async fn complete_callback(
     };
     let config = ConnectionConfig::FileService(FileServiceConfig::new(flow.provider, settings));
     let provider = config.provider_id().to_owned();
-    let provider_type = config.provider_type();
+    let connection_type = config.connection_type();
     let encrypted_data = crypto.encrypt_json(flow.workspace_id, &config)?;
 
     let new_connection = NewWorkspaceConnection {
@@ -237,29 +236,21 @@ async fn complete_callback(
         account_id: flow.account_id,
         display_name: flow.display_name,
         provider,
-        provider_type,
+        connection_type,
         encrypted_data,
         is_active: Some(true),
         metadata: None,
     };
 
-    // Insert the connection, its schedule row, and the outbox event atomically,
-    // mirroring the ordinary create path. A cloud file service is on-demand (no
-    // cron), so the schedule carries no cron; the row marks transfer capability
-    // and holds default settings. Its direction is driven per endpoint — the picker
-    // for import, an explicit request for export. The requester's security
-    // context comes from the callback request itself.
+    // Insert the connection and the outbox event atomically. A file service is
+    // request-time only — its import is picker-driven and its export per file,
+    // neither scheduled — so it gets no schedule row (scheduling is an
+    // object-store concept). Transfer capability comes from its provider_type.
+    // The requester's security context comes from the callback request itself.
     let mut conn = pg_client.get_connection().await?;
     let connection_id = conn
         .transaction(async |conn| {
             let connection = conn.create_workspace_connection(new_connection).await?;
-            conn.create_connection_schedule(NewWorkspaceConnectionSchedule {
-                connection_id: connection.id,
-                sync_mode: Some(SyncMode::Import),
-                schedule_cron: None,
-                deletion_policy: Some(SyncDeletionPolicy::default()),
-            })
-            .await?;
             conn.emit_event(
                 EventOrigin {
                     workspace_id: flow.workspace_id,

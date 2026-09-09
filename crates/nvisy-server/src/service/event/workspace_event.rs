@@ -71,6 +71,14 @@ pub enum WorkspaceEvent {
         notify: Option<Uuid>,
     },
 
+    // Providers
+    #[serde(rename = "provider.created")]
+    ProviderCreated(ProviderRef),
+    #[serde(rename = "provider.updated")]
+    ProviderUpdated(ProviderRef),
+    #[serde(rename = "provider.deleted")]
+    ProviderDeleted(ProviderRef),
+
     // Webhooks
     #[serde(rename = "webhook.created")]
     WebhookCreated(WebhookRef),
@@ -168,6 +176,13 @@ pub struct InviteRef {
 pub struct ConnectionRef {
     pub connection_id: Uuid,
     pub connection_name: String,
+}
+
+/// A provider and its display name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderRef {
+    pub provider_id: Uuid,
+    pub provider_name: String,
 }
 
 /// A webhook and its display name.

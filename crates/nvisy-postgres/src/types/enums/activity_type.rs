@@ -114,6 +114,25 @@ pub enum ActivityType {
     #[strum(serialize = "connection.sync.failed")]
     ConnectionSyncFailed,
 
+    // Provider activities
+    /// Provider was created
+    #[db_rename = "provider.created"]
+    #[serde(rename = "provider.created")]
+    #[strum(serialize = "provider.created")]
+    ProviderCreated,
+
+    /// Provider was updated
+    #[db_rename = "provider.updated"]
+    #[serde(rename = "provider.updated")]
+    #[strum(serialize = "provider.updated")]
+    ProviderUpdated,
+
+    /// Provider was deleted
+    #[db_rename = "provider.deleted"]
+    #[serde(rename = "provider.deleted")]
+    #[strum(serialize = "provider.deleted")]
+    ProviderDeleted,
+
     // Webhook activities
     /// Webhook was created
     #[db_rename = "webhook.created"]

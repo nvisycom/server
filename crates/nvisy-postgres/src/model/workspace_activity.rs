@@ -9,7 +9,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_activities;
-use crate::types::{ActivityPayload, ActivityType, HasCreatedAt, HasSecurityContext, Json};
+use crate::types::{ActivityPayload, ActivityType, Json};
 
 /// Workspace activity log entry representing an action performed in a workspace.
 ///
@@ -59,20 +59,4 @@ pub struct NewWorkspaceActivity {
     pub ip_address: Option<IpNet>,
     /// User agent string from the client request.
     pub user_agent: Option<String>,
-}
-
-impl HasCreatedAt for WorkspaceActivity {
-    fn created_at(&self) -> jiff::Timestamp {
-        self.created_at.into()
-    }
-}
-
-impl HasSecurityContext for WorkspaceActivity {
-    fn ip_address(&self) -> Option<IpNet> {
-        self.ip_address
-    }
-
-    fn user_agent(&self) -> Option<&str> {
-        self.user_agent.as_deref()
-    }
 }

@@ -1,6 +1,6 @@
 //! Connection request types.
 
-use nvisy_file_service::provider::Provider;
+use nvisy_file_service::provider::FileServiceProvider;
 use nvisy_postgres::types::{ConnectionId, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -31,10 +31,28 @@ pub struct ConnectionPathParams {
     pub connection_id: ConnectionId,
 }
 
-/// Sync configuration for a sync-capable connection (object stores).
+/// Body for minting a browser file-picker token.
 ///
-/// Only meaningful for connections whose provider supports syncing; omitted for
-/// connections that do not (e.g. LLM inference).
+/// The OneDrive v8 picker requests a token per resource (it names the resource in
+/// each `authenticate` command); the caller passes that `resource` so the server
+/// mints a token scoped to exactly it. Ignored by providers whose picker takes a
+/// single provider token (Google Drive, Box); omit it for those.
+#[must_use]
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct PickerTokenRequest {
+    /// The resource the picker asked for (its `authenticate` command's
+    /// `resource`), e.g. `https://contoso-my.sharepoint.com`. Optional; when
+    /// absent the server uses the connection's default picker resource.
+    #[validate(length(min = 1, max = 2048))]
+    pub resource: Option<String>,
+}
+
+/// Scheduled-sync configuration for a schedulable connection.
+///
+/// Accepted only for providers that can sync on a timer (object stores); rejected
+/// for others — a file service transfers on demand (picker import, per-file
+/// export), and an LLM does not transfer at all. Omit for on-demand only.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncScheduleInput {
@@ -63,22 +81,22 @@ pub struct CreateConnection {
     /// at rest. The `provider` tag selects which credential shape is required and
     /// which capability the connection has.
     pub config: ConnectionConfig,
-    /// Sync configuration. Applies only to sync-capable providers (object
-    /// stores); rejected for others. Omit for manual-only defaults.
+    /// Scheduled-sync configuration. Accepted only for schedulable providers
+    /// (object stores); rejected for others. Omit for on-demand only.
     #[validate(nested)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync: Option<SyncScheduleInput>,
 }
 
 /// Path parameters for the OAuth start endpoint: which cloud file provider to
-/// begin authorizing. The provider is the crate's [`Provider`], so the API and
+/// begin authorizing. The provider is the crate's [`FileServiceProvider`], so the API and
 /// stored config name each provider identically.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthStartPathParams {
     /// The cloud file provider to connect.
-    pub provider: Provider,
+    pub provider: FileServiceProvider,
 }
 
 /// Request payload for starting a cloud file-service OAuth authorization.
@@ -126,8 +144,8 @@ pub struct UpdateConnection {
     /// Typed provider configuration. If provided, fully replaces the stored
     /// config (and, with it, the provider). Omit to leave it unchanged.
     pub config: Option<ConnectionConfig>,
-    /// Sync configuration. Applies only to sync-capable providers. Omit to leave
-    /// unchanged.
+    /// Scheduled-sync configuration. Accepted only for schedulable providers
+    /// (object stores); rejected for others. Omit to leave unchanged.
     #[validate(nested)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync: Option<SyncScheduleInput>,
