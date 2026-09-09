@@ -20,7 +20,7 @@ use super::apps::OAuthApps;
 use super::connected::ConnectedFileService;
 use crate::error::{Error, ErrorKind, Result};
 use crate::oauth::{OAuthClient, OAuthTokens};
-use crate::provider::{FileServiceConfig, Provider};
+use crate::provider::{FileServiceConfig, FileServiceProvider};
 
 /// Tracing target for cloud file-service operations.
 const TRACING_TARGET: &str = "nvisy_file_service::client";
@@ -73,14 +73,14 @@ impl FileService {
     /// whether it can be connected. Lets callers surface availability without
     /// attempting a flow that would fail.
     #[must_use]
-    pub fn is_configured(&self, provider: Provider) -> bool {
+    pub fn is_configured(&self, provider: FileServiceProvider) -> bool {
         self.apps.for_provider(provider).is_some()
     }
 
     /// An [`OAuthClient`] for `provider`, resolving its configured app, or an
     /// error if the host has not configured one. This is the handle for the
     /// authorize URL and the code/token exchanges.
-    pub fn oauth_client(&self, provider: Provider) -> Result<OAuthClient> {
+    pub fn oauth_client(&self, provider: FileServiceProvider) -> Result<OAuthClient> {
         let app = self.apps.for_provider(provider).ok_or_else(|| {
             Error::new(
                 ErrorKind::BadRequest,
@@ -163,7 +163,7 @@ impl FileService {
 
     /// Mints a short-lived access token for a provider's browser file picker.
     ///
-    /// Provider-neutral entry point: the caller passes the connection config and,
+    /// FileServiceProvider-neutral entry point: the caller passes the connection config and,
     /// when the picker asked for a specific resource, that `resource`; this
     /// dispatches to the provider's picker-token logic. OneDrive mints a
     /// SharePoint-audience token (its picker requires one, distinct from the Graph
@@ -181,7 +181,7 @@ impl FileService {
         config: &FileServiceConfig,
         resource: Option<&str>,
     ) -> Result<PickerAccessToken> {
-        // Provider dispatch lives on `Provider` (beside `connect`), so this stays
+        // FileServiceProvider dispatch lives on `FileServiceProvider` (beside `connect`), so this stays
         // provider-neutral.
         config
             .provider
@@ -246,7 +246,7 @@ pub struct FileUpload<'a> {
     pub body: ByteStream,
 }
 
-/// Provider-neutral read/write access to a connected file service.
+/// FileServiceProvider-neutral read/write access to a connected file service.
 #[async_trait::async_trait]
 pub trait FileServiceClient: Send + Sync {
     /// Verifies the connection is reachable with the current credentials,

@@ -182,7 +182,9 @@ impl WorkspaceProviderRepository for PgConnection {
             .filter(dsl::provider_type.eq(provider_type))
             .filter(dsl::deleted_at.is_null())
             .filter(dsl::is_active.eq(true))
-            .order(dsl::updated_at.desc())
+            // `id` breaks a tie so two providers updated in the same instant pick
+            // a stable one rather than an arbitrary row per query.
+            .order((dsl::updated_at.desc(), dsl::id.desc()))
             .select(WorkspaceProvider::as_select())
             .first(self)
             .await
@@ -289,12 +291,19 @@ impl WorkspaceProviderRepository for PgConnection {
     ) -> Result<WorkspaceProvider> {
         use schema::workspace_providers::{self, dsl};
 
-        let provider = diesel::update(workspace_providers::table.filter(dsl::id.eq(provider_id)))
-            .set(&updates)
-            .returning(WorkspaceProvider::as_returning())
-            .get_result(self)
-            .await
-            .map_err(Error::from)?;
+        // Scope to a live row: a concurrent delete may have committed since the
+        // caller's lookup, and updating the tombstoned row would revive it in
+        // effect and emit a spurious event.
+        let provider = diesel::update(
+            workspace_providers::table
+                .filter(dsl::id.eq(provider_id))
+                .filter(dsl::deleted_at.is_null()),
+        )
+        .set(&updates)
+        .returning(WorkspaceProvider::as_returning())
+        .get_result(self)
+        .await
+        .map_err(Error::from)?;
 
         Ok(provider)
     }
@@ -303,11 +312,17 @@ impl WorkspaceProviderRepository for PgConnection {
         use diesel::dsl::now;
         use schema::workspace_providers::{self, dsl};
 
-        diesel::update(workspace_providers::table.filter(dsl::id.eq(provider_id)))
-            .set(dsl::deleted_at.eq(now))
-            .execute(self)
-            .await
-            .map_err(Error::from)?;
+        // Scope to a live row so a concurrent delete is not overwritten with a
+        // fresh `deleted_at`.
+        diesel::update(
+            workspace_providers::table
+                .filter(dsl::id.eq(provider_id))
+                .filter(dsl::deleted_at.is_null()),
+        )
+        .set(dsl::deleted_at.eq(now))
+        .execute(self)
+        .await
+        .map_err(Error::from)?;
 
         Ok(())
     }

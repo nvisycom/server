@@ -13,7 +13,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use elide_pipeline::entity::LabelCatalog;
 use nvisy_file_service::FileService;
-use nvisy_file_service::provider::Provider;
+use nvisy_file_service::provider::FileServiceProvider;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -79,14 +79,14 @@ pub struct FileProviders {
 impl FileProviders {
     /// Builds the availability report from the deployment's file service.
     fn from_service(file_service: &FileService) -> Self {
-        // Matched exhaustively so adding a `Provider` variant fails to compile
+        // Matched exhaustively so adding a `FileServiceProvider` variant fails to compile
         // until it is represented here.
         let is = |provider| file_service.is_configured(provider);
         Self {
-            google_drive: is(Provider::GoogleDrive),
-            dropbox: is(Provider::Dropbox),
-            one_drive: is(Provider::OneDrive),
-            box_provider: is(Provider::Box),
+            google_drive: is(FileServiceProvider::GoogleDrive),
+            dropbox: is(FileServiceProvider::Dropbox),
+            one_drive: is(FileServiceProvider::OneDrive),
+            box_provider: is(FileServiceProvider::Box),
         }
     }
 }

@@ -15,8 +15,8 @@ use crate::oauth::OAuthProvider;
 
 /// Provider identifier stored in the connection's `provider` column.
 ///
-/// Must match `Provider::OneDrive`'s serde tag (`one_drive`) so the stored
-/// provider column and the serialized config agree.
+/// Must match `FileServiceProvider::OneDrive`'s serde tag (`one_drive`) so the
+/// stored provider column and the serialized config agree.
 pub const PROVIDER_ID: &str = "one_drive";
 
 /// Microsoft identity platform authorize endpoint (multi-tenant + personal).
@@ -55,7 +55,7 @@ pub fn oauth_provider() -> OAuthProvider {
 /// resolved host is used. The resolved host also gates account type. The
 /// connector's own Graph token is never disturbed.
 ///
-/// The OneDrive arm of [`Provider::mint_picker_token`](super::Provider::mint_picker_token),
+/// The OneDrive arm of [`FileServiceProvider::mint_picker_token`](super::FileServiceProvider::mint_picker_token),
 /// kept here so the dispatch holds no provider-specific logic.
 ///
 /// # Errors
@@ -85,9 +85,20 @@ pub(super) async fn mint_picker_token(
         })?;
 
     // The picker names the resource it wants per `authenticate` command; fall back
-    // to the account's SharePoint host. Either way the audience is a SharePoint
-    // resource, requested via the v2.0 `.default` scope.
-    let resource = resource.unwrap_or(&host);
+    // to the account's SharePoint host. A client-supplied resource is untrusted —
+    // it selects the audience the minted `.default` token is scoped to — so accept
+    // it only when it belongs to the same SharePoint tenant as the resolved host.
+    // Otherwise the caller could mint a token scoped to an arbitrary resource.
+    let resource = match resource {
+        Some(requested) if same_sharepoint_tenant(&host, requested) => requested,
+        Some(_) => {
+            return Err(Error::new(
+                ErrorKind::BadRequest,
+                "the requested picker resource is not in this account's SharePoint tenant",
+            ));
+        }
+        None => &host,
+    };
     let scope = format!("{}/.default", resource.trim_end_matches('/'));
 
     let tokens = service
@@ -151,6 +162,33 @@ pub(super) async fn resolve_sharepoint_host(
     });
 
     Ok(host)
+}
+
+/// Whether a client-supplied picker `resource` belongs to the same SharePoint
+/// tenant as the account's resolved `host`.
+///
+/// The picker may legitimately name either the tenant's SharePoint root
+/// (`{tenant}.sharepoint.com`) or its personal-site host
+/// (`{tenant}-my.sharepoint.com`), so the check is on the tenant label rather
+/// than an exact host match: both hosts must be `*.sharepoint.com` and share the
+/// tenant label once a `-my` suffix is dropped. Anything else — a different
+/// tenant, or a non-SharePoint host — is rejected, so a minted token cannot be
+/// scoped to an arbitrary resource.
+fn same_sharepoint_tenant(host: &str, resource: &str) -> bool {
+    fn tenant_label(url: &str) -> Option<String> {
+        let parsed = reqwest::Url::parse(url).ok()?;
+        let host = parsed.host_str()?.to_ascii_lowercase();
+        let label = host.strip_suffix(".sharepoint.com")?;
+        // The tenant is the leftmost label; the personal-site host adds a `-my`
+        // suffix to it (`contoso-my`), which is the same tenant as `contoso`.
+        let first = label.split('.').next().unwrap_or(label);
+        Some(first.strip_suffix("-my").unwrap_or(first).to_owned())
+    }
+
+    match (tenant_label(host), tenant_label(resource)) {
+        (Some(a), Some(b)) => !a.is_empty() && a == b,
+        _ => false,
+    }
 }
 
 /// A connected OneDrive client holding a valid access token.
@@ -231,5 +269,43 @@ impl FileServiceClient for OneDriveClient {
             .send_checked(PROVIDER_ID)
             .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::same_sharepoint_tenant;
+
+    #[test]
+    fn accepts_same_tenant_and_personal_site() {
+        let host = "https://contoso-my.sharepoint.com";
+        // The resolved host itself.
+        assert!(same_sharepoint_tenant(
+            host,
+            "https://contoso-my.sharepoint.com"
+        ));
+        // The tenant's SharePoint root is the same tenant.
+        assert!(same_sharepoint_tenant(
+            host,
+            "https://contoso.sharepoint.com"
+        ));
+        // A path on the resource does not change the tenant.
+        assert!(same_sharepoint_tenant(
+            host,
+            "https://contoso.sharepoint.com/sites/x"
+        ));
+    }
+
+    #[test]
+    fn rejects_other_tenant_and_non_sharepoint() {
+        let host = "https://contoso-my.sharepoint.com";
+        assert!(!same_sharepoint_tenant(
+            host,
+            "https://evil-my.sharepoint.com"
+        ));
+        assert!(!same_sharepoint_tenant(host, "https://evil.sharepoint.com"));
+        assert!(!same_sharepoint_tenant(host, "https://contoso.example.com"));
+        assert!(!same_sharepoint_tenant(host, "https://attacker.com"));
+        assert!(!same_sharepoint_tenant(host, "not a url"));
     }
 }

@@ -77,10 +77,10 @@ pub trait WorkspaceConnectionRepository {
         provider: &str,
     ) -> impl Future<Output = Result<Vec<WorkspaceConnection>>> + Send;
 
-    /// Lists all active, import-mode connections that have a sync schedule,
-    /// across every workspace, each paired with its cron. Used by the
-    /// scheduled-sync worker; returning the cron avoids re-reading each
-    /// schedule row.
+    /// Lists all active connections that have a cron sync schedule, in either
+    /// direction, across every workspace, each paired with its cron. Used by the
+    /// scheduled-sync worker; returning the cron avoids re-reading each schedule
+    /// row.
     fn list_scheduled_connections(
         &mut self,
     ) -> impl Future<Output = Result<Vec<ScheduledConnection>>> + Send;
@@ -402,13 +402,19 @@ impl WorkspaceConnectionRepository for PgConnection {
     ) -> Result<WorkspaceConnection> {
         use schema::workspace_connections::{self, dsl};
 
-        let connection =
-            diesel::update(workspace_connections::table.filter(dsl::id.eq(connection_id)))
-                .set(&updates)
-                .returning(WorkspaceConnection::as_returning())
-                .get_result(self)
-                .await
-                .map_err(Error::from)?;
+        // Scope to a live row: a concurrent delete may have committed since the
+        // caller's lookup, and updating the tombstoned row would revive it in
+        // effect and emit a spurious event.
+        let connection = diesel::update(
+            workspace_connections::table
+                .filter(dsl::id.eq(connection_id))
+                .filter(dsl::deleted_at.is_null()),
+        )
+        .set(&updates)
+        .returning(WorkspaceConnection::as_returning())
+        .get_result(self)
+        .await
+        .map_err(Error::from)?;
 
         Ok(connection)
     }
@@ -417,11 +423,17 @@ impl WorkspaceConnectionRepository for PgConnection {
         use diesel::dsl::now;
         use schema::workspace_connections::{self, dsl};
 
-        diesel::update(workspace_connections::table.filter(dsl::id.eq(connection_id)))
-            .set(dsl::deleted_at.eq(now))
-            .execute(self)
-            .await
-            .map_err(Error::from)?;
+        // Scope to a live row so a concurrent delete is not overwritten with a
+        // fresh `deleted_at`.
+        diesel::update(
+            workspace_connections::table
+                .filter(dsl::id.eq(connection_id))
+                .filter(dsl::deleted_at.is_null()),
+        )
+        .set(dsl::deleted_at.eq(now))
+        .execute(self)
+        .await
+        .map_err(Error::from)?;
 
         Ok(())
     }

@@ -1,6 +1,6 @@
 //! Typed cloud file-service configuration and provider dispatch.
 //!
-//! [`Provider`] is the single enum of supported providers; it owns each
+//! [`FileServiceProvider`] is the single enum of supported providers; it owns each
 //! provider's identity, OAuth endpoints, and client construction, so no caller
 //! re-derives per-provider facts. [`FileServiceConfig`] pairs a provider with its
 //! [`ConnectionSettings`] (OAuth tokens + sync root) and is what a connection
@@ -68,7 +68,7 @@ impl ProviderRequest for reqwest::RequestBuilder {
         tracing::warn!(
             target: TRACING_TARGET,
             %provider, status = status.as_u16(), body = %body,
-            "Provider request failed",
+            "FileServiceProvider request failed",
         );
         let detail: String = body.trim().chars().take(300).collect();
         let message = if detail.is_empty() {
@@ -123,7 +123,7 @@ fn encode_path_segment(segment: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, EnumIter)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
-pub enum Provider {
+pub enum FileServiceProvider {
     /// Google Drive.
     GoogleDrive,
     /// Dropbox.
@@ -134,7 +134,7 @@ pub enum Provider {
     Box,
 }
 
-impl Provider {
+impl FileServiceProvider {
     /// The stable identifier stored in the connection's `provider` column and
     /// matching the serialized tag.
     #[must_use]
@@ -261,7 +261,7 @@ pub struct ConnectionSettings {
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct FileServiceConfig {
     /// Which provider backs this connection.
-    pub provider: Provider,
+    pub provider: FileServiceProvider,
     /// The connection's tokens and sync root.
     #[serde(flatten)]
     pub settings: ConnectionSettings,
@@ -270,7 +270,7 @@ pub struct FileServiceConfig {
 impl FileServiceConfig {
     /// Creates a config for `provider` with the given settings.
     #[must_use]
-    pub fn new(provider: Provider, settings: ConnectionSettings) -> Self {
+    pub fn new(provider: FileServiceProvider, settings: ConnectionSettings) -> Self {
         Self { provider, settings }
     }
 
@@ -314,7 +314,7 @@ mod tests {
     /// different columns of the same connection and are later compared.
     #[test]
     fn provider_id_matches_serde_tag() {
-        for provider in Provider::iter() {
+        for provider in FileServiceProvider::iter() {
             let tag = serde_json::to_value(provider)
                 .unwrap()
                 .as_str()

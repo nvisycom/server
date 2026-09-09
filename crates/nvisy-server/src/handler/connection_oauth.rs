@@ -27,7 +27,7 @@ use axum::http::StatusCode;
 use axum::response::Redirect;
 use axum::routing::get;
 use nvisy_file_service::FileService;
-use nvisy_file_service::provider::{ConnectionSettings, FileServiceConfig, Provider};
+use nvisy_file_service::provider::{ConnectionSettings, FileServiceConfig, FileServiceProvider};
 use nvisy_nats::NatsClient;
 use nvisy_nats::kv::{OAuthStateBucket as OAuthStateKvBucket, OAuthStateKey};
 use nvisy_postgres::model::NewWorkspaceConnection;
@@ -62,7 +62,7 @@ struct OAuthFlowState {
     /// Account that started the flow; the connection is attributed to it.
     account_id: Uuid,
     /// The provider being connected.
-    provider: Provider,
+    provider: FileServiceProvider,
     /// Display name for the connection to create.
     display_name: String,
     /// Optional sync root (folder id or path) to scope the sync to.

@@ -171,7 +171,16 @@ impl AccountIdentityRepository for PgConnection {
         self.transaction(async |conn| {
             lock_active_account(conn, account_id).await?;
 
-            match conn.create_account_identity(identity).await {
+            // Run the insert in a savepoint (a nested `transaction`). A unique
+            // violation aborts only the savepoint, not the outer transaction, so
+            // the follow-up read below can still run — a bare insert here would
+            // poison the whole transaction on `23505` and the read would fail with
+            // `25P02` instead of resolving the conflict.
+            let insert = conn
+                .transaction(async |conn| conn.create_account_identity(identity).await)
+                .await;
+
+            match insert {
                 Ok(_) => Ok(LinkIdentityOutcome::Linked),
                 // A concurrent callback won the `(account_id, provider)` slot.
                 // Whether that is benign depends on what it linked, so read the

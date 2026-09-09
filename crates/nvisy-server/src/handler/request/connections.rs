@@ -1,6 +1,6 @@
 //! Connection request types.
 
-use nvisy_file_service::provider::Provider;
+use nvisy_file_service::provider::FileServiceProvider;
 use nvisy_postgres::types::{ConnectionId, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -89,14 +89,14 @@ pub struct CreateConnection {
 }
 
 /// Path parameters for the OAuth start endpoint: which cloud file provider to
-/// begin authorizing. The provider is the crate's [`Provider`], so the API and
+/// begin authorizing. The provider is the crate's [`FileServiceProvider`], so the API and
 /// stored config name each provider identically.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthStartPathParams {
     /// The cloud file provider to connect.
-    pub provider: Provider,
+    pub provider: FileServiceProvider,
 }
 
 /// Request payload for starting a cloud file-service OAuth authorization.
