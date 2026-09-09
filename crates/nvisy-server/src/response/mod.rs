@@ -5,6 +5,8 @@
 //! [`handler::response`](crate::handler::response); this module is for types
 //! whose job is response *behavior* — setting status, headers, or cookies.
 
-mod session;
+mod auth;
+mod sse;
 
-pub use session::{ClearedSession, CookieConfig, WebSession};
+pub use auth::{ClearedSession, CookieConfig, WebSession};
+pub use sse::SseResponse;

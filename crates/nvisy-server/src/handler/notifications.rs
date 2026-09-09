@@ -22,8 +22,8 @@ use crate::handler::request::{CursorPagination, NotificationPathParams};
 use crate::handler::response::{
     ErrorResponse, MarkedReadStatus, Notification, NotificationsPage, UnreadStatus,
 };
-use crate::handler::utility::SseResponse;
 use crate::handler::{Error, Result};
+use crate::response::SseResponse;
 use crate::service::{NotificationEmitter, ServiceState, UnreadCountEvent};
 
 /// Tracing target for notification operations.
