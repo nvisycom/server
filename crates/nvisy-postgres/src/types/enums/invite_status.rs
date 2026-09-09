@@ -1,46 +1,24 @@
 //! Invite status enumeration for workspace invitation tracking.
 
-use diesel_derive_enum::DbEnum;
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString};
+use super::db_enum;
 
-/// Defines the current status of a workspace invitation.
-///
-/// This enumeration corresponds to the `INVITE_STATUS` PostgreSQL enum and is used
-/// to track the lifecycle of workspace invitations from creation to resolution.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
-#[ExistingTypePath = "crate::schema::sql_types::InviteStatus"]
-pub enum InviteStatus {
-    /// Invitation has been sent and is awaiting a response from the invitee
-    #[db_rename = "pending"]
-    #[serde(rename = "pending")]
-    #[default]
-    Pending,
-
-    /// Invitation has been accepted and the member has been added to the workspace
-    #[db_rename = "accepted"]
-    #[serde(rename = "accepted")]
-    Accepted,
-
-    /// Invitation was declined by the invitee
-    #[db_rename = "declined"]
-    #[serde(rename = "declined")]
-    Declined,
-
-    /// Invitation was canceled by the person who sent it
-    #[db_rename = "canceled"]
-    #[serde(rename = "canceled")]
-    Canceled,
-
-    /// Invitation expired due to timeout (automatic system action)
-    #[db_rename = "expired"]
-    #[serde(rename = "expired")]
-    Expired,
-
-    /// Invitation was revoked by a workspace administrator
-    #[db_rename = "revoked"]
-    #[serde(rename = "revoked")]
-    Revoked,
+db_enum! {
+    /// The current status of a workspace invitation.
+    ///
+    /// Corresponds to the `INVITE_STATUS` PostgreSQL enum and tracks the lifecycle
+    /// of an invitation from creation to resolution.
+    pub enum InviteStatus: Default = Pending, "crate::schema::sql_types::InviteStatus" {
+        /// Sent and awaiting a response from the invitee.
+        Pending = "pending",
+        /// Accepted; the member has been added to the workspace.
+        Accepted = "accepted",
+        /// Declined by the invitee.
+        Declined = "declined",
+        /// Canceled by the person who sent it.
+        Canceled = "canceled",
+        /// Expired due to timeout (automatic system action).
+        Expired = "expired",
+        /// Revoked by a workspace administrator.
+        Revoked = "revoked",
+    }
 }

@@ -81,15 +81,3 @@ pub struct UpdateWorkspaceConnectionSync {
     /// When the sync finished.
     pub completed_at: Option<Option<Timestamp>>,
 }
-
-impl WorkspaceConnectionSync {
-    /// Returns whether the sync is in progress (pending or running).
-    pub fn is_in_progress(&self) -> bool {
-        self.status.is_in_progress()
-    }
-
-    /// Returns whether the sync failed.
-    pub fn is_failed(&self) -> bool {
-        self.status.is_failed()
-    }
-}

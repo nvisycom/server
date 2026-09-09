@@ -1,173 +1,64 @@
 //! Webhook event type enumeration for webhook event subscriptions.
 
-use diesel_derive_enum::DbEnum;
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString, IntoStaticStr};
+use super::db_enum;
 
-/// Defines the types of events that can trigger webhook delivery.
-///
-/// This enumeration corresponds to the `WEBHOOK_EVENT` PostgreSQL enum and is used
-/// to configure which events a webhook should receive notifications for.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(DbEnum, Display, EnumIter, EnumString, IntoStaticStr)]
-#[ExistingTypePath = "crate::schema::sql_types::WebhookEvent"]
-pub enum WebhookEvent {
-    // File events
-    /// A new file was created
-    #[db_rename = "file.created"]
-    #[serde(rename = "file.created")]
-    #[strum(serialize = "file.created")]
-    FileCreated,
-
-    /// A file was updated
-    #[db_rename = "file.updated"]
-    #[serde(rename = "file.updated")]
-    #[strum(serialize = "file.updated")]
-    FileUpdated,
-
-    /// A file was deleted
-    #[db_rename = "file.deleted"]
-    #[serde(rename = "file.deleted")]
-    #[strum(serialize = "file.deleted")]
-    FileDeleted,
-
-    // Member events
-    /// A member was added to the workspace
-    #[db_rename = "member.added"]
-    #[serde(rename = "member.added")]
-    #[strum(serialize = "member.added")]
-    MemberAdded,
-
-    /// A member was deleted from the workspace
-    #[db_rename = "member.deleted"]
-    #[serde(rename = "member.deleted")]
-    #[strum(serialize = "member.deleted")]
-    MemberDeleted,
-
-    /// A member's details were updated
-    #[db_rename = "member.updated"]
-    #[serde(rename = "member.updated")]
-    #[strum(serialize = "member.updated")]
-    MemberUpdated,
-
-    // Connection events
-    /// A connection was created
-    #[db_rename = "connection.created"]
-    #[serde(rename = "connection.created")]
-    #[strum(serialize = "connection.created")]
-    ConnectionCreated,
-
-    /// A connection was updated
-    #[db_rename = "connection.updated"]
-    #[serde(rename = "connection.updated")]
-    #[strum(serialize = "connection.updated")]
-    ConnectionUpdated,
-
-    /// A connection was deleted
-    #[db_rename = "connection.deleted"]
-    #[serde(rename = "connection.deleted")]
-    #[strum(serialize = "connection.deleted")]
-    ConnectionDeleted,
-
-    /// A connection sync started
-    #[db_rename = "connection.sync.started"]
-    #[serde(rename = "connection.sync.started")]
-    #[strum(serialize = "connection.sync.started")]
-    ConnectionSyncStarted,
-
-    /// A connection sync finished successfully
-    #[db_rename = "connection.sync.completed"]
-    #[serde(rename = "connection.sync.completed")]
-    #[strum(serialize = "connection.sync.completed")]
-    ConnectionSyncCompleted,
-
-    /// A connection sync failed
-    #[db_rename = "connection.sync.failed"]
-    #[serde(rename = "connection.sync.failed")]
-    #[strum(serialize = "connection.sync.failed")]
-    ConnectionSyncFailed,
-
-    // Provider events
-    /// A provider was created
-    #[db_rename = "provider.created"]
-    #[serde(rename = "provider.created")]
-    #[strum(serialize = "provider.created")]
-    ProviderCreated,
-
-    /// A provider was updated
-    #[db_rename = "provider.updated"]
-    #[serde(rename = "provider.updated")]
-    #[strum(serialize = "provider.updated")]
-    ProviderUpdated,
-
-    /// A provider was deleted
-    #[db_rename = "provider.deleted"]
-    #[serde(rename = "provider.deleted")]
-    #[strum(serialize = "provider.deleted")]
-    ProviderDeleted,
-
-    // Pipeline events
-    /// A pipeline was created
-    #[db_rename = "pipeline.created"]
-    #[serde(rename = "pipeline.created")]
-    #[strum(serialize = "pipeline.created")]
-    PipelineCreated,
-
-    /// A pipeline was updated
-    #[db_rename = "pipeline.updated"]
-    #[serde(rename = "pipeline.updated")]
-    #[strum(serialize = "pipeline.updated")]
-    PipelineUpdated,
-
-    /// A pipeline was deleted
-    #[db_rename = "pipeline.deleted"]
-    #[serde(rename = "pipeline.deleted")]
-    #[strum(serialize = "pipeline.deleted")]
-    PipelineDeleted,
-
-    /// A detection started
-    #[db_rename = "pipeline.detection.started"]
-    #[serde(rename = "pipeline.detection.started")]
-    #[strum(serialize = "pipeline.detection.started")]
-    DetectionStarted,
-
-    /// A detection's analysis finished (findings ready to redact)
-    #[db_rename = "pipeline.detection.completed"]
-    #[serde(rename = "pipeline.detection.completed")]
-    #[strum(serialize = "pipeline.detection.completed")]
-    DetectionCompleted,
-
-    /// A detection failed
-    #[db_rename = "pipeline.detection.failed"]
-    #[serde(rename = "pipeline.detection.failed")]
-    #[strum(serialize = "pipeline.detection.failed")]
-    DetectionFailed,
-
-    /// A redaction was created
-    #[db_rename = "pipeline.redaction.created"]
-    #[serde(rename = "pipeline.redaction.created")]
-    #[strum(serialize = "pipeline.redaction.created")]
-    RedactionCreated,
-
-    // Policy events
-    /// A policy was created
-    #[db_rename = "policy.created"]
-    #[serde(rename = "policy.created")]
-    #[strum(serialize = "policy.created")]
-    PolicyCreated,
-
-    /// A policy was updated
-    #[db_rename = "policy.updated"]
-    #[serde(rename = "policy.updated")]
-    #[strum(serialize = "policy.updated")]
-    PolicyUpdated,
-
-    /// A policy was deleted
-    #[db_rename = "policy.deleted"]
-    #[serde(rename = "policy.deleted")]
-    #[strum(serialize = "policy.deleted")]
-    PolicyDeleted,
+db_enum! {
+    /// The types of events that can trigger webhook delivery.
+    ///
+    /// Corresponds to the `WEBHOOK_EVENT` PostgreSQL enum and configures which
+    /// events a webhook receives.
+    pub enum WebhookEvent = "crate::schema::sql_types::WebhookEvent" {
+        /// A new file was created.
+        FileCreated = "file.created",
+        /// A file was updated.
+        FileUpdated = "file.updated",
+        /// A file was deleted.
+        FileDeleted = "file.deleted",
+        /// A member was added.
+        MemberAdded = "member.added",
+        /// A member was removed.
+        MemberDeleted = "member.deleted",
+        /// A member's role or permissions were updated.
+        MemberUpdated = "member.updated",
+        /// A connection was created.
+        ConnectionCreated = "connection.created",
+        /// A connection was updated.
+        ConnectionUpdated = "connection.updated",
+        /// A connection was deleted.
+        ConnectionDeleted = "connection.deleted",
+        /// A connection sync started.
+        ConnectionSyncStarted = "connection.sync.started",
+        /// A connection sync completed.
+        ConnectionSyncCompleted = "connection.sync.completed",
+        /// A connection sync failed.
+        ConnectionSyncFailed = "connection.sync.failed",
+        /// A provider was created.
+        ProviderCreated = "provider.created",
+        /// A provider was updated.
+        ProviderUpdated = "provider.updated",
+        /// A provider was deleted.
+        ProviderDeleted = "provider.deleted",
+        /// A pipeline was created.
+        PipelineCreated = "pipeline.created",
+        /// A pipeline was updated.
+        PipelineUpdated = "pipeline.updated",
+        /// A pipeline was deleted.
+        PipelineDeleted = "pipeline.deleted",
+        /// A detection was started.
+        DetectionStarted = "pipeline.detection.started",
+        /// A detection finished analysis.
+        DetectionCompleted = "pipeline.detection.completed",
+        /// A detection failed.
+        DetectionFailed = "pipeline.detection.failed",
+        /// A redaction was created.
+        RedactionCreated = "pipeline.redaction.created",
+        /// A policy was created.
+        PolicyCreated = "policy.created",
+        /// A policy was updated.
+        PolicyUpdated = "policy.updated",
+        /// A policy was deleted.
+        PolicyDeleted = "policy.deleted",
+    }
 }
 
 impl WebhookEvent {

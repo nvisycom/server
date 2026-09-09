@@ -1,41 +1,25 @@
 //! Detection status enumeration indicating the execution state of a detection.
 
-use diesel_derive_enum::DbEnum;
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString};
+use super::db_enum;
 
-/// The execution status of a detection (one analysis pass of a file).
-///
-/// Corresponds to the `DETECTION_STATUS` PostgreSQL enum. A detection is
-/// `Pending` (enqueued, no worker yet), then `Executing` (a worker is actively
-/// analyzing), then settles into `Complete` (analysis done, ready to redact) or
-/// `Failed`. Redaction is a separate, repeatable action over a complete
-/// detection and does not change this status.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
-#[ExistingTypePath = "crate::schema::sql_types::DetectionStatus"]
-pub enum DetectionStatus {
-    /// Enqueued for detection; no worker has picked it up yet.
-    #[db_rename = "pending"]
-    #[serde(rename = "pending")]
-    #[default]
-    Pending,
-
-    /// A worker is actively analyzing the document.
-    #[db_rename = "executing"]
-    #[serde(rename = "executing")]
-    Executing,
-
-    /// Analysis done; the detection is ready to redact.
-    #[db_rename = "complete"]
-    #[serde(rename = "complete")]
-    Complete,
-
-    /// Detection failed with an error.
-    #[db_rename = "failed"]
-    #[serde(rename = "failed")]
-    Failed,
+db_enum! {
+    /// The execution status of a detection (one analysis pass of a file).
+    ///
+    /// Corresponds to the `DETECTION_STATUS` PostgreSQL enum. A detection is
+    /// `Pending` (enqueued, no worker yet), then `Executing` (a worker is actively
+    /// analyzing), then settles into `Complete` (analysis done, ready to redact)
+    /// or `Failed`. Redaction is a separate, repeatable action over a complete
+    /// detection and does not change this status.
+    pub enum DetectionStatus: Default = Pending, "crate::schema::sql_types::DetectionStatus" {
+        /// Enqueued for detection; no worker has picked it up yet.
+        Pending = "pending",
+        /// A worker is actively analyzing the document.
+        Executing = "executing",
+        /// Analysis done; the detection is ready to redact.
+        Complete = "complete",
+        /// Detection failed with an error.
+        Failed = "failed",
+    }
 }
 
 impl DetectionStatus {

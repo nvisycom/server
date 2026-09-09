@@ -709,7 +709,7 @@ impl WorkspaceFileRepository for PgConnection {
 
         // Hybrid name search: ILIKE substring (works for short queries) OR
         // trigram similarity (typo tolerance); both served by the trgm index.
-        if let Some(term) = filter.search_term() {
+        if let Some(term) = &filter.search {
             query = query.filter(
                 dsl::display_name
                     .ilike(ilike_contains(term))
@@ -719,13 +719,13 @@ impl WorkspaceFileRepository for PgConnection {
 
         // Apply the extension constraint. A present-but-empty set matches
         // nothing (an active facet with no members), so apply whenever `Some`.
-        if let Some(extensions) = filter.extensions() {
-            query = query.filter(dsl::file_extension.eq_any(extensions.to_vec()));
+        if let Some(extensions) = &filter.extensions {
+            query = query.filter(dsl::file_extension.eq_any(extensions.clone()));
         }
 
         // Apply the exact content-hash constraint (dedup lookup).
-        if let Some(hash) = filter.hash() {
-            query = query.filter(dsl::file_hash_sha256.eq(hash.to_vec()));
+        if let Some(hash) = &filter.hash {
+            query = query.filter(dsl::file_hash_sha256.eq(hash.clone()));
         }
 
         // Apply sorting
@@ -759,9 +759,9 @@ impl WorkspaceFileRepository for PgConnection {
         use schema::{accounts, workspace_files};
 
         // Precompute filter values
-        let search_term = filter.search_term().map(|s| s.to_string());
-        let extensions: Option<Vec<String>> = filter.extensions().map(|e| e.to_vec());
-        let hash: Option<Vec<u8>> = filter.hash().map(|h| h.to_vec());
+        let search_term = filter.search.clone();
+        let extensions = filter.extensions.clone();
+        let hash = filter.hash.clone();
 
         // Build base query with filters
         let mut base_query = workspace_files::table

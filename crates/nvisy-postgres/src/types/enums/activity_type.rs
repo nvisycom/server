@@ -1,237 +1,84 @@
 //! Activity type enumeration for workspace audit logging.
 
-use diesel_derive_enum::DbEnum;
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString, IntoStaticStr};
+use super::db_enum;
 
-/// Defines the type of activity performed in a workspace for audit logging.
-///
-/// This enumeration corresponds to the `ACTIVITY_TYPE` PostgreSQL enum and is used
-/// to categorize different types of activities that occur within workspaces for comprehensive
-/// audit trail and activity tracking.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(DbEnum, Display, EnumIter, EnumString, IntoStaticStr)]
-#[ExistingTypePath = "crate::schema::sql_types::ActivityType"]
-pub enum ActivityType {
-    // Workspace activities
-    /// Workspace was created
-    #[db_rename = "workspace.created"]
-    #[serde(rename = "workspace.created")]
-    #[strum(serialize = "workspace.created")]
-    WorkspaceCreated,
-
-    /// Workspace settings or metadata were updated
-    #[db_rename = "workspace.updated"]
-    #[serde(rename = "workspace.updated")]
-    #[strum(serialize = "workspace.updated")]
-    WorkspaceUpdated,
-
-    /// Workspace was deleted
-    #[db_rename = "workspace.deleted"]
-    #[serde(rename = "workspace.deleted")]
-    #[strum(serialize = "workspace.deleted")]
-    WorkspaceDeleted,
-
-    // Member activities
-    /// Member joined the workspace
-    #[db_rename = "member.added"]
-    #[serde(rename = "member.added")]
-    #[strum(serialize = "member.added")]
-    MemberAdded,
-
-    /// Member information or preferences were updated
-    #[db_rename = "member.updated"]
-    #[serde(rename = "member.updated")]
-    #[strum(serialize = "member.updated")]
-    MemberUpdated,
-
-    /// Member was removed from the workspace
-    #[db_rename = "member.deleted"]
-    #[serde(rename = "member.deleted")]
-    #[strum(serialize = "member.deleted")]
-    MemberDeleted,
-
-    // Invite activities
-    /// Invite was created
-    #[db_rename = "invite.created"]
-    #[serde(rename = "invite.created")]
-    #[strum(serialize = "invite.created")]
-    InviteCreated,
-
-    /// Invite was accepted
-    #[db_rename = "invite.accepted"]
-    #[serde(rename = "invite.accepted")]
-    #[strum(serialize = "invite.accepted")]
-    InviteAccepted,
-
-    /// Invite was declined
-    #[db_rename = "invite.declined"]
-    #[serde(rename = "invite.declined")]
-    #[strum(serialize = "invite.declined")]
-    InviteDeclined,
-
-    /// Invite was canceled
-    #[db_rename = "invite.canceled"]
-    #[serde(rename = "invite.canceled")]
-    #[strum(serialize = "invite.canceled")]
-    InviteCanceled,
-
-    // Connection activities
-    /// Connection was created
-    #[db_rename = "connection.created"]
-    #[serde(rename = "connection.created")]
-    #[strum(serialize = "connection.created")]
-    ConnectionCreated,
-
-    /// Connection was updated
-    #[db_rename = "connection.updated"]
-    #[serde(rename = "connection.updated")]
-    #[strum(serialize = "connection.updated")]
-    ConnectionUpdated,
-
-    /// Connection was deleted
-    #[db_rename = "connection.deleted"]
-    #[serde(rename = "connection.deleted")]
-    #[strum(serialize = "connection.deleted")]
-    ConnectionDeleted,
-
-    /// Connection started synchronization
-    #[db_rename = "connection.sync.started"]
-    #[serde(rename = "connection.sync.started")]
-    #[strum(serialize = "connection.sync.started")]
-    ConnectionSyncStarted,
-
-    /// Connection completed synchronization
-    #[db_rename = "connection.sync.completed"]
-    #[serde(rename = "connection.sync.completed")]
-    #[strum(serialize = "connection.sync.completed")]
-    ConnectionSyncCompleted,
-
-    /// Connection synchronization failed
-    #[db_rename = "connection.sync.failed"]
-    #[serde(rename = "connection.sync.failed")]
-    #[strum(serialize = "connection.sync.failed")]
-    ConnectionSyncFailed,
-
-    // Provider activities
-    /// Provider was created
-    #[db_rename = "provider.created"]
-    #[serde(rename = "provider.created")]
-    #[strum(serialize = "provider.created")]
-    ProviderCreated,
-
-    /// Provider was updated
-    #[db_rename = "provider.updated"]
-    #[serde(rename = "provider.updated")]
-    #[strum(serialize = "provider.updated")]
-    ProviderUpdated,
-
-    /// Provider was deleted
-    #[db_rename = "provider.deleted"]
-    #[serde(rename = "provider.deleted")]
-    #[strum(serialize = "provider.deleted")]
-    ProviderDeleted,
-
-    // Webhook activities
-    /// Webhook was created
-    #[db_rename = "webhook.created"]
-    #[serde(rename = "webhook.created")]
-    #[strum(serialize = "webhook.created")]
-    WebhookCreated,
-
-    /// Webhook was updated
-    #[db_rename = "webhook.updated"]
-    #[serde(rename = "webhook.updated")]
-    #[strum(serialize = "webhook.updated")]
-    WebhookUpdated,
-
-    /// Webhook was deleted
-    #[db_rename = "webhook.deleted"]
-    #[serde(rename = "webhook.deleted")]
-    #[strum(serialize = "webhook.deleted")]
-    WebhookDeleted,
-
-    // File activities
-    /// File was created
-    #[db_rename = "file.created"]
-    #[serde(rename = "file.created")]
-    #[strum(serialize = "file.created")]
-    FileCreated,
-
-    /// File was updated
-    #[db_rename = "file.updated"]
-    #[serde(rename = "file.updated")]
-    #[strum(serialize = "file.updated")]
-    FileUpdated,
-
-    /// File was deleted
-    #[db_rename = "file.deleted"]
-    #[serde(rename = "file.deleted")]
-    #[strum(serialize = "file.deleted")]
-    FileDeleted,
-
-    // Pipeline activities
-    /// Pipeline was created
-    #[db_rename = "pipeline.created"]
-    #[serde(rename = "pipeline.created")]
-    #[strum(serialize = "pipeline.created")]
-    PipelineCreated,
-
-    /// Pipeline was updated
-    #[db_rename = "pipeline.updated"]
-    #[serde(rename = "pipeline.updated")]
-    #[strum(serialize = "pipeline.updated")]
-    PipelineUpdated,
-
-    /// Pipeline was deleted
-    #[db_rename = "pipeline.deleted"]
-    #[serde(rename = "pipeline.deleted")]
-    #[strum(serialize = "pipeline.deleted")]
-    PipelineDeleted,
-
-    /// Detection was started
-    #[db_rename = "pipeline.detection.started"]
-    #[serde(rename = "pipeline.detection.started")]
-    #[strum(serialize = "pipeline.detection.started")]
-    DetectionStarted,
-
-    /// Detection finished analysis
-    #[db_rename = "pipeline.detection.completed"]
-    #[serde(rename = "pipeline.detection.completed")]
-    #[strum(serialize = "pipeline.detection.completed")]
-    DetectionCompleted,
-
-    /// Detection failed
-    #[db_rename = "pipeline.detection.failed"]
-    #[serde(rename = "pipeline.detection.failed")]
-    #[strum(serialize = "pipeline.detection.failed")]
-    DetectionFailed,
-
-    /// Redaction was created
-    #[db_rename = "pipeline.redaction.created"]
-    #[serde(rename = "pipeline.redaction.created")]
-    #[strum(serialize = "pipeline.redaction.created")]
-    RedactionCreated,
-
-    // Policy activities
-    /// Policy was created
-    #[db_rename = "policy.created"]
-    #[serde(rename = "policy.created")]
-    #[strum(serialize = "policy.created")]
-    PolicyCreated,
-
-    /// Policy was updated
-    #[db_rename = "policy.updated"]
-    #[serde(rename = "policy.updated")]
-    #[strum(serialize = "policy.updated")]
-    PolicyUpdated,
-
-    /// Policy was deleted
-    #[db_rename = "policy.deleted"]
-    #[serde(rename = "policy.deleted")]
-    #[strum(serialize = "policy.deleted")]
-    PolicyDeleted,
+db_enum! {
+    /// The type of activity performed in a workspace, for audit logging.
+    ///
+    /// Corresponds to the `ACTIVITY_TYPE` PostgreSQL enum and categorizes the
+    /// activities that occur within workspaces for a comprehensive audit trail.
+    pub enum ActivityType = "crate::schema::sql_types::ActivityType" {
+        /// Workspace was created.
+        WorkspaceCreated = "workspace.created",
+        /// Workspace settings or metadata were updated.
+        WorkspaceUpdated = "workspace.updated",
+        /// Workspace was deleted.
+        WorkspaceDeleted = "workspace.deleted",
+        /// Member was added to a workspace.
+        MemberAdded = "member.added",
+        /// Member's role or permissions were updated.
+        MemberUpdated = "member.updated",
+        /// Member was removed from a workspace.
+        MemberDeleted = "member.deleted",
+        /// Invitation was created.
+        InviteCreated = "invite.created",
+        /// Invitation was accepted.
+        InviteAccepted = "invite.accepted",
+        /// Invitation was declined.
+        InviteDeclined = "invite.declined",
+        /// Invitation was canceled.
+        InviteCanceled = "invite.canceled",
+        /// Connection was created.
+        ConnectionCreated = "connection.created",
+        /// Connection was updated.
+        ConnectionUpdated = "connection.updated",
+        /// Connection was deleted.
+        ConnectionDeleted = "connection.deleted",
+        /// Connection sync started.
+        ConnectionSyncStarted = "connection.sync.started",
+        /// Connection sync completed.
+        ConnectionSyncCompleted = "connection.sync.completed",
+        /// Connection sync failed.
+        ConnectionSyncFailed = "connection.sync.failed",
+        /// Provider was created.
+        ProviderCreated = "provider.created",
+        /// Provider was updated.
+        ProviderUpdated = "provider.updated",
+        /// Provider was deleted.
+        ProviderDeleted = "provider.deleted",
+        /// Webhook was created.
+        WebhookCreated = "webhook.created",
+        /// Webhook was updated.
+        WebhookUpdated = "webhook.updated",
+        /// Webhook was deleted.
+        WebhookDeleted = "webhook.deleted",
+        /// File was created.
+        FileCreated = "file.created",
+        /// File was updated.
+        FileUpdated = "file.updated",
+        /// File was deleted.
+        FileDeleted = "file.deleted",
+        /// Pipeline was created.
+        PipelineCreated = "pipeline.created",
+        /// Pipeline was updated.
+        PipelineUpdated = "pipeline.updated",
+        /// Pipeline was deleted.
+        PipelineDeleted = "pipeline.deleted",
+        /// Detection was started.
+        DetectionStarted = "pipeline.detection.started",
+        /// Detection finished analysis.
+        DetectionCompleted = "pipeline.detection.completed",
+        /// Detection failed.
+        DetectionFailed = "pipeline.detection.failed",
+        /// Redaction was created.
+        RedactionCreated = "pipeline.redaction.created",
+        /// Policy was created.
+        PolicyCreated = "policy.created",
+        /// Policy was updated.
+        PolicyUpdated = "policy.updated",
+        /// Policy was deleted.
+        PolicyDeleted = "policy.deleted",
+    }
 }
 
 impl ActivityType {

@@ -94,10 +94,3 @@ pub struct UpdateWorkspaceDetection {
     /// When the detection completed analysis.
     pub completed_at: Option<Option<Timestamp>>,
 }
-
-impl WorkspaceDetection {
-    /// Returns whether analysis is done and the detection is ready to redact.
-    pub fn is_complete(&self) -> bool {
-        self.status.is_complete()
-    }
-}

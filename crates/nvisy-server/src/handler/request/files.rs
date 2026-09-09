@@ -1,7 +1,7 @@
 //! File request types.
 
 use std::borrow::Cow;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use derive_more::{AsRef, Into};
 use elide_pipeline::FormatRegistry;
@@ -137,17 +137,19 @@ impl ListFiles {
         let modality = self.modality.as_deref();
         let modality = modality.map(|t| engine.resolve_modalities(t)).transpose()?;
 
-        let mut filter = FileFilter::new();
-        if let Some(search) = self.search.as_deref().filter(|s| !s.is_empty()) {
-            filter = filter.with_search(search.to_owned());
-        }
-        if let Some(extensions) = intersect_facets(formats, modality) {
-            filter = filter.with_extensions(extensions);
-        }
-        if let Some(hash) = &self.hash {
-            filter = filter.with_hash(hash.to_bytes());
-        }
-        Ok(filter)
+        // An empty search string is not a real search — normalize it to `None`
+        // here so the filter always carries a meaningful term.
+        let search = self
+            .search
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+
+        Ok(FileFilter {
+            search,
+            extensions: intersect_facets(formats, modality),
+            hash: self.hash.as_ref().map(FileHash::to_bytes),
+        })
     }
 }
 
@@ -158,11 +160,14 @@ fn intersect_facets(
     modality: Option<Vec<String>>,
 ) -> Option<Vec<String>> {
     match (formats, modality) {
+        // Both facets active: keep only extensions in both sets.
         (Some(a), Some(b)) => {
-            let set: std::collections::HashSet<&String> = b.iter().collect();
-            Some(a.into_iter().filter(|ext| set.contains(ext)).collect())
+            let keep: HashSet<&String> = b.iter().collect();
+            Some(a.into_iter().filter(|ext| keep.contains(ext)).collect())
         }
-        (Some(only), None) | (None, Some(only)) => Some(only),
+        // One facet active: it is the constraint on its own.
+        (only @ Some(_), None) | (None, only @ Some(_)) => only,
+        // Neither: no extension constraint.
         (None, None) => None,
     }
 }
