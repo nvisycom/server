@@ -211,13 +211,6 @@ impl fmt::Display for Version {
     }
 }
 
-impl From<Version> for bool {
-    #[inline]
-    fn from(value: Version) -> Self {
-        value.is_stable()
-    }
-}
-
 /// Path parameters for version extraction.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 struct VersionParams {
@@ -249,5 +242,20 @@ impl OperationInput for Version {
         operation: &mut Operation,
     ) -> Vec<(Option<aide::openapi::StatusCode>, Response)> {
         Path::<VersionParams>::inferred_early_responses(ctx, operation)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Version;
+
+    // `Version::new` and the predicates are covered by the doctests above; this
+    // covers the `Display` strings, which they do not.
+    #[test]
+    fn display_renders_each_variant() {
+        assert_eq!(Version::new("v1").to_string(), "v1");
+        assert_eq!(Version::new("v42").to_string(), "v42");
+        assert_eq!(Version::new("v0").to_string(), "unstable");
+        assert_eq!(Version::new("nonsense").to_string(), "unrecognized");
     }
 }

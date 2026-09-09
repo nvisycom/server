@@ -349,3 +349,91 @@ where
         Ok(claims)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use jiff::{Span, Timestamp};
+    use nvisy_postgres::model::{Account, AccountApiToken};
+    use nvisy_postgres::types::{ApiTokenType, session};
+
+    use super::{AuthClaims, NEVER_EXPIRES_SECONDS};
+
+    /// Builds bare claims with a chosen `expires_at`, for the time predicates.
+    fn claims_expiring_at(expires_at: i64) -> AuthClaims<()> {
+        AuthClaims {
+            issued_by: Cow::Borrowed("nvisy"),
+            audience: Cow::Borrowed("nvisy:server"),
+            token_id: uuid::Uuid::now_v7(),
+            account_id: uuid::Uuid::now_v7(),
+            issued_at: Timestamp::now().as_second(),
+            expires_at,
+            custom_claims: (),
+            is_admin: false,
+        }
+    }
+
+    #[test]
+    fn web_exp_is_the_absolute_cap_from_issued_at() {
+        let account = Account::test();
+        let token = AccountApiToken::test(account.id, ApiTokenType::Web);
+        let claims = AuthClaims::new(&account, &token);
+
+        // A web session's JWT `exp` is `issued_at + MAX_AGE`, independent of the
+        // row's (sliding) `expired_at`.
+        let issued = Timestamp::from(token.issued_at).as_second();
+        let expected = issued + session::MAX_AGE.as_secs() as i64;
+        assert_eq!(claims.expires_at, expected);
+        assert_eq!(claims.account_id, account.id);
+        assert_eq!(claims.token_id, token.id);
+    }
+
+    #[test]
+    fn api_and_app_exp_follow_the_rows_own_expiry() {
+        let account = Account::test();
+        let chosen = Timestamp::now() + Span::new().hours(3);
+
+        for kind in [ApiTokenType::Api, ApiTokenType::App] {
+            let mut token = AccountApiToken::test(account.id, kind);
+            token.expired_at = Some(chosen.into());
+            let claims = AuthClaims::new(&account, &token);
+            // Not the browser cap — the token's chosen lifetime.
+            assert_eq!(claims.expires_at, chosen.as_second());
+        }
+    }
+
+    #[test]
+    fn api_and_app_without_expiry_never_effectively_expire() {
+        let account = Account::test();
+        let token = AccountApiToken::test(account.id, ApiTokenType::Api); // expired_at: None
+        let claims = AuthClaims::new(&account, &token);
+
+        // Falls back to a far-future value (~100 years), so the JWT never lapses.
+        let lower_bound = Timestamp::now().as_second() + NEVER_EXPIRES_SECONDS - 60;
+        assert!(claims.expires_at >= lower_bound);
+        assert!(!claims.is_expired());
+    }
+
+    #[test]
+    fn time_predicates_track_expiry() {
+        let now = Timestamp::now().as_second();
+
+        // Already past.
+        let expired = claims_expiring_at(now - 10);
+        assert!(expired.is_expired());
+        assert!(expired.expires_soon());
+        assert_eq!(expired.remaining_lifetime().get_seconds(), 0);
+
+        // Comfortably in the future.
+        let fresh = claims_expiring_at(now + 3600);
+        assert!(!fresh.is_expired());
+        assert!(!fresh.expires_soon());
+        assert!(fresh.remaining_lifetime().get_seconds() > 0);
+
+        // Within the 5-minute refresh threshold but not yet expired.
+        let soon = claims_expiring_at(now + 60);
+        assert!(!soon.is_expired());
+        assert!(soon.expires_soon());
+    }
+}

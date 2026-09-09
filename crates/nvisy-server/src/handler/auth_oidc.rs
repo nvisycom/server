@@ -220,11 +220,11 @@ fn start_sign_in_docs(op: TransformOperation) -> TransformOperation {
 /// (`POST /account/identities/{provider}`), not `/auth`, so linking and
 /// unlinking a provider sit symmetrically on the same resource. The OIDC redirect
 /// machinery lives here beside the shared callback.
-#[tracing::instrument(skip_all, fields(provider = ?path_params.provider, account_id = %auth_claims.account_id))]
+#[tracing::instrument(skip_all, fields(provider = ?path_params.provider, account_id = %auth_state.account_id))]
 pub(crate) async fn start_link(
     State(nats): State<NatsClient>,
     State(oidc): State<OidcService>,
-    AuthState(auth_claims): AuthState,
+    auth_state: AuthState,
     Path(path_params): Path<IdentityPathParams>,
     Query(query): Query<OidcStartQuery>,
 ) -> Result<(StatusCode, Json<OidcStartResponse>)> {
@@ -239,7 +239,7 @@ pub(crate) async fn start_link(
             .with_message("Re-authentication required to link a provider")
             .with_resource("account")
     })?;
-    consume_reauth_proof(&nats, auth_claims.account_id, proof).await?;
+    consume_reauth_proof(&nats, auth_state.account_id, proof).await?;
 
     let authorize_url = begin_flow(
         &nats,
@@ -247,7 +247,7 @@ pub(crate) async fn start_link(
         path_params.provider,
         query.redirect_uri,
         OidcPurpose::Link {
-            account_id: auth_claims.account_id,
+            account_id: auth_state.account_id,
         },
     )
     .await?;
@@ -272,11 +272,11 @@ pub(crate) fn start_link_docs(op: TransformOperation) -> TransformOperation {
 /// provider identity already linked to their account, so a credential-adding
 /// action (setting a first password, linking a new provider) can require more
 /// than a merely-live session. The callback mints a single-use proof.
-#[tracing::instrument(skip_all, fields(provider = ?path_params.provider, account_id = %auth_claims.account_id))]
+#[tracing::instrument(skip_all, fields(provider = ?path_params.provider, account_id = %auth_state.account_id))]
 async fn start_reauth(
     State(nats): State<NatsClient>,
     State(oidc): State<OidcService>,
-    AuthState(auth_claims): AuthState,
+    auth_state: AuthState,
     Path(path_params): Path<IdentityPathParams>,
     Query(query): Query<OidcStartQuery>,
 ) -> Result<(StatusCode, Json<OidcStartResponse>)> {
@@ -287,7 +287,7 @@ async fn start_reauth(
         path_params.provider,
         query.redirect_uri,
         OidcPurpose::Reauth {
-            account_id: auth_claims.account_id,
+            account_id: auth_state.account_id,
         },
     )
     .await?;
@@ -317,13 +317,13 @@ fn start_reauth_docs(op: TransformOperation) -> TransformOperation {
 /// token and returns it for the frontend to hand back to the app via the
 /// deep-link. Authenticated by the just-established session, so a caller can only
 /// mint a token for their own account. No cookie is set on the response.
-#[tracing::instrument(skip_all, fields(account_id = %auth_claims.account_id))]
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn mint_desktop_token(
     State(pg_client): State<PgClient>,
     State(oidc): State<OidcService>,
     State(auth_keys): State<SessionKeys>,
     State(ua_parser): State<UserAgentParser>,
-    AuthState(auth_claims): AuthState,
+    auth_state: AuthState,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ValidateJson(request): ValidateJson<DesktopTokenRequest>,
 ) -> Result<(StatusCode, Json<DesktopToken>)> {
@@ -345,7 +345,7 @@ async fn mint_desktop_token(
     // long-lived `app` token from renewing itself indefinitely by minting fresh
     // `app` tokens.
     let session = conn
-        .find_account_api_token_by_id(auth_claims.token_id)
+        .find_account_api_token_by_id(auth_state.token_id)
         .await?
         .ok_or_else(|| ErrorKind::Unauthorized.with_message("Session not found"))?;
     if session.session_type != ApiTokenType::Web {
@@ -354,7 +354,7 @@ async fn mint_desktop_token(
             .with_resource("session"));
     }
 
-    let account = load_active_account(&mut conn, auth_claims.account_id).await?;
+    let account = load_active_account(&mut conn, auth_state.account_id).await?;
     gate_account_status(&account)?;
 
     let api_token = mint_app_token(

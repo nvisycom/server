@@ -1,15 +1,10 @@
-//! Core authorization types and utilities.
+//! Core authorization types.
 //!
-//! This module provides the fundamental types used for authorization throughout
-//! the nvisy system, including permissions and results.
+//! Defines [`Permission`] and its mapping to the minimum [`WorkspaceRole`] that
+//! satisfies it.
 
-use std::borrow::Cow;
-
-use nvisy_postgres::model::WorkspaceMember;
 use nvisy_postgres::types::WorkspaceRole;
 use strum::{EnumIter, EnumString, IntoEnumIterator};
-
-use crate::handler::{ErrorKind, Result};
 
 /// Granular workspace permissions for authorization checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -177,63 +172,84 @@ impl Permission {
     }
 }
 
-/// Result of an authorization check with detailed information.
-#[derive(Debug, Clone, PartialEq)]
-pub struct AuthResult {
-    pub granted: bool,
-    pub member: Option<WorkspaceMember>,
-    pub reason: Option<Cow<'static, str>>,
-}
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
 
-impl AuthResult {
-    /// Creates a granted authorization result without member information.
-    pub const fn granted() -> Self {
-        Self {
-            granted: true,
-            member: None,
-            reason: None,
-        }
+    use nvisy_postgres::types::WorkspaceRole;
+
+    use super::Permission;
+
+    #[test]
+    fn security_boundaries_map_to_the_right_minimum_role() {
+        // The review-vs-original split is a real boundary: a Reviewer may see and
+        // download redacted output and audit, but never the original bytes.
+        assert_eq!(
+            Permission::ViewFiles.minimum_required_role(),
+            WorkspaceRole::Reviewer
+        );
+        assert_eq!(
+            Permission::DownloadRedactedFiles.minimum_required_role(),
+            WorkspaceRole::Reviewer
+        );
+        assert_eq!(
+            Permission::DownloadOriginalFiles.minimum_required_role(),
+            WorkspaceRole::Editor
+        );
+
+        // Managing the workspace is Admin; destroying it or changing roles is
+        // Owner-only.
+        assert_eq!(
+            Permission::InviteMembers.minimum_required_role(),
+            WorkspaceRole::Admin
+        );
+        assert_eq!(
+            Permission::DeleteWorkspace.minimum_required_role(),
+            WorkspaceRole::Owner
+        );
+        assert_eq!(
+            Permission::ManageRoles.minimum_required_role(),
+            WorkspaceRole::Owner
+        );
     }
 
-    /// Creates a granted authorization result with member information.
-    pub const fn granted_with_member(member: WorkspaceMember) -> Self {
-        Self {
-            granted: true,
-            member: Some(member),
-            reason: None,
+    #[test]
+    fn is_permitted_follows_the_role_hierarchy() {
+        // A Reviewer-tier permission is granted to everyone at Reviewer or above.
+        for role in [
+            WorkspaceRole::Reviewer,
+            WorkspaceRole::Editor,
+            WorkspaceRole::Admin,
+            WorkspaceRole::Owner,
+        ] {
+            assert!(Permission::ViewFiles.is_permitted_by_role(role));
         }
+        // An Owner-only permission is denied to everyone below Owner.
+        assert!(!Permission::ManageRoles.is_permitted_by_role(WorkspaceRole::Admin));
+        assert!(!Permission::ManageRoles.is_permitted_by_role(WorkspaceRole::Editor));
+        assert!(Permission::ManageRoles.is_permitted_by_role(WorkspaceRole::Owner));
     }
 
-    /// Creates a denied authorization result with a reason.
-    pub fn denied(reason: impl Into<Cow<'static, str>>) -> Self {
-        Self {
-            granted: false,
-            member: None,
-            reason: Some(reason.into()),
-        }
-    }
+    #[test]
+    fn permissions_are_monotonic_up_the_hierarchy() {
+        // A higher role must hold every permission a lower role does (roles are a
+        // strict hierarchy, so permission sets nest). This catches any permission
+        // that was mis-tiered such that it regressed for a higher role.
+        let set = |role| -> HashSet<Permission> {
+            Permission::permissions_for_role(role).into_iter().collect()
+        };
+        let reviewer = set(WorkspaceRole::Reviewer);
+        let editor = set(WorkspaceRole::Editor);
+        let admin = set(WorkspaceRole::Admin);
+        let owner = set(WorkspaceRole::Owner);
 
-    /// Converts the result to a `Result` type, returning an error if access is denied.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use nvisy_server::extract::AuthResult;
-    /// let result = AuthResult::granted();
-    /// assert!(result.into_result().is_ok());
-    ///
-    /// let result = AuthResult::denied("Access denied");
-    /// assert!(result.into_result().is_err());
-    /// ```
-    pub fn into_result(self) -> Result<Option<WorkspaceMember>> {
-        if self.granted {
-            Ok(self.member)
-        } else {
-            let error = match self.reason {
-                Some(reason) => ErrorKind::Forbidden.with_context(reason),
-                None => ErrorKind::Forbidden.into_error(),
-            };
-            Err(error)
-        }
+        assert!(reviewer.is_subset(&editor));
+        assert!(editor.is_subset(&admin));
+        assert!(admin.is_subset(&owner));
+
+        // Owner holds every permission; each step up strictly adds at least one.
+        assert!(reviewer.len() < editor.len());
+        assert!(editor.len() < admin.len());
+        assert!(admin.len() < owner.len());
     }
 }

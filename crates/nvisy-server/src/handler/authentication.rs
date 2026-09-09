@@ -329,14 +329,14 @@ fn signup_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_claims.account_id,
-        token_id = %auth_claims.token_id,
+        account_id = %auth_state.account_id,
+        token_id = %auth_state.token_id,
     )
 )]
 async fn logout(
     State(pg_client): State<PgClient>,
     State(cookie): State<CookieConfig>,
-    AuthState(auth_claims): AuthState,
+    auth_state: AuthState,
 ) -> Result<Response> {
     tracing::debug!(target: TRACING_TARGET, "Logging out");
 
@@ -344,7 +344,7 @@ async fn logout(
 
     // Verify API token exists before attempting to delete
     let token_exists = conn
-        .find_account_api_token_by_id(auth_claims.token_id)
+        .find_account_api_token_by_id(auth_state.token_id)
         .await?
         .is_some();
 
@@ -361,7 +361,7 @@ async fn logout(
     }
 
     // Delete the API token (revocation: the row is the session authority).
-    let deleted = conn.delete_account_api_token(auth_claims.token_id).await?;
+    let deleted = conn.delete_account_api_token(auth_state.token_id).await?;
 
     if deleted {
         tracing::info!(target: TRACING_TARGET, "Logout successful");

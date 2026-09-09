@@ -18,7 +18,7 @@ use axum::http::request::Parts;
 use nvisy_postgres::model::{Workspace, WorkspaceMember};
 use uuid::Uuid;
 
-use super::{AuthProvider, AuthState, Permission};
+use super::{AuthState, Permission};
 use crate::extract::{PgPool, WorkspaceContext};
 use crate::handler::Error;
 
@@ -68,7 +68,7 @@ where
             WorkspaceContext::from_request_parts(parts, state).await?;
         let PgPool(mut conn) = PgPool::from_request_parts(parts, state).await?;
 
-        let account_id = auth.account_id();
+        let account_id = auth.account_id;
         let member = auth
             .authorize_workspace(&mut conn, workspace.id, P::PERMISSION)
             .await?;

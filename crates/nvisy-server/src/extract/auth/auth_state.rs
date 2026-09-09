@@ -11,14 +11,17 @@ use aide::generate::GenContext;
 use aide::openapi::Operation;
 use axum::extract::{FromRef, FromRequestParts, OptionalFromRequestParts};
 use axum::http::request::Parts;
-use derive_more::{Deref, DerefMut};
-use nvisy_postgres::model::Account;
-use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
+use derive_more::Deref;
+use nvisy_postgres::model::{Account, WorkspaceMember};
+use nvisy_postgres::query::{
+    AccountApiTokenRepository, AccountRepository, WorkspaceMemberRepository,
+};
 use nvisy_postgres::types::session;
 use nvisy_postgres::{PgClient, PgConn};
 use serde::Deserialize;
+use uuid::Uuid;
 
-use super::{AuthClaims, AuthHeader};
+use super::{AuthClaims, AuthHeader, Permission};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::SessionKeys;
 
@@ -61,29 +64,89 @@ const TRACING_TARGET: &str = "nvisy_server::authentication";
 ///
 /// [`AuthState`] is [`Send`] + [`Sync`] and can be safely shared across threads.
 /// All contained data is immutable after creation.
-#[derive(Debug, Clone, Deref, DerefMut, Hash, PartialEq, Eq)]
-pub struct AuthState<T = ()>(pub AuthClaims<T>);
+#[derive(Debug, Clone, Deref, Hash, PartialEq, Eq)]
+pub struct AuthState<T = ()>(AuthClaims<T>);
 
 impl<T> AuthState<T> {
-    /// Creates a new [`AuthState`] from pre-verified claims.
-    ///
-    /// # Safety Requirements
-    ///
-    /// This method should **only** be used when the claims have already undergone
-    /// complete database verification. Using this with unverified claims bypasses
-    /// critical security checks.
-    ///
-    /// # Arguments
-    ///
-    /// * `auth_claims` - Claims that have been verified against the database
-    ///
-    /// # Returns
-    ///
-    /// Returns a new [`AuthState`] without additional verification.
+    /// Wraps claims that have already been verified against the database. Private
+    /// on purpose: the only way to obtain an `AuthState` is by going through
+    /// [`from_unverified_header`](Self::from_unverified_header) (or the extractor),
+    /// so the type is a proof of verification that cannot be forged from raw claims.
     #[inline]
-    #[must_use]
-    pub const fn from_verified_claims(auth_claims: AuthClaims<T>) -> Self {
+    const fn from_verified_claims(auth_claims: AuthClaims<T>) -> Self {
         Self(auth_claims)
+    }
+
+    /// Authorizes the caller for `permission` in `workspace_id`, returning their
+    /// membership on success (or `None` for a global admin, who is authorized
+    /// without being a member).
+    ///
+    /// A global admin bypasses the workspace check. Otherwise the caller must be a
+    /// member whose role satisfies `permission`; a non-member or an insufficient
+    /// role is `403 Forbidden`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Forbidden` if access is denied, or propagates database errors from
+    /// the membership lookup.
+    pub async fn authorize_workspace(
+        &self,
+        conn: &mut PgConn,
+        workspace_id: Uuid,
+        permission: Permission,
+    ) -> Result<Option<WorkspaceMember>> {
+        // Global administrators bypass workspace-level permissions.
+        if self.0.is_admin {
+            tracing::debug!(
+                target: TRACING_TARGET,
+                account_id = %self.0.account_id,
+                workspace_id = %workspace_id,
+                permission = ?permission,
+                "access granted: global administrator"
+            );
+            return Ok(None);
+        }
+
+        let member = conn
+            .find_workspace_member(workspace_id, self.0.account_id)
+            .await
+            .map_err(Error::from)?;
+
+        let Some(member) = member else {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                account_id = %self.0.account_id,
+                workspace_id = %workspace_id,
+                "access denied: not a workspace member"
+            );
+            return Err(ErrorKind::Forbidden
+                .with_message("Not a workspace member")
+                .with_resource("workspace"));
+        };
+
+        if permission.is_permitted_by_role(member.member_role) {
+            tracing::debug!(
+                target: TRACING_TARGET,
+                account_id = %self.0.account_id,
+                workspace_id = %workspace_id,
+                permission = ?permission,
+                role = ?member.member_role,
+                "access granted: sufficient role"
+            );
+            Ok(Some(member))
+        } else {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                account_id = %self.0.account_id,
+                workspace_id = %workspace_id,
+                permission = ?permission,
+                role = ?member.member_role,
+                "access denied: insufficient role"
+            );
+            Err(ErrorKind::Forbidden
+                .with_message("Insufficient role for this action")
+                .with_resource("workspace"))
+        }
     }
 }
 
@@ -427,5 +490,58 @@ where
         // The Bearer token is required: the only way to satisfy the operation is
         // to present it.
         operation.security = vec![[("BearerAuth".to_string(), vec![])].into()];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nvisy_postgres::model::{Account, AccountApiToken};
+    use nvisy_postgres::types::ApiTokenType;
+
+    use super::{AuthClaims, AuthState};
+
+    /// Builds claims for `account` (the claim's `is_admin` mirrors the account it
+    /// was minted from).
+    fn claims_for(account: &Account) -> AuthClaims<()> {
+        let token = AccountApiToken::test(account.id, ApiTokenType::Web);
+        AuthClaims::new(account, &token)
+    }
+
+    #[test]
+    fn privilege_consistency_accepts_a_matching_admin_flag() {
+        let mut admin = Account::test();
+        admin.is_admin = true;
+        assert!(AuthState::<()>::verify_privilege_consistency(&claims_for(&admin), &admin).is_ok());
+
+        let user = Account::test(); // is_admin: false
+        assert!(AuthState::<()>::verify_privilege_consistency(&claims_for(&user), &user).is_ok());
+    }
+
+    #[test]
+    fn privilege_consistency_rejects_a_stale_admin_claim() {
+        // Token was minted while the account was admin; the account has since been
+        // demoted. The stale admin claim must be rejected (fail closed).
+        let mut was_admin = Account::test();
+        was_admin.is_admin = true;
+        let stale_claims = claims_for(&was_admin);
+
+        let mut now_demoted = was_admin.clone();
+        now_demoted.is_admin = false;
+
+        assert!(
+            AuthState::<()>::verify_privilege_consistency(&stale_claims, &now_demoted).is_err()
+        );
+    }
+
+    #[test]
+    fn privilege_consistency_rejects_a_forged_admin_claim() {
+        // A non-admin account whose token nonetheless claims admin must be
+        // rejected — a claim can never grant a privilege the DB does not hold.
+        let mut forged = Account::test();
+        forged.is_admin = true;
+        let forged_claims = claims_for(&forged);
+
+        let real = Account::test(); // is_admin: false
+        assert!(AuthState::<()>::verify_privilege_consistency(&forged_claims, &real).is_err());
     }
 }

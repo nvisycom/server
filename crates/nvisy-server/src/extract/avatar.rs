@@ -30,7 +30,7 @@ where
     type Rejection = Error<'static>;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
-        let mut multipart = Multipart::from_request(req, state).await?.into_inner();
+        let Multipart(mut multipart) = Multipart::from_request(req, state).await?;
 
         while let Some(field) = multipart.next_field().await.map_err(|err| {
             ErrorKind::BadRequest

@@ -336,7 +336,7 @@ fn update_member_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn leave_workspace(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     security: SecurityContext,
 ) -> Result<StatusCode> {

@@ -40,7 +40,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::notifications";
 )]
 async fn list_notifications(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<NotificationsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing notifications");
@@ -80,7 +80,7 @@ fn list_notifications_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn get_unread_status(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
 ) -> Result<(StatusCode, Json<UnreadStatus>)> {
     tracing::debug!(target: TRACING_TARGET, "Checking unread notifications count");
 
@@ -133,7 +133,7 @@ async fn stream_unread_status(
     State(pg_client): State<PgClient>,
     State(notification_emitter): State<NotificationEmitter>,
     State(shutdown): State<CancellationToken>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
 ) -> Result<SseResponse<UnreadCountEvent>> {
     tracing::debug!(target: TRACING_TARGET, "Opening unread notifications stream");
 
@@ -233,7 +233,7 @@ fn stream_unread_status_docs(op: TransformOperation) -> TransformOperation {
 async fn mark_all_notifications_read(
     State(pg_client): State<PgClient>,
     State(notification_emitter): State<NotificationEmitter>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
 ) -> Result<(StatusCode, Json<MarkedReadStatus>)> {
     tracing::debug!(target: TRACING_TARGET, "Marking all notifications as read");
 
@@ -279,7 +279,7 @@ fn mark_all_notifications_read_docs(op: TransformOperation) -> TransformOperatio
 async fn mark_notification_read(
     State(pg_client): State<PgClient>,
     State(notification_emitter): State<NotificationEmitter>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
     Path(path_params): Path<NotificationPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Marking notification as read");

@@ -22,7 +22,7 @@ use crate::handler::response::{ErrorResponse, RecognizerCatalog};
 use crate::service::{EngineService, ServiceState};
 
 /// Lists the deployment's supported labels (the built-in taxonomy).
-async fn list_labels(AuthState(_): AuthState) -> Json<LabelCatalog> {
+async fn list_labels(_: AuthState) -> Json<LabelCatalog> {
     Json(LabelCatalog::with_builtins())
 }
 
@@ -39,7 +39,7 @@ fn list_labels_docs(op: TransformOperation) -> TransformOperation {
 /// Lists the recognizers the engine has registered, grouped into NER and LLM.
 async fn list_recognizers(
     State(engine): State<EngineService>,
-    AuthState(_): AuthState,
+    _: AuthState,
 ) -> Json<RecognizerCatalog> {
     let components = engine.engine().components();
     Json(RecognizerCatalog {
@@ -114,7 +114,7 @@ pub struct ConnectorCatalog {
 /// Reports which connectors this deployment can create.
 async fn list_connectors(
     State(file_service): State<FileService>,
-    AuthState(_): AuthState,
+    _: AuthState,
 ) -> Json<ConnectorCatalog> {
     Json(ConnectorCatalog {
         file_services: FileProviders::from_service(&file_service),

@@ -23,8 +23,8 @@ use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Authorized, DeleteFiles, Json, Multipart, Path, Permission, Query,
-    SecurityContext, UpdateFiles, UploadFiles, ValidateJson, ViewFiles, WorkspaceContext,
+    AuthState, Authorized, DeleteFiles, Json, Multipart, Path, Permission, Query, SecurityContext,
+    UpdateFiles, UploadFiles, ValidateJson, ViewFiles, WorkspaceContext,
 };
 use crate::handler::request::{
     CursorPagination, DeleteFiles as DeleteFilesRequest, ListFiles, UpdateFile,
@@ -539,7 +539,7 @@ fn update_file_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_claims.account_id,
+        account_id = %auth.account_id,
         workspace_id = %workspace.id,
         file_id = %path_params.file_id,
     )
@@ -550,7 +550,7 @@ async fn download_file(
     State(crypto): State<CryptoService>,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<WorkspaceFilePathParams>,
-    AuthState(auth_claims): AuthState,
+    auth: AuthState,
 ) -> Result<(StatusCode, HeaderMap, Body)> {
     tracing::debug!(target: TRACING_TARGET, "Downloading file");
 
@@ -560,8 +560,7 @@ async fn download_file(
     // cannot see files cannot distinguish a missing file from a forbidden one.
     // Every kind-specific download permission below already requires at least the
     // role this check does, so it never rejects an otherwise-authorized caller.
-    auth_claims
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewFiles)
+    auth.authorize_workspace(&mut conn, workspace.id, Permission::ViewFiles)
         .await?;
 
     // The permission a download requires depends on the file's kind, so that the
@@ -577,8 +576,7 @@ async fn download_file(
         FileKind::Audit | FileKind::Review => Permission::DownloadAudit,
     };
 
-    auth_claims
-        .authorize_workspace(&mut conn, workspace.id, permission)
+    auth.authorize_workspace(&mut conn, workspace.id, permission)
         .await?;
 
     let file_key = FileKey::from_str(&file.storage_path).map_err(|err| {

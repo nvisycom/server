@@ -102,10 +102,10 @@ mod tests {
             .body(())
             .expect("request should build")
             .into_parts();
-        Query::<T>::from_request_parts(&mut parts, &())
+        let Query(inner) = Query::<T>::from_request_parts(&mut parts, &())
             .await
-            .expect("query should extract")
-            .into_inner()
+            .expect("query should extract");
+        inner
     }
 
     #[tokio::test]

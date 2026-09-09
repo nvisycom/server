@@ -10,23 +10,20 @@ use axum::extract::multipart::MultipartRejection;
 use axum::extract::{FromRequest, Multipart as AxumMultipart, Request};
 use derive_more::{Deref, DerefMut, From};
 
+use super::sanitize_error_message;
 use crate::handler::{Error, ErrorKind};
 
 /// Enhanced Multipart extractor with improved error handling.
 ///
 /// This extractor wraps the default Axum Multipart extractor and provides
 /// better error messages for multipart form parsing failures.
+///
+/// The [`FromRequest`] impl is hand-written rather than derived because the
+/// `#[from_request(via(...))]` derive only supports wrapping a generic newtype
+/// extractor, and [`axum::extract::Multipart`] is not generic.
 #[must_use]
 #[derive(Debug, Deref, DerefMut, From)]
 pub struct Multipart(pub AxumMultipart);
-
-impl Multipart {
-    /// Returns the inner Axum Multipart extractor.
-    #[inline]
-    pub fn into_inner(self) -> AxumMultipart {
-        self.0
-    }
-}
 
 impl<S> FromRequest<S> for Multipart
 where
@@ -53,7 +50,10 @@ impl From<MultipartRejection> for Error<'static> {
                 ),
             _ => ErrorKind::BadRequest
                 .with_message("Invalid multipart request")
-                .with_context(format!("Multipart parsing failed: {}", rejection)),
+                .with_context(format!(
+                    "Multipart parsing failed: {}",
+                    sanitize_error_message(&rejection.to_string())
+                )),
         }
     }
 }

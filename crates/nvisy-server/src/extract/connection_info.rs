@@ -135,7 +135,10 @@ impl AppConnectInfo {
                     || ipv4.is_unspecified()
             }
             IpAddr::V6(ipv6) => {
-                ipv6.is_loopback() || ipv6.is_unspecified() || ipv6.segments()[0] & 0xfe00 == 0xfc00 // Unique local addresses
+                ipv6.is_loopback()
+                    || ipv6.is_unspecified()
+                    || ipv6.is_unique_local()        // fc00::/7
+                    || ipv6.is_unicast_link_local() // fe80::/10, mirroring the IPv4 link-local case
             }
         }
     }
@@ -195,5 +198,78 @@ impl Connected<IncomingStream<'_, TcpListener>> for AppConnectInfo {
 impl Connected<SocketAddr> for AppConnectInfo {
     fn connect_info(addr: SocketAddr) -> Self {
         Self::new(addr)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::SocketAddr;
+
+    use super::AppConnectInfo;
+
+    fn info(addr: &str) -> AppConnectInfo {
+        AppConnectInfo::new(addr.parse::<SocketAddr>().unwrap())
+    }
+
+    #[test]
+    fn classifies_private_and_public_ipv4() {
+        for private in [
+            "10.0.0.1:80",
+            "172.16.5.4:80",
+            "192.168.1.1:80",
+            "127.0.0.1:80",
+            "169.254.1.1:80",
+        ] {
+            assert!(info(private).is_private_ip(), "{private} should be private");
+            assert!(!info(private).is_public_ip());
+        }
+        for public in ["8.8.8.8:80", "1.1.1.1:443"] {
+            assert!(info(public).is_public_ip(), "{public} should be public");
+            assert!(!info(public).is_private_ip());
+        }
+    }
+
+    #[test]
+    fn classifies_ipv6_including_link_local() {
+        // Loopback, unique-local (fc00::/7), and — the case the old bit-check
+        // missed — link-local (fe80::/10) are all private.
+        for private in [
+            "[::1]:80",
+            "[fc00::1]:80",
+            "[fd12:3456::1]:80",
+            "[fe80::1]:80",
+        ] {
+            assert!(info(private).is_private_ip(), "{private} should be private");
+        }
+        // A global-unicast address is public.
+        assert!(info("[2606:4700::1111]:443").is_public_ip());
+    }
+
+    #[test]
+    fn localhost_and_ip_family_predicates() {
+        assert!(info("127.0.0.1:80").is_localhost());
+        assert!(info("[::1]:80").is_localhost());
+        assert!(!info("8.8.8.8:80").is_localhost());
+
+        assert!(info("8.8.8.8:80").is_ipv4());
+        assert!(!info("8.8.8.8:80").is_ipv6());
+        assert!(info("[::1]:80").is_ipv6());
+    }
+
+    #[test]
+    fn client_ip_prefers_the_proxy_real_ip() {
+        let proxy: SocketAddr = "10.0.0.9:1234".parse().unwrap();
+        let real = "203.0.113.7".parse().unwrap();
+        let info = AppConnectInfo::with_real_ip(proxy, real);
+
+        // The real (client) IP wins over the direct proxy address.
+        assert_eq!(info.client_ip(), real);
+        assert!(
+            info.is_public_ip(),
+            "classification follows the real client IP"
+        );
+        assert_eq!(info.client_port(), 1234);
+        // The log string notes both the real IP and the proxy it came via.
+        assert_eq!(info.to_log_string(), "203.0.113.7 (via 10.0.0.9)");
     }
 }
