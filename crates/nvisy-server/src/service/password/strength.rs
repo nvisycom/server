@@ -155,23 +155,23 @@ impl PasswordStrength {
                 "password validation failed: insufficient strength"
             );
 
-            let mut error = ErrorKind::BadRequest
-                .with_message("Password does not meet minimum strength requirements")
-                .with_resource("password");
+            // Build a single user-facing message: the base requirement, then any
+            // strength-estimator suggestions appended so the client sees how to
+            // fix it. The warning stays in context (debug detail, not advice).
+            let mut message = String::from("Password does not meet minimum strength requirements");
+            let mut error = ErrorKind::BadRequest.with_resource("password");
 
             if let Some(feedback) = result.feedback {
-                // Add warning as context if present
                 if let Some(warning) = feedback.warning {
                     error = error.with_context(warning);
                 }
-
-                // Add suggestions as suggestion field
                 if !feedback.suggestions.is_empty() {
-                    error = error.with_suggestion(feedback.suggestions.join("; "));
+                    message.push_str(": ");
+                    message.push_str(&feedback.suggestions.join("; "));
                 }
             }
 
-            return Err(error);
+            return Err(error.with_message(message));
         }
 
         tracing::debug!(

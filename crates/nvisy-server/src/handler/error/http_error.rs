@@ -22,11 +22,14 @@ use crate::handler::response::ErrorResponse;
 #[derive(Clone)]
 #[must_use = "errors do nothing unless serialized"]
 pub struct Error<'a> {
-    kind: ErrorKind,
-    resource: Option<Cow<'a, str>>,
-    context: Option<Cow<'a, str>>,
-    message: Option<Cow<'a, str>>,
-    suggestion: Option<Cow<'a, str>>,
+    /// The error category, which determines the HTTP status and default message.
+    pub kind: ErrorKind,
+    /// The resource the error relates to, if any.
+    pub resource: Option<Cow<'a, str>>,
+    /// Debugging context appended to the response, if any.
+    pub context: Option<Cow<'a, str>>,
+    /// A custom user-facing message overriding the kind's default, if any.
+    pub message: Option<Cow<'a, str>>,
 }
 
 impl Error<'static> {
@@ -38,7 +41,6 @@ impl Error<'static> {
             resource: None,
             context: None,
             message: None,
-            suggestion: None,
         }
     }
 
@@ -81,43 +83,13 @@ impl<'a> Error<'a> {
         }
     }
 
-    /// Sets a suggestion for how to resolve the error.
-    #[inline]
-    pub fn with_suggestion(self, suggestion: impl Into<Cow<'a, str>>) -> Self {
-        Self {
-            suggestion: Some(suggestion.into()),
-            ..self
-        }
-    }
-
     /// Returns the error kind.
+    ///
+    /// A convenience over the public [`kind`](Self::kind) field for the common
+    /// `error.kind() == ErrorKind::X` check, returning it by copy from `&self`.
     #[inline]
     pub fn kind(&self) -> ErrorKind {
         self.kind
-    }
-
-    /// Returns the context if present.
-    #[inline]
-    pub fn context(&self) -> Option<&str> {
-        self.context.as_deref()
-    }
-
-    /// Returns the custom message if present.
-    #[inline]
-    pub fn message(&self) -> Option<&str> {
-        self.message.as_deref()
-    }
-
-    /// Returns the resource if present.
-    #[inline]
-    pub fn resource(&self) -> Option<&str> {
-        self.resource.as_deref()
-    }
-
-    /// Returns the suggestion if present.
-    #[inline]
-    pub fn suggestion(&self) -> Option<&str> {
-        self.suggestion.as_deref()
     }
 
     /// Converts this error into a static version by cloning all borrowed data.
@@ -127,7 +99,6 @@ impl<'a> Error<'a> {
             context: self.context.map(|c| Cow::Owned(c.into_owned())),
             message: self.message.map(|m| Cow::Owned(m.into_owned())),
             resource: self.resource.map(|r| Cow::Owned(r.into_owned())),
-            suggestion: self.suggestion.map(|s| Cow::Owned(s.into_owned())),
         }
     }
 }
@@ -140,7 +111,6 @@ impl Default for Error<'static> {
             context: None,
             message: None,
             resource: None,
-            suggestion: None,
         }
     }
 }
@@ -169,10 +139,6 @@ impl fmt::Debug for Error<'_> {
             debug_struct.field("custom_resource", resource);
         }
 
-        if let Some(ref suggestion) = self.suggestion {
-            debug_struct.field("suggestion", suggestion);
-        }
-
         debug_struct.finish()
     }
 }
@@ -192,10 +158,6 @@ impl fmt::Display for Error<'_> {
             write!(f, " [resource: {}]", resource)?;
         }
 
-        if let Some(ref suggestion) = self.suggestion {
-            write!(f, " | suggestion: {}", suggestion)?;
-        }
-
         Ok(())
     }
 }
@@ -204,29 +166,18 @@ impl std::error::Error for Error<'_> {}
 
 impl IntoResponse for Error<'_> {
     fn into_response(self) -> Response {
-        let mut response = self.kind.response();
-
-        // Set custom message if provided
-        if let Some(message) = self.message {
-            response = response.with_message(message);
+        // The kind supplies the defaults (name, status, and fallback message);
+        // this error's own fields override the message and add the per-occurrence
+        // resource and context.
+        let defaults = self.kind.response();
+        ErrorResponse {
+            name: defaults.name,
+            message: self.message.unwrap_or(defaults.message),
+            resource: self.resource,
+            context: self.context,
+            status: defaults.status,
         }
-
-        // Set custom resource if provided
-        if let Some(resource) = self.resource {
-            response = response.with_resource(resource);
-        }
-
-        // Set context if present
-        if let Some(context) = self.context {
-            response = response.with_context(context);
-        }
-
-        // Set suggestion if present
-        if let Some(suggestion) = self.suggestion {
-            response = response.with_suggestion(suggestion);
-        }
-
-        response.into_response()
+        .into_response()
     }
 }
 
@@ -315,38 +266,81 @@ impl ErrorKind {
         Error::new(self).with_resource(resource)
     }
 
-    /// Creates an [`Error`] with the specified suggestion.
+    /// Returns the default [`ErrorResponse`] for this kind: its machine-readable
+    /// name, HTTP status, and default user-facing message.
     ///
-    /// This is a convenience method for creating errors with helpful suggestions.
+    /// This match is the single source of truth for each variant's wire
+    /// metadata — a new variant is described in exactly one place — and
+    /// [`status_code`](Self::status_code) reads its status from here.
     #[inline]
-    pub fn with_suggestion<'a>(self, suggestion: impl Into<Cow<'a, str>>) -> Error<'a> {
-        Error::new(self).with_suggestion(suggestion)
+    pub const fn response(self) -> ErrorResponse<'static> {
+        match self {
+            Self::MissingPathParam => ErrorResponse::new(
+                "missing_path_param",
+                "Missing path parameter",
+                StatusCode::BAD_REQUEST,
+            ),
+            Self::BadRequest => ErrorResponse::new(
+                "bad_request",
+                "Invalid request data",
+                StatusCode::BAD_REQUEST,
+            ),
+            Self::MissingAuthToken => ErrorResponse::new(
+                "missing_auth_token",
+                "Missing auth token",
+                StatusCode::UNAUTHORIZED,
+            ),
+            Self::MalformedAuthToken => ErrorResponse::new(
+                "malformed_auth_token",
+                "Malformed auth token",
+                StatusCode::UNAUTHORIZED,
+            ),
+            Self::Unauthorized => ErrorResponse::new(
+                "unauthorized",
+                "Invalid credentials",
+                StatusCode::UNAUTHORIZED,
+            ),
+            Self::Forbidden => {
+                ErrorResponse::new("forbidden", "Resource access denied", StatusCode::FORBIDDEN)
+            }
+            Self::NotFound => {
+                ErrorResponse::new("not_found", "Resource not found", StatusCode::NOT_FOUND)
+            }
+            Self::Conflict => {
+                ErrorResponse::new("conflict", "Resource state conflict", StatusCode::CONFLICT)
+            }
+            Self::PayloadTooLarge => ErrorResponse::new(
+                "payload_too_large",
+                "Payload too large",
+                StatusCode::PAYLOAD_TOO_LARGE,
+            ),
+            Self::TooManyRequests => ErrorResponse::new(
+                "too_many_requests",
+                "Rate limit exceeded",
+                StatusCode::TOO_MANY_REQUESTS,
+            ),
+            Self::InternalServerError => ErrorResponse::new(
+                "internal_server_error",
+                "Internal server error",
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+            Self::NotImplemented => ErrorResponse::new(
+                "not_implemented",
+                "Not implemented",
+                StatusCode::NOT_IMPLEMENTED,
+            ),
+            Self::ServiceUnavailable => ErrorResponse::new(
+                "service_unavailable",
+                "Service unavailable",
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+        }
     }
 
     /// Returns the HTTP status code for this error kind.
     #[inline]
     pub fn status_code(self) -> StatusCode {
         self.response().status
-    }
-
-    /// Returns the internal representation of this error kind.
-    #[inline]
-    pub fn response(self) -> ErrorResponse<'static> {
-        match self {
-            Self::MissingPathParam => ErrorResponse::MISSING_PATH_PARAM,
-            Self::BadRequest => ErrorResponse::BAD_REQUEST,
-            Self::MissingAuthToken => ErrorResponse::MISSING_AUTH_TOKEN,
-            Self::MalformedAuthToken => ErrorResponse::MALFORMED_AUTH_TOKEN,
-            Self::Unauthorized => ErrorResponse::UNAUTHORIZED,
-            Self::Forbidden => ErrorResponse::FORBIDDEN,
-            Self::NotFound => ErrorResponse::NOT_FOUND,
-            Self::Conflict => ErrorResponse::CONFLICT,
-            Self::PayloadTooLarge => ErrorResponse::PAYLOAD_TOO_LARGE,
-            Self::TooManyRequests => ErrorResponse::TOO_MANY_REQUESTS,
-            Self::InternalServerError => ErrorResponse::INTERNAL_SERVER_ERROR,
-            Self::NotImplemented => ErrorResponse::NOT_IMPLEMENTED,
-            Self::ServiceUnavailable => ErrorResponse::SERVICE_UNAVAILABLE,
-        }
     }
 }
 
@@ -404,21 +398,21 @@ mod tests {
     #[test]
     fn error_with_context() {
         let error = ErrorKind::BadRequest.with_context("Invalid format");
-        assert_eq!(error.context(), Some("Invalid format"));
+        assert_eq!(error.context.as_deref(), Some("Invalid format"));
         let _ = error.into_response();
     }
 
     #[test]
     fn error_with_message() {
         let error = ErrorKind::NotFound.with_message("Custom not found message");
-        assert_eq!(error.message(), Some("Custom not found message"));
+        assert_eq!(error.message.as_deref(), Some("Custom not found message"));
         let _ = error.into_response();
     }
 
     #[test]
     fn error_with_resource() {
         let error = ErrorKind::Forbidden.with_resource("document");
-        assert_eq!(error.resource(), Some("document"));
+        assert_eq!(error.resource.as_deref(), Some("document"));
         let _ = error.into_response();
     }
 
@@ -427,17 +421,12 @@ mod tests {
         let error = ErrorKind::NotFound
             .with_message("Document not found")
             .with_resource("document")
-            .with_context("ID: 123")
-            .with_suggestion("Check if the document ID is correct");
+            .with_context("ID: 123");
 
-        assert_eq!(error.kind(), ErrorKind::NotFound);
-        assert_eq!(error.message(), Some("Document not found"));
-        assert_eq!(error.resource(), Some("document"));
-        assert_eq!(error.context(), Some("ID: 123"));
-        assert_eq!(
-            error.suggestion(),
-            Some("Check if the document ID is correct")
-        );
+        assert_eq!(error.kind, ErrorKind::NotFound);
+        assert_eq!(error.message.as_deref(), Some("Document not found"));
+        assert_eq!(error.resource.as_deref(), Some("document"));
+        assert_eq!(error.context.as_deref(), Some("ID: 123"));
     }
 
     #[test]
@@ -479,14 +468,12 @@ mod tests {
         let error = ErrorKind::NotFound
             .with_message("Test message".to_string())
             .with_resource("test_resource".to_string())
-            .with_context("Test context".to_string())
-            .with_suggestion("Test suggestion".to_string());
+            .with_context("Test context".to_string());
 
         let static_error = error.into_owned();
-        assert_eq!(static_error.message(), Some("Test message"));
-        assert_eq!(static_error.resource(), Some("test_resource"));
-        assert_eq!(static_error.context(), Some("Test context"));
-        assert_eq!(static_error.suggestion(), Some("Test suggestion"));
+        assert_eq!(static_error.message.as_deref(), Some("Test message"));
+        assert_eq!(static_error.resource.as_deref(), Some("test_resource"));
+        assert_eq!(static_error.context.as_deref(), Some("Test context"));
     }
 
     #[test]

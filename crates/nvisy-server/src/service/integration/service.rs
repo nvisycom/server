@@ -301,7 +301,7 @@ impl ConnectionSyncService {
                 WorkspaceEvent::ConnectionSyncFailed {
                     connection_id,
                     connection_name: connection_name.to_owned(),
-                    error: Some(err.message().unwrap_or("Sync failed").to_owned()),
+                    error: Some(err.message.as_deref().unwrap_or("Sync failed").to_owned()),
                     notify: Some(origin.account_id),
                 }
             }

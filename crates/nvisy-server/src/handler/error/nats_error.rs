@@ -107,7 +107,7 @@ mod tests {
         let http_err: HttpError = nats_err.into();
 
         assert_eq!(http_err.kind(), ErrorKind::InternalServerError);
-        assert!(http_err.message().unwrap().contains("timed out"));
+        assert!(http_err.message.as_deref().unwrap().contains("timed out"));
     }
 
     #[test]
@@ -117,7 +117,13 @@ mod tests {
         let http_err: HttpError = nats_err.into();
 
         assert_eq!(http_err.kind(), ErrorKind::BadRequest);
-        assert!(http_err.message().unwrap().contains("Invalid request"));
+        assert!(
+            http_err
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("Invalid request")
+        );
     }
 
     #[test]
@@ -126,8 +132,8 @@ mod tests {
         let http_err: HttpError = nats_err.into();
 
         assert_eq!(http_err.kind(), ErrorKind::NotFound);
-        assert_eq!(http_err.resource(), Some("missing_key"));
-        assert!(http_err.context().unwrap().contains("test_bucket"));
+        assert_eq!(http_err.resource.as_deref(), Some("missing_key"));
+        assert!(http_err.context.as_deref().unwrap().contains("test_bucket"));
     }
 
     #[test]
@@ -136,8 +142,8 @@ mod tests {
         let http_err: HttpError = nats_err.into();
 
         assert_eq!(http_err.kind(), ErrorKind::Conflict);
-        assert_eq!(http_err.resource(), Some("test_key"));
-        assert!(http_err.context().unwrap().contains("modified"));
+        assert_eq!(http_err.resource.as_deref(), Some("test_key"));
+        assert!(http_err.context.as_deref().unwrap().contains("modified"));
     }
 
     #[test]
@@ -146,8 +152,8 @@ mod tests {
         let http_err: HttpError = nats_err.into();
 
         assert_eq!(http_err.kind(), ErrorKind::InternalServerError);
-        assert_eq!(http_err.resource(), Some("test_stream"));
-        assert!(http_err.context().unwrap().contains("stream"));
+        assert_eq!(http_err.resource.as_deref(), Some("test_stream"));
+        assert!(http_err.context.as_deref().unwrap().contains("stream"));
     }
 
     #[test]
@@ -156,6 +162,12 @@ mod tests {
         let http_err: HttpError = nats_err.into();
 
         assert_eq!(http_err.kind(), ErrorKind::BadRequest);
-        assert!(http_err.context().unwrap().contains("configuration"));
+        assert!(
+            http_err
+                .context
+                .as_deref()
+                .unwrap()
+                .contains("configuration")
+        );
     }
 }
