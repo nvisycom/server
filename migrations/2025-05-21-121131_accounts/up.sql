@@ -164,8 +164,9 @@ CREATE TABLE account_identities (
     CONSTRAINT account_identities_updated_after_created CHECK (updated_at >= created_at)
 );
 
--- Keep updated_at current on every write.
-SELECT setup_updated_at('account_identities');
+-- Keep updated_at current on every write. Identities are hard-deleted and
+-- have no `deleted_at`, so this uses the no-soft-delete trigger.
+SELECT setup_updated_at_no_soft_delete('account_identities');
 
 -- An account has at most one identity per provider (one password, one Google, …).
 CREATE UNIQUE INDEX account_identities_account_provider_unique_idx
