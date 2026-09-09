@@ -17,7 +17,7 @@ use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthState, Authorized, Avatar, DeleteWorkspace, Json, Query, SecurityContext,
+    AuthState, Authorized, AvatarUpload, DeleteWorkspace, Json, Query, SecurityContext,
     UpdateWorkspace as UpdateWorkspacePerm, ValidateJson, ViewWorkspace, WorkspaceContext,
 };
 use crate::handler::request::{
@@ -459,7 +459,7 @@ async fn find_workspace_creator(conn: &mut PgConn, slug: &str) -> Result<Account
 async fn upload_workspace_avatar(
     State(avatar): State<AvatarService>,
     authz: Authorized<UpdateWorkspacePerm>,
-    Avatar(bytes): Avatar,
+    AvatarUpload(bytes): AvatarUpload,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Uploading workspace avatar");
 

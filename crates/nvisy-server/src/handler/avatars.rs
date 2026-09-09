@@ -15,9 +15,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::extract::{Avatar, Json, Path};
+use crate::extract::{Json, Path};
 use crate::handler::response::ErrorResponse;
 use crate::handler::{Error, Result};
+use crate::response::AvatarImage;
 use crate::service::{AvatarService, ServiceState};
 
 /// Tracing target for public avatar serving.
@@ -43,7 +44,7 @@ struct AvatarPathParams {
 async fn get_account_avatar(
     State(avatar): State<AvatarService>,
     Path(params): Path<AvatarPathParams>,
-) -> Result<Avatar> {
+) -> Result<AvatarImage> {
     tracing::debug!(target: TRACING_TARGET, "Serving account avatar");
 
     let bytes = avatar
@@ -51,7 +52,7 @@ async fn get_account_avatar(
         .await?
         .ok_or_else(|| Error::not_found("avatar"))?;
 
-    Ok(Avatar(bytes))
+    Ok(AvatarImage(bytes))
 }
 
 /// Serves a workspace's avatar image. Public; 404 when the version is unknown.
@@ -59,7 +60,7 @@ async fn get_account_avatar(
 async fn get_workspace_avatar(
     State(avatar): State<AvatarService>,
     Path(params): Path<AvatarPathParams>,
-) -> Result<Avatar> {
+) -> Result<AvatarImage> {
     tracing::debug!(target: TRACING_TARGET, "Serving workspace avatar");
 
     let bytes = avatar
@@ -67,7 +68,7 @@ async fn get_workspace_avatar(
         .await?
         .ok_or_else(|| Error::not_found("avatar"))?;
 
-    Ok(Avatar(bytes))
+    Ok(AvatarImage(bytes))
 }
 
 fn get_avatar_docs(op: TransformOperation) -> TransformOperation {

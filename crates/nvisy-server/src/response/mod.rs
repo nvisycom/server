@@ -6,7 +6,9 @@
 //! whose job is response *behavior* — setting status, headers, or cookies.
 
 mod auth;
+mod avatar_image;
 mod sse;
 
 pub use auth::{ClearedSession, CookieConfig, WebSession};
+pub use avatar_image::AvatarImage;
 pub use sse::SseResponse;

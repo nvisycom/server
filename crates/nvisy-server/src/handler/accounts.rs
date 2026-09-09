@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use super::request::{AccountPathParams, UpdateAccount};
 use super::response::{Account, ErrorResponse, PublicAccount};
-use crate::extract::{AuthState, Avatar, Json, Path, ValidateJson};
+use crate::extract::{AuthState, AvatarUpload, Json, Path, ValidateJson};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState};
 
@@ -206,7 +206,7 @@ async fn upload_account_avatar(
     State(avatar): State<AvatarService>,
     auth_state: AuthState,
     Path(path_params): Path<AccountPathParams>,
-    Avatar(bytes): Avatar,
+    AvatarUpload(bytes): AvatarUpload,
 ) -> Result<(StatusCode, Json<Account>)> {
     tracing::debug!(target: TRACING_TARGET, "Uploading account avatar");
 
