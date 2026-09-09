@@ -1,14 +1,27 @@
 //! The scheduler leader-election lock bucket and its key.
 
+use std::str::FromStr;
 use std::time::Duration;
 
-use derive_more::{Display, From, FromStr};
+use derive_more::{Display, From};
 
-use super::core::{KvBucket, KvKey};
+use super::core::{InvalidKvKey, KvBucket, KvKey, validate_kv_key};
 
-/// A free-form string key for named locks and similar coordination entries.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Display, FromStr, From)]
+/// A string key for named locks and similar coordination entries.
+///
+/// [`FromStr`] enforces NATS KV key syntax (via [`validate_kv_key`]), like the
+/// other key types, so a malformed lock name is rejected on parse rather than at
+/// the store.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Display, From)]
 pub struct SchedulerLockKey(pub String);
+
+impl FromStr for SchedulerLockKey {
+    type Err = InvalidKvKey;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        validate_kv_key(s).map(Self)
+    }
+}
 
 impl KvKey for SchedulerLockKey {}
 
