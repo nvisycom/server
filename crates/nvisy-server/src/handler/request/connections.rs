@@ -53,11 +53,11 @@ pub struct PickerTokenRequest {
 /// Accepted only for providers that can sync on a timer (object stores); rejected
 /// for others — a file service transfers on demand (picker import, per-file
 /// export), and an LLM does not transfer at all. Omit for on-demand only.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncScheduleInput {
-    /// Whether the connection imports data in or exports data out.
-    #[serde(default)]
+    /// Whether the connection imports data in or exports data out. Required: the
+    /// caller states the direction explicitly rather than defaulting to one.
     pub sync_mode: SyncMode,
     /// Cron expression for scheduled imports; omit for manual-only.
     #[validate(length(min = 9, max = 100))]

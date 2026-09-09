@@ -33,6 +33,7 @@ pub struct WorkspaceDetectionUsage {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspace_detection_usage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceDetectionUsage {
     /// The detection this usage belongs to.
     pub detection_id: Uuid,
@@ -48,4 +49,21 @@ pub struct NewWorkspaceDetectionUsage {
     pub total_tokens: Option<i64>,
     /// Wall-clock time this model spent, in milliseconds.
     pub duration_ms: i64,
+}
+
+impl NewWorkspaceDetectionUsage {
+    /// A usage row for `detection_id` on `model`, reporting the given token
+    /// totals, for tests.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(detection_id: Uuid, model: impl Into<String>, input: i64, output: i64) -> Self {
+        Self {
+            detection_id,
+            model: model.into(),
+            version: None,
+            input_tokens: Some(input),
+            output_tokens: Some(output),
+            total_tokens: Some(input + output),
+            duration_ms: 100,
+        }
+    }
 }

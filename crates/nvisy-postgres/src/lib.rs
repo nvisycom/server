@@ -31,6 +31,8 @@ mod error;
 pub mod model;
 pub mod query;
 mod schema;
+#[cfg(feature = "test_util")]
+pub mod test_util;
 pub mod types;
 
 pub use diesel_async::{AsyncConnection, AsyncPgConnection as PgConnection};

@@ -11,7 +11,10 @@ use serde::de::DeserializeOwned;
 ///
 /// Defines how keys are formatted for storage in NATS KV: a key must render to
 /// and parse from the string form used as the entry's KV key.
-pub trait KvKey: fmt::Debug + fmt::Display + FromStr + Clone + Send + Sync + 'static {}
+pub trait KvKey:
+    fmt::Debug + fmt::Display + FromStr<Err = InvalidKvKey> + Clone + Send + Sync + 'static
+{
+}
 
 /// Returned when a string is not a valid NATS KV key (empty, or containing
 /// characters KV keys disallow). Shared by the opaque-token key types whose

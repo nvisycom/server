@@ -57,6 +57,7 @@ pub struct WorkspaceWebhook {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspace_webhooks)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceWebhook {
     /// Reference to the workspace this webhook will belong to.
     pub workspace_id: Uuid,
@@ -82,6 +83,7 @@ pub struct NewWorkspaceWebhook {
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = workspace_webhooks)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateWorkspaceWebhook {
     /// Updated name for the webhook.
     pub display_name: Option<String>,
@@ -97,6 +99,26 @@ pub struct UpdateWorkspaceWebhook {
     pub status: Option<WebhookStatus>,
     /// Soft deletion timestamp.
     pub deleted_at: Option<Option<Timestamp>>,
+}
+
+impl NewWorkspaceWebhook {
+    /// A minimal enabled webhook for `workspace_id`, subscribed to `events`, for
+    /// tests. The URL is a valid `https://` endpoint and the status takes its
+    /// `enabled` database default.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(workspace_id: Uuid, created_by: Uuid, events: Vec<WebhookEvent>) -> Self {
+        Self {
+            workspace_id,
+            display_name: "Test Webhook".to_owned(),
+            description: String::new(),
+            url: "https://example.com/hook".to_owned(),
+            events: events.into_iter().map(Some).collect(),
+            headers: None,
+            encrypted_secret: vec![1, 2, 3],
+            status: None,
+            created_by,
+        }
+    }
 }
 
 impl WorkspaceWebhook {

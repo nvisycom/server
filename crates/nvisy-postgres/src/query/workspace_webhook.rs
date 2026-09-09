@@ -8,8 +8,7 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, OffsetPagination, WebhookEvent, WebhookStatus,
-    WithAccountRef,
+    AccountRefRow, CursorPage, CursorPagination, WebhookEvent, WebhookStatus, WithAccountRef,
 };
 use crate::{Error, PgConnection, Result, schema};
 
@@ -29,13 +28,6 @@ pub trait WorkspaceWebhookRepository {
         webhook_id: Uuid,
     ) -> impl Future<Output = Result<Option<WorkspaceWebhook>>> + Send;
 
-    /// Finds a webhook by ID, scoped to its workspace.
-    fn find_webhook_in_workspace(
-        &mut self,
-        workspace_id: Uuid,
-        webhook_id: Uuid,
-    ) -> impl Future<Output = Result<Option<WorkspaceWebhook>>> + Send;
-
     /// Finds a webhook by id within a workspace, with the handle and avatar of
     /// the account that created it, excluding soft-deleted rows.
     fn find_webhook_in_workspace_with_creator(
@@ -43,13 +35,6 @@ pub trait WorkspaceWebhookRepository {
         workspace_id: Uuid,
         webhook_id: Uuid,
     ) -> impl Future<Output = Result<Option<WithAccountRef<WorkspaceWebhook>>>> + Send;
-
-    /// Lists all webhooks for a workspace with offset pagination.
-    fn offset_list_workspace_webhooks(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = Result<Vec<WorkspaceWebhook>>> + Send;
 
     /// Lists all webhooks for a workspace with cursor pagination, each paired
     /// with the handle and avatar of the account that created it.
@@ -139,26 +124,6 @@ impl WorkspaceWebhookRepository for PgConnection {
         Ok(webhook)
     }
 
-    async fn find_webhook_in_workspace(
-        &mut self,
-        workspace_id: Uuid,
-        webhook_id: Uuid,
-    ) -> Result<Option<WorkspaceWebhook>> {
-        use schema::workspace_webhooks::{self, dsl};
-
-        let webhook = workspace_webhooks::table
-            .filter(dsl::id.eq(webhook_id))
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .select(WorkspaceWebhook::as_select())
-            .first(self)
-            .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(webhook)
-    }
-
     async fn find_webhook_in_workspace_with_creator(
         &mut self,
         workspace_id: Uuid,
@@ -186,27 +151,6 @@ impl WorkspaceWebhookRepository for PgConnection {
             .map_err(Error::from)?;
 
         Ok(row.map(|(item, account)| WithAccountRef { item, account }))
-    }
-
-    async fn offset_list_workspace_webhooks(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> Result<Vec<WorkspaceWebhook>> {
-        use schema::workspace_webhooks::{self, dsl};
-
-        let webhooks = workspace_webhooks::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .select(WorkspaceWebhook::as_select())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(webhooks)
     }
 
     async fn cursor_list_workspace_webhooks(
@@ -375,5 +319,134 @@ impl WorkspaceWebhookRepository for PgConnection {
             .map_err(Error::from)?;
 
         Ok(webhooks)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::model::NewWorkspaceWebhook;
+    use crate::query::WorkspaceWebhookRepository;
+    use crate::test_util::TestDatabase;
+
+    #[tokio::test]
+    async fn create_scoped_lookup_and_soft_delete() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let webhook = conn
+            .create_workspace_webhook(NewWorkspaceWebhook::test(
+                workspace_id,
+                account_id,
+                vec![WebhookEvent::FileCreated],
+            ))
+            .await?;
+
+        assert!(
+            conn.find_workspace_webhook_by_id(webhook.id)
+                .await?
+                .is_some()
+        );
+        assert!(
+            conn.find_webhook_in_workspace_with_creator(workspace_id, webhook.id)
+                .await?
+                .is_some()
+        );
+        // Not found scoped to another workspace.
+        assert!(
+            conn.find_webhook_in_workspace_with_creator(Uuid::now_v7(), webhook.id)
+                .await?
+                .is_none()
+        );
+
+        // Soft delete hides it from reads.
+        conn.delete_workspace_webhook(webhook.id).await?;
+        assert!(
+            conn.find_workspace_webhook_by_id(webhook.id)
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn success_resets_failures_and_failure_increments_them() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let webhook = conn
+            .create_workspace_webhook(NewWorkspaceWebhook::test(
+                workspace_id,
+                account_id,
+                vec![WebhookEvent::FileCreated],
+            ))
+            .await?;
+
+        // Two failures accumulate.
+        let _ = conn.record_webhook_failure(webhook.id).await?;
+        let after_two = conn.record_webhook_failure(webhook.id).await?;
+        assert_eq!(after_two.consecutive_failures, 2);
+        assert!(after_two.last_failure_at.is_some());
+
+        // A success resets the counter and records the delivery.
+        let after_success = conn.record_webhook_success(webhook.id).await?;
+        assert_eq!(after_success.consecutive_failures, 0);
+        assert!(after_success.last_success_at.is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_for_event_requires_enabled_subscribed_and_live() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // Subscribed and enabled: matches.
+        let subscribed = conn
+            .create_workspace_webhook(NewWorkspaceWebhook::test(
+                workspace_id,
+                account_id,
+                vec![WebhookEvent::FileCreated, WebhookEvent::FileDeleted],
+            ))
+            .await?;
+        // Subscribed to a different event only: does not match FileCreated.
+        let _other_event = conn
+            .create_workspace_webhook(NewWorkspaceWebhook::test(
+                workspace_id,
+                account_id,
+                vec![WebhookEvent::MemberAdded],
+            ))
+            .await?;
+        // Subscribed but suspended: excluded (not enabled).
+        let suspended = conn
+            .create_workspace_webhook(NewWorkspaceWebhook::test(
+                workspace_id,
+                account_id,
+                vec![WebhookEvent::FileCreated],
+            ))
+            .await?;
+        let _ = conn.suspend_webhook(suspended.id).await?;
+        // Subscribed but soft-deleted: excluded.
+        let deleted = conn
+            .create_workspace_webhook(NewWorkspaceWebhook::test(
+                workspace_id,
+                account_id,
+                vec![WebhookEvent::FileCreated],
+            ))
+            .await?;
+        conn.delete_workspace_webhook(deleted.id).await?;
+
+        let matched = conn
+            .find_webhooks_for_event(workspace_id, WebhookEvent::FileCreated)
+            .await?;
+        assert_eq!(
+            matched.iter().map(|w| w.id).collect::<Vec<_>>(),
+            vec![subscribed.id]
+        );
+        Ok(())
     }
 }

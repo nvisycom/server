@@ -56,6 +56,7 @@ pub struct Account {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = accounts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewAccount {
     /// Public account handle, unique across all accounts.
     pub username: Handle,
@@ -71,10 +72,34 @@ pub struct NewAccount {
     pub locale: Option<String>,
 }
 
+impl NewAccount {
+    /// Creates an account with the required handle and email; all optional
+    /// profile fields default to `None`.
+    pub fn new(username: Handle, email_address: impl Into<String>) -> Self {
+        Self {
+            username,
+            display_name: None,
+            email_address: email_address.into(),
+            avatar_url: None,
+            timezone: None,
+            locale: None,
+        }
+    }
+
+    /// An account with a fresh unique handle and matching email, for tests.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test() -> Self {
+        let handle = Handle::test();
+        let email = format!("{}@example.com", handle.as_str());
+        Self::new(handle, email)
+    }
+}
+
 /// Data for updating an account.
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = accounts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateAccount {
     /// Public account handle, unique across all accounts.
     pub username: Option<Handle>,

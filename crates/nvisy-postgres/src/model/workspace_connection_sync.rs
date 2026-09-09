@@ -48,6 +48,7 @@ pub struct WorkspaceConnectionSync {
 #[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = workspace_connection_syncs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceConnectionSync {
     /// Connection ID (required).
     pub connection_id: Uuid,
@@ -65,10 +66,25 @@ pub struct NewWorkspaceConnectionSync {
     pub metadata: Option<JsonValue>,
 }
 
+impl NewWorkspaceConnectionSync {
+    /// A minimal sync for `connection_id`, attributed to `account_id`, for tests.
+    /// The trigger, status, records, and attempt take their database defaults
+    /// (`on_demand`, `running`, `0`, `1`), so the sync starts in an active state.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(connection_id: Uuid, account_id: Uuid) -> Self {
+        Self {
+            connection_id,
+            account_id,
+            ..Default::default()
+        }
+    }
+}
+
 /// Data for updating a workspace connection sync.
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = workspace_connection_syncs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateWorkspaceConnectionSync {
     /// Sync status.
     pub status: Option<SyncStatus>,
@@ -80,16 +96,4 @@ pub struct UpdateWorkspaceConnectionSync {
     pub metadata: Option<JsonValue>,
     /// When the sync finished.
     pub completed_at: Option<Option<Timestamp>>,
-}
-
-impl WorkspaceConnectionSync {
-    /// Returns whether the sync is in progress (pending or running).
-    pub fn is_in_progress(&self) -> bool {
-        self.status.is_in_progress()
-    }
-
-    /// Returns whether the sync failed.
-    pub fn is_failed(&self) -> bool {
-        self.status.is_failed()
-    }
 }

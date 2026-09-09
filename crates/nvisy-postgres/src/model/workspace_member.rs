@@ -38,6 +38,7 @@ pub struct WorkspaceMember {
 #[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = workspace_members)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceMember {
     /// Workspace ID.
     pub workspace_id: Uuid,
@@ -80,6 +81,7 @@ impl NewWorkspaceMember {
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = workspace_members)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateWorkspaceMember {
     /// Member role.
     pub member_role: Option<WorkspaceRole>,

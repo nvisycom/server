@@ -1,34 +1,21 @@
 //! Webhook status enumeration for webhook lifecycle management.
 
-use diesel_derive_enum::DbEnum;
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString};
+use super::db_enum;
 
-/// Defines the operational status of a workspace webhook.
-///
-/// This enumeration corresponds to the `WEBHOOK_STATUS` PostgreSQL enum. The
-/// user controls `Enabled` / `Disabled`; `Suspended` is set by the system when a
-/// webhook fails repeatedly, and the user can re-enable it.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
-#[ExistingTypePath = "crate::schema::sql_types::WebhookStatus"]
-pub enum WebhookStatus {
-    /// Webhook is enabled and will receive events.
-    #[db_rename = "enabled"]
-    #[serde(rename = "enabled")]
-    #[default]
-    Enabled,
-
-    /// Webhook was disabled by the user.
-    #[db_rename = "disabled"]
-    #[serde(rename = "disabled")]
-    Disabled,
-
-    /// Webhook was suspended by the system (e.g., too many failures).
-    #[db_rename = "suspended"]
-    #[serde(rename = "suspended")]
-    Suspended,
+db_enum! {
+    /// The operational status of a workspace webhook.
+    ///
+    /// Corresponds to the `WEBHOOK_STATUS` PostgreSQL enum. The user controls
+    /// `Enabled` / `Disabled`; `Suspended` is set by the system when a webhook
+    /// fails repeatedly, and the user can re-enable it.
+    pub enum WebhookStatus: Default = Enabled, "crate::schema::sql_types::WebhookStatus" {
+        /// Webhook is enabled and will receive events.
+        Enabled = "enabled",
+        /// Webhook was disabled by the user.
+        Disabled = "disabled",
+        /// Webhook was suspended by the system (e.g. too many failures).
+        Suspended = "suspended",
+    }
 }
 
 impl WebhookStatus {

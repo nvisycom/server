@@ -1,33 +1,20 @@
 //! Pipeline status enumeration indicating the lifecycle state of a pipeline.
 
-use diesel_derive_enum::DbEnum;
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString};
+use super::db_enum;
 
-/// Defines the lifecycle status of a pipeline definition.
-///
-/// This enumeration corresponds to the `PIPELINE_STATUS` PostgreSQL enum and is used
-/// to track whether a pipeline is being configured, enabled and ready to run, or disabled.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
-#[ExistingTypePath = "crate::schema::sql_types::PipelineStatus"]
-pub enum PipelineStatus {
-    /// Pipeline is being configured
-    #[db_rename = "draft"]
-    #[serde(rename = "draft")]
-    #[default]
-    Draft,
-
-    /// Pipeline is ready to run
-    #[db_rename = "enabled"]
-    #[serde(rename = "enabled")]
-    Enabled,
-
-    /// Pipeline is disabled
-    #[db_rename = "disabled"]
-    #[serde(rename = "disabled")]
-    Disabled,
+db_enum! {
+    /// The lifecycle status of a pipeline definition.
+    ///
+    /// Corresponds to the `PIPELINE_STATUS` PostgreSQL enum and tracks whether a
+    /// pipeline is being configured, enabled and ready to run, or disabled.
+    pub enum PipelineStatus: Default = Draft, "crate::schema::sql_types::PipelineStatus" {
+        /// Pipeline is being configured.
+        Draft = "draft",
+        /// Pipeline is ready to run.
+        Enabled = "enabled",
+        /// Pipeline is disabled.
+        Disabled = "disabled",
+    }
 }
 
 impl PipelineStatus {

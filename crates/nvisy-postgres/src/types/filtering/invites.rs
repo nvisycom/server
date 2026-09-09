@@ -12,24 +12,3 @@ pub struct InviteFilter {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<WorkspaceRole>,
 }
-
-impl InviteFilter {
-    /// Creates a new empty filter.
-    #[inline]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Filters by role.
-    #[inline]
-    pub fn with_role(mut self, role: WorkspaceRole) -> Self {
-        self.role = Some(role);
-        self
-    }
-
-    /// Returns whether any filter is active.
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.role.is_none()
-    }
-}

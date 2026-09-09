@@ -200,7 +200,7 @@ impl ConnectionSyncWorker {
             {
                 let latest = latest.get(&connection.id);
                 // A run already in progress means this connection is busy; skip it.
-                if latest.is_some_and(|run| run.is_in_progress()) {
+                if latest.is_some_and(|run| run.status.is_in_progress()) {
                     continue;
                 }
                 // Due-ness is measured from the last attempt (success or failure),
@@ -294,7 +294,7 @@ impl ConnectionSyncWorker {
         // one-active-run unique index is the authoritative guard; this check just
         // avoids the noisy index violation on the common redelivery case.
         match self.load_latest_run(&connection).await {
-            Ok(Some(run)) if run.is_in_progress() => {
+            Ok(Some(run)) if run.status.is_in_progress() => {
                 tracing::debug!(target: TRACING_TARGET, connection_id = %connection.id, "Sync already in progress; skipping duplicate job");
                 return;
             }
@@ -363,7 +363,7 @@ impl ConnectionSyncWorker {
                 }
             };
             match conn.find_workspace_connection_sync_by_id(run_id).await {
-                Ok(Some(run)) => run.is_failed(),
+                Ok(Some(run)) => run.status.is_failed(),
                 Ok(None) => false,
                 Err(err) => {
                     tracing::error!(target: TRACING_TARGET, %run_id, error = %err, "Failed to check run outcome for retry");

@@ -81,7 +81,7 @@ async fn sync_connection(
     if let Some(latest) = conn
         .find_latest_workspace_connection_sync(connection.id)
         .await?
-        && latest.is_in_progress()
+        && latest.status.is_in_progress()
     {
         return Err(ErrorKind::Conflict.with_message("A sync is already in progress"));
     }
@@ -180,7 +180,7 @@ async fn import_files(
     if let Some(latest) = conn
         .find_latest_workspace_connection_sync(connection.id)
         .await?
-        && latest.is_in_progress()
+        && latest.status.is_in_progress()
     {
         return Err(ErrorKind::Conflict.with_message("A sync is already in progress"));
     }
@@ -267,7 +267,7 @@ async fn export_files(
     if let Some(latest) = conn
         .find_latest_workspace_connection_sync(connection.id)
         .await?
-        && latest.is_in_progress()
+        && latest.status.is_in_progress()
     {
         return Err(ErrorKind::Conflict.with_message("A sync is already in progress"));
     }

@@ -57,6 +57,7 @@ pub struct WorkspaceFile {
 #[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = workspace_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceFile {
     /// Workspace ID (required).
     pub workspace_id: Uuid,
@@ -86,10 +87,31 @@ pub struct NewWorkspaceFile {
     pub expires_at: Option<Timestamp>,
 }
 
+impl NewWorkspaceFile {
+    /// A minimal `original` file for `workspace_id`, for tests.
+    ///
+    /// Supplies the required storage fields and a valid 32-byte hash; the name,
+    /// extension, and kind take their database defaults.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(workspace_id: Uuid, account_id: Uuid) -> Self {
+        let suffix = Uuid::now_v7().simple().to_string();
+        Self {
+            workspace_id,
+            account_id,
+            file_size_bytes: 1024,
+            file_hash_sha256: vec![0u8; 32],
+            storage_path: format!("test/{suffix}"),
+            storage_bucket: "test-bucket".to_owned(),
+            ..Default::default()
+        }
+    }
+}
+
 /// Data for updating a workspace file.
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = workspace_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateWorkspaceFile {
     /// Display name.
     pub display_name: Option<String>,

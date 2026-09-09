@@ -7,7 +7,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
-use crate::types::{AccountRefRow, CursorPage, CursorPagination, OffsetPagination, WithAccountRef};
+use crate::types::{AccountRefRow, CursorPage, CursorPagination, WithAccountRef};
 use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for workspace policy database operations.
@@ -17,12 +17,6 @@ pub trait WorkspacePolicyRepository {
         &mut self,
         new_policy: NewWorkspacePolicy,
     ) -> impl Future<Output = Result<WorkspacePolicy>> + Send;
-
-    /// Finds a policy by its unique identifier.
-    fn find_workspace_policy_by_id(
-        &mut self,
-        policy_id: Uuid,
-    ) -> impl Future<Output = Result<Option<WorkspacePolicy>>> + Send;
 
     /// Finds a policy by ID within a specific workspace.
     fn find_policy_in_workspace(
@@ -38,13 +32,6 @@ pub trait WorkspacePolicyRepository {
         workspace_id: Uuid,
         slug: &str,
     ) -> impl Future<Output = Result<Option<WithAccountRef<WorkspacePolicy>>>> + Send;
-
-    /// Lists all policies in a workspace with offset pagination.
-    fn offset_list_workspace_policies(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = Result<Vec<WorkspacePolicy>>> + Send;
 
     /// Lists all policies in a workspace with cursor pagination, each paired
     /// with the handle and avatar of the account that created it.
@@ -66,12 +53,6 @@ pub trait WorkspacePolicyRepository {
         &mut self,
         policy_id: Uuid,
     ) -> impl Future<Output = Result<()>> + Send;
-
-    /// Counts policies in a workspace.
-    fn count_workspace_policies(
-        &mut self,
-        workspace_id: Uuid,
-    ) -> impl Future<Output = Result<i64>> + Send;
 }
 
 impl WorkspacePolicyRepository for PgConnection {
@@ -86,24 +67,6 @@ impl WorkspacePolicyRepository for PgConnection {
             .returning(WorkspacePolicy::as_returning())
             .get_result(self)
             .await
-            .map_err(Error::from)?;
-
-        Ok(policy)
-    }
-
-    async fn find_workspace_policy_by_id(
-        &mut self,
-        policy_id: Uuid,
-    ) -> Result<Option<WorkspacePolicy>> {
-        use schema::workspace_policies::{self, dsl};
-
-        let policy = workspace_policies::table
-            .filter(dsl::id.eq(policy_id))
-            .filter(dsl::deleted_at.is_null())
-            .select(WorkspacePolicy::as_select())
-            .first(self)
-            .await
-            .optional()
             .map_err(Error::from)?;
 
         Ok(policy)
@@ -156,27 +119,6 @@ impl WorkspacePolicyRepository for PgConnection {
             .map_err(Error::from)?;
 
         Ok(row.map(|(item, account)| WithAccountRef { item, account }))
-    }
-
-    async fn offset_list_workspace_policies(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> Result<Vec<WorkspacePolicy>> {
-        use schema::workspace_policies::{self, dsl};
-
-        let policies = workspace_policies::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(WorkspacePolicy::as_select())
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(policies)
     }
 
     async fn cursor_list_workspace_policies(
@@ -287,18 +229,103 @@ impl WorkspacePolicyRepository for PgConnection {
 
         Ok(())
     }
+}
 
-    async fn count_workspace_policies(&mut self, workspace_id: Uuid) -> Result<i64> {
-        use schema::workspace_policies::{self, dsl};
+#[cfg(test)]
+mod tests {
+    use jiff::{Span, Timestamp};
+    use uuid::Uuid;
 
-        let count = workspace_policies::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .count()
-            .get_result(self)
-            .await
-            .map_err(Error::from)?;
+    use super::*;
+    use crate::model::{NewWorkspacePolicy, UpdateWorkspacePolicy};
+    use crate::query::WorkspacePolicyRepository;
+    use crate::test_util::{TestDatabase, backdate};
 
-        Ok(count)
+    #[tokio::test]
+    async fn create_find_update_and_soft_delete() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let policy = conn
+            .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+            .await?;
+        let slug = policy.slug.as_str().to_owned();
+
+        // Found by id and by slug within the workspace.
+        assert!(
+            conn.find_policy_in_workspace(workspace_id, policy.id)
+                .await?
+                .is_some()
+        );
+        let by_slug = conn
+            .find_policy_in_workspace_by_slug(workspace_id, &slug)
+            .await?;
+        assert_eq!(by_slug.map(|p| p.item.id), Some(policy.id));
+
+        // Not found in another workspace.
+        assert!(
+            conn.find_policy_in_workspace(Uuid::now_v7(), policy.id)
+                .await?
+                .is_none()
+        );
+
+        // Update the display name.
+        let updated = conn
+            .update_workspace_policy(
+                policy.id,
+                UpdateWorkspacePolicy {
+                    display_name: Some("Renamed Policy".to_owned()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert_eq!(updated.display_name, "Renamed Policy");
+
+        // Soft delete hides it from both lookups.
+        conn.delete_workspace_policy(policy.id).await?;
+        assert!(
+            conn.find_policy_in_workspace(workspace_id, policy.id)
+                .await?
+                .is_none()
+        );
+        assert!(
+            conn.find_policy_in_workspace_by_slug(workspace_id, &slug)
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cursor_list_returns_live_policies_newest_first() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // Backdate `first` an hour so it is unambiguously older than `second`;
+        // without a distinct `created_at` the two could tie and the newest-first
+        // order would not be well-defined.
+        let first = conn
+            .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+            .await?;
+        backdate::policy_created_at(&mut conn, first.id, Timestamp::now() - Span::new().hours(1))
+            .await?;
+        let second = conn
+            .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+            .await?;
+        let deleted = conn
+            .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+            .await?;
+        conn.delete_workspace_policy(deleted.id).await?;
+
+        let page = conn
+            .cursor_list_workspace_policies(workspace_id, CursorPagination::new(50))
+            .await?;
+        assert_eq!(
+            page.items.iter().map(|p| p.item.id).collect::<Vec<_>>(),
+            vec![second.id, first.id]
+        );
+        Ok(())
     }
 }

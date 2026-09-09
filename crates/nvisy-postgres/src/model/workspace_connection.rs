@@ -49,6 +49,7 @@ pub struct WorkspaceConnection {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspace_connections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceConnection {
     /// Workspace ID (required).
     pub workspace_id: Uuid,
@@ -68,10 +69,34 @@ pub struct NewWorkspaceConnection {
     pub metadata: Option<JsonValue>,
 }
 
+impl NewWorkspaceConnection {
+    /// A minimal active object-store connection for `workspace_id`, for tests.
+    ///
+    /// The display name is unique per call, so several test connections can be
+    /// seeded into one workspace without colliding on the per-workspace
+    /// display-name unique index.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(workspace_id: Uuid, account_id: Uuid) -> Self {
+        let hex = Uuid::now_v7().simple().to_string();
+        let suffix = &hex[hex.len() - 12..];
+        Self {
+            workspace_id,
+            account_id,
+            display_name: format!("Test Connection {suffix}"),
+            provider: "s3".to_owned(),
+            connection_type: ConnectionType::ObjectStore,
+            encrypted_data: vec![1, 2, 3],
+            is_active: Some(true),
+            metadata: None,
+        }
+    }
+}
+
 /// Data for updating a workspace connection.
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = workspace_connections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateWorkspaceConnection {
     /// Connection display name.
     pub display_name: Option<String>,

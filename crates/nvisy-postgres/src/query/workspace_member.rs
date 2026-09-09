@@ -10,8 +10,8 @@ use crate::model::{
     Account, NewWorkspaceMember, UpdateWorkspaceMember, Workspace, WorkspaceMember,
 };
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, MemberFilter, MemberSortBy, MemberSortField,
-    NotificationEvent, OffsetPagination, SortOrder, WorkspaceRole,
+    AccountRefRow, CursorPage, CursorPagination, MemberFilter, NotificationEvent, OffsetPagination,
+    WorkspaceRole,
 };
 use crate::{Error, PgConnection, Result, schema};
 
@@ -48,34 +48,6 @@ pub trait WorkspaceMemberRepository {
         member_account_id: Uuid,
     ) -> impl Future<Output = Result<()>> + Send;
 
-    /// Lists members of a workspace with offset pagination.
-    ///
-    /// Supports filtering by role and 2FA status, and sorting by name or date.
-    fn offset_list_workspace_members(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: OffsetPagination,
-        sort_by: MemberSortBy,
-        filter: MemberFilter,
-    ) -> impl Future<Output = Result<Vec<WorkspaceMember>>> + Send;
-
-    /// Lists members of a workspace with cursor pagination.
-    fn cursor_list_workspace_members(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: CursorPagination,
-        filter: MemberFilter,
-    ) -> impl Future<Output = Result<CursorPage<WorkspaceMember>>> + Send;
-
-    /// Lists workspaces where a user is a member.
-    ///
-    /// Returns memberships ordered by creation date.
-    fn list_account_workspaces(
-        &mut self,
-        account_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = Result<Vec<WorkspaceMember>>> + Send;
-
     /// Lists user workspaces with full workspace details via JOIN.
     fn list_account_workspaces_with_details(
         &mut self,
@@ -92,22 +64,6 @@ pub trait WorkspaceMemberRepository {
         pagination: CursorPagination,
     ) -> impl Future<Output = Result<CursorPage<(Workspace, WorkspaceMember, AccountRefRow)>>> + Send;
 
-    /// Gets a user's role in a workspace for permission checking.
-    ///
-    /// Returns the role if the user is a member, None otherwise.
-    fn check_account_role(
-        &mut self,
-        workspace_id: Uuid,
-        account_id: Uuid,
-    ) -> impl Future<Output = Result<Option<WorkspaceRole>>> + Send;
-
-    /// Finds all members with a specific role.
-    fn find_members_by_role(
-        &mut self,
-        workspace_id: Uuid,
-        role: WorkspaceRole,
-    ) -> impl Future<Output = Result<Vec<WorkspaceMember>>> + Send;
-
     /// Returns the account ids of members holding any of `roles` who accept
     /// `event` as an in-app notification.
     ///
@@ -120,24 +76,6 @@ pub trait WorkspaceMemberRepository {
         roles: &[WorkspaceRole],
         event: NotificationEvent,
     ) -> impl Future<Output = Result<Vec<Uuid>>> + Send;
-
-    /// Checks if a user has any access to a workspace.
-    fn check_workspace_access(
-        &mut self,
-        workspace_id: Uuid,
-        account_id: Uuid,
-    ) -> impl Future<Output = Result<bool>> + Send;
-
-    /// Lists members of a workspace with account details using offset pagination.
-    ///
-    /// Returns members with their associated account information (email, display name).
-    fn offset_list_workspace_members_with_accounts(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: OffsetPagination,
-        sort_by: MemberSortBy,
-        filter: MemberFilter,
-    ) -> impl Future<Output = Result<Vec<(WorkspaceMember, Account)>>> + Send;
 
     /// Lists members of a workspace with account details using cursor pagination.
     ///
@@ -249,132 +187,6 @@ impl WorkspaceMemberRepository for PgConnection {
         Ok(())
     }
 
-    async fn offset_list_workspace_members(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: OffsetPagination,
-        sort_by: MemberSortBy,
-        filter: MemberFilter,
-    ) -> Result<Vec<WorkspaceMember>> {
-        use schema::{accounts, workspace_members};
-
-        // Build base query with JOIN for name sorting
-        let mut query = workspace_members::table
-            .inner_join(accounts::table.on(accounts::id.eq(workspace_members::account_id)))
-            .filter(workspace_members::workspace_id.eq(workspace_id))
-            .into_boxed();
-
-        // Apply role filter
-        if let Some(role) = filter.role {
-            query = query.filter(workspace_members::member_role.eq(role));
-        }
-
-        // Note: has_2fa filter is not yet implemented as accounts table
-        // doesn't have a 2FA field. Will be added when 2FA is implemented.
-
-        // Apply sorting
-        let query = match (sort_by.field, sort_by.order) {
-            (MemberSortField::Name, SortOrder::Asc) => query.order(accounts::display_name.asc()),
-            (MemberSortField::Name, SortOrder::Desc) => query.order(accounts::display_name.desc()),
-            (MemberSortField::Date, SortOrder::Asc) => {
-                query.order(workspace_members::created_at.asc())
-            }
-            (MemberSortField::Date, SortOrder::Desc) => {
-                query.order(workspace_members::created_at.desc())
-            }
-        };
-
-        let members = query
-            .select(WorkspaceMember::as_select())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(members)
-    }
-
-    async fn cursor_list_workspace_members(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: CursorPagination,
-        filter: MemberFilter,
-    ) -> Result<CursorPage<WorkspaceMember>> {
-        use schema::workspace_members::{self, dsl};
-
-        // Get total count only if requested
-        let total = if pagination.include_count {
-            let mut count_query = workspace_members::table
-                .filter(dsl::workspace_id.eq(workspace_id))
-                .into_boxed();
-
-            if let Some(role) = filter.role {
-                count_query = count_query.filter(dsl::member_role.eq(role));
-            }
-
-            Some(
-                count_query
-                    .count()
-                    .get_result(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
-
-        // Build query with cursor
-        let mut query = workspace_members::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .into_boxed();
-
-        if let Some(role) = filter.role {
-            query = query.filter(dsl::member_role.eq(role));
-        }
-
-        if let Some(cursor) = &pagination.after {
-            let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
-            query = query.filter(
-                dsl::created_at.lt(cursor_ts).or(dsl::created_at
-                    .eq(cursor_ts)
-                    .and(dsl::account_id.lt(cursor.id))),
-            );
-        }
-
-        let items: Vec<WorkspaceMember> = query
-            .select(WorkspaceMember::as_select())
-            .order((dsl::created_at.desc(), dsl::account_id.desc()))
-            .limit(pagination.fetch_limit())
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(CursorPage::new(items, total, pagination.limit, |m| {
-            (m.created_at.into(), m.account_id)
-        }))
-    }
-
-    async fn list_account_workspaces(
-        &mut self,
-        account_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> Result<Vec<WorkspaceMember>> {
-        use schema::workspace_members::{self, dsl};
-
-        let memberships = workspace_members::table
-            .filter(dsl::account_id.eq(account_id))
-            .select(WorkspaceMember::as_select())
-            .order(dsl::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(memberships)
-    }
-
     async fn list_account_workspaces_with_details(
         &mut self,
         account_id: Uuid,
@@ -475,44 +287,6 @@ impl WorkspaceMemberRepository for PgConnection {
         ))
     }
 
-    async fn check_account_role(
-        &mut self,
-        workspace_id: Uuid,
-        account_id: Uuid,
-    ) -> Result<Option<WorkspaceRole>> {
-        use schema::workspace_members::{self, dsl};
-
-        let role = workspace_members::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::account_id.eq(account_id))
-            .select(dsl::member_role)
-            .first(self)
-            .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(role)
-    }
-
-    async fn find_members_by_role(
-        &mut self,
-        workspace_id: Uuid,
-        role: WorkspaceRole,
-    ) -> Result<Vec<WorkspaceMember>> {
-        use schema::workspace_members::{self, dsl};
-
-        let members = workspace_members::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::member_role.eq(role))
-            .select(WorkspaceMember::as_select())
-            .order(dsl::created_at.asc())
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(members)
-    }
-
     async fn notification_recipients_by_roles(
         &mut self,
         workspace_id: Uuid,
@@ -541,67 +315,6 @@ impl WorkspaceMemberRepository for PgConnection {
             .map_err(Error::from)?;
 
         Ok(account_ids)
-    }
-
-    async fn check_workspace_access(
-        &mut self,
-        workspace_id: Uuid,
-        account_id: Uuid,
-    ) -> Result<bool> {
-        use schema::workspace_members::{self, dsl};
-
-        let is_member = workspace_members::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::account_id.eq(account_id))
-            .select(dsl::account_id)
-            .first::<Uuid>(self)
-            .await
-            .optional()
-            .map_err(Error::from)?
-            .is_some();
-
-        Ok(is_member)
-    }
-
-    async fn offset_list_workspace_members_with_accounts(
-        &mut self,
-        workspace_id: Uuid,
-        pagination: OffsetPagination,
-        sort_by: MemberSortBy,
-        filter: MemberFilter,
-    ) -> Result<Vec<(WorkspaceMember, Account)>> {
-        use schema::{accounts, workspace_members};
-
-        let mut query = workspace_members::table
-            .inner_join(accounts::table.on(accounts::id.eq(workspace_members::account_id)))
-            .filter(workspace_members::workspace_id.eq(workspace_id))
-            .filter(accounts::deleted_at.is_null())
-            .into_boxed();
-
-        if let Some(role) = filter.role {
-            query = query.filter(workspace_members::member_role.eq(role));
-        }
-
-        let query = match (sort_by.field, sort_by.order) {
-            (MemberSortField::Name, SortOrder::Asc) => query.order(accounts::display_name.asc()),
-            (MemberSortField::Name, SortOrder::Desc) => query.order(accounts::display_name.desc()),
-            (MemberSortField::Date, SortOrder::Asc) => {
-                query.order(workspace_members::created_at.asc())
-            }
-            (MemberSortField::Date, SortOrder::Desc) => {
-                query.order(workspace_members::created_at.desc())
-            }
-        };
-
-        let results = query
-            .select((WorkspaceMember::as_select(), Account::as_select()))
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(results)
     }
 
     async fn cursor_list_workspace_members_with_accounts(
@@ -762,5 +475,190 @@ impl WorkspaceMemberRepository for PgConnection {
         .map_err(Error::from)?;
 
         Ok(shares)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::model::{NewAccount, NewWorkspace, NewWorkspaceMember, UpdateWorkspaceMember};
+    use crate::query::{AccountRepository, WorkspaceMemberRepository, WorkspaceRepository};
+    use crate::test_util::TestDatabase;
+    use crate::types::{Handle, NotificationEvent, WorkspaceRole};
+
+    #[tokio::test]
+    async fn add_find_update_remove_round_trip() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (owner_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let member = conn
+            .add_workspace_member(NewWorkspaceMember::new(
+                workspace_id,
+                owner_id,
+                WorkspaceRole::Owner,
+            ))
+            .await?;
+        assert_eq!(member.member_role, WorkspaceRole::Owner);
+
+        let found = conn
+            .find_workspace_member(workspace_id, owner_id)
+            .await?
+            .expect("member should exist");
+        assert_eq!(found.account_id, owner_id);
+
+        let updated = conn
+            .update_workspace_member(
+                workspace_id,
+                owner_id,
+                UpdateWorkspaceMember {
+                    member_role: Some(WorkspaceRole::Admin),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert_eq!(updated.member_role, WorkspaceRole::Admin);
+
+        conn.remove_workspace_member(workspace_id, owner_id).await?;
+        assert!(
+            conn.find_workspace_member(workspace_id, owner_id)
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn notification_recipients_respect_role_and_event_prefs() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (owner_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // An owner with default (empty) prefs accepts every event.
+        let _ = conn
+            .add_workspace_member(NewWorkspaceMember::new(
+                workspace_id,
+                owner_id,
+                WorkspaceRole::Owner,
+            ))
+            .await?;
+
+        // A viewer who opted in to ONLY `member.joined`.
+        let viewer_id = conn.create_account(NewAccount::test()).await?.id;
+        let mut viewer = NewWorkspaceMember::new(workspace_id, viewer_id, WorkspaceRole::Reviewer);
+        viewer.notification_events_app = vec![Some(NotificationEvent::MemberJoined)];
+        let _ = conn.add_workspace_member(viewer).await?;
+
+        // For `member.joined`, restricted to owners: only the owner matches.
+        let owners_only = conn
+            .notification_recipients_by_roles(
+                workspace_id,
+                &[WorkspaceRole::Owner],
+                NotificationEvent::MemberJoined,
+            )
+            .await?;
+        assert_eq!(owners_only, vec![owner_id]);
+
+        // For `member.joined` across owner+viewer: both accept it.
+        let mut both = conn
+            .notification_recipients_by_roles(
+                workspace_id,
+                &[WorkspaceRole::Owner, WorkspaceRole::Reviewer],
+                NotificationEvent::MemberJoined,
+            )
+            .await?;
+        both.sort();
+        let mut expected = vec![owner_id, viewer_id];
+        expected.sort();
+        assert_eq!(both, expected);
+
+        // For an event the viewer did NOT opt into: only the all-events owner.
+        let detection = conn
+            .notification_recipients_by_roles(
+                workspace_id,
+                &[WorkspaceRole::Owner, WorkspaceRole::Reviewer],
+                NotificationEvent::DetectionCompleted,
+            )
+            .await?;
+        assert_eq!(detection, vec![owner_id]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn accounts_share_workspace_detects_common_membership() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (owner_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let member_id = conn.create_account(NewAccount::test()).await?.id;
+        let stranger_id = conn.create_account(NewAccount::test()).await?.id;
+
+        let _ = conn
+            .add_workspace_member(NewWorkspaceMember::new(
+                workspace_id,
+                owner_id,
+                WorkspaceRole::Owner,
+            ))
+            .await?;
+        let _ = conn
+            .add_workspace_member(NewWorkspaceMember::new(
+                workspace_id,
+                member_id,
+                WorkspaceRole::Editor,
+            ))
+            .await?;
+
+        // Two members of the same workspace share it.
+        assert!(conn.accounts_share_workspace(owner_id, member_id).await?);
+        // The stranger is in no shared workspace.
+        assert!(!conn.accounts_share_workspace(owner_id, stranger_id).await?);
+        // An account always shares with itself, even with no memberships.
+        assert!(
+            conn.accounts_share_workspace(stranger_id, stranger_id)
+                .await?
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_by_email_is_scoped_to_the_workspace() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let owner_id = db.seed_account().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // Two workspaces; the account is a member of only the first.
+        let ws_a = conn
+            .create_workspace(NewWorkspace::test(owner_id))
+            .await?
+            .id;
+        let ws_b = conn
+            .create_workspace(NewWorkspace::test(owner_id))
+            .await?
+            .id;
+
+        let account_id = conn
+            .create_account(NewAccount::new(Handle::test(), "member@example.com"))
+            .await?
+            .id;
+        let _ = conn
+            .add_workspace_member(NewWorkspaceMember::new(
+                ws_a,
+                account_id,
+                WorkspaceRole::Editor,
+            ))
+            .await?;
+
+        // Found in the workspace they belong to.
+        let found = conn
+            .find_workspace_member_by_email(ws_a, "member@example.com")
+            .await?;
+        assert_eq!(found.map(|(m, _)| m.account_id), Some(account_id));
+
+        // Not found in the other workspace, even though the account exists.
+        assert!(
+            conn.find_workspace_member_by_email(ws_b, "member@example.com")
+                .await?
+                .is_none()
+        );
+        Ok(())
     }
 }

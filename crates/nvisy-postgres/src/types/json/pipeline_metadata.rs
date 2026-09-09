@@ -53,3 +53,31 @@ impl RetentionOverride {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Retention, RetentionOverride, RetentionScope};
+
+    #[test]
+    fn get_maps_each_scope_to_its_field_and_never_overrides_originals() {
+        let over = RetentionOverride {
+            redacted_documents: Some(Retention::Forever),
+            audit_logs: Some(Retention::Days { days: 30 }),
+            intermediates: None,
+        };
+
+        // Original documents are ingested, not pipeline-produced, so they have no
+        // per-pipeline override even when the other scopes are set.
+        assert_eq!(over.get(RetentionScope::OriginalDocuments), None);
+        assert_eq!(
+            over.get(RetentionScope::RedactedDocuments),
+            Some(Retention::Forever)
+        );
+        assert_eq!(
+            over.get(RetentionScope::AuditLogs),
+            Some(Retention::Days { days: 30 })
+        );
+        // A `None` field inherits the workspace baseline (no override reported).
+        assert_eq!(over.get(RetentionScope::Intermediates), None);
+    }
+}

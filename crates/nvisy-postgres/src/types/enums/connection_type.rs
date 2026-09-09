@@ -1,31 +1,22 @@
 //! Connection capability-category enumeration.
 
-use diesel_derive_enum::DbEnum;
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString};
+use super::db_enum;
 
-/// The capability category of a transfer connection.
-///
-/// Corresponds to the `CONNECTION_TYPE` PostgreSQL enum. A stable, closed set:
-/// the concrete provider (the `provider` column, e.g. `s3`) stays open and
-/// extensible, while its capability is one of these types. Both categories are
-/// transfer-capable — an object store is enumerable and syncs on a timer; a file
-/// service transfers on demand. Inference services are a separate resource
-/// (`workspace_providers`), not a connection.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
-#[ExistingTypePath = "crate::schema::sql_types::ConnectionType"]
-pub enum ConnectionType {
-    /// External object storage (s3, azure, gcs, ...).
-    #[db_rename = "object_store"]
-    #[serde(rename = "object_store")]
-    ObjectStore,
-
-    /// External file service (google_drive, dropbox, ...).
-    #[db_rename = "file_service"]
-    #[serde(rename = "file_service")]
-    FileService,
+db_enum! {
+    /// The capability category of a transfer connection.
+    ///
+    /// Corresponds to the `CONNECTION_TYPE` PostgreSQL enum. A stable, closed set:
+    /// the concrete provider (the `provider` column, e.g. `s3`) stays open and
+    /// extensible, while its capability is one of these types. Both categories are
+    /// transfer-capable — an object store is enumerable and syncs on a timer; a
+    /// file service transfers on demand. Inference services are a separate
+    /// resource (`workspace_providers`), not a connection.
+    pub enum ConnectionType = "crate::schema::sql_types::ConnectionType" {
+        /// External object storage (s3, azure, gcs, ...).
+        ObjectStore = "object_store",
+        /// External file service (google_drive, dropbox, ...).
+        FileService = "file_service",
+    }
 }
 
 impl ConnectionType {

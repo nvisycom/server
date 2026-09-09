@@ -10,7 +10,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::query::{AccountRepository, WorkspaceMemberRepository};
-use nvisy_postgres::types::{Handle, WorkspaceRole};
+use nvisy_postgres::types::Handle;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
@@ -175,7 +175,7 @@ async fn delete_member(
     };
 
     // Owners cannot be removed, they can only leave
-    if member_to_remove.member_role == WorkspaceRole::Owner {
+    if member_to_remove.member_role.is_owner() {
         return Err(ErrorKind::BadRequest
             .with_message("Cannot remove an owner")
             .with_context("Owners can only leave the workspace themselves"));
@@ -264,7 +264,7 @@ async fn update_member(
     };
 
     // Owners cannot be demoted, they can only leave
-    if current_member.member_role == WorkspaceRole::Owner && request.role != WorkspaceRole::Owner {
+    if current_member.member_role.is_owner() && !request.role.is_owner() {
         return Err(ErrorKind::BadRequest
             .with_message("Cannot demote an owner")
             .with_context("Owners can only leave the workspace themselves"));

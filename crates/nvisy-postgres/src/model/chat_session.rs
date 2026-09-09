@@ -33,6 +33,7 @@ pub struct ChatSession {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = chat_sessions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewChatSession {
     /// Workspace this session belongs to.
     pub workspace_id: Uuid,
@@ -42,10 +43,24 @@ pub struct NewChatSession {
     pub title: String,
 }
 
+impl NewChatSession {
+    /// A minimal chat session for `workspace_id`, opened by `account_id`, for
+    /// tests.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(workspace_id: Uuid, account_id: Uuid) -> Self {
+        Self {
+            workspace_id,
+            account_id,
+            title: "Test Chat".to_owned(),
+        }
+    }
+}
+
 /// Data for updating a chat session.
 #[derive(Debug, Default, Clone, AsChangeset)]
 #[diesel(table_name = chat_sessions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateChatSession {
     /// New title.
     pub title: Option<String>,

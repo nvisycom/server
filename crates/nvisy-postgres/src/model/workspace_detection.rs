@@ -54,6 +54,7 @@ pub struct WorkspaceDetection {
 #[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = workspace_detections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceDetection {
     /// Pipeline ID (required).
     pub pipeline_id: Uuid,
@@ -76,10 +77,26 @@ pub struct NewWorkspaceDetection {
     pub metadata: Option<Json<DetectionMetadata>>,
 }
 
+impl NewWorkspaceDetection {
+    /// A minimal detection of `input_file_id` through `pipeline_id`, for tests.
+    /// The trigger and status take their database defaults (`user`, `pending`),
+    /// so the detection starts unclaimed and claimable.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(pipeline_id: Uuid, account_id: Uuid, input_file_id: Uuid) -> Self {
+        Self {
+            pipeline_id,
+            account_id,
+            input_file_id,
+            ..Default::default()
+        }
+    }
+}
+
 /// Data for updating a workspace detection.
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = workspace_detections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateWorkspaceDetection {
     /// Detection status.
     pub status: Option<DetectionStatus>,
@@ -93,11 +110,4 @@ pub struct UpdateWorkspaceDetection {
     pub claimed_at: Option<Option<Timestamp>>,
     /// When the detection completed analysis.
     pub completed_at: Option<Option<Timestamp>>,
-}
-
-impl WorkspaceDetection {
-    /// Returns whether analysis is done and the detection is ready to redact.
-    pub fn is_complete(&self) -> bool {
-        self.status.is_complete()
-    }
 }

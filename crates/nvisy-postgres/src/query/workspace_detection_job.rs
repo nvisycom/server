@@ -144,3 +144,136 @@ impl DetectionJobOutboxRepository for PgConnection {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use diesel::{ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper};
+    use diesel_async::RunQueryDsl;
+    use uuid::Uuid;
+
+    use super::{DetectionJobOutboxRepository, OutboxStatus, WorkspaceDetectionJob, schema};
+    use crate::model::{NewWorkspaceDetection, NewWorkspaceDetectionJob};
+    use crate::query::WorkspaceDetectionRepository;
+    use crate::test_util::TestDatabase;
+    use crate::{AsyncConnection, PgConn, Result};
+
+    /// Seeds a detection and returns its id — the FK parent an outbox row needs.
+    async fn seed_detection(db: &TestDatabase) -> anyhow::Result<Uuid> {
+        let (account_id, _ws, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let mut conn = db.client.get_connection().await?;
+        let detection = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                pipeline_id,
+                account_id,
+                file_id,
+            ))
+            .await?;
+        Ok(detection.id)
+    }
+
+    /// Re-reads an outbox row by id, bypassing the repository (which has no
+    /// single-row getter) so tests can assert on its post-transition state.
+    async fn reread(conn: &mut PgConn, id: Uuid) -> anyhow::Result<Option<WorkspaceDetectionJob>> {
+        use schema::workspace_detection_jobs::dsl;
+
+        let row = dsl::workspace_detection_jobs
+            .filter(dsl::id.eq(id))
+            .select(WorkspaceDetectionJob::as_select())
+            .first(conn)
+            .await
+            .optional()?;
+        Ok(row)
+    }
+
+    #[tokio::test]
+    async fn claim_then_process_removes_the_row_from_the_pending_set() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let detection_id = seed_detection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        let job = conn
+            .insert_detection_job(NewWorkspaceDetectionJob::test(detection_id))
+            .await?;
+
+        // The drainer claims and processes in one transaction.
+        let processed = conn
+            .transaction(async |conn| -> Result<Uuid> {
+                let batch = conn.claim_detection_job_batch(10).await?;
+                assert_eq!(batch.len(), 1);
+                assert_eq!(batch[0].id, job.id);
+                conn.mark_detection_job_processed(batch[0].id).await?;
+                Ok(batch[0].id)
+            })
+            .await?;
+        assert_eq!(processed, job.id);
+
+        // Nothing is due any more.
+        let empty = conn
+            .transaction(async |conn| conn.claim_detection_job_batch(10).await)
+            .await?;
+        assert!(empty.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn defer_pushes_the_row_out_of_the_due_window() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let detection_id = seed_detection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        let job = conn
+            .insert_detection_job(NewWorkspaceDetectionJob::test(detection_id))
+            .await?;
+
+        // Claim, then defer the attempt an hour into the future.
+        conn.transaction(async |conn| -> Result<()> {
+            let batch = conn.claim_detection_job_batch(10).await?;
+            assert_eq!(batch.len(), 1);
+            conn.defer_detection_job_attempt(batch[0].id, 3600).await?;
+            Ok(())
+        })
+        .await?;
+
+        // It is still pending but no longer due, so a later claim skips it.
+        let due = conn
+            .transaction(async |conn| conn.claim_detection_job_batch(10).await)
+            .await?;
+        assert!(due.is_empty(), "deferred row must not be due yet");
+
+        // Its attempt count advanced.
+        let reread = reread(&mut conn, job.id).await?.expect("row exists");
+        assert_eq!(reread.attempts, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mark_failed_dead_letters_the_row() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let detection_id = seed_detection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        let job = conn
+            .insert_detection_job(NewWorkspaceDetectionJob::test(detection_id))
+            .await?;
+
+        conn.transaction(async |conn| -> Result<()> {
+            let batch = conn.claim_detection_job_batch(10).await?;
+            conn.mark_detection_job_failed(batch[0].id).await?;
+            Ok(())
+        })
+        .await?;
+
+        // A dead-lettered row is out of the pending set for good.
+        let due = conn
+            .transaction(async |conn| conn.claim_detection_job_batch(10).await)
+            .await?;
+        assert!(due.is_empty());
+
+        let reread = reread(&mut conn, job.id)
+            .await?
+            .expect("row retained for inspection");
+        assert_eq!(reread.status, OutboxStatus::Failed);
+        assert_eq!(reread.attempts, 1);
+        Ok(())
+    }
+}

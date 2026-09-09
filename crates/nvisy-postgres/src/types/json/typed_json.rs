@@ -139,3 +139,51 @@ impl<T> FromSql<Jsonb, Pg> for Json<T> {
         Ok(Self::from_raw(value))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde::{Deserialize, Serialize};
+
+    use super::Json;
+
+    #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+    struct Config {
+        name: String,
+        count: u32,
+    }
+
+    #[test]
+    fn encode_then_read_round_trips() {
+        let config = Config {
+            name: "hi".to_owned(),
+            count: 3,
+        };
+        let column = Json::encode(&config);
+        assert_eq!(column.strict().unwrap(), config);
+        assert_eq!(column.optional(), Some(config));
+    }
+
+    #[test]
+    fn the_three_read_policies_diverge_on_a_mismatch() {
+        // A blob whose shape does not match `Config` (missing `count`, wrong type
+        // for `name`).
+        let bad = Json::<Config>::from_raw(serde_json::json!({ "name": 123 }));
+
+        // strict surfaces the decode error; optional drops to None; or_default
+        // repairs to `Config::default()`.
+        assert!(bad.strict().is_err());
+        assert_eq!(bad.optional(), None);
+        assert_eq!(bad.or_default(), Config::default());
+    }
+
+    #[test]
+    fn is_empty_is_true_for_an_empty_object_or_a_non_object() {
+        assert!(Json::<Config>::from_raw(serde_json::json!({})).is_empty());
+        // A non-object blob (the default `'{}'`-shaped column never holds these,
+        // but a stray scalar/array counts as "no fields").
+        assert!(Json::<Config>::from_raw(serde_json::json!(null)).is_empty());
+        assert!(Json::<Config>::from_raw(serde_json::json!([1, 2])).is_empty());
+        // A populated object is not empty.
+        assert!(!Json::<Config>::from_raw(serde_json::json!({ "name": "x" })).is_empty());
+    }
+}

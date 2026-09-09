@@ -130,3 +130,32 @@ pub(super) async fn ensure_stream<S: EventStream>(jetstream: &Context) -> Result
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{EventStream, subjects};
+
+    enum TestStream {}
+
+    impl EventStream for TestStream {
+        type Message = ();
+
+        const CONSUMER_NAME: &'static str = "test-worker";
+        const DESCRIPTION: &'static str = "test stream";
+        const MAX_AGE: Option<std::time::Duration> = None;
+        const NAME: &'static str = "TEST";
+        const SUBJECT: &'static str = "events.test";
+    }
+
+    #[test]
+    fn subjects_bind_the_exact_subject_and_its_wildcard() {
+        // Both are required: `publish` uses the exact subject, `publish_to`
+        // appends a token under `SUBJECT.>`, and `SUBJECT.>` alone would not match
+        // a bare `publish` (the `>` requires a token after the dot). Missing either
+        // means a published message the stream never captures.
+        assert_eq!(
+            subjects::<TestStream>(),
+            vec!["events.test".to_string(), "events.test.>".to_string()]
+        );
+    }
+}

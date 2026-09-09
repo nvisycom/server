@@ -600,7 +600,7 @@ async fn redact_detection(
             find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
 
         // A detection can only be redacted once its analysis is complete.
-        if !detection.is_complete() {
+        if !detection.status.is_complete() {
             return Err(ErrorKind::Conflict
                 .with_message("Detection is not ready to redact")
                 .with_resource("detection"));

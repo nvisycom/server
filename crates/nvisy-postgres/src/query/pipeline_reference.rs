@@ -167,3 +167,131 @@ fn dedup(ids: &[Uuid]) -> Vec<Uuid> {
     let mut seen = std::collections::HashSet::with_capacity(ids.len());
     ids.iter().copied().filter(|id| seen.insert(*id)).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use crate::model::{NewWorkspacePipeline, NewWorkspacePolicy};
+    use crate::query::{
+        PipelineReferenceRepository, WorkspacePipelineRepository, WorkspacePolicyRepository,
+    };
+    use crate::test_util::TestDatabase;
+    use crate::types::Handle;
+
+    /// Seeds a pipeline plus `count` policies, returning `(workspace_id,
+    /// pipeline_id, policy_ids)`.
+    async fn seed(db: &TestDatabase, count: usize) -> anyhow::Result<(Uuid, Uuid, Vec<Uuid>)> {
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+        let pipeline = conn
+            .create_workspace_pipeline(NewWorkspacePipeline::test(workspace_id, account_id))
+            .await?;
+        let mut policy_ids = Vec::new();
+        for _ in 0..count {
+            let policy = conn
+                .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+                .await?;
+            policy_ids.push(policy.id);
+        }
+        Ok((workspace_id, pipeline.id, policy_ids))
+    }
+
+    #[tokio::test]
+    async fn replace_sets_dedups_and_clears_references() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (workspace_id, pipeline_id, policies) = seed(&db, 2).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        // Replace with a set that names one policy twice: it is deduplicated.
+        conn.replace_workspace_pipeline_policies(
+            workspace_id,
+            pipeline_id,
+            &[policies[0], policies[1], policies[0]],
+        )
+        .await?;
+        let mut ids = conn.list_pipeline_policy_ids(pipeline_id).await?;
+        ids.sort();
+        let mut expected = vec![policies[0], policies[1]];
+        expected.sort();
+        assert_eq!(ids, expected);
+
+        // Replacing with a smaller set overwrites (delete-then-insert).
+        conn.replace_workspace_pipeline_policies(workspace_id, pipeline_id, &[policies[1]])
+            .await?;
+        assert_eq!(
+            conn.list_pipeline_policy_ids(pipeline_id).await?,
+            vec![policies[1]]
+        );
+
+        // Replacing with an empty set clears all references.
+        conn.replace_workspace_pipeline_policies(workspace_id, pipeline_id, &[])
+            .await?;
+        assert!(conn.list_pipeline_policy_ids(pipeline_id).await?.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn listings_exclude_soft_deleted_policies() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (workspace_id, pipeline_id, policies) = seed(&db, 2).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        conn.replace_workspace_pipeline_policies(workspace_id, pipeline_id, &policies)
+            .await?;
+        assert_eq!(conn.list_pipeline_policy_ids(pipeline_id).await?.len(), 2);
+        assert_eq!(conn.list_pipeline_policy_slugs(pipeline_id).await?.len(), 2);
+
+        // Soft-deleting a referenced policy drops it from both listings (the join
+        // row remains, but the parent is filtered on `deleted_at`).
+        conn.delete_workspace_policy(policies[0]).await?;
+        assert_eq!(
+            conn.list_pipeline_policy_ids(pipeline_id).await?,
+            vec![policies[1]]
+        );
+        assert_eq!(conn.list_pipeline_policy_slugs(pipeline_id).await?.len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn resolve_policy_slugs_preserves_order_and_rejects_unknown() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let alpha = conn
+            .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+            .await?;
+        let bravo = conn
+            .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+            .await?;
+
+        // Resolution preserves request order, not storage order.
+        let resolved = conn
+            .resolve_policy_slugs(workspace_id, &[bravo.slug.clone(), alpha.slug.clone()])
+            .await?;
+        assert_eq!(resolved, Some(vec![bravo.id, alpha.id]));
+
+        // An empty request resolves to an empty vec (not `None`).
+        assert_eq!(
+            conn.resolve_policy_slugs(workspace_id, &[]).await?,
+            Some(Vec::new())
+        );
+
+        // If any slug is unknown, the whole set is rejected with `None`.
+        let unknown = Handle::test();
+        assert_eq!(
+            conn.resolve_policy_slugs(workspace_id, &[alpha.slug.clone(), unknown])
+                .await?,
+            None
+        );
+
+        // A slug that exists only in another workspace does not resolve here.
+        assert_eq!(
+            conn.resolve_policy_slugs(Uuid::now_v7(), std::slice::from_ref(&alpha.slug))
+                .await?,
+            None
+        );
+        Ok(())
+    }
+}

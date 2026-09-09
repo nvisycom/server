@@ -1,32 +1,19 @@
 //! API token type enumeration for authentication tracking.
 
-use diesel_derive_enum::DbEnum;
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString};
+use super::db_enum;
 
-/// Defines the type of API token for authentication and tracking purposes.
-///
-/// This enumeration corresponds to the `API_TOKEN_TYPE` PostgreSQL enum and is used
-/// to categorize different types of authentication tokens based on the client type.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
-#[ExistingTypePath = "crate::schema::sql_types::ApiTokenType"]
-pub enum ApiTokenType {
-    /// Web browser token (desktop or mobile browser)
-    #[db_rename = "web"]
-    #[serde(rename = "web")]
-    #[default]
-    Web,
-
-    /// API client token (programmatic access)
-    #[db_rename = "api"]
-    #[serde(rename = "api")]
-    Api,
-
-    /// Native app session token (obtained by interactive desktop login via the
-    /// external browser + deep-link flow, sent as a Bearer token)
-    #[db_rename = "app"]
-    #[serde(rename = "app")]
-    App,
+db_enum! {
+    /// The type of API token, for authentication and tracking.
+    ///
+    /// Corresponds to the `API_TOKEN_TYPE` PostgreSQL enum and categorizes tokens
+    /// by the client type they authenticate.
+    pub enum ApiTokenType: Default = Web, "crate::schema::sql_types::ApiTokenType" {
+        /// Web browser token (desktop or mobile browser).
+        Web = "web",
+        /// API client token (programmatic access).
+        Api = "api",
+        /// Native app session token (obtained by interactive desktop login via
+        /// the external browser + deep-link flow, sent as a Bearer token).
+        App = "app",
+    }
 }

@@ -6,7 +6,7 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use crate::model::{ChatSession, NewChatSession, UpdateChatSession};
+use crate::model::{ChatSession, NewChatSession};
 use crate::types::{CursorPage, CursorPagination};
 use crate::{Error, PgConnection, Result, schema};
 
@@ -34,13 +34,6 @@ pub trait ChatSessionRepository {
         workspace_id: Uuid,
         pagination: CursorPagination,
     ) -> impl Future<Output = Result<CursorPage<ChatSession>>> + Send;
-
-    /// Updates a session (title and/or activity timestamp).
-    fn update_chat_session(
-        &mut self,
-        session_id: Uuid,
-        updates: UpdateChatSession,
-    ) -> impl Future<Output = Result<ChatSession>> + Send;
 
     /// Soft-deletes a live session within a workspace, returning whether a live
     /// session was deleted.
@@ -131,21 +124,6 @@ impl ChatSessionRepository for PgConnection {
         }))
     }
 
-    async fn update_chat_session(
-        &mut self,
-        session_id: Uuid,
-        updates: UpdateChatSession,
-    ) -> Result<ChatSession> {
-        use schema::chat_sessions::{self, dsl};
-
-        diesel::update(chat_sessions::table.filter(dsl::id.eq(session_id)))
-            .set(updates)
-            .returning(ChatSession::as_returning())
-            .get_result(self)
-            .await
-            .map_err(Error::from)
-    }
-
     async fn delete_chat_session(&mut self, workspace_id: Uuid, session_id: Uuid) -> Result<bool> {
         use diesel::dsl::now;
         use schema::chat_sessions::{self, dsl};
@@ -162,5 +140,84 @@ impl ChatSessionRepository for PgConnection {
         .map_err(Error::from)?;
 
         Ok(affected > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use jiff::{Span, Timestamp};
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::model::NewChatSession;
+    use crate::query::ChatSessionRepository;
+    use crate::test_util::{TestDatabase, backdate};
+
+    #[tokio::test]
+    async fn create_find_scoped_and_soft_delete() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let session = conn
+            .create_chat_session(NewChatSession::test(workspace_id, account_id))
+            .await?;
+
+        // Found within its workspace, not in another.
+        assert!(
+            conn.find_chat_session_in_workspace(workspace_id, session.id)
+                .await?
+                .is_some()
+        );
+        assert!(
+            conn.find_chat_session_in_workspace(Uuid::now_v7(), session.id)
+                .await?
+                .is_none()
+        );
+
+        // Delete returns true once, then false (idempotent, live-scoped), and the
+        // session is hidden from the lookup.
+        assert!(conn.delete_chat_session(workspace_id, session.id).await?);
+        assert!(!conn.delete_chat_session(workspace_id, session.id).await?);
+        assert!(
+            conn.find_chat_session_in_workspace(workspace_id, session.id)
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_is_newest_first_and_excludes_deleted() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // Backdate `first` an hour so the newest-first order is deterministic.
+        let first = conn
+            .create_chat_session(NewChatSession::test(workspace_id, account_id))
+            .await?;
+        backdate::chat_session_created_at(
+            &mut conn,
+            first.id,
+            Timestamp::now() - Span::new().hours(1),
+        )
+        .await?;
+        let second = conn
+            .create_chat_session(NewChatSession::test(workspace_id, account_id))
+            .await?;
+        let deleted = conn
+            .create_chat_session(NewChatSession::test(workspace_id, account_id))
+            .await?;
+        assert!(conn.delete_chat_session(workspace_id, deleted.id).await?);
+
+        let page = conn
+            .list_chat_sessions(workspace_id, CursorPagination::new(50))
+            .await?;
+        assert_eq!(
+            page.items.iter().map(|s| s.id).collect::<Vec<_>>(),
+            vec![second.id, first.id]
+        );
+        Ok(())
     }
 }

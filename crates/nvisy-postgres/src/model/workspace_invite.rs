@@ -42,6 +42,7 @@ pub struct WorkspaceInvite {
 #[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = workspace_invites)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceInvite {
     /// Workspace ID.
     pub workspace_id: Uuid,
@@ -59,10 +60,26 @@ pub struct NewWorkspaceInvite {
     pub updated_by: Uuid,
 }
 
+impl NewWorkspaceInvite {
+    /// A minimal invite for `workspace_id`, created and owned by `created_by`,
+    /// for tests. The role, token, expiry, and status take their database
+    /// defaults (`reviewer`, a generated token, now + 7 days, `pending`).
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(workspace_id: Uuid, created_by: Uuid) -> Self {
+        Self {
+            workspace_id,
+            created_by,
+            updated_by: created_by,
+            ..Default::default()
+        }
+    }
+}
+
 /// Data for updating a workspace invitation.
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = workspace_invites)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateWorkspaceInvite {
     /// Invite status.
     pub invite_status: Option<InviteStatus>,

@@ -8,7 +8,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
-use crate::types::{ApiTokenType, CursorPage, CursorPagination, OffsetPagination, session};
+use crate::types::{ApiTokenType, CursorPage, CursorPagination, session};
 use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for account API token database operations.
@@ -93,14 +93,6 @@ pub trait AccountApiTokenRepository {
         account_id: Uuid,
     ) -> impl Future<Output = Result<i64>> + Send;
 
-    /// Soft deletes account API tokens by type with optional exceptions.
-    fn delete_account_api_tokens_by_type(
-        &mut self,
-        account_id: Uuid,
-        token_type: ApiTokenType,
-        except_ids: &[Uuid],
-    ) -> impl Future<Output = Result<i64>> + Send;
-
     /// Caps the number of live (`deleted_at IS NULL`) `app` session tokens for an
     /// account to the `keep` newest by `issued_at`, soft-deleting the rest.
     ///
@@ -114,26 +106,12 @@ pub trait AccountApiTokenRepository {
         keep: usize,
     ) -> impl Future<Output = Result<i64>> + Send;
 
-    /// Lists active, unexpired account API tokens with offset pagination.
-    fn offset_list_account_api_tokens(
-        &mut self,
-        account_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = Result<Vec<AccountApiToken>>> + Send;
-
     /// Lists active, unexpired account API tokens with cursor pagination.
     fn cursor_list_account_api_tokens(
         &mut self,
         account_id: Uuid,
         pagination: CursorPagination,
     ) -> impl Future<Output = Result<CursorPage<AccountApiToken>>> + Send;
-
-    /// Lists all non-deleted account API tokens including expired ones.
-    fn offset_list_all_account_api_tokens(
-        &mut self,
-        account_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = Result<Vec<AccountApiToken>>> + Send;
 
     /// Soft-deletes all expired account API tokens system-wide.
     fn cleanup_expired_account_api_tokens(&mut self) -> impl Future<Output = Result<i64>> + Send;
@@ -325,35 +303,6 @@ impl AccountApiTokenRepository for PgConnection {
         .map(|rows| rows as i64)
     }
 
-    async fn delete_account_api_tokens_by_type(
-        &mut self,
-        account_id: Uuid,
-        token_type: ApiTokenType,
-        except_ids: &[Uuid],
-    ) -> Result<i64> {
-        use diesel::dsl::now;
-        use schema::account_api_tokens::{self, dsl};
-
-        let mut query = diesel::update(
-            account_api_tokens::table
-                .filter(dsl::account_id.eq(account_id))
-                .filter(dsl::session_type.eq(token_type))
-                .filter(dsl::deleted_at.is_null()),
-        )
-        .into_boxed();
-
-        if !except_ids.is_empty() {
-            query = query.filter(dsl::id.ne_all(except_ids));
-        }
-
-        query
-            .set(dsl::deleted_at.eq(now))
-            .execute(self)
-            .await
-            .map_err(Error::from)
-            .map(|rows| rows as i64)
-    }
-
     async fn prune_app_tokens(&mut self, account_id: Uuid, keep: usize) -> Result<i64> {
         use crate::AsyncConnection;
 
@@ -404,27 +353,6 @@ impl AccountApiTokenRepository for PgConnection {
             Ok::<_, Error>(deleted as i64)
         })
         .await
-    }
-
-    async fn offset_list_account_api_tokens(
-        &mut self,
-        account_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> Result<Vec<AccountApiToken>> {
-        use diesel::dsl::now;
-        use schema::account_api_tokens::{self, dsl};
-
-        account_api_tokens::table
-            .filter(dsl::account_id.eq(account_id))
-            .filter(dsl::deleted_at.is_null())
-            .filter(dsl::expired_at.is_null().or(dsl::expired_at.gt(now)))
-            .order(dsl::issued_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(AccountApiToken::as_select())
-            .load(self)
-            .await
-            .map_err(Error::from)
     }
 
     async fn cursor_list_account_api_tokens(
@@ -484,25 +412,6 @@ impl AccountApiTokenRepository for PgConnection {
         }))
     }
 
-    async fn offset_list_all_account_api_tokens(
-        &mut self,
-        account_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> Result<Vec<AccountApiToken>> {
-        use schema::account_api_tokens::{self, dsl};
-
-        account_api_tokens::table
-            .filter(dsl::account_id.eq(account_id))
-            .filter(dsl::deleted_at.is_null())
-            .order(dsl::issued_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .select(AccountApiToken::as_select())
-            .load(self)
-            .await
-            .map_err(Error::from)
-    }
-
     async fn cleanup_expired_account_api_tokens(&mut self) -> Result<i64> {
         use diesel::dsl::now;
         use schema::account_api_tokens::{self, dsl};
@@ -518,5 +427,200 @@ impl AccountApiTokenRepository for PgConnection {
         .await
         .map_err(Error::from)
         .map(|rows| rows as i64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use jiff::{Span, Timestamp};
+
+    use crate::model::{NewAccountApiToken, UpdateAccountApiToken};
+    use crate::query::AccountApiTokenRepository;
+    use crate::test_util::TestDatabase;
+    use crate::types::ApiTokenType;
+
+    /// Backdates a token's `issued_at` to `ago` before now.
+    async fn backdate_issued_at(
+        conn: &mut crate::PgConn,
+        token_id: uuid::Uuid,
+        ago: Span,
+    ) -> anyhow::Result<()> {
+        let when = Timestamp::now() - ago;
+        let _ = conn
+            .update_account_api_token(
+                token_id,
+                UpdateAccountApiToken {
+                    issued_at: Some(jiff_diesel::Timestamp::from(when)),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Sets a token's `expired_at` to `expired_ago` before now, first pushing
+    /// `issued_at` further back so the `expired_at > issued_at` DB check holds.
+    async fn set_expired(
+        conn: &mut crate::PgConn,
+        token_id: uuid::Uuid,
+        expired_ago: Span,
+    ) -> anyhow::Result<()> {
+        let now = Timestamp::now();
+        let _ = conn
+            .update_account_api_token(
+                token_id,
+                UpdateAccountApiToken {
+                    issued_at: Some(jiff_diesel::Timestamp::from(
+                        now - expired_ago - Span::new().hours(1),
+                    )),
+                    expired_at: Some(Some(jiff_diesel::Timestamp::from(now - expired_ago))),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn active_absolute_cap_applies_to_web_sessions_only() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let account_id = db.seed_account().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // A 30-day absolute cap.
+        let max_age = Duration::from_secs(30 * 24 * 3600);
+
+        // A web session issued 60 days ago is past the cap -> inactive.
+        let web = conn
+            .create_account_api_token(NewAccountApiToken::test(account_id, ApiTokenType::Web))
+            .await?;
+        backdate_issued_at(&mut conn, web.id, Span::new().hours(60 * 24)).await?;
+        assert!(
+            !conn
+                .account_api_token_is_active(web.id, account_id, max_age)
+                .await?
+        );
+
+        // An api token of the same age is exempt from the cap -> still active.
+        let api = conn
+            .create_account_api_token(NewAccountApiToken::test(account_id, ApiTokenType::Api))
+            .await?;
+        backdate_issued_at(&mut conn, api.id, Span::new().hours(60 * 24)).await?;
+        assert!(
+            conn.account_api_token_is_active(api.id, account_id, max_age)
+                .await?
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn active_respects_expiry_and_deletion_for_all_types() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let account_id = db.seed_account().await;
+        let mut conn = db.client.get_connection().await?;
+        let max_age = Duration::from_secs(30 * 24 * 3600);
+
+        // An api token with a past `expired_at` is inactive despite the cap
+        // exemption.
+        let api = conn
+            .create_account_api_token(NewAccountApiToken::test(account_id, ApiTokenType::Api))
+            .await?;
+        set_expired(&mut conn, api.id, Span::new().hours(1)).await?;
+        assert!(
+            !conn
+                .account_api_token_is_active(api.id, account_id, max_age)
+                .await?
+        );
+
+        // A wrong account never matches.
+        let fresh = conn
+            .create_account_api_token(NewAccountApiToken::test(account_id, ApiTokenType::Api))
+            .await?;
+        assert!(
+            !conn
+                .account_api_token_is_active(fresh.id, uuid::Uuid::now_v7(), max_age)
+                .await?
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn prune_app_tokens_keeps_the_newest_and_returns_the_pruned_count() -> anyhow::Result<()>
+    {
+        let db = TestDatabase::start().await;
+        let account_id = db.seed_account().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // Five app tokens with strictly increasing issued_at (t-5d .. t-1d), so
+        // "newest" is unambiguous.
+        let mut ids = Vec::new();
+        for days_ago in (1..=5).rev() {
+            let t = conn
+                .create_account_api_token(NewAccountApiToken::test(account_id, ApiTokenType::App))
+                .await?;
+            backdate_issued_at(&mut conn, t.id, Span::new().hours(i64::from(days_ago) * 24))
+                .await?;
+            ids.push((days_ago, t.id));
+        }
+
+        // Keep the newest 2; the other 3 are pruned.
+        let pruned = conn.prune_app_tokens(account_id, 2).await?;
+        assert_eq!(pruned, 3);
+
+        // The two most-recent (t-1d, t-2d) remain active; the older three do not.
+        let max_age = Duration::from_secs(365 * 24 * 3600);
+        for (days_ago, id) in ids {
+            let active = conn
+                .account_api_token_is_active(id, account_id, max_age)
+                .await?;
+            assert_eq!(active, days_ago <= 2, "token {days_ago}d ago");
+        }
+
+        // Pruning again is a no-op (at most `keep` remain).
+        assert_eq!(conn.prune_app_tokens(account_id, 2).await?, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cleanup_expired_soft_deletes_only_past_expiry() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let account_id = db.seed_account().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // One expired, one with a future expiry, one with no expiry.
+        let expired = conn
+            .create_account_api_token(NewAccountApiToken::test(account_id, ApiTokenType::Web))
+            .await?;
+        set_expired(&mut conn, expired.id, Span::new().hours(1)).await?;
+        let future = conn
+            .create_account_api_token(NewAccountApiToken::test(account_id, ApiTokenType::Web))
+            .await?;
+        let _ = conn
+            .update_account_api_token(
+                future.id,
+                UpdateAccountApiToken {
+                    expired_at: Some(Some(jiff_diesel::Timestamp::from(
+                        Timestamp::now() + Span::new().hours(1),
+                    ))),
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+        assert_eq!(conn.cleanup_expired_account_api_tokens().await?, 1);
+        // The expired one is gone; the future one is untouched.
+        assert!(
+            conn.find_account_api_token_by_id(expired.id)
+                .await?
+                .is_none()
+        );
+        assert!(
+            conn.find_account_api_token_by_id(future.id)
+                .await?
+                .is_some()
+        );
+        Ok(())
     }
 }

@@ -42,9 +42,23 @@ pub struct WorkspaceDetectionJob {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspace_detection_jobs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceDetectionJob {
     /// The detection this job analyzes.
     pub detection_id: Uuid,
     /// The serialized detection job.
     pub job: serde_json::Value,
+}
+
+impl NewWorkspaceDetectionJob {
+    /// A minimal pending outbox row for `detection_id`, with a placeholder job
+    /// payload, for tests. The status, attempts, and next-attempt time take
+    /// their database defaults, so the row is immediately due.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(detection_id: Uuid) -> Self {
+        Self {
+            detection_id,
+            job: serde_json::json!({ "kind": "test" }),
+        }
+    }
 }

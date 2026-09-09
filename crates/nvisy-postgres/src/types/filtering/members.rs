@@ -15,31 +15,3 @@ pub struct MemberFilter {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub has_2fa: Option<bool>,
 }
-
-impl MemberFilter {
-    /// Creates a new empty filter.
-    #[inline]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Filters by role.
-    #[inline]
-    pub fn with_role(mut self, role: WorkspaceRole) -> Self {
-        self.role = Some(role);
-        self
-    }
-
-    /// Filters by 2FA status.
-    #[inline]
-    pub fn with_2fa(mut self, has_2fa: bool) -> Self {
-        self.has_2fa = Some(has_2fa);
-        self
-    }
-
-    /// Returns whether any filter is active.
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.role.is_none() && self.has_2fa.is_none()
-    }
-}

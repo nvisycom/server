@@ -2,43 +2,32 @@
 
 use std::cmp;
 
-use diesel_derive_enum::DbEnum;
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString};
+use super::db_enum;
 
-/// Defines the role and permission level of a workspace member.
-///
-/// This enumeration corresponds to the `WORKSPACE_ROLE` PostgreSQL enum and provides
-/// hierarchical access control for workspace members with clearly defined capabilities.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Serialize, Deserialize, DbEnum, Display, EnumIter, EnumString)]
-#[ExistingTypePath = "crate::schema::sql_types::WorkspaceRole"]
-pub enum WorkspaceRole {
-    /// Full workspace ownership and management capabilities
-    #[db_rename = "owner"]
-    #[serde(rename = "owner")]
-    Owner,
-
-    /// Can manage members, integrations, and settings, but cannot delete workspace or transfer ownership
-    #[db_rename = "admin"]
-    #[serde(rename = "admin")]
-    Admin,
-
-    /// Can edit content and download original files, but cannot manage members or workspace settings
-    #[db_rename = "editor"]
-    #[serde(rename = "editor")]
-    Editor,
-
-    /// Can review redacted output and audits, but cannot download original files
-    #[db_rename = "reviewer"]
-    #[serde(rename = "reviewer")]
-    #[default]
-    Reviewer,
+db_enum! {
+    /// The role and permission level of a workspace member.
+    ///
+    /// Corresponds to the `WORKSPACE_ROLE` PostgreSQL enum and provides
+    /// hierarchical access control for workspace members with clearly defined
+    /// capabilities.
+    pub enum WorkspaceRole: Default = Reviewer, "crate::schema::sql_types::WorkspaceRole" {
+        /// Full workspace ownership and management capabilities.
+        Owner = "owner",
+        /// Can manage members, integrations, and settings, but cannot delete the
+        /// workspace or transfer ownership.
+        Admin = "admin",
+        /// Can edit content and download original files, but cannot manage members
+        /// or workspace settings.
+        Editor = "editor",
+        /// Can review redacted output and audits, but cannot download original
+        /// files.
+        Reviewer = "reviewer",
+    }
 }
 
 impl WorkspaceRole {
-    /// Returns the hierarchical level of this role (higher number = more permissions).
+    /// Returns the hierarchical level of this role (higher number = more
+    /// permissions).
     #[inline]
     pub const fn hierarchy_level(self) -> u8 {
         match self {
@@ -49,10 +38,18 @@ impl WorkspaceRole {
         }
     }
 
-    /// Returns whether this role has equal or higher permissions than the other role.
+    /// Returns whether this role has equal or higher permissions than the other
+    /// role.
     #[inline]
     pub const fn has_permission_level_of(self, other: WorkspaceRole) -> bool {
         self.hierarchy_level() >= other.hierarchy_level()
+    }
+
+    /// Returns whether this is the workspace owner — the single top role that
+    /// cannot be removed or demoted except by an ownership transfer.
+    #[inline]
+    pub const fn is_owner(self) -> bool {
+        matches!(self, WorkspaceRole::Owner)
     }
 }
 
@@ -65,5 +62,28 @@ impl PartialOrd for WorkspaceRole {
 impl Ord for WorkspaceRole {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         self.hierarchy_level().cmp(&other.hierarchy_level())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WorkspaceRole::{Admin, Editor, Owner, Reviewer};
+
+    #[test]
+    fn ordering_follows_the_permission_hierarchy() {
+        assert!(Owner > Admin);
+        assert!(Admin > Editor);
+        assert!(Editor > Reviewer);
+        // A sort orders least- to most-privileged.
+        let mut roles = [Admin, Reviewer, Owner, Editor];
+        roles.sort();
+        assert_eq!(roles, [Reviewer, Editor, Admin, Owner]);
+    }
+
+    #[test]
+    fn has_permission_level_of_is_ge_on_the_hierarchy() {
+        assert!(Admin.has_permission_level_of(Editor));
+        assert!(Owner.has_permission_level_of(Owner));
+        assert!(!Editor.has_permission_level_of(Admin));
     }
 }

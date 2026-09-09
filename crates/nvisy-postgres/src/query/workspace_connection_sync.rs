@@ -6,9 +6,7 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use crate::model::{
-    NewWorkspaceConnectionSync, UpdateWorkspaceConnectionSync, WorkspaceConnectionSync,
-};
+use crate::model::{NewWorkspaceConnectionSync, WorkspaceConnectionSync};
 use crate::types::{AccountRefRow, CursorPage, CursorPagination, SyncStatus, WithAccountRef};
 use crate::{Error, PgConnection, Result, schema};
 
@@ -91,13 +89,6 @@ pub trait WorkspaceConnectionSyncRepository {
         &mut self,
         connection_ids: &[Uuid],
     ) -> impl Future<Output = Result<Vec<WorkspaceConnectionSync>>> + Send;
-
-    /// Updates a workspace connection sync with new data.
-    fn update_workspace_connection_sync(
-        &mut self,
-        sync_id: Uuid,
-        updates: UpdateWorkspaceConnectionSync,
-    ) -> impl Future<Output = Result<WorkspaceConnectionSync>> + Send;
 
     /// Marks a sync as completed successfully with its final record count, only if
     /// it is still active.
@@ -442,23 +433,6 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
         Ok(syncs)
     }
 
-    async fn update_workspace_connection_sync(
-        &mut self,
-        sync_id: Uuid,
-        updates: UpdateWorkspaceConnectionSync,
-    ) -> Result<WorkspaceConnectionSync> {
-        use schema::workspace_connection_syncs::{self, dsl};
-
-        let sync = diesel::update(workspace_connection_syncs::table.filter(dsl::id.eq(sync_id)))
-            .set(&updates)
-            .returning(WorkspaceConnectionSync::as_returning())
-            .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(sync)
-    }
-
     async fn complete_workspace_connection_sync(
         &mut self,
         sync_id: Uuid,
@@ -563,5 +537,315 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
         .map_err(Error::from)?;
 
         Ok(reaped)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use jiff::{Span, Timestamp};
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::PgConn;
+    use crate::model::{NewWorkspaceConnection, NewWorkspaceConnectionSync};
+    use crate::query::{WorkspaceConnectionRepository, WorkspaceConnectionSyncRepository};
+    use crate::test_util::{TestDatabase, backdate};
+
+    /// Seeds a connection in a fresh workspace, returning `(account_id,
+    /// workspace_id, connection_id)` — the FK parents a sync requires.
+    async fn seed_connection(db: &TestDatabase) -> anyhow::Result<(Uuid, Uuid, Uuid)> {
+        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+        let connection = conn
+            .create_workspace_connection(NewWorkspaceConnection::test(workspace_id, account_id))
+            .await?;
+        Ok((account_id, workspace_id, connection.id))
+    }
+
+    /// Creates a sync whose `started_at` is `ago` in the past, so time-based
+    /// queries treat it as old.
+    async fn old_sync(
+        conn: &mut PgConn,
+        connection_id: Uuid,
+        account_id: Uuid,
+        ago: Span,
+    ) -> anyhow::Result<WorkspaceConnectionSync> {
+        let sync = conn
+            .create_workspace_connection_sync(NewWorkspaceConnectionSync::test(
+                connection_id,
+                account_id,
+            ))
+            .await?;
+        backdate::sync_started_at(conn, sync.id, Timestamp::now() - ago).await?;
+        Ok(sync)
+    }
+
+    #[tokio::test]
+    async fn complete_transitions_active_and_is_a_noop_when_terminal() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, _ws, connection_id) = seed_connection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        let sync = conn
+            .create_workspace_connection_sync(NewWorkspaceConnectionSync::test(
+                connection_id,
+                account_id,
+            ))
+            .await?;
+        assert_eq!(sync.status, SyncStatus::Running);
+
+        // Completing an active sync succeeds and records the count.
+        let completed = conn
+            .complete_workspace_connection_sync(sync.id, 42)
+            .await?
+            .expect("active sync should complete");
+        assert_eq!(completed.status, SyncStatus::Completed);
+        assert_eq!(completed.records_synced, 42);
+        assert!(completed.completed_at.is_some());
+
+        // A second completion is a guarded no-op: the terminal row is untouched.
+        assert!(
+            conn.complete_workspace_connection_sync(sync.id, 99)
+                .await?
+                .is_none()
+        );
+        let reread = conn
+            .find_workspace_connection_sync_by_id(sync.id)
+            .await?
+            .expect("sync exists");
+        assert_eq!(reread.records_synced, 42, "count must not be rewritten");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fail_and_cancel_respect_the_terminal_guard() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, _ws, connection_id) = seed_connection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        // Fail an active sync, then confirm a later cancel is a no-op.
+        let sync = conn
+            .create_workspace_connection_sync(NewWorkspaceConnectionSync::test(
+                connection_id,
+                account_id,
+            ))
+            .await?;
+        let failed = conn
+            .fail_workspace_connection_sync(sync.id, "boom")
+            .await?
+            .expect("active sync should fail");
+        assert_eq!(failed.status, SyncStatus::Failed);
+        assert_eq!(failed.error_message.as_deref(), Some("boom"));
+        assert!(
+            conn.cancel_workspace_connection_sync(sync.id)
+                .await?
+                .is_none(),
+            "a failed sync cannot be cancelled"
+        );
+
+        // Cancel a fresh active sync; a later completion is then a no-op.
+        let other = conn
+            .create_workspace_connection_sync(NewWorkspaceConnectionSync::test(
+                connection_id,
+                account_id,
+            ))
+            .await?;
+        let cancelled = conn
+            .cancel_workspace_connection_sync(other.id)
+            .await?
+            .expect("active sync should cancel");
+        assert_eq!(cancelled.status, SyncStatus::Cancelled);
+        assert!(
+            conn.complete_workspace_connection_sync(other.id, 5)
+                .await?
+                .is_none(),
+            "a cancelled sync cannot complete"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_in_workspace_is_scoped_through_the_connection() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id, connection_id) = seed_connection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        let sync = conn
+            .create_workspace_connection_sync(NewWorkspaceConnectionSync::test(
+                connection_id,
+                account_id,
+            ))
+            .await?;
+
+        // Found through its owning connection's workspace.
+        assert!(
+            conn.find_connection_sync_in_workspace(workspace_id, sync.id)
+                .await?
+                .is_some()
+        );
+        // Not found when scoped to a different workspace.
+        assert!(
+            conn.find_connection_sync_in_workspace(Uuid::now_v7(), sync.id)
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn last_successful_sync_at_counts_only_completed() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, _ws, connection_id) = seed_connection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        // A completed sync sets the connection's "last synced" instant.
+        let completed = conn
+            .create_workspace_connection_sync(NewWorkspaceConnectionSync::test(
+                connection_id,
+                account_id,
+            ))
+            .await?;
+        let _ = conn
+            .complete_workspace_connection_sync(completed.id, 1)
+            .await?;
+
+        // A later failed sync does NOT move it.
+        let failed = conn
+            .create_workspace_connection_sync(NewWorkspaceConnectionSync::test(
+                connection_id,
+                account_id,
+            ))
+            .await?;
+        let _ = conn
+            .fail_workspace_connection_sync(failed.id, "nope")
+            .await?;
+
+        let result = conn.last_successful_sync_at(&[connection_id]).await?;
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, connection_id);
+
+        // A connection that never completed a sync is simply absent.
+        let (_a, _w, never) = seed_connection(&db).await?;
+        assert!(conn.last_successful_sync_at(&[never]).await?.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_latest_syncs_pick_the_newest_per_connection() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, _ws, connection_id) = seed_connection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        // An older sync, then a newer one for the same connection. Only one
+        // sync may be active per connection, so the older one is completed
+        // before the newer starts (as it would be in the real lifecycle).
+        let older = old_sync(&mut conn, connection_id, account_id, Span::new().hours(2)).await?;
+        let _ = conn.complete_workspace_connection_sync(older.id, 0).await?;
+        let newer = conn
+            .create_workspace_connection_sync(NewWorkspaceConnectionSync::test(
+                connection_id,
+                account_id,
+            ))
+            .await?;
+
+        // The single-connection latest is the newest.
+        let latest = conn
+            .find_latest_workspace_connection_sync(connection_id)
+            .await?;
+        assert_eq!(latest.map(|s| s.id), Some(newer.id));
+
+        // The batched latest returns exactly one row (the newest) per connection.
+        let batched = conn
+            .find_latest_workspace_connection_syncs(&[connection_id])
+            .await?;
+        assert_eq!(
+            batched.iter().map(|s| s.id).collect::<Vec<_>>(),
+            vec![newer.id]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fail_stale_running_syncs_reaps_only_old_running_ones() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // Only one active sync is allowed per connection, so each active sync
+        // below lives on its own connection.
+
+        // An old Running sync (should be reaped).
+        let (stale_acct, _w1, stale_conn) = seed_connection(&db).await?;
+        let stale = old_sync(&mut conn, stale_conn, stale_acct, Span::new().hours(2)).await?;
+
+        // A recent Running sync (too new to reap).
+        let (fresh_acct, _w2, fresh_conn) = seed_connection(&db).await?;
+        let fresh = conn
+            .create_workspace_connection_sync(NewWorkspaceConnectionSync::test(
+                fresh_conn, fresh_acct,
+            ))
+            .await?;
+
+        // An old but already-completed sync (not Running, so left alone).
+        let (done_acct, _w3, done_conn) = seed_connection(&db).await?;
+        let done = old_sync(&mut conn, done_conn, done_acct, Span::new().hours(2)).await?;
+        let _ = conn.complete_workspace_connection_sync(done.id, 0).await?;
+
+        let cutoff = jiff_diesel::Timestamp::from(Timestamp::now() - Span::new().hours(1));
+        assert_eq!(conn.fail_stale_running_syncs(cutoff).await?, 1);
+
+        // Only the stale Running one flipped to Failed.
+        let stale = conn
+            .find_workspace_connection_sync_by_id(stale.id)
+            .await?
+            .expect("exists");
+        assert_eq!(stale.status, SyncStatus::Failed);
+        let fresh = conn
+            .find_workspace_connection_sync_by_id(fresh.id)
+            .await?
+            .expect("exists");
+        assert_eq!(fresh.status, SyncStatus::Running);
+        let done = conn
+            .find_workspace_connection_sync_by_id(done.id)
+            .await?
+            .expect("exists");
+        assert_eq!(done.status, SyncStatus::Completed);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cursor_list_applies_status_filter() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, _ws, connection_id) = seed_connection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+
+        let completed = conn
+            .create_workspace_connection_sync(NewWorkspaceConnectionSync::test(
+                connection_id,
+                account_id,
+            ))
+            .await?;
+        let _ = conn
+            .complete_workspace_connection_sync(completed.id, 1)
+            .await?;
+        let running = conn
+            .create_workspace_connection_sync(NewWorkspaceConnectionSync::test(
+                connection_id,
+                account_id,
+            ))
+            .await?;
+
+        // Filtering to Running returns only the active run.
+        let page = conn
+            .cursor_list_workspace_connection_syncs(
+                connection_id,
+                CursorPagination::new(50),
+                Some(SyncStatus::Running),
+            )
+            .await?;
+        assert_eq!(
+            page.items.iter().map(|s| s.item.id).collect::<Vec<_>>(),
+            vec![running.id]
+        );
+        Ok(())
     }
 }

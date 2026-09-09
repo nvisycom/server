@@ -30,6 +30,7 @@ pub struct WorkspaceFileImport {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspace_file_imports)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspaceFileImport {
     /// The imported file this origin describes.
     pub file_id: Uuid,

@@ -41,6 +41,7 @@ pub struct AccountApiToken {
 #[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = account_api_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewAccountApiToken {
     /// Reference to the account this token belongs to.
     pub account_id: Uuid,
@@ -58,10 +59,25 @@ pub struct NewAccountApiToken {
     pub expired_at: Option<Timestamp>,
 }
 
+impl NewAccountApiToken {
+    /// A minimal token of `session_type` for `account_id`, for tests. No expiry,
+    /// no remembered flag, no client metadata.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(account_id: Uuid, session_type: ApiTokenType) -> Self {
+        Self {
+            account_id,
+            display_name: "Test Token".to_owned(),
+            session_type: Some(session_type),
+            ..Default::default()
+        }
+    }
+}
+
 /// Data for updating an account API token.
 #[derive(Debug, Default, Clone, AsChangeset)]
 #[diesel(table_name = account_api_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateAccountApiToken {
     /// Timestamp of token creation (the absolute-cap anchor).
     pub issued_at: Option<Timestamp>,

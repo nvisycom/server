@@ -30,6 +30,7 @@ pub struct ChatMessage {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = chat_messages)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewChatMessage {
     /// Session this message belongs to.
     pub session_id: Uuid,
@@ -39,4 +40,17 @@ pub struct NewChatMessage {
     pub role: ChatRole,
     /// Message text, XChaCha20-Poly1305 encrypted with the workspace key.
     pub content: Vec<u8>,
+}
+
+impl NewChatMessage {
+    /// A minimal root message in `session_id` with the given `role`, for tests.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(session_id: Uuid, role: ChatRole) -> Self {
+        Self {
+            session_id,
+            parent_id: None,
+            role,
+            content: vec![1, 2, 3],
+        }
+    }
 }

@@ -533,3 +533,198 @@ async fn load_detection_day_tokens(
         .await
         .map_err(Error::from)
 }
+
+#[cfg(test)]
+mod tests {
+    use jiff::{Span, Timestamp};
+
+    use super::*;
+    use crate::PgConn;
+    use crate::model::{NewWorkspaceDetection, NewWorkspaceDetectionUsage, NewWorkspaceFile};
+    use crate::query::{
+        WorkspaceAnalyticsRepository, WorkspaceDetectionRepository, WorkspaceFileRepository,
+    };
+    use crate::test_util::{TestDatabase, backdate};
+
+    /// Inserts a `Complete` detection that started `started_ago` in the past and
+    /// finished `duration` later, returning its id — for the duration and
+    /// per-day aggregates.
+    async fn completed_detection(
+        conn: &mut PgConn,
+        pipeline_id: Uuid,
+        account_id: Uuid,
+        input_file_id: Uuid,
+        started_ago: Span,
+        duration: Span,
+    ) -> anyhow::Result<Uuid> {
+        let started = Timestamp::now() - started_ago;
+        let mut new = NewWorkspaceDetection::test(pipeline_id, account_id, input_file_id);
+        new.status = Some(DetectionStatus::Complete);
+        let detection = conn.create_workspace_detection(new).await?;
+        // Backdate the run span so the day-bucket and duration aggregates see a
+        // known started/completed pair.
+        backdate::detection_span(conn, detection.id, started, started + duration).await?;
+        Ok(detection.id)
+    }
+
+    #[tokio::test]
+    async fn snapshot_aggregates_storage_detections_and_usage_by_group() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id, pipeline_id, seed_file) = db.seed_pipeline_and_file().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // Storage: the seeded original file plus a second original and a redacted.
+        let mut redacted = NewWorkspaceFile::test(workspace_id, account_id);
+        redacted.file_kind = Some(FileKind::Redacted);
+        let _ = conn.create_workspace_file(redacted).await?;
+        let _ = conn
+            .create_workspace_file(NewWorkspaceFile::test(workspace_id, account_id))
+            .await?;
+
+        // Detections: one Complete (with a duration) and one Pending.
+        let complete = completed_detection(
+            &mut conn,
+            pipeline_id,
+            account_id,
+            seed_file,
+            Span::new().hours(2),
+            Span::new().seconds(10),
+        )
+        .await?;
+        let _pending = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                pipeline_id,
+                account_id,
+                seed_file,
+            ))
+            .await?;
+
+        // Usage: two models on the completed detection.
+        conn.record_detection_usage(&[
+            NewWorkspaceDetectionUsage::test(complete, "gpt-4o", 100, 20),
+            NewWorkspaceDetectionUsage::test(complete, "claude", 200, 40),
+        ])
+        .await?;
+
+        let snapshot = conn.snapshot(workspace_id).await?;
+
+        // Storage: 2 original files + 1 redacted, grouped by kind.
+        let original = snapshot
+            .storage
+            .iter()
+            .find(|s| s.file_kind == FileKind::Original)
+            .expect("original kind present");
+        assert_eq!(original.file_count, 2);
+        assert!(
+            snapshot
+                .storage
+                .iter()
+                .any(|s| s.file_kind == FileKind::Redacted)
+        );
+
+        // Detections: one Complete, one Pending, grouped by status.
+        let complete_count = snapshot
+            .detections
+            .iter()
+            .find(|d| d.status == DetectionStatus::Complete)
+            .map(|d| d.count);
+        assert_eq!(complete_count, Some(1));
+        assert!(
+            snapshot
+                .detections
+                .iter()
+                .any(|d| d.status == DetectionStatus::Pending && d.count == 1)
+        );
+
+        // Durations: a completed detection exists, so the summary is populated.
+        assert_eq!(snapshot.durations.avg_ms, Some(10_000));
+
+        // Usage: two models, tokens summed per model.
+        let gpt = snapshot
+            .usage
+            .iter()
+            .find(|u| u.model == "gpt-4o")
+            .expect("gpt-4o usage present");
+        assert_eq!(gpt.input_tokens, Some(100));
+        assert_eq!(gpt.total_tokens, Some(120));
+        assert!(snapshot.usage.iter().any(|u| u.model == "claude"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn snapshot_is_scoped_to_the_workspace() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (_a, other_workspace) = db.seed_account_and_workspace().await;
+
+        // A different workspace with a detection.
+        let (account_id, workspace_id, pipeline_id, seed_file) = db.seed_pipeline_and_file().await;
+        let mut conn = db.client.get_connection().await?;
+        let _ = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                pipeline_id,
+                account_id,
+                seed_file,
+            ))
+            .await?;
+
+        // The unrelated workspace sees none of it.
+        let snapshot = conn.snapshot(other_workspace).await?;
+        assert!(snapshot.detections.is_empty());
+        assert!(snapshot.storage.is_empty());
+        assert!(snapshot.usage.is_empty());
+
+        // The owning workspace does.
+        assert!(!conn.snapshot(workspace_id).await?.detections.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn detections_by_day_buckets_within_the_window() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id, pipeline_id, seed_file) = db.seed_pipeline_and_file().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // Two detections started ~1 day ago (same UTC day), one ~3 days ago.
+        let recent = completed_detection(
+            &mut conn,
+            pipeline_id,
+            account_id,
+            seed_file,
+            Span::new().hours(25),
+            Span::new().seconds(5),
+        )
+        .await?;
+        let _recent2 = completed_detection(
+            &mut conn,
+            pipeline_id,
+            account_id,
+            seed_file,
+            Span::new().hours(26),
+            Span::new().seconds(5),
+        )
+        .await?;
+        let _old = completed_detection(
+            &mut conn,
+            pipeline_id,
+            account_id,
+            seed_file,
+            Span::new().hours(72),
+            Span::new().seconds(5),
+        )
+        .await?;
+        conn.record_detection_usage(&[NewWorkspaceDetectionUsage::test(recent, "gpt-4o", 50, 10)])
+            .await?;
+
+        // A window covering only the last two days excludes the 3-day-old one.
+        let from = Timestamp::now() - Span::new().hours(48);
+        let to = Timestamp::now() + Span::new().hours(1);
+        let points = conn.detections_by_day(workspace_id, from, to).await?;
+
+        // One bucket (the two recent detections share a UTC day), 2 detections.
+        let total: i64 = points.iter().map(|p| p.detections).sum();
+        assert_eq!(total, 2, "the 3-day-old detection is outside the window");
+        // Tokens from the usage row are merged onto that day.
+        assert!(points.iter().any(|p| p.input_tokens == Some(50)));
+        Ok(())
+    }
+}

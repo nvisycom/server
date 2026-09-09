@@ -42,6 +42,7 @@ pub struct WorkspacePipeline {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspace_pipelines)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct NewWorkspacePipeline {
     /// Workspace ID (required).
     pub workspace_id: Uuid,
@@ -61,10 +62,32 @@ pub struct NewWorkspacePipeline {
     pub metadata: Option<Json<PipelineMetadata>>,
 }
 
+impl NewWorkspacePipeline {
+    /// A minimal draft pipeline for `workspace_id`, for tests.
+    ///
+    /// The slug is unique per call (so several test pipelines fit in one
+    /// workspace), the definition is a non-empty placeholder object, and the
+    /// status takes its `draft` database default.
+    #[cfg(any(feature = "test_util", test))]
+    pub fn test(workspace_id: Uuid, account_id: Uuid) -> Self {
+        Self {
+            workspace_id,
+            account_id,
+            slug: Handle::test(),
+            display_name: "Test Pipeline".to_owned(),
+            description: None,
+            status: None,
+            definition: Some(serde_json::json!({ "recognizers": [] })),
+            metadata: None,
+        }
+    }
+}
+
 /// Data for updating a workspace pipeline.
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = workspace_pipelines)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[must_use]
 pub struct UpdateWorkspacePipeline {
     /// Pipeline display name.
     pub display_name: Option<String>,
