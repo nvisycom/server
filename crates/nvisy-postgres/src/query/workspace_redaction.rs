@@ -149,7 +149,7 @@ mod tests {
     use crate::query::{
         WorkspaceDetectionRepository, WorkspacePipelineRepository, WorkspaceRedactionRepository,
     };
-    use crate::test_util::TestDatabase;
+    use crate::test_util::{TestDatabase, backdate};
 
     /// Seeds a detection and returns `(account_id, workspace_id, pipeline_id,
     /// detection_id)` — a redaction's FK parent plus the context tests scope on.
@@ -222,12 +222,16 @@ mod tests {
         let (account_id, _ws, _pipeline, detection_id) = seed_detection(&db).await?;
         let mut conn = db.client.get_connection().await?;
 
-        // Insert `first` an hour old so the newest-first order is deterministic.
-        let mut first_new = NewWorkspaceRedaction::test(detection_id, account_id);
-        first_new.created_at = Some(jiff_diesel::Timestamp::from(
+        // Backdate `first` an hour so the newest-first order is deterministic.
+        let first = conn
+            .create_redaction(NewWorkspaceRedaction::test(detection_id, account_id))
+            .await?;
+        backdate::redaction_created_at(
+            &mut conn,
+            first.id,
             Timestamp::now() - Span::new().hours(1),
-        ));
-        let first = conn.create_redaction(first_new).await?;
+        )
+        .await?;
         let second = conn
             .create_redaction(NewWorkspaceRedaction::test(detection_id, account_id))
             .await?;

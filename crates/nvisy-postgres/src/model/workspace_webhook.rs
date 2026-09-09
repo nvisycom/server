@@ -18,7 +18,6 @@ use crate::types::{Json, WebhookEvent, WebhookHeaders, WebhookStatus};
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_webhooks)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct WorkspaceWebhook {
     /// Unique webhook identifier.
     pub id: Uuid,

@@ -9,7 +9,6 @@ use crate::schema::workspace_detection_usage;
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = workspace_detection_usage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct WorkspaceDetectionUsage {
     /// Unique usage row identifier.
     pub id: Uuid,

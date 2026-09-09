@@ -21,7 +21,6 @@ use crate::types::Handle;
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = accounts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct Account {
     /// Unique account identifier.
     pub id: Uuid,

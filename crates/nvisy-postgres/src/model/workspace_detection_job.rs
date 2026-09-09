@@ -16,7 +16,6 @@ use crate::types::OutboxStatus;
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = workspace_detection_jobs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct WorkspaceDetectionJob {
     /// Unique outbox row identifier.
     pub id: Uuid,

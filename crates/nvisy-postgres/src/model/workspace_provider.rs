@@ -17,7 +17,6 @@ use crate::types::ProviderType;
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_providers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct WorkspaceProvider {
     /// Unique provider identifier.
     pub id: Uuid,
@@ -78,7 +77,8 @@ impl NewWorkspaceProvider {
     /// display-name unique index.
     #[cfg(any(feature = "test_util", test))]
     pub fn test(workspace_id: Uuid, account_id: Uuid, provider_type: ProviderType) -> Self {
-        let suffix = &Uuid::now_v7().simple().to_string()[..12];
+        let hex = Uuid::now_v7().simple().to_string();
+        let suffix = &hex[hex.len() - 12..];
         Self {
             workspace_id,
             account_id,

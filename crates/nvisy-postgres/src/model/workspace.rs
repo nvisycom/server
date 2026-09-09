@@ -11,7 +11,6 @@ use crate::types::{Handle, Json, WorkspaceMetadata, WorkspaceSettings};
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspaces)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct Workspace {
     /// Unique workspace identifier.
     pub id: Uuid,
@@ -81,7 +80,8 @@ impl NewWorkspace {
     /// display-name unique index.
     #[cfg(any(feature = "test_util", test))]
     pub fn test(created_by: Uuid) -> Self {
-        let suffix = &Uuid::now_v7().simple().to_string()[..12];
+        let hex = Uuid::now_v7().simple().to_string();
+        let suffix = &hex[hex.len() - 12..];
         Self::new(
             format!("Test Workspace {suffix}"),
             Handle::test(),

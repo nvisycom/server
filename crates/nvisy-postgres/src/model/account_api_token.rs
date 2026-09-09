@@ -12,7 +12,6 @@ use crate::types::ApiTokenType;
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = account_api_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct AccountApiToken {
     /// Unique identifier for the token.
     pub id: Uuid,

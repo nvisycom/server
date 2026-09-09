@@ -11,7 +11,6 @@ use crate::types::{Handle, Json, PipelineMetadata, PipelineStatus};
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_pipelines)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct WorkspacePipeline {
     /// Unique pipeline identifier.
     pub id: Uuid,

@@ -15,7 +15,6 @@ use crate::types::{SyncDeletionPolicy, SyncMode};
 #[diesel(table_name = workspace_connection_schedule)]
 #[diesel(primary_key(connection_id))]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct WorkspaceConnectionSchedule {
     /// The connection this schedule configures.
     pub connection_id: Uuid,

@@ -151,7 +151,7 @@ mod tests {
     use crate::PgConn;
     use crate::model::{NewChatMessage, NewChatSession};
     use crate::query::{ChatMessageRepository, ChatSessionRepository};
-    use crate::test_util::TestDatabase;
+    use crate::test_util::{TestDatabase, backdate};
     use crate::types::ChatRole;
 
     /// Seeds a chat session and returns its id.
@@ -164,8 +164,8 @@ mod tests {
         Ok(session.id)
     }
 
-    /// Appends a message with an explicit `created_at`, so oldest-first ordering
-    /// is deterministic across messages in one test.
+    /// Appends a message, then backdates its `created_at` by `age`, so oldest-first
+    /// ordering is deterministic across messages in one test.
     async fn append_at(
         conn: &mut PgConn,
         session_id: Uuid,
@@ -175,10 +175,11 @@ mod tests {
     ) -> anyhow::Result<ChatMessage> {
         let mut new = NewChatMessage::test(session_id, role);
         new.parent_id = parent_id;
-        new.created_at = Some(jiff_diesel::Timestamp::from(Timestamp::now() - age));
-        Ok(conn
+        let message = conn
             .append_chat_message(new, AppendSessionUpdate::default())
-            .await?)
+            .await?;
+        backdate::chat_message_created_at(conn, message.id, Timestamp::now() - age).await?;
+        Ok(message)
     }
 
     #[tokio::test]

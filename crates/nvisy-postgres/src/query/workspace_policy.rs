@@ -239,7 +239,7 @@ mod tests {
     use super::*;
     use crate::model::{NewWorkspacePolicy, UpdateWorkspacePolicy};
     use crate::query::WorkspacePolicyRepository;
-    use crate::test_util::TestDatabase;
+    use crate::test_util::{TestDatabase, backdate};
 
     #[tokio::test]
     async fn create_find_update_and_soft_delete() -> anyhow::Result<()> {
@@ -303,14 +303,14 @@ mod tests {
         let (account_id, workspace_id) = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
-        // Insert `first` already an hour old so it is unambiguously older than
-        // `second`; without a distinct `created_at` the two could tie and the
-        // newest-first order would not be well-defined.
-        let mut first_new = NewWorkspacePolicy::test(workspace_id, account_id);
-        first_new.created_at = Some(jiff_diesel::Timestamp::from(
-            Timestamp::now() - Span::new().hours(1),
-        ));
-        let first = conn.create_workspace_policy(first_new).await?;
+        // Backdate `first` an hour so it is unambiguously older than `second`;
+        // without a distinct `created_at` the two could tie and the newest-first
+        // order would not be well-defined.
+        let first = conn
+            .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+            .await?;
+        backdate::policy_created_at(&mut conn, first.id, Timestamp::now() - Span::new().hours(1))
+            .await?;
         let second = conn
             .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
             .await?;

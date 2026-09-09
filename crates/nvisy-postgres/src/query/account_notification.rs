@@ -221,7 +221,7 @@ mod tests {
     use crate::PgConn;
     use crate::model::{AccountNotification, NewAccountNotification};
     use crate::query::AccountNotificationRepository;
-    use crate::test_util::TestDatabase;
+    use crate::test_util::{TestDatabase, backdate};
     use crate::types::CursorPagination;
 
     /// Creates a notification already past its expiry: `created_at` two hours ago,
@@ -232,10 +232,20 @@ mod tests {
         account_id: Uuid,
     ) -> anyhow::Result<AccountNotification> {
         let created = Timestamp::now() - Span::new().hours(2);
-        let mut new = NewAccountNotification::test(account_id);
-        new.created_at = Some(jiff_diesel::Timestamp::from(created));
-        new.expires_at = Some(jiff_diesel::Timestamp::from(created + Span::new().hours(1)));
-        Ok(conn.create_account_notification(new).await?)
+        let notification = conn
+            .create_account_notification(NewAccountNotification::test(account_id))
+            .await?;
+        // Backdate `created_at` and set `expires_at` an hour later, together, so
+        // the row is expired against `now()` while the `expires_at > created_at`
+        // check still holds.
+        backdate::notification_span(
+            conn,
+            notification.id,
+            created,
+            created + Span::new().hours(1),
+        )
+        .await?;
+        Ok(notification)
     }
 
     /// Creates a notification whose `created_at` is an hour old, so two rows in one
@@ -244,11 +254,16 @@ mod tests {
         conn: &mut PgConn,
         account_id: Uuid,
     ) -> anyhow::Result<AccountNotification> {
-        let mut new = NewAccountNotification::test(account_id);
-        new.created_at = Some(jiff_diesel::Timestamp::from(
+        let notification = conn
+            .create_account_notification(NewAccountNotification::test(account_id))
+            .await?;
+        backdate::notification_created_at(
+            conn,
+            notification.id,
             Timestamp::now() - Span::new().hours(1),
-        ));
-        Ok(conn.create_account_notification(new).await?)
+        )
+        .await?;
+        Ok(notification)
     }
 
     #[tokio::test]

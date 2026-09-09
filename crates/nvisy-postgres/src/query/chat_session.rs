@@ -151,7 +151,7 @@ mod tests {
     use super::*;
     use crate::model::NewChatSession;
     use crate::query::ChatSessionRepository;
-    use crate::test_util::TestDatabase;
+    use crate::test_util::{TestDatabase, backdate};
 
     #[tokio::test]
     async fn create_find_scoped_and_soft_delete() -> anyhow::Result<()> {
@@ -193,12 +193,16 @@ mod tests {
         let (account_id, workspace_id) = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
-        // `first` inserted an hour old so the newest-first order is deterministic.
-        let mut first_new = NewChatSession::test(workspace_id, account_id);
-        first_new.created_at = Some(jiff_diesel::Timestamp::from(
+        // Backdate `first` an hour so the newest-first order is deterministic.
+        let first = conn
+            .create_chat_session(NewChatSession::test(workspace_id, account_id))
+            .await?;
+        backdate::chat_session_created_at(
+            &mut conn,
+            first.id,
             Timestamp::now() - Span::new().hours(1),
-        ));
-        let first = conn.create_chat_session(first_new).await?;
+        )
+        .await?;
         let second = conn
             .create_chat_session(NewChatSession::test(workspace_id, account_id))
             .await?;

@@ -13,7 +13,6 @@ use crate::schema::workspace_pipeline_policies;
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable, Insertable)]
 #[diesel(table_name = workspace_pipeline_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct PipelinePolicy {
     /// Workspace both the pipeline and policy belong to.
     pub workspace_id: Uuid,

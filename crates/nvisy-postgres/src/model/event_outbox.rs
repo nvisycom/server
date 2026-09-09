@@ -17,7 +17,6 @@ use crate::types::OutboxStatus;
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = event_outbox)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct EventOutbox {
     /// Unique outbox row identifier.
     pub id: Uuid,

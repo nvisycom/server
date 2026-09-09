@@ -15,7 +15,6 @@ use crate::types::{DetectionMetadata, DetectionStatus, Json, PipelineTriggerType
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_detections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct WorkspaceDetection {
     /// Unique detection identifier.
     pub id: Uuid,
@@ -76,12 +75,6 @@ pub struct NewWorkspaceDetection {
     pub idempotency_key: Option<String>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<Json<DetectionMetadata>>,
-    /// Start timestamp override, for tests only.
-    #[cfg(any(feature = "test_util", test))]
-    pub started_at: Option<Timestamp>,
-    /// Completion timestamp override, for tests only.
-    #[cfg(any(feature = "test_util", test))]
-    pub completed_at: Option<Timestamp>,
 }
 
 impl NewWorkspaceDetection {

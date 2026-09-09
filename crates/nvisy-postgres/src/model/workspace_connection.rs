@@ -17,7 +17,6 @@ use crate::types::ConnectionType;
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_connections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct WorkspaceConnection {
     /// Unique connection identifier.
     pub id: Uuid,
@@ -78,7 +77,8 @@ impl NewWorkspaceConnection {
     /// display-name unique index.
     #[cfg(any(feature = "test_util", test))]
     pub fn test(workspace_id: Uuid, account_id: Uuid) -> Self {
-        let suffix = &Uuid::now_v7().simple().to_string()[..12];
+        let hex = Uuid::now_v7().simple().to_string();
+        let suffix = &hex[hex.len() - 12..];
         Self {
             workspace_id,
             account_id,

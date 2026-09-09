@@ -17,7 +17,6 @@ use crate::types::IdentityProvider;
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = account_identities)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct AccountIdentity {
     /// Unique identity identifier.
     pub id: Uuid,

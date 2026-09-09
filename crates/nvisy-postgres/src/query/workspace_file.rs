@@ -823,7 +823,7 @@ mod tests {
     use crate::query::{
         WorkspaceConnectionRepository, WorkspaceDetectionRepository, WorkspaceFileRepository,
     };
-    use crate::test_util::TestDatabase;
+    use crate::test_util::{TestDatabase, backdate};
 
     /// Creates a file that is already past its retention window: its `created_at`
     /// is two hours ago and its `expires_at` an hour after that (so the
@@ -834,10 +834,14 @@ mod tests {
         account_id: Uuid,
     ) -> anyhow::Result<WorkspaceFile> {
         let created = Timestamp::now() - Span::new().hours(2);
-        let mut new = NewWorkspaceFile::test(workspace_id, account_id);
-        new.created_at = Some(jiff_diesel::Timestamp::from(created));
-        new.expires_at = Some(jiff_diesel::Timestamp::from(created + Span::new().hours(1)));
-        Ok(conn.create_workspace_file(new).await?)
+        let file = conn
+            .create_workspace_file(NewWorkspaceFile::test(workspace_id, account_id))
+            .await?;
+        // Backdate `created_at` and set `expires_at` an hour later, together, so
+        // the file is expired against `now()` while `expires_at >= created_at`
+        // still holds.
+        backdate::file_span(conn, file.id, created, created + Span::new().hours(1)).await?;
+        Ok(file)
     }
 
     #[tokio::test]

@@ -95,7 +95,12 @@ impl Handle {
     #[cfg(any(feature = "test_util", test))]
     #[must_use]
     pub fn test() -> Self {
-        let suffix = &Uuid::now_v7().simple().to_string()[..12];
+        // Use the UUID's trailing hex (its random bits), not the leading hex,
+        // which is the v7 millisecond timestamp and repeats for calls within the
+        // same millisecond — a repeated handle would collide on the account
+        // uniqueness constraints. 12 random hex fit within `HANDLE_MAX_LENGTH`.
+        let hex = Uuid::now_v7().simple().to_string();
+        let suffix = &hex[hex.len() - 12..];
         Self::parse(format!("h-{suffix}")).expect("composed test handle is valid")
     }
 

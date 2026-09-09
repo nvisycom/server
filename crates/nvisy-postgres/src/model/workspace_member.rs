@@ -11,7 +11,6 @@ use crate::types::{NotificationEvent, WorkspaceRole};
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_members)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct WorkspaceMember {
     /// Reference to the workspace.
     pub workspace_id: Uuid,

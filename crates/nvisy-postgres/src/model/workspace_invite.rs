@@ -11,7 +11,6 @@ use crate::types::{InviteStatus, WorkspaceRole};
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_invites)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct WorkspaceInvite {
     /// Unique invitation identifier.
     pub id: Uuid,

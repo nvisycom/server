@@ -11,7 +11,6 @@ use crate::types::{Json, NotificationEvent, NotificationPayload};
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = account_notifications)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct AccountNotification {
     /// Unique notification identifier.
     pub id: Uuid,
@@ -43,9 +42,6 @@ pub struct NewAccountNotification {
     pub params: Json<NotificationPayload>,
     /// Expiration timestamp.
     pub expires_at: Option<Timestamp>,
-    /// Creation timestamp override, for tests only.
-    #[cfg(any(feature = "test_util", test))]
-    pub created_at: Option<Timestamp>,
 }
 
 impl NewAccountNotification {
@@ -65,7 +61,6 @@ impl NewAccountNotification {
             notify_type,
             params,
             expires_at: None,
-            created_at: None,
         }
     }
 }

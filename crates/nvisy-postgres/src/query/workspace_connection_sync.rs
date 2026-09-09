@@ -549,7 +549,7 @@ mod tests {
     use crate::PgConn;
     use crate::model::{NewWorkspaceConnection, NewWorkspaceConnectionSync};
     use crate::query::{WorkspaceConnectionRepository, WorkspaceConnectionSyncRepository};
-    use crate::test_util::TestDatabase;
+    use crate::test_util::{TestDatabase, backdate};
 
     /// Seeds a connection in a fresh workspace, returning `(account_id,
     /// workspace_id, connection_id)` — the FK parents a sync requires.
@@ -570,9 +570,14 @@ mod tests {
         account_id: Uuid,
         ago: Span,
     ) -> anyhow::Result<WorkspaceConnectionSync> {
-        let mut new = NewWorkspaceConnectionSync::test(connection_id, account_id);
-        new.started_at = Some(jiff_diesel::Timestamp::from(Timestamp::now() - ago));
-        Ok(conn.create_workspace_connection_sync(new).await?)
+        let sync = conn
+            .create_workspace_connection_sync(NewWorkspaceConnectionSync::test(
+                connection_id,
+                account_id,
+            ))
+            .await?;
+        backdate::sync_started_at(conn, sync.id, Timestamp::now() - ago).await?;
+        Ok(sync)
     }
 
     #[tokio::test]

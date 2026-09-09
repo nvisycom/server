@@ -311,14 +311,34 @@ mod tests {
         let (account_id, workspace_id) = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
-        // A disabled provider must never be returned, even if it is newer.
-        let older = conn
+        // Two active LLM providers. `newer` is then updated, bumping its
+        // `updated_at` past `older`'s, so the `updated_at DESC` ordering must
+        // return `newer` — this is what exercises recency, not just presence.
+        let _older = conn
             .create_workspace_provider(NewWorkspaceProvider::test(
                 workspace_id,
                 account_id,
                 ProviderType::Llm,
             ))
             .await?;
+        let newer = conn
+            .create_workspace_provider(NewWorkspaceProvider::test(
+                workspace_id,
+                account_id,
+                ProviderType::Llm,
+            ))
+            .await?;
+        let newer = conn
+            .update_workspace_provider(
+                newer.id,
+                UpdateWorkspaceProvider {
+                    display_name: Some("Bumped".to_owned()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+        // A disabled provider must never be returned, even if it is newest.
         let disabled = NewWorkspaceProvider {
             is_active: Some(false),
             ..NewWorkspaceProvider::test(workspace_id, account_id, ProviderType::Llm)
@@ -328,7 +348,7 @@ mod tests {
         let found = conn
             .find_provider_by_type(workspace_id, ProviderType::Llm)
             .await?;
-        assert_eq!(found.map(|p| p.id), Some(older.id));
+        assert_eq!(found.map(|p| p.id), Some(newer.id));
 
         // A different kind in the same workspace is not matched.
         assert!(

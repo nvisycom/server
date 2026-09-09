@@ -10,7 +10,6 @@ use crate::schema::chat_sessions;
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = chat_sessions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct ChatSession {
     /// Unique session identifier.
     pub id: Uuid,
@@ -42,9 +41,6 @@ pub struct NewChatSession {
     pub account_id: Uuid,
     /// Human-readable title.
     pub title: String,
-    /// Creation timestamp override, for tests only.
-    #[cfg(any(feature = "test_util", test))]
-    pub created_at: Option<Timestamp>,
 }
 
 impl NewChatSession {
@@ -56,7 +52,6 @@ impl NewChatSession {
             workspace_id,
             account_id,
             title: "Test Chat".to_owned(),
-            created_at: None,
         }
     }
 }

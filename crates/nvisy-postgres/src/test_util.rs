@@ -170,3 +170,84 @@ impl TestDatabase {
         (account_id, workspace_id, pipeline.id, file.id)
     }
 }
+
+/// Test-only helpers that backdate a single row's timestamp column(s).
+///
+/// Production `create_*` methods stamp timestamps like `created_at`/`started_at`
+/// from the database clock and never expose them, so a test cannot otherwise
+/// build a row that is already old, expired, or strictly ordered against another.
+/// This module is the one place tests reach past the repository to set such a
+/// column, kept here (feature-gated) rather than as raw SQL scattered through the
+/// test modules, and off the production `New*` structs so it can never affect a
+/// non-test build.
+pub mod backdate {
+    use diesel::prelude::*;
+    use diesel_async::RunQueryDsl;
+    use jiff::Timestamp;
+    use uuid::Uuid;
+
+    use crate::{PgConn, Result};
+
+    /// Generates a backdate setter that updates a table's timestamp column(s) on
+    /// the row with the given `id`. Each table's columns are distinct Diesel
+    /// types, so the body is generated per (table, column) rather than made
+    /// generic. The invocation names the table and each column, and the generated
+    /// function's parameters are named after those columns, so both the definition
+    /// and the call site show which value goes to which column.
+    ///
+    /// - `fn = table.column` sets one non-null column.
+    /// - `fn = table.(a, b)` sets two together (`b` nullable), for spans where a
+    ///   two-step update would trip a `b > a` / `b >= a` check.
+    macro_rules! backdate {
+        ($fn:ident = $table:ident . $col:ident) => {
+            #[doc = concat!("Sets `", stringify!($table), ".", stringify!($col), "`.")]
+            pub async fn $fn(conn: &mut PgConn, id: Uuid, $col: Timestamp) -> Result<()> {
+                use crate::schema::$table::dsl;
+                diesel::update(dsl::$table.filter(dsl::id.eq(id)))
+                    .set(dsl::$col.eq(jiff_diesel::Timestamp::from($col)))
+                    .execute(conn)
+                    .await
+                    .map_err(crate::Error::from)?;
+                Ok(())
+            }
+        };
+        ($fn:ident = $table:ident . ($col_a:ident, $col_b:ident)) => {
+            #[doc = concat!(
+                            "Sets `", stringify!($table), ".", stringify!($col_a), "` and `",
+                            stringify!($col_b), "` (nullable), together."
+                        )]
+            pub async fn $fn(
+                conn: &mut PgConn,
+                id: Uuid,
+                $col_a: Timestamp,
+                $col_b: Timestamp,
+            ) -> Result<()> {
+                use crate::schema::$table::dsl;
+                diesel::update(dsl::$table.filter(dsl::id.eq(id)))
+                    .set((
+                        dsl::$col_a.eq(jiff_diesel::Timestamp::from($col_a)),
+                        dsl::$col_b.eq(Some(jiff_diesel::Timestamp::from($col_b))),
+                    ))
+                    .execute(conn)
+                    .await
+                    .map_err(crate::Error::from)?;
+                Ok(())
+            }
+        };
+    }
+
+    backdate!(chat_session_created_at = chat_sessions.created_at);
+    backdate!(chat_message_created_at = chat_messages.created_at);
+    backdate!(activity_created_at = workspace_activities.created_at);
+    backdate!(notification_created_at = account_notifications.created_at);
+    backdate!(policy_created_at = workspace_policies.created_at);
+    backdate!(redaction_created_at = workspace_redactions.created_at);
+    backdate!(sync_started_at = workspace_connection_syncs.started_at);
+
+    // Two-column spans: set both at once so `expires_at > created_at` /
+    // `completed_at >= started_at` holds (a two-step update would momentarily
+    // violate it).
+    backdate!(notification_span = account_notifications.(created_at, expires_at));
+    backdate!(file_span = workspace_files.(created_at, expires_at));
+    backdate!(detection_span = workspace_detections.(started_at, completed_at));
+}

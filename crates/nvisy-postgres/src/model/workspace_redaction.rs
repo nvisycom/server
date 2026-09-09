@@ -14,7 +14,6 @@ use crate::schema::workspace_redactions;
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_redactions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct WorkspaceRedaction {
     /// Unique redaction identifier.
     pub id: Uuid,
@@ -46,9 +45,6 @@ pub struct NewWorkspaceRedaction {
     pub review_file_id: Option<Uuid>,
     /// Redacted output document this redaction produced.
     pub output_file_id: Option<Uuid>,
-    /// Creation timestamp override, for tests only.
-    #[cfg(any(feature = "test_util", test))]
-    pub created_at: Option<Timestamp>,
 }
 
 impl NewWorkspaceRedaction {
@@ -61,7 +57,6 @@ impl NewWorkspaceRedaction {
             account_id,
             review_file_id: None,
             output_file_id: None,
-            created_at: None,
         }
     }
 }

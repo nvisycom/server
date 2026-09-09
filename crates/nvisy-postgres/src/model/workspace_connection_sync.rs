@@ -18,7 +18,6 @@ use crate::types::{SyncStatus, SyncTriggerType};
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_connection_syncs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct WorkspaceConnectionSync {
     /// Unique sync identifier.
     pub id: Uuid,
@@ -65,9 +64,6 @@ pub struct NewWorkspaceConnectionSync {
     pub attempt: Option<i32>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<JsonValue>,
-    /// Start timestamp override, for tests only.
-    #[cfg(any(feature = "test_util", test))]
-    pub started_at: Option<Timestamp>,
 }
 
 impl NewWorkspaceConnectionSync {

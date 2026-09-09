@@ -15,7 +15,6 @@ use crate::types::Handle;
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct WorkspacePolicy {
     /// Unique policy identifier.
     pub id: Uuid,
@@ -61,9 +60,6 @@ pub struct NewWorkspacePolicy {
     pub definition: Vec<u8>,
     /// Metadata for filtering/display.
     pub metadata: Option<JsonValue>,
-    /// Creation timestamp override, for tests only.
-    #[cfg(any(feature = "test_util", test))]
-    pub created_at: Option<Timestamp>,
 }
 
 impl NewWorkspacePolicy {
@@ -74,7 +70,8 @@ impl NewWorkspacePolicy {
     /// unique indexes. The definition is a non-empty placeholder blob.
     #[cfg(any(feature = "test_util", test))]
     pub fn test(workspace_id: Uuid, account_id: Uuid) -> Self {
-        let suffix = &Uuid::now_v7().simple().to_string()[..12];
+        let hex = Uuid::now_v7().simple().to_string();
+        let suffix = &hex[hex.len() - 12..];
         Self {
             workspace_id,
             account_id,
@@ -83,7 +80,6 @@ impl NewWorkspacePolicy {
             description: None,
             definition: vec![1, 2, 3],
             metadata: None,
-            created_at: None,
         }
     }
 }

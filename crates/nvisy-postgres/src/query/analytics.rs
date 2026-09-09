@@ -544,7 +544,7 @@ mod tests {
     use crate::query::{
         WorkspaceAnalyticsRepository, WorkspaceDetectionRepository, WorkspaceFileRepository,
     };
-    use crate::test_util::TestDatabase;
+    use crate::test_util::{TestDatabase, backdate};
 
     /// Inserts a `Complete` detection that started `started_ago` in the past and
     /// finished `duration` later, returning its id — for the duration and
@@ -560,9 +560,10 @@ mod tests {
         let started = Timestamp::now() - started_ago;
         let mut new = NewWorkspaceDetection::test(pipeline_id, account_id, input_file_id);
         new.status = Some(DetectionStatus::Complete);
-        new.started_at = Some(jiff_diesel::Timestamp::from(started));
-        new.completed_at = Some(jiff_diesel::Timestamp::from(started + duration));
         let detection = conn.create_workspace_detection(new).await?;
+        // Backdate the run span so the day-bucket and duration aggregates see a
+        // known started/completed pair.
+        backdate::detection_span(conn, detection.id, started, started + duration).await?;
         Ok(detection.id)
     }
 

@@ -215,7 +215,7 @@ mod tests {
     use crate::PgConn;
     use crate::model::{NewAccount, NewWorkspaceActivity};
     use crate::query::{AccountRepository, WorkspaceActivityRepository};
-    use crate::test_util::TestDatabase;
+    use crate::test_util::{TestDatabase, backdate};
 
     /// Logs an activity of `activity_type` for `workspace_id` by `account_id`,
     /// overriding the type on the default test payload so the type filter has a
@@ -230,8 +230,11 @@ mod tests {
     ) -> anyhow::Result<WorkspaceActivity> {
         let mut activity = NewWorkspaceActivity::test(workspace_id, account_id);
         activity.activity_type = activity_type;
-        activity.created_at = age.map(|span| jiff_diesel::Timestamp::from(Timestamp::now() - span));
-        Ok(conn.log_activity(activity).await?)
+        let logged = conn.log_activity(activity).await?;
+        if let Some(span) = age {
+            backdate::activity_created_at(conn, logged.id, Timestamp::now() - span).await?;
+        }
+        Ok(logged)
     }
 
     #[tokio::test]

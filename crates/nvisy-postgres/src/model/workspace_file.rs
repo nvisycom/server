@@ -11,7 +11,6 @@ use crate::types::FileKind;
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_files)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
 pub struct WorkspaceFile {
     /// Unique file identifier.
     pub id: Uuid,
@@ -86,9 +85,6 @@ pub struct NewWorkspaceFile {
     pub metadata: Option<serde_json::Value>,
     /// Data-retention expiry (`None` = keep indefinitely).
     pub expires_at: Option<Timestamp>,
-    /// Creation timestamp override, for tests only.
-    #[cfg(any(feature = "test_util", test))]
-    pub created_at: Option<Timestamp>,
 }
 
 impl NewWorkspaceFile {
