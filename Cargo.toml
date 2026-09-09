@@ -167,7 +167,7 @@ csv = { version = "1.4", features = [] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = [] }
 toml = { version = "1.1", features = [] }
-validator = { version = "0.21", features = ["derive"] }
+garde = { version = "0.23", features = ["derive", "email", "url"] }
 
 # Text processing
 slug = { version = "0.1", features = [] }

@@ -24,7 +24,7 @@ use aide::axum::routing::post_with;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::Redirect;
+use axum::response::Response;
 use axum::routing::get;
 use nvisy_file_service::FileService;
 use nvisy_file_service::provider::{ConnectionSettings, FileServiceConfig, FileServiceProvider};
@@ -42,6 +42,7 @@ use crate::extract::{
 use crate::handler::request::{OAuthCallbackQuery, OAuthStartPathParams, StartFileServiceOAuth};
 use crate::handler::response::ErrorResponse;
 use crate::handler::{Error, ErrorKind, Result};
+use crate::response::connection_result_redirect;
 use crate::service::{
     ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin, FileServiceRedirect,
     ServiceState, WorkspaceEvent,
@@ -157,7 +158,7 @@ async fn oauth_callback(
     State(redirect): State<FileServiceRedirect>,
     security: SecurityContext,
     Query(query): Query<OAuthCallbackQuery>,
-) -> Redirect {
+) -> Response {
     tracing::debug!(target: TRACING_TARGET, "Completing cloud file OAuth");
 
     // The callback is a top-level browser navigation, so its outcome is conveyed
@@ -177,7 +178,7 @@ async fn oauth_callback(
             ("error", None)
         }
     };
-    redirect_to_frontend(redirect.0.as_deref(), status, workspace_slug.as_deref())
+    connection_result_redirect(redirect.0.as_deref(), status, workspace_slug.as_deref())
 }
 
 /// Runs the callback's work: consume the pending authorization, exchange the
@@ -271,33 +272,6 @@ async fn complete_callback(
         connection_id,
         workspace_slug: flow.workspace_slug,
     })
-}
-
-/// Redirects the browser back to the frontend with the flow's outcome.
-///
-/// A `{workspaceSlug}` placeholder in the configured base is substituted with
-/// `workspace_slug` when known (i.e. on success), so a base like
-/// `https://app/w/{workspaceSlug}/integrations` lands on the workspace's page.
-/// The outcome is appended as a `connection=success|error` query. Falls back to a
-/// self-describing data page when no frontend URL is configured.
-fn redirect_to_frontend(
-    base: Option<&str>,
-    status: &str,
-    workspace_slug: Option<&str>,
-) -> Redirect {
-    match base {
-        Some(base) => {
-            let base = match workspace_slug {
-                Some(slug) => base.replace("{workspaceSlug}", slug),
-                None => base.to_owned(),
-            };
-            let separator = if base.contains('?') { '&' } else { '?' };
-            Redirect::to(&format!("{base}{separator}connection={status}"))
-        }
-        None => Redirect::to(&format!(
-            "data:text/plain,cloud%20file%20connection%20{status}"
-        )),
-    }
 }
 
 /// Returns the authenticated cloud file OAuth routes: starting an

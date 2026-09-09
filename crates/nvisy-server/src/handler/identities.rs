@@ -40,16 +40,16 @@ use crate::service::{PasswordService, ServiceState};
 const TRACING_TARGET: &str = "nvisy_server::handler::identities";
 
 /// Lists the authenticated account's sign-in methods.
-#[tracing::instrument(skip_all, fields(account_id = %auth_claims.account_id))]
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn list_identities(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    auth_state: AuthState,
 ) -> Result<Json<AccountIdentities>> {
     tracing::debug!(target: TRACING_TARGET, "Listing account identities");
 
     let mut conn = pg_client.get_connection().await?;
     let identities = conn
-        .list_account_identities(auth_claims.account_id)
+        .list_account_identities(auth_state.account_id)
         .await?
         .into_iter()
         .collect();
@@ -64,17 +64,17 @@ fn list_identities_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Sets or changes the authenticated account's password.
-#[tracing::instrument(skip_all, fields(account_id = %auth_claims.account_id))]
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn set_password(
     State(pg_client): State<PgClient>,
     State(nats): State<NatsClient>,
     State(password): State<PasswordService>,
-    AuthState(auth_claims): AuthState,
+    auth_state: AuthState,
     ValidateJson(request): ValidateJson<SetPassword>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Setting account password");
 
-    let account_id = auth_claims.account_id;
+    let account_id = auth_state.account_id;
     let mut conn = pg_client.get_connection().await?;
     let account = conn.find_account_by_id(account_id).await?.ok_or_else(|| {
         ErrorKind::NotFound
@@ -159,19 +159,14 @@ fn set_password_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Removes the authenticated account's password identity.
-#[tracing::instrument(skip_all, fields(account_id = %auth_claims.account_id))]
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn delete_password(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    auth_state: AuthState,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Removing account password");
     let mut conn = pg_client.get_connection().await?;
-    remove_identity(
-        &mut conn,
-        auth_claims.account_id,
-        IdentityProvider::Password,
-    )
-    .await
+    remove_identity(&mut conn, auth_state.account_id, IdentityProvider::Password).await
 }
 
 fn delete_password_docs(op: TransformOperation) -> TransformOperation {
@@ -187,10 +182,10 @@ fn delete_password_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Unlinks a provider from the authenticated account.
-#[tracing::instrument(skip_all, fields(account_id = %auth_claims.account_id, provider = ?path_params.provider))]
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id, provider = ?path_params.provider))]
 async fn unlink_provider(
     State(pg_client): State<PgClient>,
-    AuthState(auth_claims): AuthState,
+    auth_state: AuthState,
     Path(path_params): Path<IdentityPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Unlinking provider");
@@ -204,7 +199,7 @@ async fn unlink_provider(
     }
 
     let mut conn = pg_client.get_connection().await?;
-    remove_identity(&mut conn, auth_claims.account_id, path_params.provider).await
+    remove_identity(&mut conn, auth_state.account_id, path_params.provider).await
 }
 
 fn unlink_provider_docs(op: TransformOperation) -> TransformOperation {

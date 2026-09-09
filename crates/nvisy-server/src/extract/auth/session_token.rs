@@ -1,21 +1,21 @@
-//! JWT authentication header extraction and generation.
+//! Session-token extraction.
 //!
-//! This module provides JWT token handling for HTTP Authorization headers.
-//! It supports both extracting tokens from incoming requests and generating
-//! tokens for outgoing responses.
+//! Provides [`SessionToken`], the extractor that reads and validates the session
+//! JWT from an incoming request — a session cookie (browser) or an
+//! `Authorization: Bearer` header (programmatic) — and records which transport
+//! carried it. Signing outbound tokens is [`AuthIssuer`](crate::service::AuthIssuer).
 
 use std::fmt::Debug;
 
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
-use axum::response::{IntoResponse, IntoResponseParts, Response, ResponseParts};
 use axum_extra::TypedHeader;
 use axum_extra::extract::CookieJar;
 use axum_extra::headers::Authorization;
 use axum_extra::headers::authorization::Bearer;
 use axum_extra::typed_header::TypedHeaderRejectionReason;
 use jsonwebtoken::errors::{Error as JwtError, ErrorKind as JwtErrorKind};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use super::AuthClaims;
 use crate::extract::auth::SESSION_COOKIE_NAME;
@@ -37,132 +37,67 @@ pub enum AuthTransport {
     Bearer,
 }
 
-/// JWT authentication header extractor and response generator.
+/// The verified session credential together with the transport that carried it.
 ///
-/// This type handles JWT tokens in HTTP Authorization Bearer headers. It can both
-/// extract and validate tokens from incoming requests, and generate signed tokens
-/// for outgoing responses.
+/// Read from a request, it validates the session JWT (from the session cookie or
+/// an `Authorization: Bearer` header) and records which transport delivered it —
+/// the distinction CSRF protection depends on. Signing outbound tokens is not its
+/// job; that is [`AuthIssuer`](crate::service::AuthIssuer).
 ///
 /// # Security
 ///
-/// When used as an extractor, the JWT token is validated for:
-/// - Signature integrity using the configured keys
-/// - Token expiration
-/// - Required claims (iss, aud, jti, sub, iat, exp)
-/// - Issuer and audience matching
+/// The JWT is validated for signature integrity, expiration, the required claims
+/// (iss, aud, jti, sub, iat, exp), and issuer/audience matching.
 ///
 /// # Notes
 ///
-/// This extractor only performs JWT validation. For full authentication
-/// including database verification, use [`AuthState`] instead.
+/// This extractor only performs JWT validation. For full authentication including
+/// database verification, use [`AuthState`] instead.
 ///
 /// [`AuthState`]: crate::extract::AuthState
 #[must_use]
 #[derive(Debug, Clone)]
-pub struct AuthHeader<T = ()> {
+pub struct SessionToken<T = ()> {
     auth_claims: AuthClaims<T>,
-    auth_secret_keys: SessionKeys,
-    /// The transport the token arrived on when extracted from a request. `None`
-    /// when the header was constructed for an outgoing response (there is no
-    /// inbound transport in that direction).
-    transport: Option<AuthTransport>,
+    /// The transport the token arrived on.
+    transport: AuthTransport,
 }
 
-impl<T> AuthHeader<T> {
-    /// Creates a new authentication header with the given claims and keys, for
-    /// producing an outgoing token (no inbound transport).
-    ///
-    /// # Arguments
-    ///
-    /// * `claims` - The JWT claims to include in the token
-    /// * `keys` - The cryptographic keys for signing the token
-    #[inline]
-    pub const fn new(claims: AuthClaims<T>, keys: SessionKeys) -> Self {
-        Self {
-            auth_claims: claims,
-            auth_secret_keys: keys,
-            transport: None,
-        }
-    }
-
-    /// Returns a reference to the JWT claims.
-    #[inline]
-    pub const fn as_auth_claims(&self) -> &AuthClaims<T> {
-        &self.auth_claims
-    }
-
-    /// The transport this token arrived on, when it was extracted from a request.
+impl<T> SessionToken<T> {
+    /// The transport this token arrived on.
     #[inline]
     #[must_use]
-    pub const fn transport(&self) -> Option<AuthTransport> {
+    pub const fn transport(&self) -> AuthTransport {
         self.transport
     }
 
-    /// Consumes this header and returns the JWT claims.
+    /// Consumes this token and returns the verified JWT claims.
     #[inline]
     pub fn into_auth_claims(self) -> AuthClaims<T> {
         self.auth_claims
     }
-
-    /// Returns the encoded JWT token string.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if JWT encoding fails.
-    pub fn into_string(&self) -> Result<String>
-    where
-        T: Clone + Serialize,
-    {
-        let encoding_key = self.auth_secret_keys.encoding_key();
-        self.auth_claims.clone().into_string(encoding_key)
-    }
 }
 
-impl<T> AuthHeader<T>
+impl<T> SessionToken<T>
 where
     T: Clone + for<'de> Deserialize<'de>,
 {
-    /// Creates an `AuthHeader` from a raw JWT string carried by `transport`.
-    ///
-    /// This validates the JWT (signature, claims, expiry) and records which
-    /// transport delivered it.
+    /// Validates a raw JWT `token` carried by `transport` (signature, claims,
+    /// expiry) and records the transport.
     ///
     /// # Errors
     ///
     /// Returns an error if the token is invalid, expired, or malformed.
-    fn from_token(
-        token: &str,
-        transport: AuthTransport,
-        auth_secret_keys: SessionKeys,
-    ) -> Result<Self> {
-        let decoding_key = auth_secret_keys.decoding_key();
-        let auth_claims = AuthClaims::from_token(token, decoding_key)?;
+    fn from_token(token: &str, transport: AuthTransport, keys: &SessionKeys) -> Result<Self> {
+        let auth_claims = AuthClaims::from_token(token, keys.decoding_key())?;
         Ok(Self {
             auth_claims,
-            auth_secret_keys,
-            transport: Some(transport),
+            transport,
         })
     }
 }
 
-impl<T> AuthHeader<T>
-where
-    T: Clone + Serialize,
-{
-    /// Converts this header into an HTTP Authorization header.
-    ///
-    /// This method signs the JWT token and creates the appropriate header.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if JWT signing fails.
-    fn into_header(self) -> Result<TypedHeader<Authorization<Bearer>>> {
-        let encoding_key = self.auth_secret_keys.encoding_key();
-        self.auth_claims.into_header(encoding_key)
-    }
-}
-
-impl<T, S> FromRequestParts<S> for AuthHeader<T>
+impl<T, S> FromRequestParts<S> for SessionToken<T>
 where
     T: Clone + for<'de> Deserialize<'de> + Send + Sync + 'static,
     S: Sync + Send,
@@ -171,9 +106,9 @@ where
     type Rejection = Error<'static>;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        // Return cached header if available to avoid re-parsing.
-        if let Some(auth_header) = parts.extensions.get::<Self>() {
-            return Ok(auth_header.clone());
+        // Return the cached token if a prior extractor already verified it.
+        if let Some(session_token) = parts.extensions.get::<Self>() {
+            return Ok(session_token.clone());
         }
 
         let auth_keys = SessionKeys::from_ref(state);
@@ -188,8 +123,8 @@ where
             .get(SESSION_COOKIE_NAME)
             .map(|cookie| cookie.value().to_owned());
 
-        let auth_header = if let Some(token) = cookie_token {
-            Self::from_token(&token, AuthTransport::Cookie, auth_keys)?
+        let session_token = if let Some(token) = cookie_token {
+            Self::from_token(&token, AuthTransport::Cookie, &auth_keys)?
         } else {
             // No session cookie: require a Bearer header.
             type AuthBearerHeader = TypedHeader<Authorization<Bearer>>;
@@ -209,35 +144,12 @@ where
                         .with_context("Unexpected error during header extraction")
                         .with_resource("authentication"),
                 })?;
-            Self::from_token(bearer.token(), AuthTransport::Bearer, auth_keys)?
+            Self::from_token(bearer.token(), AuthTransport::Bearer, &auth_keys)?
         };
 
         // Cache for subsequent extractors in the same request.
-        parts.extensions.insert(auth_header.clone());
-        Ok(auth_header)
-    }
-}
-
-impl<T> IntoResponseParts for AuthHeader<T>
-where
-    T: Clone + Serialize,
-{
-    type Error = Error<'static>;
-
-    fn into_response_parts(self, res: ResponseParts) -> Result<ResponseParts, Self::Error> {
-        // .into_response_parts() for a TypedHeader is infallible
-        self.into_header()
-            .map(|h| h.into_response_parts(res).unwrap())
-    }
-}
-
-impl<T> IntoResponse for AuthHeader<T>
-where
-    T: Clone + Serialize,
-{
-    fn into_response(self) -> Response {
-        // .into_response() for a TypedHeader is infallible
-        self.into_header().map(|h| h.into_response()).unwrap()
+        parts.extensions.insert(session_token.clone());
+        Ok(session_token)
     }
 }
 

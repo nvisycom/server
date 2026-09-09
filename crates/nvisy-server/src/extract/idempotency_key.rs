@@ -26,22 +26,6 @@ const MAX_KEY_LENGTH: usize = 255;
 #[derive(Debug, Clone, Default)]
 pub struct IdempotencyKey(pub Option<String>);
 
-impl IdempotencyKey {
-    /// Returns the key as a string slice, if one was supplied.
-    #[inline]
-    #[must_use]
-    pub fn as_deref(&self) -> Option<&str> {
-        self.0.as_deref()
-    }
-
-    /// Consumes the extractor, returning the owned optional key.
-    #[inline]
-    #[must_use]
-    pub fn into_inner(self) -> Option<String> {
-        self.0
-    }
-}
-
 impl<S> FromRequestParts<S> for IdempotencyKey
 where
     S: Sync,
@@ -65,3 +49,52 @@ where
 }
 
 impl OperationInput for IdempotencyKey {}
+
+#[cfg(test)]
+mod tests {
+    use axum::extract::FromRequestParts;
+    use axum::http::Request;
+
+    use super::{IdempotencyKey, MAX_KEY_LENGTH};
+    use crate::handler::ErrorKind;
+
+    /// Drives the extractor against a request carrying `header` (or none).
+    async fn extract(header: Option<&str>) -> Result<Option<String>, ErrorKind> {
+        let mut builder = Request::builder().uri("/");
+        if let Some(value) = header {
+            builder = builder.header("idempotency-key", value);
+        }
+        let (mut parts, ()) = builder.body(()).expect("request should build").into_parts();
+        IdempotencyKey::from_request_parts(&mut parts, &())
+            .await
+            .map(|k| k.0)
+            .map_err(|e| e.kind())
+    }
+
+    #[tokio::test]
+    async fn an_absent_header_is_none() {
+        assert_eq!(extract(None).await, Ok(None));
+    }
+
+    #[tokio::test]
+    async fn a_present_header_is_carried_through() {
+        assert_eq!(
+            extract(Some("abc-123")).await,
+            Ok(Some("abc-123".to_owned()))
+        );
+    }
+
+    #[tokio::test]
+    async fn an_empty_header_is_rejected() {
+        assert_eq!(extract(Some("")).await, Err(ErrorKind::BadRequest));
+    }
+
+    #[tokio::test]
+    async fn a_key_at_the_length_cap_is_accepted_but_one_over_is_rejected() {
+        let at_cap = "k".repeat(MAX_KEY_LENGTH);
+        assert_eq!(extract(Some(&at_cap)).await, Ok(Some(at_cap.clone())));
+
+        let over_cap = "k".repeat(MAX_KEY_LENGTH + 1);
+        assert_eq!(extract(Some(&over_cap)).await, Err(ErrorKind::BadRequest));
+    }
+}

@@ -1,17 +1,18 @@
 //! Workspace member request types.
 
+use garde::Validate;
 use nvisy_postgres::model::UpdateWorkspaceMember;
 use nvisy_postgres::types::{
     MemberFilter, MemberSortBy, MemberSortField, SortOrder, WorkspaceRole,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use validator::Validate;
 
 /// Request to update a member's role.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct UpdateMember {
     /// New role for the member.
     pub role: WorkspaceRole,

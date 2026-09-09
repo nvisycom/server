@@ -103,79 +103,6 @@ impl Version {
         }
     }
 
-    /// Returns `true` if this represents an unrecognized or invalid version.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use nvisy_server::extract::Version;
-    /// assert!(Version::new("invalid").is_unrecognized());
-    /// assert!(!Version::new("v1").is_unrecognized());
-    /// ```
-    #[inline]
-    #[must_use]
-    pub fn is_unrecognized(&self) -> bool {
-        matches!(self, Self::Unrecognized)
-    }
-
-    /// Returns `true` if this represents the unstable version (v0).
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use nvisy_server::extract::Version;
-    /// assert!(Version::new("v0").is_unstable());
-    /// assert!(!Version::new("v1").is_unstable());
-    /// ```
-    #[inline]
-    #[must_use]
-    pub fn is_unstable(&self) -> bool {
-        matches!(self, Self::Unstable)
-    }
-
-    /// Returns `true` if this represents a stable version (v1, v2, etc.).
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use nvisy_server::extract::Version;
-    /// assert!(Version::new("v1").is_stable());
-    /// assert!(Version::new("v2").is_stable());
-    /// assert!(!Version::new("v0").is_stable());
-    /// ```
-    #[inline]
-    #[must_use]
-    pub fn is_stable(&self) -> bool {
-        matches!(self, Self::Stable(_))
-    }
-
-    /// Returns `true` if this version matches the specified version number.
-    ///
-    /// # Arguments
-    ///
-    /// * `version` - The version number to check against (0 for unstable, 1+ for stable)
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use nvisy_server::extract::Version;
-    /// let v1 = Version::new("v1");
-    /// let v0 = Version::new("v0");
-    ///
-    /// assert!(v1.is_v(1));
-    /// assert!(!v1.is_v(2));
-    /// assert!(v0.is_v(0));
-    /// assert!(!v0.is_v(1));
-    /// ```
-    #[must_use]
-    pub fn is_v(&self, version: u16) -> bool {
-        match self {
-            Self::Unstable => version == UNSTABLE_VERSION,
-            Self::Stable(x) => x.get() == version,
-            Self::Unrecognized => false,
-        }
-    }
-
     /// Returns the underlying version number, if available.
     ///
     /// # Returns
@@ -211,13 +138,6 @@ impl fmt::Display for Version {
     }
 }
 
-impl From<Version> for bool {
-    #[inline]
-    fn from(value: Version) -> Self {
-        value.is_stable()
-    }
-}
-
 /// Path parameters for version extraction.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 struct VersionParams {
@@ -249,5 +169,20 @@ impl OperationInput for Version {
         operation: &mut Operation,
     ) -> Vec<(Option<aide::openapi::StatusCode>, Response)> {
         Path::<VersionParams>::inferred_early_responses(ctx, operation)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Version;
+
+    // `Version::new` and the predicates are covered by the doctests above; this
+    // covers the `Display` strings, which they do not.
+    #[test]
+    fn display_renders_each_variant() {
+        assert_eq!(Version::new("v1").to_string(), "v1");
+        assert_eq!(Version::new("v42").to_string(), "v42");
+        assert_eq!(Version::new("v0").to_string(), "unstable");
+        assert_eq!(Version::new("nonsense").to_string(), "unrecognized");
     }
 }

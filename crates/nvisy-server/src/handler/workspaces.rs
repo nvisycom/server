@@ -17,7 +17,7 @@ use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthState, Authorized, Avatar, DeleteWorkspace, Json, Query, SecurityContext,
+    AuthState, Authorized, AvatarUpload, DeleteWorkspace, Json, Query, SecurityContext,
     UpdateWorkspace as UpdateWorkspacePerm, ValidateJson, ViewWorkspace, WorkspaceContext,
 };
 use crate::handler::request::{
@@ -72,7 +72,7 @@ async fn backfill_retention(
 async fn create_workspace(
     State(pg_client): State<PgClient>,
     State(upload): State<UploadConfig>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateWorkspace>,
 ) -> Result<(StatusCode, Json<Workspace>)> {
@@ -140,7 +140,7 @@ fn create_workspace_docs(op: TransformOperation) -> TransformOperation {
 async fn list_workspaces(
     State(pg_client): State<PgClient>,
     State(upload): State<UploadConfig>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<WorkspacesPage>)> {
     let mut conn = pg_client.get_connection().await?;
@@ -361,7 +361,7 @@ fn delete_workspace_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn get_notification_settings(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
 ) -> Result<(StatusCode, Json<NotificationSettings>)> {
     let mut conn = pg_client.get_connection().await?;
@@ -400,7 +400,7 @@ fn get_notification_settings_docs(op: TransformOperation) -> TransformOperation 
 )]
 async fn update_notification_settings(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     ValidateJson(request): ValidateJson<UpdateNotificationSettings>,
 ) -> Result<(StatusCode, Json<NotificationSettings>)> {
@@ -459,7 +459,7 @@ async fn find_workspace_creator(conn: &mut PgConn, slug: &str) -> Result<Account
 async fn upload_workspace_avatar(
     State(avatar): State<AvatarService>,
     authz: Authorized<UpdateWorkspacePerm>,
-    Avatar(bytes): Avatar,
+    AvatarUpload(bytes): AvatarUpload,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Uploading workspace avatar");
 

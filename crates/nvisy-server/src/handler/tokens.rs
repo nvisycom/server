@@ -8,7 +8,6 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum_extra::headers::UserAgent;
 use nvisy_postgres::model::{AccountApiToken, UpdateAccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::types::ApiTokenType;
@@ -17,11 +16,9 @@ use uuid::Uuid;
 
 use super::request::{CreateApiToken, CursorPagination, TokenPathParams, UpdateApiToken};
 use super::response::{ApiToken, ApiTokenWithJWT, ApiTokensPage, ErrorResponse};
-use crate::extract::{
-    AuthClaims, AuthHeader, AuthState, Json, Path, Query, TypedHeader, ValidateJson,
-};
+use crate::extract::{AuthState, Json, Path, Query, SecurityContext, ValidateJson};
 use crate::handler::{ErrorKind, Result};
-use crate::service::{ServiceState, SessionKeys};
+use crate::service::{AuthIssuer, ServiceState};
 
 /// Tracing target for API token operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::tokens";
@@ -30,12 +27,12 @@ const TRACING_TARGET: &str = "nvisy_server::handler::tokens";
 ///
 /// Returns the token with a JWT that can be used for authentication.
 /// The JWT is only shown once upon creation.
-#[tracing::instrument(skip_all, fields(account_id = %auth_claims.account_id))]
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn create_api_token(
     State(pg_client): State<PgClient>,
-    State(auth_keys): State<SessionKeys>,
-    AuthState(auth_claims): AuthState,
-    TypedHeader(user_agent): TypedHeader<UserAgent>,
+    State(issuer): State<AuthIssuer>,
+    auth_state: AuthState,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateApiToken>,
 ) -> Result<(StatusCode, Json<ApiTokenWithJWT>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating API token");
@@ -44,7 +41,7 @@ async fn create_api_token(
 
     // Fetch the account to generate JWT claims
     let account = conn
-        .find_account_by_id(auth_claims.account_id)
+        .find_account_by_id(auth_state.account_id)
         .await?
         .ok_or_else(|| {
             ErrorKind::NotFound
@@ -52,13 +49,11 @@ async fn create_api_token(
                 .with_message("Account not found")
         })?;
 
-    let new_token = request.into_model(auth_claims.account_id, user_agent.to_string())?;
+    let new_token = request.into_model(auth_state.account_id, security)?;
     let api_token = conn.create_account_api_token(new_token).await?;
 
-    // Generate JWT for the new token
-    let auth_claims = AuthClaims::new(&account, &api_token);
-    let auth_header = AuthHeader::new(auth_claims, auth_keys);
-    let jwt_token = auth_header.into_string()?;
+    // Sign the JWT for the new token through the shared issuer.
+    let jwt_token = issuer.sign(&account, &api_token)?;
 
     let response = ApiToken::from_model(api_token.clone()).with_jwt(jwt_token);
 
@@ -83,7 +78,7 @@ fn create_api_token_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn list_api_tokens(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<ApiTokensPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing API tokens");
@@ -123,7 +118,7 @@ fn list_api_tokens_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn read_api_token(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
     Path(path): Path<TokenPathParams>,
 ) -> Result<(StatusCode, Json<ApiToken>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading API token");
@@ -153,7 +148,7 @@ fn read_api_token_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn update_api_token(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
     Path(path): Path<TokenPathParams>,
     ValidateJson(request): ValidateJson<UpdateApiToken>,
 ) -> Result<(StatusCode, Json<ApiToken>)> {
@@ -202,7 +197,7 @@ fn update_api_token_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn revoke_api_token(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
     Path(path): Path<TokenPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Revoking API token");

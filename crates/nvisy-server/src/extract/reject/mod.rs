@@ -10,14 +10,12 @@ mod json_with_rej;
 mod mutlipart_with_rej;
 mod path_with_rej;
 mod query_with_rej;
-mod validated_json;
 
 pub use self::form_with_rej::Form;
 pub use self::json_with_rej::Json;
 pub use self::mutlipart_with_rej::Multipart;
 pub use self::path_with_rej::Path;
 pub use self::query_with_rej::Query;
-pub use self::validated_json::ValidateJson;
 
 /// Sanitizes a deserializer error message before it is surfaced or logged.
 ///
@@ -45,10 +43,18 @@ fn redact_quoted(message: &str) -> String {
     while let Some(ch) = chars.next() {
         if ch == '"' || ch == '`' {
             output.push_str("<redacted>");
-            // Consume through the matching closing delimiter, if any.
-            for inner in chars.by_ref() {
-                if inner == ch {
-                    break;
+            // Consume through the matching closing delimiter, treating a
+            // backslash as escaping the next character so an escaped delimiter
+            // (`\"`) inside the value does not end the span early and leak the
+            // suffix that follows it.
+            while let Some(inner) = chars.next() {
+                match inner {
+                    '\\' => {
+                        // Skip the escaped character, whatever it is.
+                        chars.next();
+                    }
+                    _ if inner == ch => break,
+                    _ => {}
                 }
             }
         } else {
@@ -82,5 +88,16 @@ mod tests {
     fn caps_length() {
         let message = "x".repeat(500);
         assert_eq!(sanitize_error_message(&message).chars().count(), 200);
+    }
+
+    #[test]
+    fn an_escaped_delimiter_does_not_end_redaction_early() {
+        // A submitted value containing an escaped quote must stay fully redacted:
+        // the `\"` must not be treated as the closing delimiter, which would leak
+        // the `secret` suffix that follows it.
+        let message = r#"invalid value: string "a\"secret", expected an integer"#;
+        let sanitized = sanitize_error_message(message);
+        assert!(!sanitized.contains("secret"), "leaked: {sanitized}");
+        assert!(sanitized.contains("<redacted>"));
     }
 }

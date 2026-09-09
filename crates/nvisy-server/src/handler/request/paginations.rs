@@ -3,10 +3,10 @@
 //! This module re-exports pagination types from nvisy-postgres and provides
 //! API-specific wrappers with validation for HTTP query parameters.
 
+use garde::Validate;
 use nvisy_postgres::types;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use validator::Validate;
 
 /// Default pagination limit.
 const DEFAULT_LIMIT: u32 = 20;
@@ -21,14 +21,15 @@ const MAX_OFFSET: u32 = 100_000;
 /// For infinite scroll or API iteration, prefer [`CursorPagination`].
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct OffsetPagination {
     /// The number of records to skip before starting to return results.
-    #[validate(range(max = 100000))]
+    #[garde(range(max = 100000))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offset: Option<u32>,
 
     /// The maximum number of records to return (1-100, default: 20).
-    #[validate(range(min = 1, max = 100))]
+    #[garde(range(min = 1, max = 100))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
 }
@@ -61,9 +62,10 @@ impl From<OffsetPagination> for types::OffsetPagination {
 /// - Efficient "load more" / infinite scroll patterns
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct CursorPagination {
     /// The maximum number of records to return (1-100, default: 20).
-    #[validate(range(min = 1, max = 100))]
+    #[garde(range(min = 1, max = 100))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
 

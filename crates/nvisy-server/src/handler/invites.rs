@@ -357,7 +357,7 @@ fn cancel_invite_docs(op: TransformOperation) -> TransformOperation {
 async fn reply_to_invite(
     State(pg_client): State<PgClient>,
     State(notification_emitter): State<NotificationEmitter>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     security: SecurityContext,
     Path(path_params): Path<InvitePathParams>,
@@ -559,7 +559,7 @@ fn preview_invite_code_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn reply_to_invite_code(
     State(pg_client): State<PgClient>,
-    AuthState(auth_state): AuthState,
+    auth_state: AuthState,
     security: SecurityContext,
     Path(path_params): Path<InviteCodePathParams>,
     Json(request): Json<Option<ReplyInvite>>,

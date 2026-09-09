@@ -1,10 +1,10 @@
 //! HTTP server implementation using enhanced lifecycle management.
 
 use std::io;
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use axum::Router;
-use nvisy_server::extract::AppConnectInfo;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
@@ -46,7 +46,7 @@ pub async fn serve_http(
             }
         };
 
-        let app = app.into_make_service_with_connect_info::<AppConnectInfo>();
+        let app = app.into_make_service_with_connect_info::<SocketAddr>();
         let serve = axum::serve(listener, app).with_graceful_shutdown(graceful);
 
         // Bound the graceful drain: if a connection has not closed within the

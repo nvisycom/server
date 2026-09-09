@@ -33,17 +33,17 @@ credential encryption.
 
 ## Features
 
-- **Multimodal redaction** — detect and remove sensitive data across PDFs, office documents, images, and audio.
-- **AI-powered detection** — LLM- and pattern-driven PII/entity recognition, governed by configurable redaction policies.
-- **Reviewer edits** — suppress a false positive, retag a detection, or add one the analysis missed, then re-redact — as many times as needed.
-- **Workspace isolation** — multi-tenant workspaces with HKDF-derived, per-workspace credential encryption.
-- **Real-time collaboration** — WebSocket and NATS pub/sub for live status and document editing.
-- **Interactive docs** — auto-generated OpenAPI served through a Scalar UI.
+- **Multimodal redaction**: detect and remove sensitive data across PDFs, office documents, images, and audio.
+- **AI-powered detection**: LLM- and pattern-driven PII/entity recognition, governed by configurable redaction policies.
+- **Reviewer edits**: suppress a false positive, retag a detection, or add one the analysis missed, then re-redact, as many times as needed.
+- **Workspace isolation**: multi-tenant workspaces with HKDF-derived, per-workspace credential encryption.
+- **Real-time collaboration**: WebSocket and NATS pub/sub for live status and document editing.
+- **Interactive docs**: auto-generated OpenAPI served through a Scalar UI.
 
 ## Requirements
 
-- **Rust + Cargo** — 1.95+, Edition 2024
-- **PostgreSQL** 18+, **NATS** 2.10+ (JetStream), and an **S3-compatible blob store** (RustFS by default) — the dev compose file provides all three
+- **Rust + Cargo**: 1.95+, Edition 2024
+- **PostgreSQL** 18+, **NATS** 2.10+ (JetStream), and an **S3-compatible blob store** (RustFS by default). The dev compose file provides all three.
 
 ## Quick start
 
@@ -78,10 +78,10 @@ configuration.
 
 See [`docs/`](docs/) for the details:
 
-- [Architecture](docs/ARCHITECTURE.md) — the crates, the detect/redact pipeline, and how they fit together.
-- [Intelligence](docs/INTELLIGENCE.md) — detection capabilities and the redaction engine.
-- [Providers](docs/PROVIDERS.md) — inference and object-store provider design.
-- [Security](docs/SECURITY.md) — the encryption, authentication, and isolation model.
+- [Architecture](docs/ARCHITECTURE.md): the crates, the detect/redact pipeline, and how they fit together.
+- [Intelligence](docs/INTELLIGENCE.md): detection capabilities and the redaction engine.
+- [Providers](docs/PROVIDERS.md): inference and object-store provider design.
+- [Security](docs/SECURITY.md): the encryption, authentication, and isolation model.
 
 ## Contributing
 

@@ -112,7 +112,7 @@ serde_json = { workspace = true, features = [] }
 toml = { workspace = true, features = ["parse"] }
 bytes = { workspace = true, features = [] }
 http-body = { workspace = true, features = [] }
-validator = { workspace = true, features = [] }
+garde = { workspace = true, features = [] }
 
 # Text processing
 woothee = { workspace = true, features = [] }
@@ -142,7 +142,7 @@ url = { workspace = true, features = [] }
 [dev-dependencies]
 # Internal crates
 nvisy-nats = { workspace = true, features = [] }
-nvisy-postgres = { workspace = true, features = ["schema"] }
+nvisy-postgres = { workspace = true, features = ["schema", "test_util"] }
 nvisy-webhook = { workspace = true, features = ["reqwest"] }
 
 axum-test = { workspace = true, features = [] }

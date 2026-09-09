@@ -2,11 +2,11 @@
 
 use elide_pipeline::DocumentContext;
 use elide_pipeline::entity::EditSet;
+use garde::Validate;
 use nvisy_postgres::types::{DetectionFilter, DetectionStatus, PipelineTriggerType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use validator::Validate;
 
 /// Query parameters for listing detections across a workspace.
 ///
@@ -74,6 +74,7 @@ impl From<PipelineDetectionsQuery> for DetectionFilter {
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct CreateDetection {
     /// The file to analyze.
     pub file_id: Uuid,

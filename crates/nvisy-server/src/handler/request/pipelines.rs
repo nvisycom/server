@@ -5,12 +5,12 @@
 //! and validation.
 
 use elide_pipeline::DocumentContext;
+use garde::Validate;
 use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
 use nvisy_postgres::types::{Handle, Json, PipelineMetadata, PipelineStatus, RetentionOverride};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use validator::Validate;
 
 /// A pipeline's detection + governance intent.
 ///
@@ -31,6 +31,7 @@ use validator::Validate;
 #[must_use]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[garde(allow_unvalidated)]
 pub struct PipelineDefinition {
     /// Optional pipeline-wide scope (languages, jurisdictions, document labels).
     ///
@@ -43,7 +44,7 @@ pub struct PipelineDefinition {
     /// Stored relationally in the `workspace_pipeline_policies` join table, not the JSON
     /// definition; surfaced here so the API exposes one coherent object.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[validate(length(max = 64))]
+    #[garde(length(max = 64))]
     pub policy_slugs: Vec<Handle>,
 }
 
@@ -83,18 +84,19 @@ impl PipelineDefinition {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct CreatePipeline {
     /// Pipeline display name (2-128 characters).
-    #[validate(length(min = 2, max = 128))]
+    #[garde(length(chars, min = 2, max = 128))]
     pub display_name: String,
     /// URL slug, unique within the workspace and immutable after creation.
     pub slug: Handle,
     /// Optional description of the pipeline (max 500 characters).
-    #[validate(length(max = 500))]
+    #[garde(length(chars, max = 500))]
     pub description: Option<String>,
     /// Optional detection + redaction configuration. Defaults to an empty
     /// definition that can be filled in via update.
-    #[validate(nested)]
+    #[garde(dive)]
     pub definition: Option<PipelineDefinition>,
     /// Optional lifecycle status. Defaults to `draft`; pass `enabled` to create a
     /// pipeline ready to run without a follow-up update.
@@ -168,17 +170,18 @@ fn split_definition(
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct UpdatePipeline {
     /// New display name for the pipeline (2-128 characters).
-    #[validate(length(min = 2, max = 128))]
+    #[garde(length(chars, min = 2, max = 128))]
     pub display_name: Option<String>,
     /// New description for the pipeline (max 500 characters).
-    #[validate(length(max = 500))]
+    #[garde(length(chars, max = 500))]
     pub description: Option<String>,
     /// New status for the pipeline.
     pub status: Option<PipelineStatus>,
     /// New detection + redaction configuration (replaces the whole definition).
-    #[validate(nested)]
+    #[garde(dive)]
     pub definition: Option<PipelineDefinition>,
     /// Replacement per-scope data-retention override. When omitted, the
     /// pipeline's retention override is left unchanged.
@@ -230,10 +233,11 @@ impl UpdatePipeline {
 #[must_use]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct PipelineFilter {
     /// Filter by pipeline status.
     pub status: Option<PipelineStatus>,
     /// Search by pipeline name (trigram similarity).
-    #[validate(length(max = 100))]
+    #[garde(length(chars, max = 100))]
     pub search: Option<String>,
 }

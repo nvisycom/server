@@ -1,9 +1,9 @@
 //! Account identity (credential) request types.
 
+use garde::Validate;
 use nvisy_postgres::types::IdentityProvider;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use validator::Validate;
 
 /// Path parameters for a provider-scoped identity operation: signing in with,
 /// re-authenticating with, linking, or unlinking a provider. Named identically to
@@ -28,6 +28,7 @@ pub struct IdentityPathParams {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct SetPassword {
     /// The account's current password. Required when the account already has a
     /// password; omitted when setting a first password on an account that has
@@ -40,6 +41,6 @@ pub struct SetPassword {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reauth_proof: Option<String>,
     /// The new password (will be hashed before storage).
-    #[validate(length(min = 8, max = 128))]
+    #[garde(length(chars, min = 8, max = 128))]
     pub new_password: String,
 }

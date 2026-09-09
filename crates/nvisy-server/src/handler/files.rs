@@ -23,17 +23,18 @@ use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthProvider, AuthState, Authorized, DeleteFiles, Json, Multipart, Path, Permission, Query,
-    SecurityContext, UpdateFiles, UploadFiles, ValidateJson, ViewFiles, WorkspaceContext,
+    AuthState, Authorized, DeleteFiles, Json, Multipart, Path, Permission, Query, SecurityContext,
+    UpdateFiles, UploadFiles, ValidateJson, ViewFiles, WorkspaceContext,
 };
 use crate::handler::request::{
     CursorPagination, DeleteFiles as DeleteFilesRequest, ListFiles, UpdateFile,
     WorkspaceFilePathParams,
 };
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
-use crate::handler::utility::{DownloadResponseExt, attachment_headers, resolve_account_ref};
+use crate::handler::utility::{DownloadDocs, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::UploadConfig;
+use crate::response::attachment_headers;
 use crate::service::{
     CryptoService, EngineService, EventEmitter, EventOrigin, FileRef, HashingReader, LimitedReader,
     RunBlobStore, ServiceState, WorkspaceEvent,
@@ -539,7 +540,7 @@ fn update_file_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_claims.account_id,
+        account_id = %auth.account_id,
         workspace_id = %workspace.id,
         file_id = %path_params.file_id,
     )
@@ -550,7 +551,7 @@ async fn download_file(
     State(crypto): State<CryptoService>,
     WorkspaceContext(workspace): WorkspaceContext,
     Path(path_params): Path<WorkspaceFilePathParams>,
-    AuthState(auth_claims): AuthState,
+    auth: AuthState,
 ) -> Result<(StatusCode, HeaderMap, Body)> {
     tracing::debug!(target: TRACING_TARGET, "Downloading file");
 
@@ -560,8 +561,7 @@ async fn download_file(
     // cannot see files cannot distinguish a missing file from a forbidden one.
     // Every kind-specific download permission below already requires at least the
     // role this check does, so it never rejects an otherwise-authorized caller.
-    auth_claims
-        .authorize_workspace(&mut conn, workspace.id, Permission::ViewFiles)
+    auth.authorize_workspace(&mut conn, workspace.id, Permission::ViewFiles)
         .await?;
 
     // The permission a download requires depends on the file's kind, so that the
@@ -577,8 +577,7 @@ async fn download_file(
         FileKind::Audit | FileKind::Review => Permission::DownloadAudit,
     };
 
-    auth_claims
-        .authorize_workspace(&mut conn, workspace.id, permission)
+    auth.authorize_workspace(&mut conn, workspace.id, permission)
         .await?;
 
     let file_key = FileKey::from_str(&file.storage_path).map_err(|err| {
@@ -617,18 +616,13 @@ async fn download_file(
             ErrorKind::NotFound.with_message("File content not found")
         })?;
 
-    // The display name is user-controlled, so strip characters that are invalid
-    // in a quoted header value to avoid header injection and a failed parse
-    // before it goes into the (server-trusting) attachment header.
-    let safe_name: String = file
-        .display_name
-        .chars()
-        .filter(|c| !c.is_control() && *c != '"' && *c != '\\')
-        .collect();
-    // Content-length is the plaintext size from the record; storage holds the
-    // larger ciphertext, which the decrypting reader unwraps as it streams.
+    // `attachment_headers` handles the user-controlled name safely (escapes it,
+    // and carries a non-ASCII name via RFC 6266 `filename*`), so it is passed
+    // through as-is. Content-length is the plaintext size from the record;
+    // storage holds the larger ciphertext, which the decrypting reader unwraps as
+    // it streams.
     let headers = attachment_headers(
-        &safe_name,
+        &file.display_name,
         HeaderValue::from_static("application/octet-stream"),
         file.file_size_bytes as u64,
     );

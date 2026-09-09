@@ -52,6 +52,35 @@ pub struct Account {
     pub deleted_at: Option<Timestamp>,
 }
 
+impl Account {
+    /// An account row with a fresh unique handle and matching email, for tests.
+    /// Not admin/verified/suspended; timestamps are now. Useful to downstream
+    /// crates that need an `Account` without a database.
+    #[cfg(any(feature = "test_util", test))]
+    #[must_use]
+    pub fn test() -> Self {
+        let username = Handle::test();
+        let email_address = format!("{}@example.com", username.as_str());
+        let now: Timestamp = jiff::Timestamp::now().into();
+        Self {
+            id: Uuid::now_v7(),
+            is_admin: false,
+            is_verified: false,
+            is_suspended: false,
+            username,
+            display_name: None,
+            email_address,
+            avatar_url: None,
+            timezone: "UTC".to_owned(),
+            locale: "en".to_owned(),
+            password_changed_at: None,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        }
+    }
+}
+
 /// Data for creating a new account.
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = accounts)]

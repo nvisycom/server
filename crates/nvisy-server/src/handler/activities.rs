@@ -24,10 +24,9 @@ use crate::handler::request::{
     MAX_EXPORT_ROWS,
 };
 use crate::handler::response::{ActivitiesPage, Activity, ErrorResponse};
-use crate::handler::utility::{
-    ActorFilter, DownloadResponseExt, attachment_headers, resolve_actor,
-};
+use crate::handler::utility::{ActorFilter, DownloadDocs, resolve_actor};
 use crate::handler::{Error, ErrorKind, Result, ServiceState};
+use crate::response::attachment_headers;
 
 /// Tracing target for activity export operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::activities";

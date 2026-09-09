@@ -1,5 +1,6 @@
 //! Workspace invite request types.
 
+use garde::Validate;
 use nvisy_postgres::model::NewWorkspaceInvite;
 use nvisy_postgres::types::{
     InviteFilter, InviteSortBy, InviteSortField, SortOrder, WorkspaceRole,
@@ -7,16 +8,15 @@ use nvisy_postgres::types::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use validator::Validate;
 
 /// Request payload for creating a new workspace invite.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct CreateInvite {
     /// Email address of the person to invite.
-    #[validate(email)]
-    #[validate(length(min = 5, max = 254))]
+    #[garde(email, length(chars, min = 5, max = 254))]
     pub invitee_email: String,
     /// Role the invitee will have if they accept the invitation.
     pub invited_role: WorkspaceRole,
@@ -43,6 +43,7 @@ impl CreateInvite {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct ReplyInvite {
     /// Whether to accept or decline the invitation.
     pub accept_invite: bool,
@@ -86,6 +87,7 @@ impl InviteExpiration {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct GenerateInviteCode {
     /// Role to assign when someone joins via this invite code.
     pub invited_role: WorkspaceRole,

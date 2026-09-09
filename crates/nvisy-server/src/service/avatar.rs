@@ -9,6 +9,7 @@
 
 use std::io::Cursor;
 
+use bytes::Bytes;
 use image::{ImageFormat, ImageReader};
 use nvisy_postgres::model::{Account, UpdateAccount, UpdateWorkspace};
 use nvisy_postgres::query::{AccountRepository, WorkspaceRepository};
@@ -55,7 +56,7 @@ impl AvatarService {
     /// object is written and the URL updated before the previous version is
     /// deleted, so a reader never sees a missing avatar; a crash between the
     /// update and the delete can leave the previous object orphaned (see #192).
-    pub async fn set_account_avatar(&self, account_id: Uuid, upload: Vec<u8>) -> Result<Account> {
+    pub async fn set_account_avatar(&self, account_id: Uuid, upload: Bytes) -> Result<Account> {
         let webp = process_avatar(upload).await?;
         let version = content_version(&webp);
 
@@ -136,7 +137,7 @@ impl AvatarService {
     /// object is written and the URL updated before the previous version is
     /// deleted, so a reader never sees a missing avatar; a crash between the
     /// update and the delete can leave the previous object orphaned (see #192).
-    pub async fn set_workspace_avatar(&self, workspace_id: Uuid, upload: Vec<u8>) -> Result<()> {
+    pub async fn set_workspace_avatar(&self, workspace_id: Uuid, upload: Bytes) -> Result<()> {
         let webp = process_avatar(upload).await?;
         let version = content_version(&webp);
 
@@ -256,7 +257,7 @@ fn avatar_version(avatar_url: Option<&str>) -> Option<String> {
 /// source-dimension cap. The result is resized to fit within [`TARGET_DIMENSION`]
 /// on its longest side (never upscaled) and encoded as WebP. The CPU-bound
 /// decode/encode runs on a blocking thread so it does not stall the runtime.
-async fn process_avatar(bytes: Vec<u8>) -> Result<Vec<u8>> {
+async fn process_avatar(bytes: Bytes) -> Result<Vec<u8>> {
     if bytes.len() > MAX_AVATAR_UPLOAD_BYTES {
         return Err(ErrorKind::BadRequest.with_message("Avatar must be at most 2 MiB"));
     }
@@ -326,11 +327,11 @@ mod tests {
     use super::*;
 
     /// Encodes a solid image of the given size in the given format for test input.
-    fn encode(width: u32, height: u32, format: ImageFormat) -> Vec<u8> {
+    fn encode(width: u32, height: u32, format: ImageFormat) -> Bytes {
         let img = DynamicImage::ImageRgba8(RgbaImage::new(width, height));
         let mut out = Cursor::new(Vec::new());
         img.write_to(&mut out, format).unwrap();
-        out.into_inner()
+        Bytes::from(out.into_inner())
     }
 
     #[tokio::test]
@@ -364,13 +365,15 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_non_image() {
-        let err = process_avatar(b"not an image".to_vec()).await.unwrap_err();
+        let err = process_avatar(Bytes::from_static(b"not an image"))
+            .await
+            .unwrap_err();
         assert!(err.to_string().to_lowercase().contains("image"));
     }
 
     #[tokio::test]
     async fn rejects_oversized_upload() {
-        let too_big = vec![0u8; MAX_AVATAR_UPLOAD_BYTES + 1];
+        let too_big = Bytes::from(vec![0u8; MAX_AVATAR_UPLOAD_BYTES + 1]);
         assert!(process_avatar(too_big).await.is_err());
     }
 

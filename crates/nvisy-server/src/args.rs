@@ -15,8 +15,8 @@ use nvisy_postgres::PgConfig;
 use nvisy_webhook::WebhookService;
 
 use crate::Result;
-use crate::handler::CookieConfig;
 use crate::middleware::UploadConfig;
+use crate::response::CookieConfig;
 use crate::service::{
     CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig, IntegrationConfig, OidcConfig,
     S3Config, ServiceState, SessionKeysConfig,

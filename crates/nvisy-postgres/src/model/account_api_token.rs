@@ -37,6 +37,29 @@ pub struct AccountApiToken {
     pub deleted_at: Option<Timestamp>,
 }
 
+impl AccountApiToken {
+    /// A token row of `session_type` for `account_id`, for tests. `issued_at` is
+    /// now and there is no expiry; the remaining fields are defaulted. Useful to
+    /// downstream crates building auth flows without a database.
+    #[cfg(any(feature = "test_util", test))]
+    #[must_use]
+    pub fn test(account_id: Uuid, session_type: ApiTokenType) -> Self {
+        Self {
+            id: Uuid::now_v7(),
+            account_id,
+            display_name: "Test Token".to_owned(),
+            session_type,
+            ip_address: None,
+            user_agent: None,
+            is_remembered: false,
+            issued_at: jiff::Timestamp::now().into(),
+            expired_at: None,
+            last_used_at: None,
+            deleted_at: None,
+        }
+    }
+}
+
 /// Data for creating a new account API token.
 #[derive(Debug, Default, Clone, Insertable)]
 #[diesel(table_name = account_api_tokens)]

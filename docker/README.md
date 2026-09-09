@@ -16,11 +16,11 @@ real-time events and persistent job queues for asynchronous processing.
 JetStream must be enabled with sufficient storage allocation: the default
 configuration uses 1 GB of memory store and 10 GB of file store.
 
-**An S3-compatible object store** for first-party blobs — uploaded files,
+**An S3-compatible object store** for first-party blobs: uploaded files,
 detection audits, redacted output, and avatars. The compose files use
 [RustFS](https://rustfs.com) (MinIO-compatible, Apache-2.0); AWS S3 or any
 S3-compatible service (MinIO, Cloudflare R2, …) works by pointing `S3_ENDPOINT`
-at it. The configured `S3_BUCKET` must exist before the server starts — the
+at it. The configured `S3_BUCKET` must exist before the server starts, so the
 compose files provision it with a one-shot init container.
 
 ## Quick Start
@@ -59,8 +59,8 @@ docker compose up -d --build
 ```
 
 The production compose file starts every service on a private bridge network.
-The server waits for the PostgreSQL, NATS, and RustFS health checks to pass —
-and for the bucket-provisioning init container to finish — before starting.
+The server waits for the PostgreSQL, NATS, and RustFS health checks to pass,
+and for the bucket-provisioning init container to finish, before starting.
 
 ## Services
 
@@ -76,6 +76,16 @@ and for the bucket-provisioning init container to finish — before starting.
 All configuration is provided through environment variables. See
 [`.env.example`](../.env.example) at the repository root for a complete
 reference with defaults and descriptions.
+
+Two settings depend on the deployment topology and default to the
+directly-exposed case:
+
+- `CLIENT_IP_SOURCE` decides where the caller's IP is read from for audit and
+  security records. It defaults to `ConnectInfo` (the TCP peer). Behind a reverse
+  proxy or load balancer that sets a forwarding header, set it to the matching
+  source (e.g. `RightmostXForwardedFor`), or the recorded IP is the proxy's.
+- `COOKIE_SECURE` defaults to `true` (session cookies are HTTPS-only). Set it to
+  `false` only for local HTTP development.
 
 ## Key Generation
 
@@ -117,14 +127,14 @@ queues.
 ## Encryption at Rest
 
 The server encrypts sensitive payloads at the application layer with
-XChaCha20-Poly1305 under per-workspace keys before they reach storage — file
+XChaCha20-Poly1305 under per-workspace keys before they reach storage: file
 bytes, redacted output, analyzed documents, webhook signing secrets, and
 policy/context definitions. The blob store only ever receives ciphertext; any
 server-side encryption it offers is redundant defense-in-depth. This protects
 those payloads even against a live read of the datastore.
 
-For everything else on disk — NATS stream/consumer metadata and KV entries,
-Postgres rows, backups — provision the data volumes on **encrypted storage**.
+For everything else on disk (NATS stream/consumer metadata and KV entries,
+Postgres rows, backups), provision the data volumes on **encrypted storage**.
 This adds no runtime overhead, keeps key management out of the datastores, and
 covers the whole volume.
 
@@ -138,7 +148,7 @@ The persistent volumes to encrypt are `nats_data`, `postgres_data`, and
   volumes) on a LUKS-encrypted partition.
 
 Volume encryption guards against stolen disks, snapshots, and backups. It does
-not protect against a compromised running host — which is why the sensitive
+not protect against a compromised running host, which is why the sensitive
 payloads above are additionally encrypted at the application layer.
 
 ## Health Checks

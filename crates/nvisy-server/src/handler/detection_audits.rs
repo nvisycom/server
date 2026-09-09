@@ -22,8 +22,9 @@ use super::detections::find_detection;
 use crate::extract::{Authorized, DownloadAudit, DownloadOriginalFiles, Json, Path, Query};
 use crate::handler::request::{DetectionPathParams, ExportFormat, ExportQuery};
 use crate::handler::response::ErrorResponse;
-use crate::handler::utility::{DownloadResponseExt, attachment_headers};
+use crate::handler::utility::DownloadDocs;
 use crate::handler::{Error, ErrorKind, Result};
+use crate::response::attachment_headers;
 use crate::service::{EngineService, RunBlobStore, ServiceState};
 
 /// Tracing target for detection audit operations.

@@ -7,11 +7,11 @@ use aide::OperationInput;
 use aide::generate::GenContext;
 use aide::openapi::{Operation, Response};
 use axum::extract::rejection::PathRejection;
-use axum::extract::{FromRequestParts, OptionalFromRequestParts, Path as AxumPath};
-use axum::http::request::Parts;
+use axum::extract::{FromRequestParts, Path as AxumPath};
 use derive_more::{Deref, DerefMut, From};
+// `FromRequestParts` above is both the trait and the derive macro re-exported by
+// axum's `macros` feature; the derive on `Path` resolves to it.
 use schemars::JsonSchema;
-use serde::de::DeserializeOwned;
 
 use super::sanitize_error_message;
 use crate::handler::{Error, ErrorKind};
@@ -24,80 +24,25 @@ use crate::handler::{Error, ErrorKind};
 /// - Detailed error messages for different parameter types
 /// - Type-safe deserialization with proper error context
 ///
+/// The [`FromRequestParts`] impl is derived: extraction delegates to
+/// [`axum::extract::Path`] and its [`PathRejection`] is mapped into our
+/// [`Error`] by the `From` impl below (that mapping is where the improved
+/// messages live).
+///
 /// All errors are automatically converted to appropriate HTTP responses
 /// with detailed error messages for better API debugging and user experience.
 ///
 /// [`Path`]: AxumPath
 #[must_use]
-#[derive(Debug, Clone, Copy, Default, Deref, DerefMut, From)]
+#[derive(Debug, Clone, Copy, Default, Deref, DerefMut, From, FromRequestParts)]
+#[from_request(via(AxumPath), rejection(Error<'static>))]
 pub struct Path<T>(pub T);
-
-impl<T> Path<T> {
-    /// Creates a new instance of [`Path`].
-    ///
-    /// # Arguments
-    ///
-    /// * `inner` - The deserialized path parameters
-    #[inline]
-    pub fn new(inner: T) -> Self {
-        Self(inner)
-    }
-
-    /// Returns the inner path parameters.
-    #[inline]
-    pub fn into_inner(self) -> T {
-        self.0
-    }
-}
-
-impl<T, S> FromRequestParts<S> for Path<T>
-where
-    T: DeserializeOwned + Send + 'static,
-    S: Send + Sync,
-{
-    type Rejection = Error<'static>;
-
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let extractor =
-            <AxumPath<T> as FromRequestParts<S>>::from_request_parts(parts, state).await;
-        extractor.map(|x| Self(x.0)).map_err(Into::into)
-    }
-}
-
-impl<T, S> OptionalFromRequestParts<S> for Path<T>
-where
-    T: DeserializeOwned + Send + 'static,
-    S: Send + Sync,
-{
-    type Rejection = Error<'static>;
-
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &S,
-    ) -> Result<Option<Self>, Self::Rejection> {
-        let extractor =
-            <AxumPath<T> as OptionalFromRequestParts<S>>::from_request_parts(parts, state).await;
-
-        match extractor {
-            Ok(maybe_path) => Ok(maybe_path.map(|x| Self::new(x.0))),
-            Err(rejection) => {
-                // For optional extraction, only propagate server errors
-                match rejection {
-                    PathRejection::FailedToDeserializePathParams(_)
-                    | PathRejection::MissingPathParams(_) => Ok(None),
-                    _ => Err(rejection.into()),
-                }
-            }
-        }
-    }
-}
 
 impl From<PathRejection> for Error<'static> {
     fn from(rejection: PathRejection) -> Self {
         match rejection {
             PathRejection::FailedToDeserializePathParams(err) => {
                 let error_message = sanitize_error_message(&err.to_string());
-                let enhanced_context = enhance_deserialization_error(&error_message);
 
                 tracing::warn!(
                     error = %error_message,
@@ -107,8 +52,8 @@ impl From<PathRejection> for Error<'static> {
                 ErrorKind::BadRequest
                     .with_message("Invalid path parameter format")
                     .with_context(format!(
-                        "Path parameter deserialization failed: {}. {}",
-                        error_message, enhanced_context
+                        "Path parameter deserialization failed: {}. Check that the parameter matches the expected type.",
+                        error_message
                     ))
             }
             PathRejection::MissingPathParams(err) => {
@@ -134,23 +79,6 @@ impl From<PathRejection> for Error<'static> {
                     .with_context("Unexpected error occurred during path parameter processing. This may indicate a routing configuration issue.")
             }
         }
-    }
-}
-
-/// Enhances deserialization error messages with type-specific guidance.
-fn enhance_deserialization_error(error_message: &str) -> &'static str {
-    let error_lower = error_message.to_lowercase();
-
-    if error_lower.contains("uuid") || error_lower.contains("invalid character") {
-        "UUID parameters must be in format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (32 hexadecimal digits with hyphens)"
-    } else if error_lower.contains("invalid digit") || error_lower.contains("cannot parse") {
-        "Numeric parameters must contain only digits and be within the valid range for the expected type"
-    } else if error_lower.contains("bool") {
-        "Boolean parameters must be 'true' or 'false'"
-    } else if error_lower.contains("enum") {
-        "Enum parameters must match one of the defined variants exactly"
-    } else {
-        "Check that the parameter format matches the expected type definition"
     }
 }
 

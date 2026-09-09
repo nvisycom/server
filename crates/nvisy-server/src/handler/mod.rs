@@ -43,7 +43,7 @@ use axum::middleware::{from_fn, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 pub use error::{Error, ErrorKind, Result};
 pub use invites::{CreatedInvite, InviteOutcome, create_invite};
-pub use utility::{CookieConfig, CustomRoutes};
+pub use utility::CustomRoutes;
 
 use crate::middleware::{csrf_protect, require_authentication, slide_session};
 use crate::service::ServiceState;
@@ -99,18 +99,21 @@ fn private_routes(service_state: ServiceState) -> ApiRouter<ServiceState> {
         // Account identity management and OIDC step-up re-auth.
         .merge(identities::routes())
         .merge(auth_oidc::private_routes())
+        // Logout revokes the caller's session (a cookie-driven state change), so
+        // it sits behind the authentication and CSRF layers.
+        .merge(authentication::authenticated_routes())
 }
 
 /// Returns an [`ApiRouter`] with all built-in public routes. Downstream routes
 /// are merged separately by [`routes`].
 fn public_routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
-        // Authentication is always mounted: password login/signup/logout plus OIDC
-        // sign-in. The OIDC public routes (sign-in start + provider callback) need
-        // no session — the caller has none yet and the provider's browser redirect
-        // carries no Authorization header. The authenticated link route is in the
-        // private routes.
-        .merge(authentication::routes())
+        // Public authentication: password login/signup plus OIDC sign-in. These
+        // need no session — the caller has none yet and the provider's browser
+        // redirect carries no Authorization header. Logout is authenticated (it
+        // revokes a session), so it is in the private routes; the authenticated
+        // OIDC link route is there too.
+        .merge(authentication::public_routes())
         .merge(auth_oidc::public_routes())
         .merge(monitors::routes())
         // Avatar serving is public so images load directly in an `<img>` tag; it
@@ -160,7 +163,7 @@ where
     // Layer order matters, and is security-relevant. `route_layer`s apply
     // bottom-up, so the LAST one added is the OUTERMOST (runs first). We want, per
     // request, in order:
-    //   1. require_authentication — resolves and caches the verified `AuthHeader`
+    //   1. require_authentication — resolves and caches the verified `SessionToken`
     //      (which records the transport), rejecting an unauthenticated request,
     //   2. csrf_protect — enforces CSRF on cookie-authed state-changing requests,
     //      reading the transport cached above; rejects a forged request here,
@@ -195,9 +198,9 @@ mod test {
     use nvisy_postgres::PgConfig;
     use nvisy_webhook::reqwest::ReqwestClient;
 
-    use crate::handler::utility::CookieConfig;
     use crate::handler::{CustomRoutes, routes};
     use crate::middleware::UploadConfig;
+    use crate::response::CookieConfig;
     use crate::service::{
         CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig, IntegrationConfig,
         OidcConfig, S3Config, ServiceState, SessionKeysConfig,

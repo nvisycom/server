@@ -34,8 +34,9 @@ use crate::handler::request::{
     PipelineDetectionsQuery, PipelinePathParams, RedactDetection, WorkspaceDetectionsQuery,
 };
 use crate::handler::response::{Detection, DetectionsPage, ErrorResponse, RedactionResult};
-use crate::handler::utility::{SseResponse, resolve_account_ref};
+use crate::handler::utility::resolve_account_ref;
 use crate::handler::{Error, ErrorKind, Result};
+use crate::response::SseResponse;
 use crate::service::{
     CryptoService, DetectionJob, DetectionQueue, DetectionRef, DetectionStatusEvent, EngineService,
     EventEmitter, EventOrigin, RunBlobStore, ServiceState, WorkspaceEvent, resolve_policies,

@@ -6,9 +6,6 @@
 
 use std::borrow::Cow;
 
-use axum_extra::TypedHeader;
-use axum_extra::headers::Authorization;
-use axum_extra::headers::authorization::Bearer;
 use jiff::{Span, Timestamp};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use nvisy_postgres::model::{Account, AccountApiToken};
@@ -85,8 +82,6 @@ impl<T> AuthClaims<T> {
     const JWT_AUDIENCE: &str = "nvisy:server";
     /// Default JWT issuer identifier for authentication tokens.
     const JWT_ISSUER: &str = "nvisy";
-    /// Default threshold for token expiration (5 minutes).
-    const SOON_THRESHOLD_MINUTES: i64 = 5;
 
     /// Creates a new JWT claims structure from account, session data and custom claims.
     ///
@@ -143,45 +138,6 @@ impl<T> AuthClaims<T> {
             is_admin: account_model.is_admin,
         }
     }
-
-    /// Checks if the token has expired based on current UTC time.
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if the token's expiration time has passed.
-    #[inline]
-    #[must_use]
-    pub fn is_expired(&self) -> bool {
-        self.expires_at <= Timestamp::now().as_second()
-    }
-
-    /// Checks if the token will expire soon and should be refreshed.
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if the token expires within the configured threshold.
-    #[inline]
-    #[must_use]
-    pub fn expires_soon(&self) -> bool {
-        let remaining_seconds = self.expires_at - Timestamp::now().as_second();
-        remaining_seconds < Self::SOON_THRESHOLD_MINUTES * 60
-    }
-
-    /// Returns the remaining lifetime of this token.
-    ///
-    /// # Returns
-    ///
-    /// The duration until expiration, or zero if already expired.
-    #[inline]
-    #[must_use]
-    pub fn remaining_lifetime(&self) -> Span {
-        let remaining_seconds = self.expires_at - Timestamp::now().as_second();
-        if remaining_seconds > 0 {
-            Span::new().seconds(remaining_seconds)
-        } else {
-            Span::new()
-        }
-    }
 }
 
 impl<T> AuthClaims<T>
@@ -217,54 +173,6 @@ where
                 .with_resource("authentication")
         })
     }
-
-    /// Encodes the claims into a signed JWT token and creates an Authorization header.
-    ///
-    /// # Arguments
-    ///
-    /// * `encoding_key` - The private key for token signing
-    ///
-    /// # Returns
-    ///
-    /// Returns a typed Authorization Bearer header ready for HTTP responses.
-    ///
-    /// # Errors
-    ///
-    /// Returns errors for JWT encoding failures or invalid token format.
-    pub fn into_header(
-        self,
-        encoding_key: &EncodingKey,
-    ) -> Result<TypedHeader<Authorization<Bearer>>> {
-        let header = Header::new(Algorithm::EdDSA);
-        let jwt_token = encode(&header, &self, encoding_key).map_err(|e| {
-            tracing::error!(
-                target: TRACING_TARGET,
-                error = %e,
-                account_id = %self.account_id,
-                "Failed to encode JWT token"
-            );
-
-            ErrorKind::InternalServerError
-                .with_message("Authentication token generation failed")
-                .with_context("Unable to create session token")
-                .with_resource("authentication")
-        })?;
-
-        let bearer_auth = Authorization::bearer(&jwt_token).map_err(|_| {
-            tracing::error!(
-                target: TRACING_TARGET,
-                account_id = %self.account_id,
-                "Generated JWT token has invalid format for Authorization header"
-            );
-
-            ErrorKind::InternalServerError
-                .with_message("Authentication header creation failed")
-                .with_context("Generated token format is invalid")
-                .with_resource("authentication")
-        })?;
-
-        Ok(TypedHeader(bearer_auth))
-    }
 }
 
 impl<T> AuthClaims<T>
@@ -296,6 +204,11 @@ where
         // Configure comprehensive JWT validation
         let mut validation = Validation::new(Algorithm::EdDSA);
         validation.validate_exp = true;
+        // No clock-skew grace on `exp`: the JWT expiry is documented as an
+        // independent absolute cap (a backstop if the DB session check is ever
+        // bypassed), and the default 60s leeway would let a token past its cap
+        // through for up to a minute.
+        validation.leeway = 0;
         validation.validate_nbf = false; // Not Before claim not used
         validation.validate_aud = true;
         validation.set_audience(&[Self::JWT_AUDIENCE]);
@@ -320,32 +233,65 @@ where
         })?;
         let claims = token_data.claims;
 
-        // Double-check expiration for security
-        if claims.is_expired() {
-            tracing::warn!(
-                target: TRACING_TARGET,
-                token_id = %claims.token_id,
-                account_id = %claims.account_id,
-                expired_at = %claims.expires_at,
-                "JWT token validation failed: token expired"
-            );
-
-            return Err(ErrorKind::Unauthorized
-                .with_message("Authentication session has expired")
-                .with_context("Please sign in again to continue")
-                .with_resource("authentication"));
-        }
-
+        // `validate_exp` above makes `decode` reject an expired token, so reaching
+        // here means the token is within its lifetime — no manual re-check needed.
         tracing::debug!(
             target: TRACING_TARGET,
             token_id = %claims.token_id,
             account_id = %claims.account_id,
             is_admin = claims.is_admin,
-            expires_soon = claims.expires_soon(),
-            remaining = ?claims.remaining_lifetime(),
             "JWT token validation completed successfully"
         );
 
         Ok(claims)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use jiff::{Span, Timestamp};
+    use nvisy_postgres::model::{Account, AccountApiToken};
+    use nvisy_postgres::types::{ApiTokenType, session};
+
+    use super::{AuthClaims, NEVER_EXPIRES_SECONDS};
+
+    #[test]
+    fn web_exp_is_the_absolute_cap_from_issued_at() {
+        let account = Account::test();
+        let token = AccountApiToken::test(account.id, ApiTokenType::Web);
+        let claims = AuthClaims::new(&account, &token);
+
+        // A web session's JWT `exp` is `issued_at + MAX_AGE`, independent of the
+        // row's (sliding) `expired_at`.
+        let issued = Timestamp::from(token.issued_at).as_second();
+        let expected = issued + session::MAX_AGE.as_secs() as i64;
+        assert_eq!(claims.expires_at, expected);
+        assert_eq!(claims.account_id, account.id);
+        assert_eq!(claims.token_id, token.id);
+    }
+
+    #[test]
+    fn api_and_app_exp_follow_the_rows_own_expiry() {
+        let account = Account::test();
+        let chosen = Timestamp::now() + Span::new().hours(3);
+
+        for kind in [ApiTokenType::Api, ApiTokenType::App] {
+            let mut token = AccountApiToken::test(account.id, kind);
+            token.expired_at = Some(chosen.into());
+            let claims = AuthClaims::new(&account, &token);
+            // Not the browser cap — the token's chosen lifetime.
+            assert_eq!(claims.expires_at, chosen.as_second());
+        }
+    }
+
+    #[test]
+    fn api_and_app_without_expiry_never_effectively_expire() {
+        let account = Account::test();
+        let token = AccountApiToken::test(account.id, ApiTokenType::Api); // expired_at: None
+        let claims = AuthClaims::new(&account, &token);
+
+        // Falls back to a far-future value (~100 years), so the JWT never lapses.
+        let lower_bound = Timestamp::now().as_second() + NEVER_EXPIRES_SECONDS - 60;
+        assert!(claims.expires_at >= lower_bound);
     }
 }

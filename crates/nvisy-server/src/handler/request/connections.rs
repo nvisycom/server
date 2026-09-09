@@ -1,21 +1,13 @@
 //! Connection request types.
 
+use garde::Validate;
 use nvisy_file_service::provider::FileServiceProvider;
 use nvisy_postgres::types::{ConnectionId, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use validator::{Validate, ValidationError};
 
+use crate::extract::validators::{validate_non_blank, validate_non_blank_opt};
 use crate::service::ConnectionConfig;
-
-/// Rejects a value that is empty once trimmed, matching the database's
-/// non-empty-trimmed constraint on connection display names.
-fn validate_non_blank(value: &str) -> Result<(), ValidationError> {
-    if value.trim().is_empty() {
-        return Err(ValidationError::new("blank"));
-    }
-    Ok(())
-}
 
 /// Path parameters for connection operations.
 ///
@@ -40,11 +32,12 @@ pub struct ConnectionPathParams {
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct PickerTokenRequest {
     /// The resource the picker asked for (its `authenticate` command's
     /// `resource`), e.g. `https://contoso-my.sharepoint.com`. Optional; when
     /// absent the server uses the connection's default picker resource.
-    #[validate(length(min = 1, max = 2048))]
+    #[garde(length(chars, min = 1, max = 2048))]
     pub resource: Option<String>,
 }
 
@@ -55,12 +48,13 @@ pub struct PickerTokenRequest {
 /// export), and an LLM does not transfer at all. Omit for on-demand only.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct SyncScheduleInput {
     /// Whether the connection imports data in or exports data out. Required: the
     /// caller states the direction explicitly rather than defaulting to one.
     pub sync_mode: SyncMode,
     /// Cron expression for scheduled imports; omit for manual-only.
-    #[validate(length(min = 9, max = 100))]
+    #[garde(length(chars, min = 9, max = 100))]
     pub schedule_cron: Option<String>,
     /// How an import reconciles files whose source object was deleted.
     #[serde(default)]
@@ -70,9 +64,10 @@ pub struct SyncScheduleInput {
 /// Request payload for creating a new workspace connection.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct CreateConnection {
     /// Human-readable connection display name.
-    #[validate(length(min = 1, max = 255))]
+    #[garde(length(chars, min = 1, max = 255), custom(validate_non_blank))]
     pub display_name: String,
     /// Whether the connection is enabled. Omit to default to active; set `false`
     /// to create it disabled.
@@ -83,7 +78,7 @@ pub struct CreateConnection {
     pub config: ConnectionConfig,
     /// Scheduled-sync configuration. Accepted only for schedulable providers
     /// (object stores); rejected for others. Omit for on-demand only.
-    #[validate(nested)]
+    #[garde(dive)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync: Option<SyncScheduleInput>,
 }
@@ -102,13 +97,14 @@ pub struct OAuthStartPathParams {
 /// Request payload for starting a cloud file-service OAuth authorization.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct StartFileServiceOAuth {
     /// Human-readable name for the connection to be created on success.
-    #[validate(length(min = 1, max = 255), custom(function = "validate_non_blank"))]
+    #[garde(length(chars, min = 1, max = 255), custom(validate_non_blank))]
     pub display_name: String,
     /// Where to scope the sync: a folder id (Drive, OneDrive, Box) or a folder
     /// path (Dropbox). Omit to use the account root.
-    #[validate(length(min = 1, max = 255))]
+    #[garde(length(chars, min = 1, max = 255))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
 }
@@ -134,9 +130,10 @@ pub struct OAuthCallbackQuery {
 /// Request payload for updating an existing workspace connection.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct UpdateConnection {
     /// Human-readable connection display name.
-    #[validate(length(min = 1, max = 255))]
+    #[garde(length(chars, min = 1, max = 255), custom(validate_non_blank_opt))]
     pub display_name: Option<String>,
     /// Whether the connection is enabled. `false` disables it (pausing scheduled
     /// syncs and rejecting manual ones); omit to leave unchanged.
@@ -146,7 +143,7 @@ pub struct UpdateConnection {
     pub config: Option<ConnectionConfig>,
     /// Scheduled-sync configuration. Accepted only for schedulable providers
     /// (object stores); rejected for others. Omit to leave unchanged.
-    #[validate(nested)]
+    #[garde(dive)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync: Option<SyncScheduleInput>,
 }

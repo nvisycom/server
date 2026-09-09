@@ -23,8 +23,8 @@ use crate::handler::request::{
     ChatSessionPathParams, CreateChatSession, CursorPagination, SendChatMessage,
 };
 use crate::handler::response::{ChatMessage, ChatSession, ChatSessionsPage, ErrorResponse};
-use crate::handler::utility::SseResponse;
 use crate::handler::{Error, Result};
+use crate::response::SseResponse;
 use crate::service::{ChatService, ServiceState, TurnLocation};
 
 /// Tracing target for chat operations.
