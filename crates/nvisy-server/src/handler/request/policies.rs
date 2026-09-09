@@ -160,7 +160,7 @@ pub struct UpdatePolicy {
     #[garde(length(chars, min = 1, max = 255))]
     pub display_name: Option<String>,
     /// Policy description.
-    #[garde(length(chars, max = 4096))]
+    #[garde(inner(inner(length(chars, max = 4096))))]
     pub description: Option<Option<String>>,
     /// New policy body (replaces the stored definition).
     pub definition: Option<PolicyDraft>,

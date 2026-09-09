@@ -54,17 +54,19 @@ where
 {
     type Rejection = Error<'static>;
 
-    /// Extracts and validates a body when one is present; an absent or malformed
-    /// body yields `None`. Mirrors [`Json`]'s optional semantics: only a server
-    /// error propagates, so a missing optional body is not an error.
+    /// Extracts and validates a body only when one is present. A genuinely absent
+    /// body yields `None`; a present-but-broken body (malformed JSON, wrong
+    /// content-type) or one that fails validation is propagated as an error rather
+    /// than silently treated as absent, so an optional-body handler cannot mistake
+    /// an invalid payload for "no payload".
     async fn from_request(req: Request, state: &S) -> Result<Option<Self>, Self::Rejection> {
-        match <Self as FromRequest<S>>::from_request(req, state).await {
-            Ok(validated) => Ok(Some(validated)),
-            // For optional extraction, only propagate server errors; client errors
-            // (absent body, malformed JSON, validation failure) result in `None`.
-            Err(error) if error.kind() == ErrorKind::InternalServerError => Err(error),
-            Err(_) => Ok(None),
-        }
+        let Some(Json(data)) =
+            <Json<T> as OptionalFromRequest<S>>::from_request(req, state).await?
+        else {
+            return Ok(None);
+        };
+        data.validate()?;
+        Ok(Some(Self(data)))
     }
 }
 

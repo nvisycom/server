@@ -6,7 +6,7 @@ use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::extract::validators::validate_display_name_format;
+use crate::extract::validators::{validate_display_name_format, validate_non_blank_opt};
 
 /// Request payload to update an account's profile.
 ///
@@ -21,7 +21,11 @@ pub struct UpdateAccount {
     /// New account handle.
     pub username: Option<Handle>,
     /// New display name (2-32 characters).
-    #[garde(length(chars, min = 2, max = 32), custom(validate_display_name_format))]
+    #[garde(
+        length(chars, min = 2, max = 32),
+        custom(validate_non_blank_opt),
+        custom(validate_display_name_format)
+    )]
     pub display_name: Option<String>,
     /// New email address (must be valid email format).
     #[garde(email, length(chars, min = 5, max = 254))]

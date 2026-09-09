@@ -6,7 +6,7 @@ use nvisy_postgres::types::{ConnectionId, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::extract::validators::validate_non_blank;
+use crate::extract::validators::{validate_non_blank, validate_non_blank_opt};
 use crate::service::ConnectionConfig;
 
 /// Path parameters for connection operations.
@@ -67,7 +67,7 @@ pub struct SyncScheduleInput {
 #[garde(allow_unvalidated)]
 pub struct CreateConnection {
     /// Human-readable connection display name.
-    #[garde(length(chars, min = 1, max = 255))]
+    #[garde(length(chars, min = 1, max = 255), custom(validate_non_blank))]
     pub display_name: String,
     /// Whether the connection is enabled. Omit to default to active; set `false`
     /// to create it disabled.
@@ -133,7 +133,7 @@ pub struct OAuthCallbackQuery {
 #[garde(allow_unvalidated)]
 pub struct UpdateConnection {
     /// Human-readable connection display name.
-    #[garde(length(chars, min = 1, max = 255))]
+    #[garde(length(chars, min = 1, max = 255), custom(validate_non_blank_opt))]
     pub display_name: Option<String>,
     /// Whether the connection is enabled. `false` disables it (pausing scheduled
     /// syncs and rejecting manual ones); omit to leave unchanged.

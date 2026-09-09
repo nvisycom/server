@@ -13,6 +13,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::extract::validators::{validate_non_blank, validate_non_blank_opt};
 use crate::handler::{ErrorKind, Result};
 
 /// Request payload for creating a new workspace.
@@ -25,7 +26,7 @@ use crate::handler::{ErrorKind, Result};
 #[garde(allow_unvalidated)]
 pub struct CreateWorkspace {
     /// Display name of the workspace (2-32 characters).
-    #[garde(length(min = 2, max = 32, chars))]
+    #[garde(length(min = 2, max = 32, chars), custom(validate_non_blank))]
     pub display_name: String,
     /// Optional URL slug. Derived from the display name when omitted.
     pub slug: Option<Handle>,
@@ -84,7 +85,7 @@ impl CreateWorkspace {
 #[garde(allow_unvalidated)]
 pub struct UpdateWorkspace {
     /// New display name for the workspace (2-32 characters).
-    #[garde(length(min = 2, max = 32, chars))]
+    #[garde(length(min = 2, max = 32, chars), custom(validate_non_blank_opt))]
     pub display_name: Option<String>,
     /// New description for the workspace (max 500 characters).
     #[garde(length(max = 500, chars))]

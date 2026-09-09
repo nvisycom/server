@@ -51,13 +51,14 @@ where
     type Rejection = Error<'static>;
 
     async fn from_request(req: Request, state: &S) -> Result<Option<Self>, Self::Rejection> {
-        match <Self as FromRequest<S>>::from_request(req, state).await {
-            Ok(json) => Ok(Some(json)),
-            // Only a server error is worth surfacing; a malformed or absent body
-            // is a legitimately empty optional.
-            Err(error) if error.kind() == ErrorKind::InternalServerError => Err(error),
-            Err(_) => Ok(None),
-        }
+        // Delegate to axum's optional JSON extraction, which distinguishes a
+        // genuinely absent body (no Content-Type → `None`) from a present-but-broken
+        // one (wrong content-type or malformed JSON → error). A broken body is
+        // propagated as our `Error`, not silently treated as absent.
+        <AxumJson<T> as OptionalFromRequest<S>>::from_request(req, state)
+            .await
+            .map(|opt| opt.map(|AxumJson(value)| Self(value)))
+            .map_err(Into::into)
     }
 }
 
@@ -99,7 +100,7 @@ impl From<JsonRejection> for Error<'static> {
             // variant — match it rather than sniffing the Display string.
             JsonRejection::BytesRejection(BytesRejection::FailedToBufferBody(
                 FailedToBufferBody::LengthLimitError(_),
-            )) => ErrorKind::BadRequest
+            )) => ErrorKind::PayloadTooLarge
                 .with_message("Request body too large")
                 .with_context(
                     "Request body exceeds the maximum allowed size. Consider reducing the payload size or splitting into multiple requests.",
