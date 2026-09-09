@@ -21,7 +21,7 @@ use nvisy_postgres::{PgClient, PgConn};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::{AuthClaims, AuthHeader, Permission};
+use super::{AuthClaims, Permission, SessionToken};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::service::SessionKeys;
 
@@ -169,7 +169,7 @@ where
     ///
     /// # Arguments
     ///
-    /// * `auth_header` - The authenticated JWT header from the request
+    /// * `session_token` - The authenticated JWT header from the request
     /// * `pg_database` - Database connection pool for verification queries
     ///
     /// # Returns
@@ -189,10 +189,10 @@ where
     /// This method performs optimized database queries and should be called
     /// only once per request (caching handles subsequent uses).
     pub async fn from_unverified_header(
-        auth_header: AuthHeader<T>,
+        session_token: SessionToken<T>,
         pg_client: PgClient,
     ) -> Result<Self> {
-        let auth_claims = auth_header.into_auth_claims();
+        let auth_claims = session_token.into_auth_claims();
 
         tracing::debug!(
             target: TRACING_TARGET,
@@ -435,9 +435,9 @@ where
         }
 
         // Extract JWT token and perform comprehensive database verification
-        let auth_header = AuthHeader::from_request_parts(parts, state).await?;
+        let session_token = SessionToken::from_request_parts(parts, state).await?;
         let pg_database = PgClient::from_ref(state);
-        let auth_state = Self::from_unverified_header(auth_header, pg_database).await?;
+        let auth_state = Self::from_unverified_header(session_token, pg_database).await?;
 
         // Cache the verified state for subsequent extractors in the same request
         parts.extensions.insert(auth_state.clone());

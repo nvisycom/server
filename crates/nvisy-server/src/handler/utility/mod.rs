@@ -4,12 +4,10 @@ mod accounts;
 mod custom_routes;
 mod download;
 mod file_hash;
-mod session_cookies;
 mod sse_response;
 
 pub use accounts::{ActorFilter, build_password_user_inputs, resolve_account_ref, resolve_actor};
 pub use custom_routes::CustomRoutes;
 pub use download::{DownloadResponseExt, attachment_headers};
 pub use file_hash::FileHash;
-pub use session_cookies::CookieConfig;
 pub use sse_response::SseResponse;

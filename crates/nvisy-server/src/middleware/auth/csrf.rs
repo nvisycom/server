@@ -7,7 +7,7 @@ use axum::response::Response;
 use axum_extra::extract::CookieJar;
 
 use super::TRACING_TARGET;
-use crate::extract::{AuthHeader, AuthTransport, CSRF_COOKIE_NAME, CSRF_HEADER_NAME};
+use crate::extract::{AuthTransport, CSRF_COOKIE_NAME, CSRF_HEADER_NAME, SessionToken};
 use crate::handler::{ErrorKind, Result};
 
 /// Enforces CSRF protection on cookie-authenticated, state-changing requests
@@ -27,7 +27,7 @@ use crate::handler::{ErrorKind, Result};
 /// nor set a custom header cross-site, so a forged request fails the match.
 ///
 /// Runs after authentication, so the transport that authenticated is known (the
-/// [`AuthHeader`] the auth layer verified and cached on the request).
+/// [`SessionToken`] the auth layer verified and cached on the request).
 pub async fn csrf_protect(request: Request, next: Next) -> Result<Response> {
     // Safe methods never mutate state, so they are exempt regardless of transport.
     let is_state_changing = matches!(
@@ -35,13 +35,13 @@ pub async fn csrf_protect(request: Request, next: Next) -> Result<Response> {
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
     );
 
-    // The transport is read from the verified `AuthHeader` the auth layer cached.
+    // The transport is read from the verified `SessionToken` the auth layer cached.
     // Its absence means this route was not authenticated (no auth layer ran), so
     // there is no cookie session to protect — CSRF does not apply.
     let via_cookie = request
         .extensions()
-        .get::<AuthHeader>()
-        .and_then(AuthHeader::transport)
+        .get::<SessionToken>()
+        .map(SessionToken::transport)
         == Some(AuthTransport::Cookie);
 
     if is_state_changing && via_cookie {

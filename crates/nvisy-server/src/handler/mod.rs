@@ -43,7 +43,7 @@ use axum::middleware::{from_fn, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 pub use error::{Error, ErrorKind, Result};
 pub use invites::{CreatedInvite, InviteOutcome, create_invite};
-pub use utility::{CookieConfig, CustomRoutes};
+pub use utility::CustomRoutes;
 
 use crate::middleware::{csrf_protect, require_authentication, slide_session};
 use crate::service::ServiceState;
@@ -160,7 +160,7 @@ where
     // Layer order matters, and is security-relevant. `route_layer`s apply
     // bottom-up, so the LAST one added is the OUTERMOST (runs first). We want, per
     // request, in order:
-    //   1. require_authentication — resolves and caches the verified `AuthHeader`
+    //   1. require_authentication — resolves and caches the verified `SessionToken`
     //      (which records the transport), rejecting an unauthenticated request,
     //   2. csrf_protect — enforces CSRF on cookie-authed state-changing requests,
     //      reading the transport cached above; rejects a forged request here,
@@ -195,9 +195,9 @@ mod test {
     use nvisy_postgres::PgConfig;
     use nvisy_webhook::reqwest::ReqwestClient;
 
-    use crate::handler::utility::CookieConfig;
     use crate::handler::{CustomRoutes, routes};
     use crate::middleware::UploadConfig;
+    use crate::response::CookieConfig;
     use crate::service::{
         CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig, IntegrationConfig,
         OidcConfig, S3Config, ServiceState, SessionKeysConfig,

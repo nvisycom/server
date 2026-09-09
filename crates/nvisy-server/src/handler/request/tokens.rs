@@ -12,6 +12,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::extract::SecurityContext;
 use crate::handler::Result;
 
 /// Expiration options for API tokens.
@@ -80,13 +81,18 @@ pub struct CreateApiToken {
 }
 
 impl CreateApiToken {
-    /// Converts this request into a [`NewAccountApiToken`] model.
+    /// Converts this request into a [`NewAccountApiToken`] model, recording the
+    /// caller's IP and user agent from `security` on the token row.
     ///
     /// # Arguments
     ///
     /// * `account_id` - The account this token belongs to.
-    /// * `user_agent` - The user agent string of the client.
-    pub fn into_model(self, account_id: Uuid, user_agent: String) -> Result<NewAccountApiToken> {
+    /// * `security` - The caller's request context (client IP and user agent).
+    pub fn into_model(
+        self,
+        account_id: Uuid,
+        security: SecurityContext,
+    ) -> Result<NewAccountApiToken> {
         let sanitized_name = self.display_name.trim().to_string();
         if sanitized_name.is_empty() {
             return Err(crate::handler::ErrorKind::BadRequest
@@ -97,8 +103,8 @@ impl CreateApiToken {
         Ok(NewAccountApiToken {
             account_id,
             display_name: sanitized_name,
-            ip_address: None,
-            user_agent: Some(user_agent),
+            ip_address: security.ip_address,
+            user_agent: security.user_agent,
             session_type: Some(ApiTokenType::Api),
             is_remembered: Some(true),
             expired_at: self.expires_in.to_expiry_timestamp().map(Into::into),

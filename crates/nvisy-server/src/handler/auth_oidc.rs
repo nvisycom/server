@@ -43,7 +43,6 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
-use axum_extra::headers::UserAgent;
 use nvisy_nats::NatsClient;
 use nvisy_nats::kv::{
     OidcStateBucket as OidcStateKvBucket, OidcStateKey, ReauthProofBucket as ReauthProofKvBucket,
@@ -58,15 +57,13 @@ use nvisy_postgres::{AsyncConnection, Error as PgError, PgClient, PgConn};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::authentication::{mint_app_token, mint_web_session};
-use crate::extract::{AuthState, Json, Path, Query, TypedHeader, ValidateJson};
+use crate::extract::{AuthState, Json, Path, Query, SecurityContext, ValidateJson};
 use crate::handler::request::{DesktopTokenRequest, IdentityPathParams, OidcCallbackQuery};
 use crate::handler::response::{DesktopToken, ErrorResponse};
-use crate::handler::utility::CookieConfig;
 use crate::handler::{ErrorKind, Result};
+use crate::response::{CookieConfig, WebSession};
 use crate::service::{
-    OidcAuthorization, OidcIdentity, OidcService, RedirectKind, ServiceState, SessionKeys,
-    UserAgentParser,
+    AuthIssuer, OidcAuthorization, OidcIdentity, OidcService, RedirectKind, ServiceState,
 };
 
 /// Tracing target for OIDC sign-in operations.
@@ -321,10 +318,9 @@ fn start_reauth_docs(op: TransformOperation) -> TransformOperation {
 async fn mint_desktop_token(
     State(pg_client): State<PgClient>,
     State(oidc): State<OidcService>,
-    State(auth_keys): State<SessionKeys>,
-    State(ua_parser): State<UserAgentParser>,
+    State(issuer): State<AuthIssuer>,
     auth_state: AuthState,
-    TypedHeader(user_agent): TypedHeader<UserAgent>,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<DesktopTokenRequest>,
 ) -> Result<(StatusCode, Json<DesktopToken>)> {
     tracing::debug!(target: TRACING_TARGET, "Minting desktop app token");
@@ -357,14 +353,9 @@ async fn mint_desktop_token(
     let account = load_active_account(&mut conn, auth_state.account_id).await?;
     gate_account_status(&account)?;
 
-    let api_token = mint_app_token(
-        &mut conn,
-        auth_keys,
-        &ua_parser,
-        &account,
-        user_agent.to_string(),
-    )
-    .await?;
+    let api_token = issuer
+        .issue_app_token(&mut conn, &account, security)
+        .await?;
 
     Ok((
         StatusCode::OK,
@@ -449,15 +440,12 @@ async fn oidc_callback(
     State(pg_client): State<PgClient>,
     State(nats): State<NatsClient>,
     State(oidc): State<OidcService>,
-    State(auth_keys): State<SessionKeys>,
-    State(ua_parser): State<UserAgentParser>,
+    State(issuer): State<AuthIssuer>,
     State(cookie): State<CookieConfig>,
-    TypedHeader(user_agent): TypedHeader<UserAgent>,
+    security: SecurityContext,
     Query(query): Query<OidcCallbackQuery>,
 ) -> Response {
     tracing::debug!(target: TRACING_TARGET, "Completing OIDC callback");
-
-    let user_agent = user_agent.to_string();
 
     // Recover the flow first, so the caller's redirect target is known even when
     // the subsequent work fails — a failed sign-in still returns the browser to
@@ -473,11 +461,7 @@ async fn oidc_callback(
     };
     let redirect_uri = flow.redirect_uri.clone();
 
-    match run_flow(
-        &pg_client, &oidc, &nats, &auth_keys, &ua_parser, user_agent, flow, query,
-    )
-    .await
-    {
+    match run_flow(&pg_client, &oidc, &nats, &issuer, security, flow, query).await {
         Ok(outcome) => {
             tracing::info!(target: TRACING_TARGET, kind = outcome.kind(), "OIDC callback succeeded");
             outcome.into_redirect(redirect_uri.as_deref(), cookie)
@@ -523,7 +507,7 @@ impl CallbackOutcome {
                 // Web sign-in delivers the session as an HttpOnly cookie (plus its
                 // CSRF cookie) set on the success redirect — never in the URL.
                 let redirect = redirect_to_frontend(redirect_uri, RedirectResult::Success);
-                (cookie.session_jar(jwt), redirect).into_response()
+                (WebSession::new(jwt, cookie).into_jar(), redirect).into_response()
             }
             Self::DesktopSignedIn { jwt } => {
                 // Desktop sign-in hands the app token back in the deep-link's URL
@@ -573,14 +557,12 @@ async fn consume_flow(nats: &NatsClient, query: &OidcCallbackQuery) -> Result<Oi
 /// flow's purpose (sign in, link, or mint a reauth proof). The flow state has
 /// already been consumed by [`consume_flow`], so its `redirect_uri` is the
 /// caller's and is applied by the callback whether this succeeds or fails.
-#[allow(clippy::too_many_arguments)]
 async fn run_flow(
     pg_client: &PgClient,
     oidc: &OidcService,
     nats: &NatsClient,
-    auth_keys: &SessionKeys,
-    ua_parser: &UserAgentParser,
-    user_agent: String,
+    issuer: &AuthIssuer,
+    security: SecurityContext,
     flow: OidcFlowState,
     query: OidcCallbackQuery,
 ) -> Result<CallbackOutcome> {
@@ -618,28 +600,17 @@ async fn run_flow(
                 .and_then(|uri| oidc.classify_redirect(uri));
 
             if kind == Some(RedirectKind::DesktopScheme) {
-                let jwt = mint_app_token(
-                    &mut conn,
-                    auth_keys.clone(),
-                    ua_parser,
-                    &account,
-                    user_agent,
-                )
-                .await?;
+                let jwt = issuer
+                    .issue_app_token(&mut conn, &account, security)
+                    .await?;
                 Ok(CallbackOutcome::DesktopSignedIn { jwt })
             } else {
                 // OIDC web sign-in delivers a remembered browser session as an
                 // HttpOnly cookie set on the callback redirect — the token never
                 // appears in the URL.
-                let jwt = mint_web_session(
-                    &mut conn,
-                    auth_keys.clone(),
-                    ua_parser,
-                    &account,
-                    true,
-                    user_agent,
-                )
-                .await?;
+                let jwt = issuer
+                    .issue_web_session(&mut conn, &account, true, security)
+                    .await?;
                 Ok(CallbackOutcome::SignedIn { jwt })
             }
         }

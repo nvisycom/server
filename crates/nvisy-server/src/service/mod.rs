@@ -1,5 +1,6 @@
 //! Application state and dependency injection.
 
+mod auth_issuer;
 mod avatar;
 mod chat;
 mod crypto;
@@ -32,8 +33,9 @@ pub use nvisy_s3::S3Config;
 use nvisy_webhook::WebhookService;
 use tokio_util::sync::CancellationToken;
 
-use crate::handler::CookieConfig;
 use crate::middleware::UploadConfig;
+use crate::response::CookieConfig;
+pub use crate::service::auth_issuer::AuthIssuer;
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::chat::{ChatService, TurnLocation};
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
@@ -384,5 +386,13 @@ impl axum::extract::FromRef<ServiceState> for DetectionQueue {
 impl axum::extract::FromRef<ServiceState> for ExternalObjectStore {
     fn from_ref(state: &ServiceState) -> Self {
         ExternalObjectStore::new(state.endpoint_policy)
+    }
+}
+
+// `AuthIssuer` composes from two security fields — the JWT signing keys and the
+// user-agent parser (for session display names):
+impl axum::extract::FromRef<ServiceState> for AuthIssuer {
+    fn from_ref(state: &ServiceState) -> Self {
+        AuthIssuer::new(state.session_keys.clone(), state.user_agent_parser.clone())
     }
 }

@@ -9,23 +9,20 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum_extra::headers::UserAgent;
-use jiff::{Span, Timestamp};
-use nvisy_postgres::model::{
-    Account, AccountApiToken, NewAccount, NewAccountApiToken, NewAccountIdentity,
-};
+use nvisy_postgres::model::{NewAccount, NewAccountIdentity};
 use nvisy_postgres::query::{
     AccountApiTokenRepository, AccountIdentityRepository, AccountRepository,
 };
-use nvisy_postgres::types::{ApiTokenType, IdentityProvider, session};
-use nvisy_postgres::{AsyncConnection, Error as PgError, JiffTimestamp, PgClient, PgConn};
+use nvisy_postgres::types::IdentityProvider;
+use nvisy_postgres::{AsyncConnection, Error as PgError, PgClient};
 
 use super::request::{Login, Signup};
 use super::response::ErrorResponse;
-use crate::extract::{AuthClaims, AuthHeader, AuthState, Json, TypedHeader, ValidateJson};
-use crate::handler::utility::{CookieConfig, build_password_user_inputs};
+use crate::extract::{AuthState, Json, SecurityContext, ValidateJson};
+use crate::handler::utility::build_password_user_inputs;
 use crate::handler::{ErrorKind, Result};
-use crate::service::{PasswordService, ServiceState, SessionKeys, UserAgentParser};
+use crate::response::{ClearedSession, CookieConfig, WebSession};
+use crate::service::{AuthIssuer, PasswordService, ServiceState};
 
 /// Tracing target for authentication operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
@@ -33,137 +30,16 @@ const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
 /// Tracing target for authentication cleanup operations.
 const TRACING_TARGET_CLEANUP: &str = "nvisy_server::handler::authentication::cleanup";
 
-/// Creates a new authentication header.
-pub(crate) fn create_auth_header(
-    auth_secret_keys: SessionKeys,
-    account_model: &Account,
-    account_api_token: &AccountApiToken,
-) -> Result<AuthHeader> {
-    let auth_claims = AuthClaims::new(account_model, account_api_token);
-    let auth_header = AuthHeader::new(auth_claims, auth_secret_keys);
-    Ok(auth_header)
-}
-
-/// Mints a new session token of `session_type` for `account`, persists its
-/// `account_api_tokens` row, and returns the signed JWT. The shared core behind
-/// [`mint_web_session`] and [`mint_app_token`], so every sign-in path produces a
-/// consistently-shaped token.
-///
-/// The caller is responsible for gating the account's status (suspended/deleted)
-/// before minting.
-async fn mint_session_token(
-    conn: &mut PgConn,
-    auth_keys: SessionKeys,
-    ua_parser: &UserAgentParser,
-    account: &Account,
-    session_type: ApiTokenType,
-    is_remembered: bool,
-    expired_at: JiffTimestamp,
-    user_agent: String,
-) -> Result<String> {
-    let new_token = NewAccountApiToken {
-        account_id: account.id,
-        display_name: ua_parser.parse(&user_agent),
-        ip_address: None,
-        user_agent: Some(user_agent),
-        is_remembered: Some(is_remembered),
-        session_type: Some(session_type),
-        expired_at: Some(expired_at),
-    };
-    let token = conn.create_account_api_token(new_token).await?;
-    tracing::info!(
-        target: TRACING_TARGET,
-        token_id = %token.id,
-        account_id = %account.id,
-        session_type = ?session_type,
-        "Minted session token",
-    );
-    create_auth_header(auth_keys, account, &token)?.into_string()
-}
-
-/// Mints a `web` browser session for `account` and returns its signed JWT.
-///
-/// The idle bound follows `remember_me`; the session then slides forward on use
-/// up to the absolute cap. Password login, signup, and OIDC sign-in all go through
-/// it, so the browser session shape is identical across the three paths. The
-/// caller delivers the returned JWT to the browser as a session cookie.
-pub(crate) async fn mint_web_session(
-    conn: &mut PgConn,
-    auth_keys: SessionKeys,
-    ua_parser: &UserAgentParser,
-    account: &Account,
-    remember_me: bool,
-    user_agent: String,
-) -> Result<String> {
-    mint_session_token(
-        conn,
-        auth_keys,
-        ua_parser,
-        account,
-        ApiTokenType::Web,
-        remember_me,
-        session::initial_expires_at(remember_me).into(),
-        user_agent,
-    )
-    .await
-}
-
-/// Mints a native-app (desktop) session token for `account` and returns its
-/// signed JWT — a long-lived `app` token (see [`session::APP_TOKEN_LIFETIME`])
-/// that does not slide and is exempt from the browser absolute cap. The desktop
-/// app stores it and sends it as a Bearer credential; it is never a cookie.
-pub(crate) async fn mint_app_token(
-    conn: &mut PgConn,
-    auth_keys: SessionKeys,
-    ua_parser: &UserAgentParser,
-    account: &Account,
-    user_agent: String,
-) -> Result<String> {
-    let expired_at =
-        Timestamp::now() + Span::new().seconds(session::APP_TOKEN_LIFETIME.as_secs() as i64);
-    let jwt = mint_session_token(
-        conn,
-        auth_keys,
-        ua_parser,
-        account,
-        ApiTokenType::App,
-        false,
-        expired_at.into(),
-        user_agent,
-    )
-    .await?;
-
-    // Cap live app tokens per account so repeated desktop logins do not accumulate
-    // unbounded long-lived credentials: evict the oldest beyond the limit (the
-    // token just minted is the newest, so it is always retained). Best-effort — a
-    // pruning failure must not fail an otherwise-successful sign-in, so it is
-    // logged, not propagated.
-    if let Err(error) = conn
-        .prune_app_tokens(account.id, session::MAX_APP_TOKENS_PER_ACCOUNT)
-        .await
-    {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            error = %error,
-            account_id = %account.id,
-            "failed to prune old app tokens after minting",
-        );
-    }
-
-    Ok(jwt)
-}
-
 /// Creates a new account API token (login).
 #[tracing::instrument(skip_all)]
 async fn login(
     State(pg_client): State<PgClient>,
     State(password): State<PasswordService>,
-    State(auth_keys): State<SessionKeys>,
-    State(ua_parser): State<UserAgentParser>,
+    State(issuer): State<AuthIssuer>,
     State(cookie): State<CookieConfig>,
-    TypedHeader(user_agent): TypedHeader<UserAgent>,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<Login>,
-) -> Result<Response> {
+) -> Result<WebSession> {
     tracing::debug!(target: TRACING_TARGET, "Login attempt");
 
     let mut conn = pg_client.get_connection().await?;
@@ -215,17 +91,11 @@ async fn login(
         Some(acc) => acc,
     };
 
-    let jwt = mint_web_session(
-        &mut conn,
-        auth_keys,
-        &ua_parser,
-        &account,
-        request.remember_me,
-        user_agent.to_string(),
-    )
-    .await?;
+    let jwt = issuer
+        .issue_web_session(&mut conn, &account, request.remember_me, security)
+        .await?;
 
-    Ok(cookie.session_response(jwt))
+    Ok(WebSession::new(jwt, cookie))
 }
 
 fn login_docs(op: TransformOperation) -> TransformOperation {
@@ -245,12 +115,11 @@ fn login_docs(op: TransformOperation) -> TransformOperation {
 async fn signup(
     State(pg_client): State<PgClient>,
     State(password): State<PasswordService>,
-    State(auth_keys): State<SessionKeys>,
-    State(ua_parser): State<UserAgentParser>,
+    State(issuer): State<AuthIssuer>,
     State(cookie): State<CookieConfig>,
-    TypedHeader(user_agent): TypedHeader<UserAgent>,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<Signup>,
-) -> Result<Response> {
+) -> Result<WebSession> {
     tracing::debug!(target: TRACING_TARGET, "Signing up");
 
     // Validate password strength and hash
@@ -301,17 +170,11 @@ async fn signup(
         "Account created",
     );
 
-    let jwt = mint_web_session(
-        &mut conn,
-        auth_keys,
-        &ua_parser,
-        &account,
-        request.remember_me,
-        user_agent.to_string(),
-    )
-    .await?;
+    let jwt = issuer
+        .issue_web_session(&mut conn, &account, request.remember_me, security)
+        .await?;
 
-    Ok(cookie.session_response(jwt))
+    Ok(WebSession::new(jwt, cookie))
 }
 
 fn signup_docs(op: TransformOperation) -> TransformOperation {
@@ -352,7 +215,7 @@ async fn logout(
     // client simply has no cookies to clear and ignores them; a cookie client is
     // logged out on the client side too. Revocation is authoritative server-side
     // via the token soft-delete below.
-    let cleared = cookie.clearing_response_jar();
+    let cleared = ClearedSession::new(cookie).into_jar();
 
     if !token_exists {
         tracing::warn!(target: TRACING_TARGET, "Logout attempted on non-existent token");
@@ -408,7 +271,7 @@ mod tests {
     use jiff::{Span, Timestamp};
     use nvisy_postgres::model::{NewAccount, NewAccountApiToken, UpdateAccountApiToken};
     use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
-    use nvisy_postgres::types::{Handle, session};
+    use nvisy_postgres::types::{ApiTokenType, Handle, session};
     use nvisy_postgres::{JiffTimestamp, PgClient, PgConfig, PgConn};
     use uuid::Uuid;
 
@@ -425,17 +288,17 @@ mod tests {
         /// Creates the fixture: a fresh account and a not-remembered `web` session
         /// token.
         async fn create() -> anyhow::Result<Self> {
-            Self::create_with(super::ApiTokenType::Web, session::initial_expires_at(false)).await
+            Self::create_with(ApiTokenType::Web, session::initial_expires_at(false)).await
         }
 
         /// Like [`create`](Self::create) but for an `app` token with the given
         /// idle/expiry bound — a native-app session.
         async fn create_app(expired_at: Timestamp) -> anyhow::Result<Self> {
-            Self::create_with(super::ApiTokenType::App, expired_at).await
+            Self::create_with(ApiTokenType::App, expired_at).await
         }
 
         async fn create_with(
-            session_type: super::ApiTokenType,
+            session_type: ApiTokenType,
             expired_at: Timestamp,
         ) -> anyhow::Result<Self> {
             dotenvy::dotenv().ok();
@@ -656,7 +519,7 @@ mod tests {
                 .create_account_api_token(NewAccountApiToken {
                     account_id: account.id,
                     display_name: format!("app {i}"),
-                    session_type: Some(super::ApiTokenType::App),
+                    session_type: Some(ApiTokenType::App),
                     expired_at: Some(JiffTimestamp::from(now + days(365))),
                     ..Default::default()
                 })
@@ -676,7 +539,7 @@ mod tests {
             .create_account_api_token(NewAccountApiToken {
                 account_id: account.id,
                 display_name: "web".to_owned(),
-                session_type: Some(super::ApiTokenType::Web),
+                session_type: Some(ApiTokenType::Web),
                 expired_at: Some(session::initial_expires_at(false).into()),
                 ..Default::default()
             })

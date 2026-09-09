@@ -7,16 +7,16 @@
 mod auth_state;
 mod authorized;
 mod jwt_claims;
-mod jwt_header;
 mod optional_auth;
 mod permission;
+mod session_token;
 
 pub use self::auth_state::AuthState;
 pub use self::authorized::*;
 pub use self::jwt_claims::AuthClaims;
-pub use self::jwt_header::{AuthHeader, AuthTransport};
 pub use self::optional_auth::OptionalAuth;
 pub use self::permission::Permission;
+pub use self::session_token::{AuthTransport, SessionToken};
 
 /// Name of the `HttpOnly` cookie that carries the session JWT for browser
 /// clients. The same JWT reaches programmatic callers as an `Authorization:

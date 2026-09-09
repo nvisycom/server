@@ -8,7 +8,6 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum_extra::headers::UserAgent;
 use nvisy_postgres::model::{AccountApiToken, UpdateAccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::types::ApiTokenType;
@@ -17,11 +16,9 @@ use uuid::Uuid;
 
 use super::request::{CreateApiToken, CursorPagination, TokenPathParams, UpdateApiToken};
 use super::response::{ApiToken, ApiTokenWithJWT, ApiTokensPage, ErrorResponse};
-use crate::extract::{
-    AuthClaims, AuthHeader, AuthState, Json, Path, Query, TypedHeader, ValidateJson,
-};
+use crate::extract::{AuthState, Json, Path, Query, SecurityContext, ValidateJson};
 use crate::handler::{ErrorKind, Result};
-use crate::service::{ServiceState, SessionKeys};
+use crate::service::{AuthIssuer, ServiceState};
 
 /// Tracing target for API token operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::tokens";
@@ -33,9 +30,9 @@ const TRACING_TARGET: &str = "nvisy_server::handler::tokens";
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn create_api_token(
     State(pg_client): State<PgClient>,
-    State(auth_keys): State<SessionKeys>,
+    State(issuer): State<AuthIssuer>,
     auth_state: AuthState,
-    TypedHeader(user_agent): TypedHeader<UserAgent>,
+    security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateApiToken>,
 ) -> Result<(StatusCode, Json<ApiTokenWithJWT>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating API token");
@@ -52,13 +49,11 @@ async fn create_api_token(
                 .with_message("Account not found")
         })?;
 
-    let new_token = request.into_model(auth_state.account_id, user_agent.to_string())?;
+    let new_token = request.into_model(auth_state.account_id, security)?;
     let api_token = conn.create_account_api_token(new_token).await?;
 
-    // Generate JWT for the new token
-    let auth_claims = AuthClaims::new(&account, &api_token);
-    let auth_header = AuthHeader::new(auth_claims, auth_keys);
-    let jwt_token = auth_header.into_string()?;
+    // Sign the JWT for the new token through the shared issuer.
+    let jwt_token = issuer.sign(&account, &api_token)?;
 
     let response = ApiToken::from_model(api_token.clone()).with_jwt(jwt_token);
 
