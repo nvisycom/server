@@ -204,6 +204,11 @@ where
         // Configure comprehensive JWT validation
         let mut validation = Validation::new(Algorithm::EdDSA);
         validation.validate_exp = true;
+        // No clock-skew grace on `exp`: the JWT expiry is documented as an
+        // independent absolute cap (a backstop if the DB session check is ever
+        // bypassed), and the default 60s leeway would let a token past its cap
+        // through for up to a minute.
+        validation.leeway = 0;
         validation.validate_nbf = false; // Not Before claim not used
         validation.validate_aud = true;
         validation.set_audience(&[Self::JWT_AUDIENCE]);

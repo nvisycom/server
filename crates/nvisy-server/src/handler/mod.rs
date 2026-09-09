@@ -99,18 +99,21 @@ fn private_routes(service_state: ServiceState) -> ApiRouter<ServiceState> {
         // Account identity management and OIDC step-up re-auth.
         .merge(identities::routes())
         .merge(auth_oidc::private_routes())
+        // Logout revokes the caller's session (a cookie-driven state change), so
+        // it sits behind the authentication and CSRF layers.
+        .merge(authentication::authenticated_routes())
 }
 
 /// Returns an [`ApiRouter`] with all built-in public routes. Downstream routes
 /// are merged separately by [`routes`].
 fn public_routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
-        // Authentication is always mounted: password login/signup/logout plus OIDC
-        // sign-in. The OIDC public routes (sign-in start + provider callback) need
-        // no session — the caller has none yet and the provider's browser redirect
-        // carries no Authorization header. The authenticated link route is in the
-        // private routes.
-        .merge(authentication::routes())
+        // Public authentication: password login/signup plus OIDC sign-in. These
+        // need no session — the caller has none yet and the provider's browser
+        // redirect carries no Authorization header. Logout is authenticated (it
+        // revokes a session), so it is in the private routes; the authenticated
+        // OIDC link route is there too.
+        .merge(authentication::public_routes())
         .merge(auth_oidc::public_routes())
         .merge(monitors::routes())
         // Avatar serving is public so images load directly in an `<img>` tag; it

@@ -253,15 +253,24 @@ fn logout_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
 }
 
-/// Returns a [`Router`] with all related routes.
-///
-/// [`Router`]: axum::routing::Router
-pub fn routes() -> ApiRouter<ServiceState> {
+/// Public authentication routes: login and signup, which a caller with no
+/// session reaches before authenticating.
+pub fn public_routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
         .api_route("/auth/login/", post_with(login, login_docs))
         .api_route("/auth/signup/", post_with(signup, signup_docs))
+        .with_path_items(|item| item.tag("Authentication"))
+}
+
+/// Authenticated authentication routes: logout, which revokes the caller's
+/// session and so must sit behind the authentication and CSRF layers (it is a
+/// cookie-driven state change).
+pub fn authenticated_routes() -> ApiRouter<ServiceState> {
+    use aide::axum::routing::*;
+
+    ApiRouter::new()
         .api_route("/auth/logout/", post_with(logout, logout_docs))
         .with_path_items(|item| item.tag("Authentication"))
 }
