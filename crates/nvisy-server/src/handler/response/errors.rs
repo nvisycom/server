@@ -1,26 +1,10 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
 
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use schemars::JsonSchema;
 use serde::Serialize;
-use validator::ValidationErrors;
-
-/// Validation error details for field-specific errors.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct ValidationErrorDetail {
-    /// Field name that failed validation
-    pub field: String,
-    /// Error code for the validation failure
-    pub code: String,
-    /// Human-readable error message
-    pub message: String,
-    /// Additional parameters related to the validation error
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub params: Option<HashMap<String, serde_json::Value>>,
-}
 
 /// HTTP error response representation with security-conscious design.
 ///
@@ -41,9 +25,6 @@ pub struct ErrorResponse<'a> {
     /// Helpful suggestion for resolving the error (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<Cow<'a, str>>,
-    /// Validation error details for field-specific errors
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub validation: Option<Vec<ValidationErrorDetail>>,
 
     /// Error correlation ID for tracking
     #[serde(skip)]
@@ -124,11 +105,6 @@ impl<'a> ErrorResponse<'a> {
         "Unsupported media type",
         StatusCode::UNSUPPORTED_MEDIA_TYPE,
     );
-    pub const VALIDATION_ERROR: Self = Self::new(
-        "validation_error",
-        "Validation failed",
-        StatusCode::BAD_REQUEST,
-    );
 
     /// Creates a new error response.
     #[inline]
@@ -139,7 +115,6 @@ impl<'a> ErrorResponse<'a> {
             resource: None,
             context: None,
             suggestion: None,
-            validation: None,
             correlation_id: None,
             status,
         }
@@ -184,47 +159,10 @@ impl<'a> ErrorResponse<'a> {
         self
     }
 
-    /// Adds validation errors to the error response.
-    pub fn with_validation_errors(mut self, errors: Vec<ValidationErrorDetail>) -> Self {
-        self.validation = Some(errors);
-        self
-    }
-
     /// Adds a correlation ID to the error response.
     pub fn with_correlation_id(mut self, correlation_id: impl Into<Cow<'a, str>>) -> Self {
         self.correlation_id = Some(correlation_id.into());
         self
-    }
-
-    /// Creates an error response from validator ValidationErrors.
-    pub fn from_validation_errors(validation_errors: ValidationErrors) -> Self {
-        let mut error_details = Vec::new();
-
-        for (field, field_errors) in validation_errors.field_errors() {
-            for error in field_errors {
-                let mut params = HashMap::new();
-                for (key, value) in &error.params {
-                    params.insert(key.to_string(), value.clone());
-                }
-
-                error_details.push(ValidationErrorDetail {
-                    field: field.to_string(),
-                    code: error.code.to_string(),
-                    message: error
-                        .message
-                        .as_ref()
-                        .map(|m| m.to_string())
-                        .unwrap_or_else(|| format!("Validation failed for field '{}'", field)),
-                    params: if params.is_empty() {
-                        None
-                    } else {
-                        Some(params)
-                    },
-                });
-            }
-        }
-
-        Self::VALIDATION_ERROR.with_validation_errors(error_details)
     }
 }
 
@@ -232,12 +170,6 @@ impl Default for ErrorResponse<'_> {
     #[inline]
     fn default() -> Self {
         Self::INTERNAL_SERVER_ERROR
-    }
-}
-
-impl From<ValidationErrors> for ErrorResponse<'_> {
-    fn from(errors: ValidationErrors) -> Self {
-        Self::from_validation_errors(errors)
     }
 }
 

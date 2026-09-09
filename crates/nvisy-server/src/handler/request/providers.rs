@@ -1,9 +1,9 @@
 //! Provider request types.
 
+use garde::Validate;
 use nvisy_postgres::types::ProviderId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use validator::Validate;
 
 use crate::service::ProviderConfig;
 
@@ -24,9 +24,10 @@ pub struct ProviderPathParams {
 /// Request payload for creating a new workspace provider.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct CreateProvider {
     /// Human-readable provider display name.
-    #[validate(length(min = 1, max = 255))]
+    #[garde(length(min = 1, max = 255, chars))]
     pub display_name: String,
     /// Whether the provider is enabled. Omit to default to active; set `false` to
     /// create it disabled.
@@ -40,9 +41,10 @@ pub struct CreateProvider {
 /// Request payload for updating an existing workspace provider.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct UpdateProvider {
     /// Human-readable provider display name.
-    #[validate(length(min = 1, max = 255))]
+    #[garde(length(min = 1, max = 255, chars))]
     pub display_name: Option<String>,
     /// Whether the provider is enabled. Omit to leave unchanged.
     pub is_active: Option<bool>,

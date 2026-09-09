@@ -13,6 +13,7 @@ mod pg_connection;
 mod reject;
 mod security_context;
 mod typed_header;
+mod valid;
 mod version;
 mod workspace_context;
 
@@ -23,8 +24,9 @@ pub use crate::extract::avatar::Avatar;
 pub use crate::extract::connection_info::{AppConnectInfo, ClientIp};
 pub use crate::extract::idempotency_key::IdempotencyKey;
 pub use crate::extract::pg_connection::PgPool;
-pub use crate::extract::reject::{Form, Json, Multipart, Path, Query, ValidateJson};
+pub use crate::extract::reject::{Form, Json, Multipart, Path, Query};
 pub use crate::extract::security_context::SecurityContext;
 pub use crate::extract::typed_header::TypedHeader;
+pub use crate::extract::valid::{ValidateJson, validators};
 pub use crate::extract::version::Version;
 pub use crate::extract::workspace_context::WorkspaceContext;

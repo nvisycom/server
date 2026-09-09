@@ -10,14 +10,12 @@ mod json_with_rej;
 mod mutlipart_with_rej;
 mod path_with_rej;
 mod query_with_rej;
-mod validated_json;
 
 pub use self::form_with_rej::Form;
 pub use self::json_with_rej::Json;
 pub use self::mutlipart_with_rej::Multipart;
 pub use self::path_with_rej::Path;
 pub use self::query_with_rej::Query;
-pub use self::validated_json::ValidateJson;
 
 /// Sanitizes a deserializer error message before it is surfaced or logged.
 ///

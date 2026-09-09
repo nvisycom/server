@@ -1,10 +1,10 @@
 //! Connection sync request types.
 
+use garde::Validate;
 use nvisy_postgres::types::{ConnectionId, SyncStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use validator::Validate;
 
 /// Query parameters for listing all syncs across a workspace.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -33,12 +33,13 @@ pub struct ConnectionSyncPathParams {
 /// One file the user selected in the provider's picker.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct PickedFile {
     /// The provider's file identifier (used to fetch the bytes).
-    #[validate(length(min = 1, max = 1024))]
+    #[garde(length(min = 1, max = 1024, chars))]
     pub id: String,
     /// The file's display name, as the picker reported it.
-    #[validate(length(min = 1, max = 1024))]
+    #[garde(length(min = 1, max = 1024, chars))]
     pub name: String,
 }
 
@@ -46,9 +47,10 @@ pub struct PickedFile {
 /// connection (the provider picker returns id + name per file).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct ImportFiles {
     /// The files to import. Already-imported files are skipped.
-    #[validate(length(min = 1, max = 500), nested)]
+    #[garde(length(min = 1, max = 500), dive)]
     pub files: Vec<PickedFile>,
 }
 
@@ -57,9 +59,10 @@ pub struct ImportFiles {
 /// source. Mirrors [`ImportFiles`] on the export side.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct ExportFiles {
     /// The workspace files to export, by id. Files already exported to the
     /// connection are exported again (a fresh copy).
-    #[validate(length(min = 1, max = 500))]
+    #[garde(length(min = 1, max = 500))]
     pub file_ids: Vec<Uuid>,
 }

@@ -11,6 +11,7 @@ use aide::generate::GenContext;
 use aide::openapi::Operation;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use strum::EnumIter;
 
 use crate::handler::response::ErrorResponse;
 
@@ -249,7 +250,7 @@ pub type Result<T, E = Error<'static>> = std::result::Result<T, E>;
 /// Each variant corresponds to a specific HTTP status code and error scenario.
 /// The variants are organized by HTTP status code family.
 #[must_use = "error kinds do nothing unless used to create errors"]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
 pub enum ErrorKind {
     // 4xx Client Errors
     /// 400 Bad Request - Missing required path parameter
@@ -489,24 +490,18 @@ mod tests {
     }
 
     #[test]
-    fn all_error_kinds_have_responses() {
-        let kinds = vec![
-            ErrorKind::BadRequest,
-            ErrorKind::Conflict,
-            ErrorKind::Forbidden,
-            ErrorKind::InternalServerError,
-            ErrorKind::MalformedAuthToken,
-            ErrorKind::MissingAuthToken,
-            ErrorKind::MissingPathParam,
-            ErrorKind::NotFound,
-            ErrorKind::NotImplemented,
-            ErrorKind::Unauthorized,
-        ];
+    fn every_error_kind_has_a_client_or_server_response() {
+        use strum::IntoEnumIterator;
 
-        for kind in kinds {
+        // Iterating the variants (rather than a hand-kept list) means a newly
+        // added `ErrorKind` is covered here automatically.
+        for kind in ErrorKind::iter() {
             let response = kind.response();
-            assert!(!response.name.is_empty());
-            assert!(response.status.as_u16() >= 400);
+            assert!(!response.name.is_empty(), "{kind:?} has an empty name");
+            assert!(
+                response.status.as_u16() >= 400,
+                "{kind:?} maps to a non-error status"
+            );
             let _ = kind.into_response();
         }
     }

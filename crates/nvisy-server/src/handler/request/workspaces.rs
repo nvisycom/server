@@ -4,6 +4,7 @@
 //! creation, updates, and archival. All request types support JSON serialization
 //! and validation.
 
+use garde::Validate;
 use nvisy_postgres::model::{
     NewWorkspace, UpdateWorkspace as UpdateWorkspaceModel, UpdateWorkspaceMember,
 };
@@ -11,7 +12,6 @@ use nvisy_postgres::types::{Handle, Json, NotificationEvent, WorkspaceSettings};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use validator::Validate;
 
 use crate::handler::{ErrorKind, Result};
 
@@ -22,14 +22,15 @@ use crate::handler::{ErrorKind, Result};
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct CreateWorkspace {
     /// Display name of the workspace (2-32 characters).
-    #[validate(length(min = 2, max = 32))]
+    #[garde(length(min = 2, max = 32, chars))]
     pub display_name: String,
     /// Optional URL slug. Derived from the display name when omitted.
     pub slug: Option<Handle>,
     /// Optional description of the workspace (max 500 characters).
-    #[validate(length(max = 500))]
+    #[garde(length(max = 500, chars))]
     pub description: Option<String>,
     /// Workspace settings (approval requirement, data-retention rules). Defaults
     /// to requiring approval and keeping everything when omitted.
@@ -80,12 +81,13 @@ impl CreateWorkspace {
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct UpdateWorkspace {
     /// New display name for the workspace (2-32 characters).
-    #[validate(length(min = 2, max = 32))]
+    #[garde(length(min = 2, max = 32, chars))]
     pub display_name: Option<String>,
     /// New description for the workspace (max 500 characters).
-    #[validate(length(max = 500))]
+    #[garde(length(max = 500, chars))]
     pub description: Option<String>,
     /// Replacement workspace settings (approval requirement, data-retention
     /// rules). When omitted, settings are left unchanged.
@@ -107,6 +109,7 @@ impl UpdateWorkspace {
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct UpdateNotificationSettings {
     /// Whether to send email notifications.
     pub notify_via_email: Option<bool>,

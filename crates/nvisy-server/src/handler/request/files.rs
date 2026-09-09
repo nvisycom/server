@@ -5,12 +5,12 @@ use std::collections::{BTreeSet, HashSet};
 
 use derive_more::{AsRef, Into};
 use elide_pipeline::FormatRegistry;
+use garde::Validate;
 use nvisy_postgres::model::UpdateWorkspaceFile as UpdateFileModel;
 use nvisy_postgres::types::FileFilter;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use validator::Validate;
 
 use crate::handler::utility::FileHash;
 use crate::service::{EngineService, UnknownFormatToken};
@@ -19,9 +19,10 @@ use crate::service::{EngineService, UnknownFormatToken};
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct UpdateFile {
     /// New display name for the file.
-    #[validate(length(min = 1, max = 255))]
+    #[garde(length(chars, min = 1, max = 255))]
     pub display_name: Option<String>,
     /// Updated metadata.
     pub metadata: Option<serde_json::Value>,
@@ -44,10 +45,11 @@ impl UpdateFile {
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct DeleteFiles {
     /// Ids of the files to delete. Ids that are unknown, already deleted, or in
     /// another workspace are skipped rather than failing the request.
-    #[validate(length(min = 1, max = 100))]
+    #[garde(length(min = 1, max = 100))]
     pub file_ids: Vec<Uuid>,
 }
 

@@ -1,20 +1,21 @@
 //! Authentication request types.
 
+use garde::Validate;
 use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use validator::Validate;
 
 /// Request payload for login.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct Login {
     /// Email address or username of the account.
-    #[validate(length(min = 3, max = 254))]
+    #[garde(length(chars, min = 3, max = 254))]
     pub identifier: String,
     /// Password of the account.
-    #[validate(length(min = 1, max = 1000))]
+    #[garde(length(chars, min = 1, max = 1000))]
     pub password: String,
     /// Whether to remember this device for extended session. Defaults to false.
     #[serde(default)]
@@ -25,21 +26,21 @@ pub struct Login {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct Signup {
     /// Public account handle, unique across all accounts.
     pub username: Handle,
 
     /// Optional display name of the account.
-    #[validate(length(min = 2, max = 32))]
+    #[garde(length(chars, min = 2, max = 32))]
     pub display_name: Option<String>,
 
     /// Email address of the account.
-    #[validate(email)]
-    #[validate(length(min = 5, max = 254))]
+    #[garde(email, length(chars, min = 5, max = 254))]
     pub email_address: String,
 
     /// Password of the account.
-    #[validate(length(min = 8, max = 128))]
+    #[garde(length(chars, min = 8, max = 128))]
     pub password: String,
 
     /// Whether to remember the device for extended session. Defaults to false.
@@ -53,10 +54,10 @@ pub struct Signup {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct RequestPasswordReset {
     /// Email address of the account to reset password for.
-    #[validate(email)]
-    #[validate(length(min = 5, max = 254))]
+    #[garde(email, length(chars, min = 5, max = 254))]
     pub email_address: String,
 }
 
@@ -64,13 +65,14 @@ pub struct RequestPasswordReset {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct ConfirmPasswordReset {
     /// Password reset token.
-    #[validate(length(min = 10, max = 200))]
+    #[garde(length(chars, min = 10, max = 200))]
     pub token: String,
 
     /// New password.
-    #[validate(length(min = 8, max = 128))]
+    #[garde(length(chars, min = 8, max = 128))]
     pub new_password: String,
 }
 
@@ -84,10 +86,11 @@ pub struct ConfirmPasswordReset {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct DesktopTokenRequest {
     /// The desktop deep-link the app will receive the token on. Must match a
     /// configured desktop redirect scheme.
-    #[validate(length(min = 1, max = 2048))]
+    #[garde(length(chars, min = 1, max = 2048))]
     pub redirect_uri: String,
 }
 

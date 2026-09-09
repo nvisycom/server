@@ -5,12 +5,12 @@
 
 use std::time::Duration;
 
+use garde::Validate;
 use nvisy_postgres::model::NewAccountApiToken;
 use nvisy_postgres::types::ApiTokenType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use validator::Validate;
 
 use crate::handler::Result;
 
@@ -69,9 +69,10 @@ impl TokenExpiration {
 /// Request to create a new API token.
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct CreateApiToken {
     /// Human-readable display name for the API token (1-100 characters).
-    #[validate(length(min = 1, max = 100))]
+    #[garde(length(chars, min = 1, max = 100))]
     pub display_name: String,
 
     /// When the token expires.
@@ -108,8 +109,9 @@ impl CreateApiToken {
 /// Request to update an existing API token.
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct UpdateApiToken {
     /// Updated display name for the API token (1-100 characters).
-    #[validate(length(min = 1, max = 100))]
+    #[garde(length(chars, min = 1, max = 100))]
     pub display_name: Option<String>,
 }

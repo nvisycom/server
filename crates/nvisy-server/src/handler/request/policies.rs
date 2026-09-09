@@ -6,11 +6,11 @@ use elide_pipeline::policy::{
     CustomMatcher, LabelScope, PolicyDefinition, PolicyRule, TemplateOrigin,
 };
 use elide_pipeline::template::PolicyTemplate;
+use garde::Validate;
 use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use validator::Validate;
 
 /// Path parameters for policy operations.
 ///
@@ -132,14 +132,15 @@ impl PolicyBody {
 /// overridden here.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct CreatePolicy {
     /// Optional display name override. Defaults to the policy's own name.
-    #[validate(length(min = 1, max = 255))]
+    #[garde(length(chars, min = 1, max = 255))]
     pub display_name: Option<String>,
     /// URL slug, unique within the workspace and immutable after creation.
     pub slug: Handle,
     /// Optional description override. Defaults to the policy's own description.
-    #[validate(length(max = 4096))]
+    #[garde(length(chars, max = 4096))]
     pub description: Option<String>,
     /// The source of the policy body.
     #[serde(flatten)]
@@ -153,12 +154,13 @@ pub struct CreatePolicy {
 /// settable here.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct UpdatePolicy {
     /// Human-readable policy display name.
-    #[validate(length(min = 1, max = 255))]
+    #[garde(length(chars, min = 1, max = 255))]
     pub display_name: Option<String>,
     /// Policy description.
-    #[validate(length(max = 4096))]
+    #[garde(length(chars, max = 4096))]
     pub description: Option<Option<String>>,
     /// New policy body (replaces the stored definition).
     pub definition: Option<PolicyDraft>,
