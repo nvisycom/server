@@ -42,6 +42,7 @@ use crate::extract::{
 use crate::handler::request::{OAuthCallbackQuery, OAuthStartPathParams, StartFileServiceOAuth};
 use crate::handler::response::ErrorResponse;
 use crate::handler::{Error, ErrorKind, Result};
+use crate::response::connection_result_redirect;
 use crate::service::{
     ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin, FileServiceRedirect,
     ServiceState, WorkspaceEvent,
@@ -177,7 +178,7 @@ async fn oauth_callback(
             ("error", None)
         }
     };
-    redirect_to_frontend(redirect.0.as_deref(), status, workspace_slug.as_deref())
+    connection_result_redirect(redirect.0.as_deref(), status, workspace_slug.as_deref())
 }
 
 /// Runs the callback's work: consume the pending authorization, exchange the
@@ -271,33 +272,6 @@ async fn complete_callback(
         connection_id,
         workspace_slug: flow.workspace_slug,
     })
-}
-
-/// Redirects the browser back to the frontend with the flow's outcome.
-///
-/// A `{workspaceSlug}` placeholder in the configured base is substituted with
-/// `workspace_slug` when known (i.e. on success), so a base like
-/// `https://app/w/{workspaceSlug}/integrations` lands on the workspace's page.
-/// The outcome is appended as a `connection=success|error` query. Falls back to a
-/// self-describing data page when no frontend URL is configured.
-fn redirect_to_frontend(
-    base: Option<&str>,
-    status: &str,
-    workspace_slug: Option<&str>,
-) -> Redirect {
-    match base {
-        Some(base) => {
-            let base = match workspace_slug {
-                Some(slug) => base.replace("{workspaceSlug}", slug),
-                None => base.to_owned(),
-            };
-            let separator = if base.contains('?') { '&' } else { '?' };
-            Redirect::to(&format!("{base}{separator}connection={status}"))
-        }
-        None => Redirect::to(&format!(
-            "data:text/plain,cloud%20file%20connection%20{status}"
-        )),
-    }
 }
 
 /// Returns the authenticated cloud file OAuth routes: starting an

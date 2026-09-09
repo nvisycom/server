@@ -7,8 +7,12 @@
 
 mod auth;
 mod avatar_image;
+mod download;
+mod redirect;
 mod sse;
 
 pub use auth::{ClearedSession, CookieConfig, WebSession};
 pub use avatar_image::AvatarImage;
+pub use download::attachment_headers;
+pub(crate) use redirect::{RedirectResult, connection_result_redirect};
 pub use sse::SseResponse;

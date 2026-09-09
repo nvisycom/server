@@ -31,9 +31,10 @@ use crate::handler::request::{
     WorkspaceFilePathParams,
 };
 use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
-use crate::handler::utility::{DownloadResponseExt, attachment_headers, resolve_account_ref};
+use crate::handler::utility::{DownloadDocs, resolve_account_ref};
 use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::UploadConfig;
+use crate::response::attachment_headers;
 use crate::service::{
     CryptoService, EngineService, EventEmitter, EventOrigin, FileRef, HashingReader, LimitedReader,
     RunBlobStore, ServiceState, WorkspaceEvent,
