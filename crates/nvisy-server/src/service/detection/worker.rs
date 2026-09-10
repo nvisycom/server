@@ -30,7 +30,7 @@ use super::support::{
 };
 use crate::extract::SecurityContext;
 use crate::handler::request::PipelineDefinition;
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 use crate::service::{
     DetectionRef, EngineService, EventOrigin, Infra, RunBlobStore, Worker, WorkspaceEvent,
     event_outbox_row,

@@ -25,8 +25,7 @@ CREATE TABLE accounts (
     -- Primary identifier
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-    -- Status and permissions
-    is_admin              BOOLEAN     NOT NULL DEFAULT FALSE,
+    -- Status
     is_verified           BOOLEAN     NOT NULL DEFAULT FALSE,
     is_suspended          BOOLEAN     NOT NULL DEFAULT FALSE,
 
@@ -64,10 +63,7 @@ CREATE TABLE accounts (
     CONSTRAINT accounts_updated_after_created CHECK (updated_at >= created_at),
     CONSTRAINT accounts_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
     CONSTRAINT accounts_deleted_after_updated CHECK (deleted_at IS NULL OR deleted_at >= updated_at),
-    CONSTRAINT accounts_password_changed_after_created CHECK (password_changed_at IS NULL OR password_changed_at >= created_at),
-
-    -- An admin account cannot be suspended.
-    CONSTRAINT accounts_suspended_not_admin CHECK (NOT (is_suspended AND is_admin))
+    CONSTRAINT accounts_password_changed_after_created CHECK (password_changed_at IS NULL OR password_changed_at >= created_at)
 );
 
 -- Keep updated_at current on every write.
@@ -82,11 +78,6 @@ CREATE UNIQUE INDEX accounts_username_unique_idx
     ON accounts (lower(username))
     WHERE deleted_at IS NULL;
 
--- Admins, for the admin listing.
-CREATE INDEX accounts_admin_users_idx
-    ON accounts (id, display_name)
-    WHERE is_admin = TRUE AND deleted_at IS NULL;
-
 -- Fuzzy name/email search over live accounts.
 CREATE INDEX accounts_display_name_trgm_idx
     ON accounts USING gin (display_name gin_trgm_ops)
@@ -98,7 +89,6 @@ CREATE INDEX accounts_email_address_trgm_idx
 
 COMMENT ON TABLE accounts IS 'Account identities, with preferences and security tracking.';
 COMMENT ON COLUMN accounts.id IS 'Unique account identifier';
-COMMENT ON COLUMN accounts.is_admin IS 'Administrative privileges across the whole system';
 COMMENT ON COLUMN accounts.is_verified IS 'Whether the account has confirmed its email';
 COMMENT ON COLUMN accounts.is_suspended IS 'Whether account access is temporarily disabled';
 COMMENT ON COLUMN accounts.username IS 'Public handle, unique across accounts (3-32 chars, lowercase, dash-separated)';

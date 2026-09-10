@@ -26,16 +26,14 @@ use nvisy_postgres::types::{
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
-use crate::extract::{
-    Authorized, Json, Path, Query, RunConnectionSyncs, ValidateJson, ViewConnections,
-};
+use crate::extract::{Authorized, Json, Path, Query, ValidateJson, markers};
 use crate::handler::request::{
     ConnectionPathParams, ConnectionSyncPathParams, CursorPagination, ExportFiles, ImportFiles,
     WorkspaceSyncsQuery,
 };
-use crate::handler::response::{ConnectionSync, ConnectionSyncsPage, ErrorResponse, Page};
+use crate::handler::response::{ConnectionSync, ConnectionSyncsPage, Page};
 use crate::handler::utility::resolve_account_ref;
-use crate::handler::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
     ConnectionConfig, ConnectionSyncService, CryptoService, ServiceState, SourceEntry,
     TransferKind, TransferRequest,
@@ -62,7 +60,7 @@ async fn sync_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(connection_sync): State<ConnectionSyncService>,
-    authz: Authorized<RunConnectionSyncs>,
+    authz: Authorized<markers::RunConnectionSyncs>,
     Path(path_params): Path<ConnectionPathParams>,
 ) -> Result<(StatusCode, Json<ConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Triggering connection sync");
@@ -160,7 +158,7 @@ async fn import_files(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(connection_sync): State<ConnectionSyncService>,
-    authz: Authorized<RunConnectionSyncs>,
+    authz: Authorized<markers::RunConnectionSyncs>,
     Path(path_params): Path<ConnectionPathParams>,
     ValidateJson(request): ValidateJson<ImportFiles>,
 ) -> Result<(StatusCode, Json<ConnectionSync>)> {
@@ -247,7 +245,7 @@ async fn export_files(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(connection_sync): State<ConnectionSyncService>,
-    authz: Authorized<RunConnectionSyncs>,
+    authz: Authorized<markers::RunConnectionSyncs>,
     Path(path_params): Path<ConnectionPathParams>,
     ValidateJson(request): ValidateJson<ExportFiles>,
 ) -> Result<(StatusCode, Json<ConnectionSync>)> {
@@ -358,7 +356,7 @@ async fn open_run_and_transfer(
 )]
 async fn list_connection_syncs(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewConnections>,
+    authz: Authorized<markers::ViewConnections>,
     Path(path_params): Path<ConnectionPathParams>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<ConnectionSyncsPage>)> {
@@ -403,7 +401,7 @@ fn list_connection_syncs_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn list_workspace_syncs(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewConnections>,
+    authz: Authorized<markers::ViewConnections>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<WorkspaceSyncsQuery>,
 ) -> Result<(StatusCode, Json<ConnectionSyncsPage>)> {
@@ -452,7 +450,7 @@ fn list_workspace_syncs_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn read_connection_sync(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewConnections>,
+    authz: Authorized<markers::ViewConnections>,
     Path(path_params): Path<ConnectionSyncPathParams>,
 ) -> Result<(StatusCode, Json<ConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading connection sync");
@@ -505,7 +503,7 @@ fn read_connection_sync_docs(op: TransformOperation) -> TransformOperation {
 async fn cancel_connection_sync(
     State(pg_client): State<PgClient>,
     State(connection_sync): State<ConnectionSyncService>,
-    authz: Authorized<RunConnectionSyncs>,
+    authz: Authorized<markers::RunConnectionSyncs>,
     Path(path_params): Path<ConnectionSyncPathParams>,
 ) -> Result<(StatusCode, Json<ConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Cancelling connection sync");

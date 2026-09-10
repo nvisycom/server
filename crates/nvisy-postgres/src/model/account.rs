@@ -24,8 +24,6 @@ use crate::types::Handle;
 pub struct Account {
     /// Unique account identifier.
     pub id: Uuid,
-    /// Administrative privileges across the entire system.
-    pub is_admin: bool,
     /// Account identity verification status (email confirmation, etc.).
     pub is_verified: bool,
     /// Temporarily disables account access while preserving data.
@@ -54,8 +52,8 @@ pub struct Account {
 
 impl Account {
     /// An account row with a fresh unique handle and matching email, for tests.
-    /// Not admin/verified/suspended; timestamps are now. Useful to downstream
-    /// crates that need an `Account` without a database.
+    /// Not verified/suspended; timestamps are now. Useful to downstream crates
+    /// that need an `Account` without a database.
     #[cfg(any(feature = "test_util", test))]
     #[must_use]
     pub fn test() -> Self {
@@ -64,7 +62,6 @@ impl Account {
         let now: Timestamp = jiff::Timestamp::now().into();
         Self {
             id: Uuid::now_v7(),
-            is_admin: false,
             is_verified: false,
             is_suspended: false,
             username,
@@ -142,8 +139,6 @@ pub struct UpdateAccount {
     pub timezone: Option<String>,
     /// Preferred locale code.
     pub locale: Option<String>,
-    /// Administrative privileges.
-    pub is_admin: Option<bool>,
     /// Account identity verification status.
     pub is_verified: Option<bool>,
     /// Account suspension status.

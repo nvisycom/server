@@ -14,7 +14,7 @@ use nvisy_postgres::query::{
 use nvisy_postgres::types::{ChatRole, ProviderType};
 use uuid::Uuid;
 
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 use crate::service::{Infra, ProviderConfig};
 
 /// Where in a conversation a turn happens: the workspace and session it belongs

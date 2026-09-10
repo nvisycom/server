@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 use super::coordinator::DetectionCoordinator;
 use super::job::DetectionJob;
 use super::service::DetectionQueue;
-use crate::handler::{Error, Result};
+use crate::response::{Error, Result};
 use crate::service::{Infra, Worker};
 
 /// Tracing target for the detection-job drainer.

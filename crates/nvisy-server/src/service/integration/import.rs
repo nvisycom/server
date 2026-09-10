@@ -23,7 +23,7 @@ use uuid::Uuid;
 use super::connector::Connector;
 use super::file_source::{FileSource, SourceEntry};
 use super::naming::{object_basename, object_extension};
-use crate::handler::Result;
+use crate::response::Result;
 use crate::service::{ConnectionConfig, HashingReader, Infra, Measurements};
 
 /// Tracing target for connection sync operations.

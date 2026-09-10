@@ -80,3 +80,12 @@ COMMENT ON COLUMN workspace_policies.metadata IS 'Metadata for filtering/display
 COMMENT ON COLUMN workspace_policies.created_at IS 'Creation timestamp';
 COMMENT ON COLUMN workspace_policies.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN workspace_policies.deleted_at IS 'Soft-deletion timestamp; NULL means live';
+
+-- Policy lifecycle events feed the activity log and webhooks.
+ALTER TYPE ACTIVITY_TYPE ADD VALUE 'policy.created';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE 'policy.updated';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE 'policy.deleted';
+
+ALTER TYPE WEBHOOK_EVENT ADD VALUE 'policy.created';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE 'policy.updated';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE 'policy.deleted';

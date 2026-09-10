@@ -19,19 +19,14 @@ use nvisy_webhook::provider::{WebhookContext, WebhookRequest};
 use url::Url;
 use uuid::Uuid;
 
-use crate::extract::{
-    Authorized, CreateWebhooks, DeleteWebhooks, Json, Path, Query, SecurityContext, TestWebhooks,
-    UpdateWebhooks, ValidateJson, ViewWebhooks,
-};
+use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
     CreateWebhook, CursorPagination, TestWebhook, UpdateWebhook as UpdateWebhookRequest,
     WebhookPathParams,
 };
-use crate::handler::response::{
-    ErrorResponse, Webhook, WebhookCreated, WebhookResult, WebhooksPage,
-};
+use crate::handler::response::{Webhook, WebhookCreated, WebhookResult, WebhooksPage};
 use crate::handler::utility::resolve_account_ref;
-use crate::handler::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
     CryptoService, EventEmitter, EventOrigin, ServiceState, WebhookRef, WorkspaceEvent,
 };
@@ -52,7 +47,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::webhooks";
 async fn create_webhook(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
-    authz: Authorized<CreateWebhooks>,
+    authz: Authorized<markers::CreateWebhooks>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateWebhook>,
 ) -> Result<(StatusCode, Json<WebhookCreated>)> {
@@ -138,7 +133,7 @@ fn create_webhook_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn list_webhooks(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewWebhooks>,
+    authz: Authorized<markers::ViewWebhooks>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<WebhooksPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace webhooks");
@@ -185,7 +180,7 @@ fn list_webhooks_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn read_webhook(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewWebhooks>,
+    authz: Authorized<markers::ViewWebhooks>,
     Path(path_params): Path<WebhookPathParams>,
 ) -> Result<(StatusCode, Json<Webhook>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace webhook");
@@ -229,7 +224,7 @@ fn read_webhook_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_webhook(
     State(pg_client): State<PgClient>,
-    authz: Authorized<UpdateWebhooks>,
+    authz: Authorized<markers::UpdateWebhooks>,
     Path(path_params): Path<WebhookPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWebhookRequest>,
@@ -314,7 +309,7 @@ fn update_webhook_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_webhook(
     State(pg_client): State<PgClient>,
-    authz: Authorized<DeleteWebhooks>,
+    authz: Authorized<markers::DeleteWebhooks>,
     Path(path_params): Path<WebhookPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
@@ -378,7 +373,7 @@ async fn test_webhook(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(webhook_service): State<WebhookService>,
-    authz: Authorized<TestWebhooks>,
+    authz: Authorized<markers::TestWebhooks>,
     Path(path_params): Path<WebhookPathParams>,
     ValidateJson(request): ValidateJson<TestWebhook>,
 ) -> Result<(StatusCode, Json<WebhookResult>)> {

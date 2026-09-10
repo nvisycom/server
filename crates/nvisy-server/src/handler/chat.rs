@@ -18,13 +18,12 @@ use nvisy_postgres::query::{AppendSessionUpdate, ChatMessageRepository, ChatSess
 use nvisy_postgres::types::ChatRole;
 use tokio_util::sync::CancellationToken;
 
-use crate::extract::{Authorized, Json, Path, Query, UseChat, ValidateJson};
+use crate::extract::{Authorized, Json, Path, Query, ValidateJson, markers};
 use crate::handler::request::{
     ChatSessionPathParams, CreateChatSession, CursorPagination, SendChatMessage,
 };
-use crate::handler::response::{ChatMessage, ChatSession, ChatSessionsPage, ErrorResponse};
-use crate::handler::{Error, Result};
-use crate::response::SseResponse;
+use crate::handler::response::{ChatMessage, ChatSession, ChatSessionsPage};
+use crate::response::{Error, ErrorResponse, Result, SseResponse};
 use crate::service::{ChatService, ServiceState, TurnLocation};
 
 /// Tracing target for chat operations.
@@ -45,7 +44,7 @@ const MAX_REPLY_BYTES: usize = 96 * 1024;
 #[tracing::instrument(skip_all, fields(account_id = %authz.account_id, workspace_id = %authz.workspace.id))]
 async fn create_session(
     State(pg_client): State<PgClient>,
-    authz: Authorized<UseChat>,
+    authz: Authorized<markers::UseChat>,
     ValidateJson(request): ValidateJson<CreateChatSession>,
 ) -> Result<(StatusCode, Json<ChatSession>)> {
     let account_id = authz.account_id;
@@ -76,7 +75,7 @@ fn create_session_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(skip_all, fields(account_id = %authz.account_id, workspace_id = %authz.workspace.id))]
 async fn list_sessions(
     State(pg_client): State<PgClient>,
-    authz: Authorized<UseChat>,
+    authz: Authorized<markers::UseChat>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<ChatSessionsPage>)> {
     let workspace = authz.workspace;
@@ -103,7 +102,7 @@ fn list_sessions_docs(op: TransformOperation) -> TransformOperation {
 async fn list_messages(
     State(pg_client): State<PgClient>,
     State(chat): State<ChatService>,
-    authz: Authorized<UseChat>,
+    authz: Authorized<markers::UseChat>,
     Path(path_params): Path<ChatSessionPathParams>,
 ) -> Result<(StatusCode, Json<Vec<ChatMessage>>)> {
     let workspace = authz.workspace;
@@ -136,7 +135,7 @@ fn list_messages_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(skip_all, fields(account_id = %authz.account_id, workspace_id = %authz.workspace.id, session_id = %path_params.session_id))]
 async fn delete_session(
     State(pg_client): State<PgClient>,
-    authz: Authorized<UseChat>,
+    authz: Authorized<markers::UseChat>,
     Path(path_params): Path<ChatSessionPathParams>,
 ) -> Result<StatusCode> {
     let workspace = authz.workspace;
@@ -175,7 +174,7 @@ async fn send_message(
     State(pg_client): State<PgClient>,
     State(chat): State<ChatService>,
     State(shutdown): State<CancellationToken>,
-    authz: Authorized<UseChat>,
+    authz: Authorized<markers::UseChat>,
     Path(path_params): Path<ChatSessionPathParams>,
     ValidateJson(request): ValidateJson<SendChatMessage>,
 ) -> Result<SseResponse<ChatToken>> {

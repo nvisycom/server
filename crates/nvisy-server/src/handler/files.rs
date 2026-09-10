@@ -23,18 +23,17 @@ use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthState, Authorized, DeleteFiles, Json, Multipart, Path, Permission, Query, SecurityContext,
-    UpdateFiles, UploadFiles, ValidateJson, ViewFiles, WorkspaceContext,
+    AuthState, Authorized, Json, Multipart, Path, Permission, Query, SecurityContext, ValidateJson,
+    WorkspaceContext, markers,
 };
 use crate::handler::request::{
     CursorPagination, DeleteFiles as DeleteFilesRequest, ListFiles, UpdateFile,
     WorkspaceFilePathParams,
 };
-use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
+use crate::handler::response::{self, File, Files, FilesPage};
 use crate::handler::utility::{DownloadDocs, resolve_account_ref};
-use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::UploadConfig;
-use crate::response::attachment_headers;
+use crate::response::{Error, ErrorKind, ErrorResponse, Result, attachment_headers};
 use crate::service::{
     CryptoService, EngineService, EventEmitter, EventOrigin, FileRef, HashingReader, LimitedReader,
     RunBlobStore, ServiceState, WorkspaceEvent,
@@ -73,7 +72,7 @@ async fn find_file_with_creator(
 async fn list_files(
     State(pg_client): State<PgClient>,
     State(engine): State<EngineService>,
-    authz: Authorized<ViewFiles>,
+    authz: Authorized<markers::ViewFiles>,
     Query(files_query): Query<ListFiles>,
     Query(cursor_pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<FilesPage>)> {
@@ -303,7 +302,7 @@ async fn upload_file(
     State(crypto): State<CryptoService>,
     State(engine): State<EngineService>,
     State(upload): State<UploadConfig>,
-    authz: Authorized<UploadFiles>,
+    authz: Authorized<markers::UploadFiles>,
     security: SecurityContext,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Files>)> {
@@ -427,7 +426,7 @@ fn upload_file_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn read_file(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewFiles>,
+    authz: Authorized<markers::ViewFiles>,
     Path(path_params): Path<WorkspaceFilePathParams>,
 ) -> Result<(StatusCode, Json<File>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading file metadata");
@@ -469,7 +468,7 @@ fn read_file_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_file(
     State(pg_client): State<PgClient>,
-    authz: Authorized<UpdateFiles>,
+    authz: Authorized<markers::UpdateFiles>,
     Path(path_params): Path<WorkspaceFilePathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateFile>,
@@ -668,7 +667,7 @@ fn download_file_docs(op: TransformOperation) -> TransformOperation {
 async fn delete_file(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
-    authz: Authorized<DeleteFiles>,
+    authz: Authorized<markers::DeleteFiles>,
     Path(path_params): Path<WorkspaceFilePathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
@@ -738,7 +737,7 @@ fn delete_file_docs(op: TransformOperation) -> TransformOperation {
 async fn bulk_delete_files(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
-    authz: Authorized<DeleteFiles>,
+    authz: Authorized<markers::DeleteFiles>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<DeleteFilesRequest>,
 ) -> Result<(StatusCode, Json<response::DeletedFiles>)> {

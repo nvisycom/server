@@ -15,9 +15,9 @@ use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
 use super::request::{CreateApiToken, CursorPagination, TokenPathParams, UpdateApiToken};
-use super::response::{ApiToken, ApiTokenWithJWT, ApiTokensPage, ErrorResponse};
+use super::response::{ApiToken, ApiTokenWithJWT, ApiTokensPage};
 use crate::extract::{AuthState, Json, Path, Query, SecurityContext, ValidateJson};
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, ErrorResponse, Result};
 use crate::service::{AuthIssuer, ServiceState};
 
 /// Tracing target for API token operations.

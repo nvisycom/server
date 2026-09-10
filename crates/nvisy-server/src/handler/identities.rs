@@ -31,9 +31,9 @@ use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use super::consume_reauth_proof;
 use crate::extract::{AuthState, Json, Path, ValidateJson};
 use crate::handler::request::{IdentityPathParams, SetPassword};
-use crate::handler::response::{AccountIdentities, ErrorResponse};
+use crate::handler::response::AccountIdentities;
 use crate::handler::utility::build_password_user_inputs;
-use crate::handler::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{PasswordService, ServiceState};
 
 /// Tracing target for identity operations.

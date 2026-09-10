@@ -17,15 +17,13 @@ use nvisy_postgres::types::ProviderId;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
-use crate::extract::{
-    Authorized, Json, ManageProviders, Path, Query, SecurityContext, ValidateJson, ViewProviders,
-};
+use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
     CreateProvider, CursorPagination, ProviderPathParams, ProvidersQuery, UpdateProvider,
 };
-use crate::handler::response::{ConnectionVerification, ErrorResponse, Provider, ProvidersPage};
+use crate::handler::response::{ConnectionVerification, Provider, ProvidersPage};
 use crate::handler::utility::resolve_account_ref;
-use crate::handler::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
     CryptoService, EventEmitter, EventOrigin, ProviderConfig, ProviderRef, ServiceState,
     WorkspaceEvent,
@@ -49,7 +47,7 @@ async fn create_provider(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(endpoint_policy): State<EndpointPolicy>,
-    authz: Authorized<ManageProviders>,
+    authz: Authorized<markers::ManageProviders>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateProvider>,
 ) -> Result<(StatusCode, Json<Provider>)> {
@@ -142,7 +140,7 @@ fn create_provider_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn list_providers(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewProviders>,
+    authz: Authorized<markers::ViewProviders>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<ProvidersQuery>,
 ) -> Result<(StatusCode, Json<ProvidersPage>)> {
@@ -194,7 +192,7 @@ fn list_providers_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn read_provider(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewProviders>,
+    authz: Authorized<markers::ViewProviders>,
     Path(path_params): Path<ProviderPathParams>,
 ) -> Result<(StatusCode, Json<Provider>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace provider");
@@ -240,7 +238,7 @@ async fn update_provider(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(endpoint_policy): State<EndpointPolicy>,
-    authz: Authorized<ManageProviders>,
+    authz: Authorized<markers::ManageProviders>,
     Path(path_params): Path<ProviderPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateProvider>,
@@ -353,7 +351,7 @@ fn update_provider_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_provider(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ManageProviders>,
+    authz: Authorized<markers::ManageProviders>,
     Path(path_params): Path<ProviderPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
@@ -417,7 +415,7 @@ fn delete_provider_docs(op: TransformOperation) -> TransformOperation {
 async fn verify_provider(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
-    authz: Authorized<ViewProviders>,
+    authz: Authorized<markers::ViewProviders>,
     Path(path_params): Path<ProviderPathParams>,
 ) -> Result<(StatusCode, Json<ConnectionVerification>)> {
     tracing::debug!(target: TRACING_TARGET, "Verifying workspace provider");

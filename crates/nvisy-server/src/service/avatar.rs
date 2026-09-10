@@ -17,7 +17,7 @@ use nvisy_s3::{AccountAvatarKey, GetObject, WorkspaceAvatarKey};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 use crate::service::Infra;
 
 /// The content type of every stored avatar.

@@ -3,6 +3,11 @@
 -- and its typed params; the client renders the copy from those.
 
 -- Type of activity recorded in a workspace audit log.
+-- Only the values for objects that exist by this migration are declared here.
+-- Each later feature (webhooks, connections, providers, files, policies,
+-- pipelines, detections, redactions, assignments) adds its own values via
+-- ALTER TYPE ... ADD VALUE in its own migration, so a value is introduced by
+-- the migration that introduces the object it describes.
 CREATE TYPE ACTIVITY_TYPE AS ENUM (
     -- Workspace activities
     'workspace.created',
@@ -18,44 +23,7 @@ CREATE TYPE ACTIVITY_TYPE AS ENUM (
     'invite.created',
     'invite.accepted',
     'invite.declined',
-    'invite.canceled',
-
-    -- Connection activities
-    'connection.created',
-    'connection.updated',
-    'connection.deleted',
-    'connection.sync.started',
-    'connection.sync.completed',
-    'connection.sync.failed',
-
-    -- Provider activities
-    'provider.created',
-    'provider.updated',
-    'provider.deleted',
-
-    -- Webhook activities
-    'webhook.created',
-    'webhook.updated',
-    'webhook.deleted',
-
-    -- File activities
-    'file.created',
-    'file.updated',
-    'file.deleted',
-
-    -- Pipeline, detection, and redaction activities
-    'pipeline.created',
-    'pipeline.updated',
-    'pipeline.deleted',
-    'pipeline.detection.started',
-    'pipeline.detection.completed',
-    'pipeline.detection.failed',
-    'pipeline.redaction.created',
-
-    -- Policy activities
-    'policy.created',
-    'policy.updated',
-    'policy.deleted'
+    'invite.canceled'
 );
 
 COMMENT ON TYPE ACTIVITY_TYPE IS 'Type of activity performed in a workspace, for audit logging.';

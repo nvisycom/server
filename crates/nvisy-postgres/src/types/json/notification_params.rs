@@ -6,6 +6,7 @@
 //! text is stored; the client localizes copy from `type` and the params.
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::Json;
 use crate::types::{ConnectionId, DetectionId, Handle, NotificationEvent, RedactionId};
@@ -108,6 +109,30 @@ pub struct DetectionFailedParams {
     pub error: Option<String>,
 }
 
+/// Params of a `file.assigned` notification, sent to the reviewer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct FileAssignedParams {
+    /// Id of the assignment.
+    pub assignment_id: Uuid,
+    /// Id of the file the reviewer was assigned.
+    pub file_id: Uuid,
+    /// Display name of the file the reviewer was assigned.
+    pub file_name: String,
+}
+
+/// Params of a `file.unassigned` notification, sent to the former reviewer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct FileUnassignedParams {
+    /// Id of the file the reviewer was unassigned from.
+    pub file_id: Uuid,
+    /// Display name of the file the reviewer was unassigned from.
+    pub file_name: String,
+}
+
 /// The typed payload of a notification, tagged by `type` with its params under
 /// `data` (the same `{type, data}` envelope the activity log and outbox event use).
 ///
@@ -145,6 +170,14 @@ pub enum NotificationPayload {
     /// A detection failed.
     #[serde(rename = "pipeline.detection.failed")]
     DetectionFailed(DetectionFailedParams),
+
+    /// A file was assigned to the reviewer for review.
+    #[serde(rename = "file.assigned")]
+    FileAssigned(FileAssignedParams),
+
+    /// The reviewer was unassigned from a file.
+    #[serde(rename = "file.unassigned")]
+    FileUnassigned(FileUnassignedParams),
 }
 
 impl NotificationPayload {
@@ -160,6 +193,8 @@ impl NotificationPayload {
             NotificationPayload::DetectionCompleted(_) => NotificationEvent::DetectionCompleted,
             NotificationPayload::RedactionCreated(_) => NotificationEvent::RedactionCreated,
             NotificationPayload::DetectionFailed(_) => NotificationEvent::DetectionFailed,
+            NotificationPayload::FileAssigned(_) => NotificationEvent::FileAssigned,
+            NotificationPayload::FileUnassigned(_) => NotificationEvent::FileUnassigned,
         }
     }
 

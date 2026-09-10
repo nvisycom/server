@@ -26,7 +26,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
-use crate::handler::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Result};
 use crate::service::Infra;
 
 /// Tracing target for blob-store operations.

@@ -23,17 +23,17 @@ use nvisy_postgres::{AsyncConnection, Error as PgError, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthState, Authorized, InviteMembers, Json, Path, Query, SecurityContext, ValidateJson,
-    ViewMembers, WorkspaceContext,
+    AuthState, Authorized, Json, Path, Query, SecurityContext, ValidateJson, WorkspaceContext,
+    markers,
 };
 use crate::handler::request::{
     CreateInvite, CursorPagination, GenerateInviteCode, InviteCodePathParams, InvitePathParams,
     ListInvites, ReplyInvite,
 };
 use crate::handler::response::{
-    ErrorResponse, Invite, InviteCode, InvitePreview, InviteSent, InvitesPage, Member,
+    Invite, InviteCode, InvitePreview, InviteSent, InvitesPage, Member,
 };
-use crate::handler::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
     EventEmitter, EventOrigin, InviteRef, MemberRef, NotificationEmitter, ServiceState,
     WorkspaceEvent,
@@ -175,7 +175,7 @@ pub async fn create_invite(
 )]
 async fn send_invite(
     State(pg_client): State<PgClient>,
-    authz: Authorized<InviteMembers>,
+    authz: Authorized<markers::InviteMembers>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateInvite>,
 ) -> Result<(StatusCode, Json<InviteSent>)> {
@@ -238,7 +238,7 @@ fn send_invite_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn list_invites(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewMembers>,
+    authz: Authorized<markers::ViewMembers>,
     Query(query): Query<ListInvites>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<InvitesPage>)> {
@@ -292,7 +292,7 @@ fn list_invites_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn cancel_invite(
     State(pg_client): State<PgClient>,
-    authz: Authorized<InviteMembers>,
+    authz: Authorized<markers::InviteMembers>,
     security: SecurityContext,
     Path(path_params): Path<InvitePathParams>,
 ) -> Result<StatusCode> {
@@ -460,7 +460,7 @@ fn reply_to_invite_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn generate_invite_code(
     State(pg_client): State<PgClient>,
-    authz: Authorized<InviteMembers>,
+    authz: Authorized<markers::InviteMembers>,
     ValidateJson(request): ValidateJson<GenerateInviteCode>,
 ) -> Result<(StatusCode, Json<InviteCode>)> {
     tracing::info!(target: TRACING_TARGET, "Generating invite code");

@@ -17,7 +17,7 @@ use std::time::Duration;
 use nvisy_postgres::query::{ExpiredFileRef, WorkspaceFileRepository};
 use tokio_util::sync::CancellationToken;
 
-use crate::handler::Result;
+use crate::response::Result;
 use crate::service::{Infra, PurgeOutcome, RunBlobStore, Worker};
 
 /// Tracing target for the file reaper.

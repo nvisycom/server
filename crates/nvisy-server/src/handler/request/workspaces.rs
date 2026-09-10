@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::extract::validators::{validate_non_blank, validate_non_blank_opt};
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 
 /// Request payload for creating a new workspace.
 ///

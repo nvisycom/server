@@ -2,7 +2,7 @@
 
 use nvisy_postgres::types::{ChatMessageConstraints, ChatSessionConstraints};
 
-use crate::handler::{Error, ErrorKind};
+use super::{Error, ErrorKind};
 
 impl From<ChatSessionConstraints> for Error<'static> {
     fn from(c: ChatSessionConstraints) -> Self {

@@ -15,7 +15,7 @@ use nvisy_postgres::types::session::SlidingWindow;
 
 use super::TRACING_TARGET;
 use crate::extract::AuthState;
-use crate::handler::Result;
+use crate::response::Result;
 
 /// Requires a valid session to proceed with the request.
 ///

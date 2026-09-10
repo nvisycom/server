@@ -15,11 +15,12 @@ use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
 use super::detections::find_detection;
-use crate::extract::{Authorized, DownloadAudit, Json, Path, Query, ViewDetections};
+use crate::extract::{Authorized, Json, Path, Query, markers};
+use crate::handler::ServiceState;
 use crate::handler::request::{CursorPagination, DetectionPathParams, RedactionPathParams};
-use crate::handler::response::{ErrorResponse, RedactionResult, RedactionsPage};
+use crate::handler::response::{RedactionResult, RedactionsPage};
 use crate::handler::utility::resolve_account_ref;
-use crate::handler::{ErrorKind, Result, ServiceState};
+use crate::response::{ErrorKind, ErrorResponse, Result};
 use crate::service::{EngineService, RunBlobStore};
 
 /// Tracing target for redaction operations.
@@ -36,7 +37,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::redactions";
 )]
 async fn list_detection_redactions(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewDetections>,
+    authz: Authorized<markers::ViewDetections>,
     Path(path_params): Path<DetectionPathParams>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<RedactionsPage>)> {
@@ -97,7 +98,7 @@ async fn get_redaction_review(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
-    authz: Authorized<DownloadAudit>,
+    authz: Authorized<markers::DownloadAudit>,
     Path(path_params): Path<RedactionPathParams>,
 ) -> Result<(StatusCode, Json<Audit>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting redaction review audit");

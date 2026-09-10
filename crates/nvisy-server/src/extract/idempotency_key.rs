@@ -9,7 +9,7 @@ use axum::extract::FromRequestParts;
 use axum::http::HeaderName;
 use axum::http::request::Parts;
 
-use crate::handler::{Error, ErrorKind};
+use crate::response::{Error, ErrorKind};
 
 /// The idempotency header name, lowercased to match `HeaderMap` lookup.
 const IDEMPOTENCY_HEADER: HeaderName = HeaderName::from_static("idempotency-key");
@@ -56,7 +56,7 @@ mod tests {
     use axum::http::Request;
 
     use super::{IdempotencyKey, MAX_KEY_LENGTH};
-    use crate::handler::ErrorKind;
+    use crate::response::ErrorKind;
 
     /// Drives the extractor against a request carrying `header` (or none).
     async fn extract(header: Option<&str>) -> Result<Option<String>, ErrorKind> {

@@ -16,9 +16,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::extract::{Json, Path};
-use crate::handler::response::ErrorResponse;
-use crate::handler::{Error, Result};
-use crate::response::AvatarImage;
+use crate::response::{AvatarImage, Error, ErrorResponse, Result};
 use crate::service::{AvatarService, ServiceState};
 
 /// Tracing target for public avatar serving.

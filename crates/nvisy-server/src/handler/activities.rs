@@ -18,15 +18,15 @@ use nvisy_postgres::query::WorkspaceActivityRepository;
 use nvisy_postgres::types::WithAccountRef;
 use serde::Serialize;
 
-use crate::extract::{Authorized, Json, Query, ViewActivity};
+use crate::extract::{Authorized, Json, Query, markers};
+use crate::handler::ServiceState;
 use crate::handler::request::{
     ActivityExportOptions, ActivityFilterQuery, CursorPagination, DateWindow, ExportFormat,
     MAX_EXPORT_ROWS,
 };
-use crate::handler::response::{ActivitiesPage, Activity, ErrorResponse};
+use crate::handler::response::{ActivitiesPage, Activity};
 use crate::handler::utility::{ActorFilter, DownloadDocs, resolve_actor};
-use crate::handler::{Error, ErrorKind, Result, ServiceState};
-use crate::response::attachment_headers;
+use crate::response::{Error, ErrorKind, ErrorResponse, Result, attachment_headers};
 
 /// Tracing target for activity export operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::activities";
@@ -112,7 +112,7 @@ impl ActivityExportRow {
 )]
 async fn list_activities(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewActivity>,
+    authz: Authorized<markers::ViewActivity>,
     Query(filter_query): Query<ActivityFilterQuery>,
     Query(window): Query<DateWindow>,
     Query(pagination): Query<CursorPagination>,
@@ -176,7 +176,7 @@ fn list_activities_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn export_activities(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewActivity>,
+    authz: Authorized<markers::ViewActivity>,
     Query(filter_query): Query<ActivityFilterQuery>,
     Query(window_query): Query<DateWindow>,
     Query(export_query): Query<ActivityExportOptions>,

@@ -20,7 +20,7 @@ use uuid::Uuid;
 use super::connector::Connector;
 use super::file_source::{ByteStream, FileSource, FileUpload};
 use super::naming::{export_key, mime_from_extension};
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 use crate::service::{ConnectionConfig, Infra};
 
 /// Tracing target for connection sync operations.

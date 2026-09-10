@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use super::service::DetectionQueue;
 use crate::extract::SecurityContext;
-use crate::handler::Result;
+use crate::response::Result;
 use crate::service::{CryptoService, DetectionRef, EventEmitter, EventOrigin, WorkspaceEvent};
 
 /// Tracing target for shared detection operations.

@@ -58,6 +58,12 @@ db_enum! {
         FileUpdated = "file.updated",
         /// File was deleted.
         FileDeleted = "file.deleted",
+        /// File was assigned to a reviewer.
+        FileAssigned = "file.assigned",
+        /// A reviewer was unassigned from a file.
+        FileUnassigned = "file.unassigned",
+        /// A file assignment's review status changed.
+        AssignmentStatusChanged = "file.assignment.updated",
         /// Pipeline was created.
         PipelineCreated = "pipeline.created",
         /// Pipeline was updated.

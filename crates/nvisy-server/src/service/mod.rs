@@ -49,9 +49,9 @@ pub use crate::service::detection::{
 };
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::event::{
-    ConnectionRef, DetectionRef, EventEmitter, EventOrigin, EventOutboxDrainer, FileRef, InviteRef,
-    MemberRef, PipelineRef, PolicyRef, ProviderRef, WebhookRef, WorkspaceEvent, WorkspaceRef,
-    event_outbox_row,
+    AssignmentRef, ConnectionRef, DetectionRef, EventEmitter, EventOrigin, EventOutboxDrainer,
+    FileRef, InviteRef, MemberRef, PipelineRef, PolicyRef, ProviderRef, WebhookRef, WorkspaceEvent,
+    WorkspaceRef, event_outbox_row,
 };
 pub use crate::service::file_reaper::FileReaper;
 pub use crate::service::health::{HealthCache, HealthConfig};

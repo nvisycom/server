@@ -15,12 +15,12 @@ use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthState, Authorized, Json, ManageRoles, Path, Query, RemoveMembers, SecurityContext,
-    ValidateJson, ViewMembers, WorkspaceContext,
+    AuthState, Authorized, Json, Path, Query, SecurityContext, ValidateJson, WorkspaceContext,
+    markers,
 };
 use crate::handler::request::{CursorPagination, ListMembers, MemberPathParams, UpdateMember};
-use crate::handler::response::{ErrorResponse, Member, MembersPage, Page};
-use crate::handler::{Error, ErrorKind, Result};
+use crate::handler::response::{Member, MembersPage, Page};
+use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{EventEmitter, EventOrigin, MemberRef, ServiceState, WorkspaceEvent};
 
 /// Tracing target for workspace member operations.
@@ -39,7 +39,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::members";
 )]
 async fn list_members(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewMembers>,
+    authz: Authorized<markers::ViewMembers>,
     Query(query): Query<ListMembers>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<MembersPage>)> {
@@ -92,7 +92,7 @@ fn list_members_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn get_member(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewMembers>,
+    authz: Authorized<markers::ViewMembers>,
     Path(path_params): Path<MemberPathParams>,
 ) -> Result<(StatusCode, Json<Member>)> {
     tracing::debug!(target: TRACING_TARGET, "Retrieving workspace member details");
@@ -148,7 +148,7 @@ fn get_member_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_member(
     State(pg_client): State<PgClient>,
-    authz: Authorized<RemoveMembers>,
+    authz: Authorized<markers::RemoveMembers>,
     Path(path_params): Path<MemberPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
@@ -235,7 +235,7 @@ fn delete_member_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_member(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ManageRoles>,
+    authz: Authorized<markers::ManageRoles>,
     Path(path_params): Path<MemberPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateMember>,

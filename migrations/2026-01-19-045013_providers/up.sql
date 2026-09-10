@@ -101,3 +101,12 @@ COMMENT ON COLUMN workspace_providers.metadata IS 'Non-encrypted metadata for fi
 COMMENT ON COLUMN workspace_providers.created_at IS 'Provider creation timestamp';
 COMMENT ON COLUMN workspace_providers.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN workspace_providers.deleted_at IS 'Soft-deletion timestamp; NULL means live';
+
+-- Provider lifecycle events feed the activity log and webhooks.
+ALTER TYPE ACTIVITY_TYPE ADD VALUE 'provider.created';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE 'provider.updated';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE 'provider.deleted';
+
+ALTER TYPE WEBHOOK_EVENT ADD VALUE 'provider.created';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE 'provider.updated';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE 'provider.deleted';

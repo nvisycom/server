@@ -9,7 +9,7 @@ use argon2::password_hash::{Error as ArgonError, PasswordHasher as _, PasswordVe
 use argon2::{Argon2, PasswordHash};
 use rand::distr::Alphanumeric;
 
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 
 /// Tracing target for password hashing operations.
 const TRACING_TARGET: &str = "nvisy_server::password_hasher";

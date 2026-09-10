@@ -127,3 +127,13 @@ COMMENT ON TABLE workspace_pipeline_policies IS 'Policies a pipeline applies at 
 COMMENT ON COLUMN workspace_pipeline_policies.workspace_id IS 'Workspace shared by the pipeline and policy';
 COMMENT ON COLUMN workspace_pipeline_policies.pipeline_id IS 'Pipeline that applies the policy';
 COMMENT ON COLUMN workspace_pipeline_policies.policy_id IS 'Policy applied by the pipeline';
+
+-- Pipeline lifecycle events feed the activity log and webhooks. The detection
+-- and redaction run events are added by their own later migrations.
+ALTER TYPE ACTIVITY_TYPE ADD VALUE 'pipeline.created';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE 'pipeline.updated';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE 'pipeline.deleted';
+
+ALTER TYPE WEBHOOK_EVENT ADD VALUE 'pipeline.created';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE 'pipeline.updated';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE 'pipeline.deleted';

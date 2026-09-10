@@ -13,7 +13,7 @@ use derive_more::{Deref, DerefMut, From};
 use schemars::JsonSchema;
 
 use super::sanitize_error_message;
-use crate::handler::{Error, ErrorKind};
+use crate::response::{Error, ErrorKind};
 
 /// Enhanced query parameter extractor with improved error handling.
 ///

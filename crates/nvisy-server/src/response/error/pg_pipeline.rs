@@ -6,7 +6,7 @@ use nvisy_postgres::types::{
     WorkspacePipelineReferenceConstraints, WorkspacePolicyConstraints,
 };
 
-use crate::handler::{Error, ErrorKind};
+use super::{Error, ErrorKind};
 
 impl From<WorkspacePipelineConstraints> for Error<'static> {
     fn from(c: WorkspacePipelineConstraints) -> Self {

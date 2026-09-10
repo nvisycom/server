@@ -6,8 +6,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::handler::Result;
 use crate::handler::request::{DateWindow, ExportFormat, ResolvedWindow};
+use crate::response::Result;
 
 /// Most rows a single export returns. A hard ceiling so one request cannot
 /// materialize an unbounded result; a truncated export says so in its response.

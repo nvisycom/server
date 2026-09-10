@@ -26,7 +26,7 @@ use super::export::Exporter;
 use super::file_source::SourceEntry;
 use super::import::Importer;
 use crate::extract::SecurityContext;
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 use crate::service::{
     ConnectionConfig, ConnectionRef, EventEmitter, EventOrigin, ExternalObjectStore, Infra,
     WorkspaceEvent,
@@ -148,7 +148,7 @@ impl ConnectionSyncService {
             .transaction(async |conn| {
                 let run = conn.create_workspace_connection_sync(new_run).await?;
                 conn.emit_event(origin, started).await?;
-                Ok::<_, crate::handler::Error>(run)
+                Ok::<_, crate::response::Error>(run)
             })
             .await?;
         Ok(run)
@@ -340,7 +340,7 @@ impl ConnectionSyncService {
                 if transitioned {
                     conn.emit_event(origin, event).await?;
                 }
-                Ok::<_, crate::handler::Error>(transitioned)
+                Ok::<_, crate::response::Error>(transitioned)
             })
             .await;
 

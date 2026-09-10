@@ -26,17 +26,15 @@ use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    Authorized, IdempotencyKey, Json, Path, Query, RunDetections, RunRedactions, SecurityContext,
-    ValidateJson, ViewDetections,
+    Authorized, IdempotencyKey, Json, Path, Query, SecurityContext, ValidateJson, markers,
 };
 use crate::handler::request::{
     CreateDetection, CursorPagination, DetectionPathParams, PipelineDefinition,
     PipelineDetectionsQuery, PipelinePathParams, RedactDetection, WorkspaceDetectionsQuery,
 };
-use crate::handler::response::{Detection, DetectionsPage, ErrorResponse, RedactionResult};
+use crate::handler::response::{Detection, DetectionsPage, RedactionResult};
 use crate::handler::utility::resolve_account_ref;
-use crate::handler::{Error, ErrorKind, Result};
-use crate::response::SseResponse;
+use crate::response::{Error, ErrorKind, ErrorResponse, Result, SseResponse};
 use crate::service::{
     CryptoService, DetectionJob, DetectionQueue, DetectionRef, DetectionStatusEvent, EngineService,
     EventEmitter, EventOrigin, RunBlobStore, ServiceState, WorkspaceEvent, resolve_policies,
@@ -61,7 +59,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::detections";
 async fn create_detection(
     State(pg_client): State<PgClient>,
     State(detection): State<DetectionQueue>,
-    authz: Authorized<RunDetections>,
+    authz: Authorized<markers::RunDetections>,
     Path(path_params): Path<PipelinePathParams>,
     IdempotencyKey(idempotency_key): IdempotencyKey,
     security: SecurityContext,
@@ -248,7 +246,7 @@ fn create_detection_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn list_pipeline_detections(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewDetections>,
+    authz: Authorized<markers::ViewDetections>,
     Path(path_params): Path<PipelinePathParams>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<PipelineDetectionsQuery>,
@@ -310,7 +308,7 @@ fn list_pipeline_detections_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn list_workspace_detections(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewDetections>,
+    authz: Authorized<markers::ViewDetections>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<WorkspaceDetectionsQuery>,
 ) -> Result<(StatusCode, Json<DetectionsPage>)> {
@@ -369,7 +367,7 @@ fn list_workspace_detections_docs(op: TransformOperation) -> TransformOperation 
 )]
 async fn get_detection(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewDetections>,
+    authz: Authorized<markers::ViewDetections>,
     Path(path_params): Path<DetectionPathParams>,
 ) -> Result<(StatusCode, Json<Detection>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting detection");
@@ -432,7 +430,7 @@ fn get_detection_docs(op: TransformOperation) -> TransformOperation {
 async fn stream_detection_events(
     State(pg_client): State<PgClient>,
     State(detection): State<DetectionQueue>,
-    authz: Authorized<ViewDetections>,
+    authz: Authorized<markers::ViewDetections>,
     Path(path_params): Path<DetectionPathParams>,
 ) -> Result<SseResponse<DetectionStatusEvent>> {
     tracing::debug!(target: TRACING_TARGET, "Opening detection status stream");
@@ -580,7 +578,7 @@ async fn redact_detection(
     State(blob): State<RunBlobStore>,
     State(crypto): State<CryptoService>,
     State(engine): State<EngineService>,
-    authz: Authorized<RunRedactions>,
+    authz: Authorized<markers::RunRedactions>,
     Path(path_params): Path<DetectionPathParams>,
     security: SecurityContext,
     Json(request): Json<RedactDetection>,

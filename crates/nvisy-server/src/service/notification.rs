@@ -60,7 +60,7 @@ impl NotificationEmitter {
     pub async fn subscribe_unread(
         &self,
         account_id: Uuid,
-    ) -> crate::handler::Result<BroadcastStream<UnreadCountEvent>> {
+    ) -> crate::response::Result<BroadcastStream<UnreadCountEvent>> {
         let stream = self
             .infra
             .nats

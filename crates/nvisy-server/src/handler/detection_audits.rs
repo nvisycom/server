@@ -19,12 +19,10 @@ use elide_pipeline::{ArtifactSet, Audit};
 use nvisy_postgres::PgClient;
 
 use super::detections::find_detection;
-use crate::extract::{Authorized, DownloadAudit, DownloadOriginalFiles, Json, Path, Query};
+use crate::extract::{Authorized, Json, Path, Query, markers};
 use crate::handler::request::{DetectionPathParams, ExportFormat, ExportQuery};
-use crate::handler::response::ErrorResponse;
 use crate::handler::utility::DownloadDocs;
-use crate::handler::{Error, ErrorKind, Result};
-use crate::response::attachment_headers;
+use crate::response::{Error, ErrorKind, ErrorResponse, Result, attachment_headers};
 use crate::service::{EngineService, RunBlobStore, ServiceState};
 
 /// Tracing target for detection audit operations.
@@ -46,7 +44,7 @@ async fn get_detection_analysis(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
-    authz: Authorized<DownloadAudit>,
+    authz: Authorized<markers::DownloadAudit>,
     Path(path_params): Path<DetectionPathParams>,
 ) -> Result<(StatusCode, Json<Audit>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting detection analysis");
@@ -105,7 +103,7 @@ async fn get_detection_intermediates(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
-    authz: Authorized<DownloadOriginalFiles>,
+    authz: Authorized<markers::DownloadOriginalFiles>,
     Path(path_params): Path<DetectionPathParams>,
 ) -> Result<(StatusCode, Json<ArtifactSet>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting detection intermediates");
@@ -168,7 +166,7 @@ async fn download_detection_audit(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
-    authz: Authorized<DownloadAudit>,
+    authz: Authorized<markers::DownloadAudit>,
     Path(path_params): Path<DetectionPathParams>,
     Query(query): Query<ExportQuery>,
 ) -> Result<(StatusCode, HeaderMap, Body)> {

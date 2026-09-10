@@ -18,7 +18,7 @@ use nvisy_file_service::client::FileServiceClient;
 use nvisy_object_store::Error as ObjectError;
 use nvisy_object_store::client::ObjectStoreClient;
 
-use crate::handler::Result;
+use crate::response::Result;
 
 /// One entry to transfer, addressed by the provider-specific `key` the transfer
 /// methods accept.

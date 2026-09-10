@@ -8,7 +8,7 @@ use axum_extra::extract::CookieJar;
 
 use super::TRACING_TARGET;
 use crate::extract::{AuthTransport, CSRF_COOKIE_NAME, CSRF_HEADER_NAME, SessionToken};
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 
 /// Enforces CSRF protection on cookie-authenticated, state-changing requests
 /// (the double-submit-cookie check).

@@ -13,7 +13,7 @@ use schemars::JsonSchema;
 
 use super::sanitize_error_message;
 use crate::extract::Query;
-use crate::handler::{Error, ErrorKind};
+use crate::response::{Error, ErrorKind};
 
 /// Enhanced form data extractor with improved error handling.
 ///

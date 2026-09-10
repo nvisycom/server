@@ -14,9 +14,9 @@ use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
 use super::request::{AccountPathParams, UpdateAccount};
-use super::response::{Account, ErrorResponse, PublicAccount};
+use super::response::{Account, PublicAccount};
 use crate::extract::{AuthState, AvatarUpload, Json, Path, ValidateJson};
-use crate::handler::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState};
 
 /// Tracing target for account operations.

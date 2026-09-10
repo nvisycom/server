@@ -12,7 +12,7 @@ use jiff::{ToSpan, Zoned};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::handler::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Result};
 
 /// Longest window, as a count of inclusive calendar days. Ranges are materialized
 /// per day (a gap-filled series, an exported row set), so the span is capped to

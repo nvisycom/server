@@ -20,9 +20,10 @@ use std::time::Duration;
 use nvisy_postgres::model::{EventOutbox, NewWorkspaceActivity};
 use nvisy_postgres::query::{EventOutboxRepository, WorkspaceActivityRepository};
 use nvisy_postgres::types::{
-    ActivityPayload, ConnectionActivityParams, ConnectionId, ConnectionSyncCompletedParams,
-    ConnectionSyncFailedParams, DetectionActivityParams, DetectionCompletedParams,
-    DetectionFailedParams, DetectionId, FileActivityParams, Handle, InviteActivityParams, Json,
+    ActivityPayload, AssignmentActivityParams, ConnectionActivityParams, ConnectionId,
+    ConnectionSyncCompletedParams, ConnectionSyncFailedParams, DetectionActivityParams,
+    DetectionCompletedParams, DetectionFailedParams, DetectionId, FileActivityParams,
+    FileAssignedParams, FileUnassignedParams, Handle, InviteActivityParams, Json,
     MemberActivityParams, NotificationPayload, PipelineActivityParams, PolicyActivityParams,
     ProviderActivityParams, ProviderId, RedactionActivityParams, RedactionCreatedParams,
     RedactionId, WebhookActivityParams, WebhookEvent, WebhookId, WorkspaceActivityParams,
@@ -32,10 +33,10 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::handler::{Error, Result};
+use crate::response::{Error, Result};
 use crate::service::event::{
-    ConnectionRef, DetectionRef, FileRef, InviteRef, MemberRef, PolicyRef, ProviderRef, WebhookRef,
-    WorkspaceEvent, WorkspaceRef,
+    AssignmentRef, ConnectionRef, DetectionRef, FileRef, InviteRef, MemberRef, PolicyRef,
+    ProviderRef, WebhookRef, WorkspaceEvent, WorkspaceRef,
 };
 use crate::service::{Infra, NotificationEmitter, WebhookEmitter, Worker};
 
@@ -327,6 +328,11 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
         file_id: file.file_id,
         file_name: file.file_name.clone(),
     };
+    let assignment_params = |a: &AssignmentRef| AssignmentActivityParams {
+        assignment_id: a.assignment_id,
+        file_name: a.file.file_name.clone(),
+        assignee_username: a.assignee_username.clone(),
+    };
     let pipeline = |pipeline_slug: &Handle| PipelineActivityParams {
         pipeline_slug: pipeline_slug.clone(),
     };
@@ -382,6 +388,15 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
         E::FileCreated { file, .. } => ActivityPayload::FileCreated(file_params(file)),
         E::FileUpdated(f) => ActivityPayload::FileUpdated(file_params(f)),
         E::FileDeleted(f) => ActivityPayload::FileDeleted(file_params(f)),
+        E::FileAssigned { assignment, .. } => {
+            ActivityPayload::FileAssigned(assignment_params(assignment))
+        }
+        E::FileUnassigned { assignment, .. } => {
+            ActivityPayload::FileUnassigned(assignment_params(assignment))
+        }
+        E::AssignmentStatusChanged(a) => {
+            ActivityPayload::AssignmentStatusChanged(assignment_params(a))
+        }
         E::PipelineCreated(p) => ActivityPayload::PipelineCreated(pipeline(&p.pipeline_slug)),
         E::PipelineUpdated(p) => ActivityPayload::PipelineUpdated(pipeline(&p.pipeline_slug)),
         E::PipelineDeleted(p) => ActivityPayload::PipelineDeleted(pipeline(&p.pipeline_slug)),
@@ -434,6 +449,27 @@ fn webhook_of(event: &WorkspaceEvent) -> Option<(WebhookEvent, Option<Value>)> {
         E::FileDeleted(f) => (
             WebhookEvent::FileDeleted,
             Some(serde_json::json!({ "displayName": f.file_name })),
+        ),
+        E::FileAssigned { assignment, .. } => (
+            WebhookEvent::FileAssigned,
+            Some(serde_json::json!({
+                "displayName": assignment.file.file_name,
+                "assignee": assignment.assignee_username,
+            })),
+        ),
+        E::FileUnassigned { assignment, .. } => (
+            WebhookEvent::FileUnassigned,
+            Some(serde_json::json!({
+                "displayName": assignment.file.file_name,
+                "assignee": assignment.assignee_username,
+            })),
+        ),
+        E::AssignmentStatusChanged(assignment) => (
+            WebhookEvent::AssignmentStatusChanged,
+            Some(serde_json::json!({
+                "displayName": assignment.file.file_name,
+                "assignee": assignment.assignee_username,
+            })),
         ),
         E::PipelineCreated(..) => (WebhookEvent::PipelineCreated, None),
         E::PipelineUpdated(..) => (WebhookEvent::PipelineUpdated, None),
@@ -534,9 +570,29 @@ fn notification_of(event: WorkspaceEvent) -> Option<(Uuid, NotificationPayload)>
                 error,
             }),
         )),
+        E::FileAssigned { assignment, notify } => notify.map(|to| {
+            (
+                to,
+                NotificationPayload::FileAssigned(FileAssignedParams {
+                    assignment_id: assignment.assignment_id,
+                    file_id: assignment.file.file_id,
+                    file_name: assignment.file.file_name,
+                }),
+            )
+        }),
+        E::FileUnassigned { assignment, notify } => notify.map(|to| {
+            (
+                to,
+                NotificationPayload::FileUnassigned(FileUnassignedParams {
+                    file_id: assignment.file.file_id,
+                    file_name: assignment.file.file_name,
+                }),
+            )
+        }),
         // Events that raise no in-app notification. Listed explicitly (no wildcard)
         // so a new event forces a deliberate notify / no-notify decision here.
-        E::WorkspaceCreated(_)
+        E::AssignmentStatusChanged(_)
+        | E::WorkspaceCreated(_)
         | E::WorkspaceUpdated(_)
         | E::WorkspaceDeleted(_)
         | E::MemberAdded(_)
@@ -590,6 +646,10 @@ fn resource_id_of(event: &WorkspaceEvent) -> Uuid {
         E::WebhookCreated(w) | E::WebhookUpdated(w) | E::WebhookDeleted(w) => w.webhook_id,
         E::FileCreated { file, .. } => file.file_id,
         E::FileUpdated(f) | E::FileDeleted(f) => f.file_id,
+        E::FileAssigned { assignment, .. } | E::FileUnassigned { assignment, .. } => {
+            assignment.assignment_id
+        }
+        E::AssignmentStatusChanged(a) => a.assignment_id,
         E::PipelineCreated(p) | E::PipelineUpdated(p) | E::PipelineDeleted(p) => p.pipeline_id,
         E::DetectionStarted(d) => d.detection_id,
         E::DetectionCompleted { detection, .. }

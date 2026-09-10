@@ -9,7 +9,7 @@
 use nvisy_postgres::types::ConstraintViolation;
 use nvisy_postgres::{Error as PgError, TimeoutType};
 
-use crate::handler::{Error, ErrorKind};
+use super::{Error, ErrorKind};
 
 /// Tracing target for account operations.
 const TRACING_TARGET: &str = "nvisy_server::postgres_constraints";
@@ -29,6 +29,7 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::WorkspaceActivityLog(c) => c.into(),
             ConstraintViolation::WorkspaceWebhook(c) => c.into(),
             ConstraintViolation::WorkspaceFile(c) => c.into(),
+            ConstraintViolation::WorkspaceAssignment(c) => c.into(),
             ConstraintViolation::WorkspacePipeline(c) => c.into(),
             ConstraintViolation::WorkspaceDetection(c) => c.into(),
             ConstraintViolation::WorkspacePipelineReference(c) => c.into(),

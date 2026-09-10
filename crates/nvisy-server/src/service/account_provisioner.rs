@@ -13,7 +13,7 @@ use nvisy_postgres::types::{HANDLE_MAX_LENGTH, Handle, IdentityProvider};
 use nvisy_postgres::{AsyncConnection, Error as PgError, PgConn};
 use uuid::Uuid;
 
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 use crate::service::OidcIdentity;
 
 /// Tracing target for account provisioning.

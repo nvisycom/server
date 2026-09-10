@@ -7,7 +7,7 @@ use axum::extract::{FromRequest, Request};
 use bytes::Bytes;
 
 use crate::extract::Multipart;
-use crate::handler::{Error, ErrorKind};
+use crate::response::{Error, ErrorKind};
 
 /// The raw bytes of an uploaded avatar image, read from the first file field of a
 /// multipart request.

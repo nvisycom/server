@@ -10,6 +10,10 @@ pub mod sql_types {
     pub struct ApiTokenType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "assignment_status"))]
+    pub struct AssignmentStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "chat_role"))]
     pub struct ChatRole;
 
@@ -137,7 +141,6 @@ diesel::table! {
 
     accounts (id) {
         id -> Uuid,
-        is_admin -> Bool,
         is_verified -> Bool,
         is_suspended -> Bool,
         username -> Text,
@@ -214,6 +217,22 @@ diesel::table! {
         ip_address -> Nullable<Inet>,
         user_agent -> Nullable<Text>,
         created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::AssignmentStatus;
+
+    workspace_assignments (id) {
+        id -> Uuid,
+        workspace_id -> Uuid,
+        file_id -> Uuid,
+        assignee_account_id -> Uuid,
+        assigned_account_id -> Nullable<Uuid>,
+        status -> AssignmentStatus,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
     }
 }
 
@@ -545,6 +564,8 @@ diesel::joinable!(event_outbox -> accounts (account_id));
 diesel::joinable!(event_outbox -> workspaces (workspace_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
+diesel::joinable!(workspace_assignments -> workspace_files (file_id));
+diesel::joinable!(workspace_assignments -> workspaces (workspace_id));
 diesel::joinable!(workspace_connection_schedule -> workspace_connections (connection_id));
 diesel::joinable!(workspace_connection_syncs -> accounts (account_id));
 diesel::joinable!(workspace_connection_syncs -> workspace_connections (connection_id));
@@ -584,6 +605,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     chat_sessions,
     event_outbox,
     workspace_activities,
+    workspace_assignments,
     workspace_connection_schedule,
     workspace_connection_syncs,
     workspace_connections,

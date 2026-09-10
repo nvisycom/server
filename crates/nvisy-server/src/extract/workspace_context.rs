@@ -18,7 +18,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::extract::Path;
-use crate::handler::{Error, ErrorKind};
+use crate::response::{Error, ErrorKind};
 
 /// The workspace addressed by the `{workspaceSlug}` path segment.
 ///

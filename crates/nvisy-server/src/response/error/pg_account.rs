@@ -5,7 +5,7 @@ use nvisy_postgres::types::{
     AccountNotificationConstraints,
 };
 
-use crate::handler::{Error, ErrorKind};
+use super::{Error, ErrorKind};
 
 impl From<AccountConstraints> for Error<'static> {
     fn from(c: AccountConstraints) -> Self {

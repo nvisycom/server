@@ -7,7 +7,7 @@
 
 use super::hasher::PasswordHasher;
 use super::strength::PasswordStrength;
-use crate::handler::Result;
+use crate::response::Result;
 
 /// Password strength validation and Argon2id hashing.
 #[derive(Debug, Clone, Default)]

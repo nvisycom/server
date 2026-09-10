@@ -32,7 +32,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{ConnectionSyncService, StandardCronSchedule, TransferKind, TransferRequest};
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 use crate::service::{ConnectionConfig, Infra, Worker};
 
 /// Tracing target for the connection sync worker.

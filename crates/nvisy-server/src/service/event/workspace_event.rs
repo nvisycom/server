@@ -99,6 +99,26 @@ pub enum WorkspaceEvent {
     #[serde(rename = "file.deleted")]
     FileDeleted(FileRef),
 
+    // Assignments
+    #[serde(rename = "file.assigned")]
+    FileAssigned {
+        #[serde(flatten)]
+        assignment: AssignmentRef,
+        /// The reviewer to notify in-app. `None` when the actor assigned the file
+        /// to themselves, so a self-assignment raises no notification.
+        notify: Option<Uuid>,
+    },
+    #[serde(rename = "file.unassigned")]
+    FileUnassigned {
+        #[serde(flatten)]
+        assignment: AssignmentRef,
+        /// The former reviewer to notify in-app. `None` when the actor unassigned
+        /// themselves.
+        notify: Option<Uuid>,
+    },
+    #[serde(rename = "file.assignment.updated")]
+    AssignmentStatusChanged(AssignmentRef),
+
     // Pipelines
     #[serde(rename = "pipeline.created")]
     PipelineCreated(PipelineRef),
@@ -197,6 +217,15 @@ pub struct WebhookRef {
 pub struct FileRef {
     pub file_id: Uuid,
     pub file_name: String,
+}
+
+/// An assignment, the file it covers, and the reviewer it is assigned to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssignmentRef {
+    pub assignment_id: Uuid,
+    #[serde(flatten)]
+    pub file: FileRef,
+    pub assignee_username: Handle,
 }
 
 /// A pipeline and its slug.

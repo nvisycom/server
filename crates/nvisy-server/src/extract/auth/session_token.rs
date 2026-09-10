@@ -19,7 +19,7 @@ use serde::Deserialize;
 
 use super::AuthClaims;
 use crate::extract::auth::SESSION_COOKIE_NAME;
-use crate::handler::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Result};
 use crate::service::SessionKeys;
 
 /// Which transport carried the session token on a request.
