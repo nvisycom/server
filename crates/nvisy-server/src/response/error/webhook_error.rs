@@ -58,7 +58,7 @@ impl From<nvisy_webhook::Error> for HttpError<'static> {
                 .with_message("Invalid webhook endpoint")
                 .with_context(message.to_string()),
 
-            WebhookErrorKind::Configuration => ErrorKind::BadRequest
+            WebhookErrorKind::Configuration => ErrorKind::InternalServerError
                 .with_message("Invalid webhook configuration")
                 .with_context(message.to_string()),
 

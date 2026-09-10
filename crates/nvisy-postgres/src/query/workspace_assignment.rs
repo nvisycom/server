@@ -314,6 +314,15 @@ impl WorkspaceAssignmentRepository for PgConnection {
     ) -> Result<WorkspaceAssignment> {
         use schema::workspace_assignments::{self, dsl};
 
+        // An all-`None` changeset would make Diesel emit an empty `SET`, which
+        // Postgres rejects as a syntax error. Reject it up front so a caller with
+        // nothing to change gets a clear error rather than a raw SQL failure.
+        if updates.status.is_none() {
+            return Err(Error::unexpected(
+                "update_workspace_assignment called with no fields to update",
+            ));
+        }
+
         diesel::update(workspace_assignments::table.filter(dsl::id.eq(assignment_id)))
             .set(&updates)
             .returning(WorkspaceAssignment::as_returning())
