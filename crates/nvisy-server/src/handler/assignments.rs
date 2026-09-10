@@ -301,11 +301,12 @@ async fn update_assignment(
     // Resolve the file name and the assignee reference (its handle drives the
     // event, and the same reference is returned in the response) before the
     // update. The assignee is a non-null FK, so it always resolves for a live row.
+    // The file name stays `None` when the file was removed, so the response says
+    // "gone" rather than blank; the event uses an empty string in that case.
     let file_name = conn
         .find_file_in_workspace(workspace.id, assignment.file_id)
         .await?
-        .map(|f| f.display_name)
-        .unwrap_or_default();
+        .map(|f| f.display_name);
     let assignee_ref = resolve_account_ref(&mut conn, assignment.assignee_account_id).await?;
     let assignee_handle = assignee_ref.username.clone();
 
@@ -324,7 +325,7 @@ async fn update_assignment(
                 workspace_origin(workspace.id, authz.account_id, &security),
                 WorkspaceEvent::AssignmentStatusChanged(assignment_ref(
                     &updated,
-                    &file_name,
+                    file_name.as_deref().unwrap_or_default(),
                     &assignee_handle,
                 )),
             )
@@ -337,11 +338,7 @@ async fn update_assignment(
 
     Ok((
         StatusCode::OK,
-        Json(Assignment::from_model(
-            updated,
-            assignee_ref,
-            Some(file_name),
-        )),
+        Json(Assignment::from_model(updated, assignee_ref, file_name)),
     ))
 }
 
@@ -477,6 +474,7 @@ fn assignment_ref(
             file_name: file_name.to_owned(),
         },
         assignee_username: assignee_username.clone(),
+        status: assignment.status,
     }
 }
 

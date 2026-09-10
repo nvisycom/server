@@ -8,7 +8,7 @@
 //! Variants that share a field-set carry it as one of the small `*Ref` structs
 //! below the enum, so the shape is written once and the variants stay uniform.
 
-use nvisy_postgres::types::Handle;
+use nvisy_postgres::types::{AssignmentStatus, Handle};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -219,13 +219,15 @@ pub struct FileRef {
     pub file_name: String,
 }
 
-/// An assignment, the file it covers, and the reviewer it is assigned to.
+/// An assignment, the file it covers, the reviewer it is assigned to, and its
+/// current review status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssignmentRef {
     pub assignment_id: Uuid,
     #[serde(flatten)]
     pub file: FileRef,
     pub assignee_username: Handle,
+    pub status: AssignmentStatus,
 }
 
 /// A pipeline and its slug.

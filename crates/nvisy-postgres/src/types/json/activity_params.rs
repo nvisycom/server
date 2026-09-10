@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::types::{
-    ActivityType, ConnectionId, DetectionId, Handle, ProviderId, RedactionId, WebhookEvent,
-    WebhookId,
+    ActivityType, AssignmentStatus, ConnectionId, DetectionId, Handle, ProviderId, RedactionId,
+    WebhookEvent, WebhookId,
 };
 
 /// Params of a workspace-scoped activity (`workspace.*`).
@@ -101,6 +101,8 @@ pub struct AssignmentActivityParams {
     pub file_name: String,
     /// Username of the reviewer the file is assigned to.
     pub assignee_username: Handle,
+    /// The reviewer's review status at the time of the activity.
+    pub status: AssignmentStatus,
 }
 
 /// Params of a pipeline activity (`pipeline.*`, non-run).

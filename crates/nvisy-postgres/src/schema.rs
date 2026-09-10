@@ -564,7 +564,6 @@ diesel::joinable!(event_outbox -> accounts (account_id));
 diesel::joinable!(event_outbox -> workspaces (workspace_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
-diesel::joinable!(workspace_assignments -> workspace_files (file_id));
 diesel::joinable!(workspace_assignments -> workspaces (workspace_id));
 diesel::joinable!(workspace_connection_schedule -> workspace_connections (connection_id));
 diesel::joinable!(workspace_connection_syncs -> accounts (account_id));

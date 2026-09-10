@@ -302,19 +302,19 @@ COMMENT ON COLUMN workspace_file_exports.exported_at IS 'When the file was expor
 
 -- Connection lifecycle and sync events feed the activity log, webhooks, and (for
 -- sync completion/failure) in-app notifications.
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'connection.created';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'connection.updated';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'connection.deleted';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'connection.sync.started';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'connection.sync.completed';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'connection.sync.failed';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'connection.created';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'connection.updated';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'connection.deleted';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'connection.sync.started';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'connection.sync.completed';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'connection.sync.failed';
 
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'connection.created';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'connection.updated';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'connection.deleted';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'connection.sync.started';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'connection.sync.completed';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'connection.sync.failed';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'connection.created';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'connection.updated';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'connection.deleted';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'connection.sync.started';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'connection.sync.completed';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'connection.sync.failed';
 
-ALTER TYPE NOTIFICATION_EVENT ADD VALUE 'connection.sync.completed';
-ALTER TYPE NOTIFICATION_EVENT ADD VALUE 'connection.sync.failed';
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'connection.sync.completed';
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'connection.sync.failed';

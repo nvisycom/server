@@ -257,13 +257,13 @@ COMMENT ON COLUMN workspace_detection_jobs.resolved_at IS 'When a terminal (proc
 
 -- Detection run events feed the activity log, webhooks, and (for terminal
 -- completion/failure) in-app notifications.
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'pipeline.detection.started';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'pipeline.detection.completed';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'pipeline.detection.failed';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.detection.started';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.detection.completed';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.detection.failed';
 
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'pipeline.detection.started';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'pipeline.detection.completed';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'pipeline.detection.failed';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.started';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.completed';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.failed';
 
-ALTER TYPE NOTIFICATION_EVENT ADD VALUE 'pipeline.detection.completed';
-ALTER TYPE NOTIFICATION_EVENT ADD VALUE 'pipeline.detection.failed';
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.completed';
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.failed';

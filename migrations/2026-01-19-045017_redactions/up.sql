@@ -46,6 +46,6 @@ COMMENT ON COLUMN workspace_redactions.output_file_id IS 'Redacted document this
 COMMENT ON COLUMN workspace_redactions.created_at IS 'When the redaction was created';
 
 -- Redaction creation feeds the activity log, webhooks, and in-app notifications.
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'pipeline.redaction.created';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'pipeline.redaction.created';
-ALTER TYPE NOTIFICATION_EVENT ADD VALUE 'pipeline.redaction.created';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.redaction.created';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.redaction.created';
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'pipeline.redaction.created';

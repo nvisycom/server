@@ -21,11 +21,9 @@ CREATE TABLE workspace_assignments (
 
     -- References. The workspace is denormalized onto the row (rather than reached
     -- through the file) so the common "my assignments across the workspace" query
-    -- is a single indexed scan with no join to workspace_files. Both the workspace
-    -- and the file cascade: a whole-workspace teardown removes files and their
-    -- assignments away together, and removing a file removes its assignments.
+    -- is a single indexed scan with no join to workspace_files.
     workspace_id           UUID              NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    file_id                UUID              NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
+    file_id                UUID              NOT NULL,
 
     -- The two accounts an assignment relates to, each a distinct role.
     --   assignee: the reviewer. If their account is removed, the assignment goes
@@ -43,6 +41,14 @@ CREATE TABLE workspace_assignments (
     created_at             TIMESTAMPTZ       NOT NULL DEFAULT current_timestamp,
     updated_at             TIMESTAMPTZ       NOT NULL DEFAULT current_timestamp,
     CONSTRAINT workspace_assignments_updated_after_created CHECK (updated_at >= created_at),
+
+    -- The file is referenced with its workspace, against
+    -- workspace_files (workspace_id, id), so the denormalized workspace_id must
+    -- match the file's own — a file from another workspace cannot be stored. A
+    -- whole-workspace teardown, or removing the file, cascades its assignments
+    -- away together.
+    CONSTRAINT workspace_assignments_file_fkey FOREIGN KEY (workspace_id, file_id)
+        REFERENCES workspace_files (workspace_id, id) ON DELETE CASCADE,
 
     -- A reviewer is assigned a given file at most once; assigning again is a
     -- conflict, and reassignment is remove-then-add, not a second row.
@@ -81,16 +87,16 @@ COMMENT ON COLUMN workspace_assignments.updated_at IS 'When the assignment was l
 -- transactional like the others.
 --
 -- Activity log records all three (assigned, unassigned, status changed).
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'file.assigned';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'file.unassigned';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'file.assignment.updated';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'file.assigned';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'file.unassigned';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'file.assignment.updated';
 
 -- Webhooks carry all three.
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'file.assigned';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'file.unassigned';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'file.assignment.updated';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'file.assigned';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'file.unassigned';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'file.assignment.updated';
 
 -- In-app notifications go to the reviewer on assign and unassign; a status
 -- change raises no notification, so it is not added here.
-ALTER TYPE NOTIFICATION_EVENT ADD VALUE 'file.assigned';
-ALTER TYPE NOTIFICATION_EVENT ADD VALUE 'file.unassigned';
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'file.assigned';
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'file.unassigned';

@@ -119,6 +119,6 @@ COMMENT ON COLUMN workspace_webhooks.deleted_at IS 'Soft-deletion timestamp; NUL
 
 -- Webhook lifecycle is recorded in the activity log (webhooks do not fire on
 -- their own management, so no WEBHOOK_EVENT values here).
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'webhook.created';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'webhook.updated';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'webhook.deleted';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'webhook.created';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'webhook.updated';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'webhook.deleted';

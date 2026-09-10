@@ -130,10 +130,10 @@ COMMENT ON COLUMN workspace_pipeline_policies.policy_id IS 'Policy applied by th
 
 -- Pipeline lifecycle events feed the activity log and webhooks. The detection
 -- and redaction run events are added by their own later migrations.
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'pipeline.created';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'pipeline.updated';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE 'pipeline.deleted';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.created';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.updated';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.deleted';
 
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'pipeline.created';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'pipeline.updated';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE 'pipeline.deleted';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.created';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.updated';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.deleted';

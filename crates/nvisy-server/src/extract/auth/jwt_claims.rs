@@ -209,7 +209,7 @@ where
         validation.validate_aud = true;
         validation.set_audience(&[Self::JWT_AUDIENCE]);
         validation.set_issuer(&[Self::JWT_ISSUER]);
-        validation.set_required_spec_claims(&["iss", "aud", "jti", "sub", "iat", "exp", "adm"]);
+        validation.set_required_spec_claims(&["iss", "aud", "jti", "sub", "iat", "exp"]);
 
         tracing::debug!(
             target: TRACING_TARGET,

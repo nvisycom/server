@@ -332,6 +332,7 @@ fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
         assignment_id: a.assignment_id,
         file_name: a.file.file_name.clone(),
         assignee_username: a.assignee_username.clone(),
+        status: a.status,
     };
     let pipeline = |pipeline_slug: &Handle| PipelineActivityParams {
         pipeline_slug: pipeline_slug.clone(),
@@ -455,6 +456,7 @@ fn webhook_of(event: &WorkspaceEvent) -> Option<(WebhookEvent, Option<Value>)> {
             Some(serde_json::json!({
                 "displayName": assignment.file.file_name,
                 "assignee": assignment.assignee_username,
+                "status": assignment.status,
             })),
         ),
         E::FileUnassigned { assignment, .. } => (
@@ -462,6 +464,7 @@ fn webhook_of(event: &WorkspaceEvent) -> Option<(WebhookEvent, Option<Value>)> {
             Some(serde_json::json!({
                 "displayName": assignment.file.file_name,
                 "assignee": assignment.assignee_username,
+                "status": assignment.status,
             })),
         ),
         E::AssignmentStatusChanged(assignment) => (
@@ -469,6 +472,7 @@ fn webhook_of(event: &WorkspaceEvent) -> Option<(WebhookEvent, Option<Value>)> {
             Some(serde_json::json!({
                 "displayName": assignment.file.file_name,
                 "assignee": assignment.assignee_username,
+                "status": assignment.status,
             })),
         ),
         E::PipelineCreated(..) => (WebhookEvent::PipelineCreated, None),
