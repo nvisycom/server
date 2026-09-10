@@ -22,7 +22,7 @@ impl<'a> From<FileServiceError> for HttpError<'a> {
             FileServiceErrorKind::BadRequest => ErrorKind::BadRequest
                 .with_message("Cloud file provider rejected the request")
                 .with_context(message),
-            FileServiceErrorKind::Connection => ErrorKind::BadRequest
+            FileServiceErrorKind::Connection => ErrorKind::ServiceUnavailable
                 .with_message("Could not connect to the cloud file provider")
                 .with_context(message),
             FileServiceErrorKind::Runtime => ErrorKind::InternalServerError

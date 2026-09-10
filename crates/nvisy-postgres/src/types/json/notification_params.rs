@@ -129,8 +129,10 @@ pub struct FileAssignedParams {
 pub struct FileUnassignedParams {
     /// Id of the file the reviewer was unassigned from.
     pub file_id: Uuid,
-    /// Display name of the file the reviewer was unassigned from.
-    pub file_name: String,
+    /// Display name of the file the reviewer was unassigned from, when the file
+    /// still exists. `None` (and omitted) if it was removed (e.g. by retention).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
 }
 
 /// The typed payload of a notification, tagged by `type` with its params under

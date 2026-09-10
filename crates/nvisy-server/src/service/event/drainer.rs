@@ -585,11 +585,15 @@ fn notification_of(event: WorkspaceEvent) -> Option<(Uuid, NotificationPayload)>
             )
         }),
         E::FileUnassigned { assignment, notify } => notify.map(|to| {
+            let file = assignment.file;
             (
                 to,
                 NotificationPayload::FileUnassigned(FileUnassignedParams {
-                    file_id: assignment.file.file_id,
-                    file_name: assignment.file.file_name,
+                    file_id: file.file_id,
+                    // The handler encodes a removed file as an empty name; surface
+                    // that as `None` so the notification omits it rather than
+                    // showing a blank.
+                    file_name: (!file.file_name.is_empty()).then_some(file.file_name),
                 }),
             )
         }),

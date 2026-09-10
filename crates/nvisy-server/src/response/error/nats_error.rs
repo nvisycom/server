@@ -8,8 +8,9 @@ use super::http_error::{Error as HttpError, ErrorKind};
 impl<'a> From<nvisy_nats::Error> for HttpError<'a> {
     fn from(nats_error: nvisy_nats::Error) -> Self {
         match nats_error {
-            // Connection and network errors -> Service Unavailable or Internal Server Error
-            nvisy_nats::Error::Connection(_) => ErrorKind::InternalServerError
+            // Connection and network errors -> Service Unavailable (transient,
+            // retryable; the messaging backend is momentarily unreachable).
+            nvisy_nats::Error::Connection(_) => ErrorKind::ServiceUnavailable
                 .with_message("Service temporarily unavailable")
                 .with_context("Unable to connect to messaging service"),
 
@@ -21,12 +22,15 @@ impl<'a> From<nvisy_nats::Error> for HttpError<'a> {
                 .with_message("Message delivery failed")
                 .with_context(format!("Failed to deliver message to {}", subject)),
 
-            // Data validation and serialization errors -> Bad Request
-            nvisy_nats::Error::Serialization(_) => ErrorKind::BadRequest
+            // Serialization is an internal encode/decode fault, not a client
+            // input error: the caller cannot influence how we frame NATS payloads.
+            nvisy_nats::Error::Serialization(_) => ErrorKind::InternalServerError
                 .with_message("Invalid request or response data format")
                 .with_context("Failed to serialize data for storage"),
 
-            nvisy_nats::Error::InvalidConfig { .. } => ErrorKind::BadRequest
+            // A bad messaging configuration is a server-side fault, not a client
+            // error.
+            nvisy_nats::Error::InvalidConfig { .. } => ErrorKind::InternalServerError
                 .with_message("Invalid configuration")
                 .with_context("Service configuration is invalid"),
 
@@ -116,7 +120,7 @@ mod tests {
         let nats_err = nvisy_nats::Error::Serialization(json_err);
         let http_err: HttpError = nats_err.into();
 
-        assert_eq!(http_err.kind(), ErrorKind::BadRequest);
+        assert_eq!(http_err.kind(), ErrorKind::InternalServerError);
         assert!(
             http_err
                 .message
@@ -161,7 +165,7 @@ mod tests {
         let nats_err = nvisy_nats::Error::invalid_config("missing server URL");
         let http_err: HttpError = nats_err.into();
 
-        assert_eq!(http_err.kind(), ErrorKind::BadRequest);
+        assert_eq!(http_err.kind(), ErrorKind::InternalServerError);
         assert!(
             http_err
                 .context
