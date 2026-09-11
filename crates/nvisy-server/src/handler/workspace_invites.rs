@@ -346,6 +346,9 @@ async fn reply_to_invite(
             .with_resource("workspace_invite"));
     }
 
+    // An email-bound invite may only be accepted or declined by its invitee.
+    verify_invitee_matches(&mut conn, &invite, auth_state.account_id).await?;
+
     if request.accept_invite {
         let (workspace_member, account) =
             accept_invite_as_member(&mut conn, &invite, auth_state.account_id, &security).await?;
@@ -541,6 +544,9 @@ async fn reply_to_invite_code(
             .with_resource("invite_code"));
     }
 
+    // An email-bound invite may only be accepted or declined by its invitee.
+    verify_invitee_matches(&mut conn, &invite, auth_state.account_id).await?;
+
     if accept {
         let workspace_id = invite.workspace_id;
         let invited_role = invite.invited_role;
@@ -615,21 +621,6 @@ async fn accept_invite_as_member(
     account_id: Uuid,
     security: &SecurityContext,
 ) -> Result<(WorkspaceMember, Account)> {
-    // An email-bound invitation may only be accepted by the account that owns
-    // that email; otherwise any authenticated account could claim it. An open
-    // invite (no `invitee_email`) is claimable by anyone who holds the code.
-    if let Some(ref invitee_email) = invite.invitee_email {
-        let account = conn
-            .find_account_by_id(account_id)
-            .await?
-            .ok_or_else(|| Error::not_found("account"))?;
-        if !account.email_address.eq_ignore_ascii_case(invitee_email) {
-            return Err(ErrorKind::Forbidden
-                .with_message("This invitation was sent to a different email address")
-                .with_resource("workspace_invite"));
-        }
-    }
-
     if conn
         .find_workspace_member(invite.workspace_id, account_id)
         .await?
@@ -647,7 +638,17 @@ async fn accept_invite_as_member(
 
     let member = conn
         .transaction(async |conn| {
-            conn.accept_workspace_invite(invite_id, account_id).await?;
+            // Atomic accept: `None` means the invite was consumed or expired
+            // between the pre-check and here (a concurrent accept won the race).
+            if conn
+                .accept_workspace_invite(invite_id, account_id)
+                .await?
+                .is_none()
+            {
+                return Err(ErrorKind::Conflict
+                    .with_message("This invitation is no longer valid")
+                    .with_resource("workspace_invite"));
+            }
 
             let new_member = NewWorkspaceMember::new(workspace_id, account_id, invited_role);
             conn.add_workspace_member(new_member).await?;
@@ -692,6 +693,33 @@ async fn accept_invite_as_member(
         .await?;
 
     Ok(member)
+}
+
+/// Enforces that an email-bound invitation belongs to the authenticated account.
+///
+/// An email-bound invite may only be acted on (accepted *or* declined) by the
+/// account that owns that email; otherwise any authenticated account could claim
+/// or decline it. An open invite (no `invitee_email`) is exempt — it is claimable
+/// by anyone who holds the code.
+async fn verify_invitee_matches(
+    conn: &mut PgConn,
+    invite: &WorkspaceInvite,
+    account_id: Uuid,
+) -> Result<()> {
+    let Some(ref invitee_email) = invite.invitee_email else {
+        return Ok(());
+    };
+    let account = conn
+        .find_account_by_id(account_id)
+        .await?
+        .ok_or_else(|| Error::not_found("account"))?;
+    if account.email_address.eq_ignore_ascii_case(invitee_email) {
+        Ok(())
+    } else {
+        Err(ErrorKind::Forbidden
+            .with_message("This invitation was sent to a different email address")
+            .with_resource("workspace_invite"))
+    }
 }
 
 /// Finds an invite within a workspace or returns NotFound error.

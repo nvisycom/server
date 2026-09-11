@@ -501,22 +501,6 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-    use super::sql_types::OutboxStatus;
-
-    workspace_retention_jobs (id) {
-        id -> Uuid,
-        workspace_id -> Uuid,
-        pipeline_id -> Nullable<Uuid>,
-        status -> OutboxStatus,
-        attempts -> Int4,
-        next_attempt_at -> Timestamptz,
-        created_at -> Timestamptz,
-        resolved_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
 
     workspace_thread_anchors (id) {
         id -> Uuid,
@@ -653,8 +637,6 @@ diesel::joinable!(workspace_providers -> accounts (account_id));
 diesel::joinable!(workspace_providers -> workspaces (workspace_id));
 diesel::joinable!(workspace_redactions -> accounts (account_id));
 diesel::joinable!(workspace_redactions -> workspace_detections (detection_id));
-diesel::joinable!(workspace_retention_jobs -> workspace_pipelines (pipeline_id));
-diesel::joinable!(workspace_retention_jobs -> workspaces (workspace_id));
 diesel::joinable!(workspace_thread_anchors -> workspace_threads (thread_id));
 diesel::joinable!(workspace_thread_comments -> accounts (author_account_id));
 diesel::joinable!(workspace_thread_comments -> workspace_threads (thread_id));
@@ -692,7 +674,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_policies,
     workspace_providers,
     workspace_redactions,
-    workspace_retention_jobs,
     workspace_thread_anchors,
     workspace_thread_comments,
     workspace_thread_events,

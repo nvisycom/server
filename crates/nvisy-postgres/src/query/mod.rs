@@ -36,7 +36,6 @@ mod workspace_pipelines;
 mod workspace_policies;
 mod workspace_providers;
 mod workspace_redactions;
-mod workspace_retention_jobs;
 mod workspace_thread_anchors;
 mod workspace_thread_comments;
 mod workspace_thread_events;
@@ -79,7 +78,6 @@ pub use workspace_pipelines::{PipelineCursor, WorkspacePipelineRepository};
 pub use workspace_policies::{PolicyCursor, WorkspacePolicyRepository};
 pub use workspace_providers::{ProviderCursor, WorkspaceProviderRepository};
 pub use workspace_redactions::{RedactionCursor, WorkspaceRedactionRepository};
-pub use workspace_retention_jobs::{REPROJECT_PAGE, RetentionJobOutboxRepository};
 pub use workspace_thread_anchors::{
     AddAnchorOutcome, MAX_THREAD_ANCHORS, WorkspaceThreadAnchorRepository,
 };

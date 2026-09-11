@@ -47,14 +47,6 @@ pub trait WorkspacePipelineRepository {
         slug: &str,
     ) -> impl Future<Output = Result<Option<WithAccountRef<WorkspacePipeline>>>> + Send;
 
-    /// Finds a live pipeline by id, or `None` if it does not exist or was
-    /// soft-deleted. Used where only the id is known (e.g. the retention-backfill
-    /// worker resolving a pipeline's current override).
-    fn find_pipeline_by_id(
-        &mut self,
-        pipeline_id: Uuid,
-    ) -> impl Future<Output = Result<Option<WorkspacePipeline>>> + Send;
-
     /// Lists all pipelines in a workspace with cursor pagination, each paired
     /// with the handle and avatar of the account that created it.
     fn cursor_list_workspace_pipelines(
@@ -123,22 +115,6 @@ impl WorkspacePipelineRepository for PgConnection {
             .map_err(Error::from)?;
 
         Ok(row.map(|(item, account)| WithAccountRef { item, account }))
-    }
-
-    async fn find_pipeline_by_id(
-        &mut self,
-        pipeline_id: Uuid,
-    ) -> Result<Option<WorkspacePipeline>> {
-        use schema::workspace_pipelines::{self, dsl};
-
-        workspace_pipelines::table
-            .filter(dsl::id.eq(pipeline_id))
-            .filter(dsl::deleted_at.is_null())
-            .select(WorkspacePipeline::as_select())
-            .first(self)
-            .await
-            .optional()
-            .map_err(Error::from)
     }
 
     async fn cursor_list_workspace_pipelines(

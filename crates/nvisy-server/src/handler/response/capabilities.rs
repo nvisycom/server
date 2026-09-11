@@ -1,4 +1,4 @@
-//! Deployment catalog response types.
+//! Deployment capabilities response types.
 
 use elide_pipeline::RegisteredRecognizer;
 use schemars::JsonSchema;

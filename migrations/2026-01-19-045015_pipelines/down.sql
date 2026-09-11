@@ -1,7 +1,6 @@
 -- Revert the pipelines tables.
 -- Objects are dropped in reverse order of creation.
 
-DROP TABLE IF EXISTS workspace_retention_jobs;
 DROP TABLE IF EXISTS workspace_pipeline_policies;
 DROP TABLE IF EXISTS workspace_pipelines;
 

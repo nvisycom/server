@@ -27,7 +27,6 @@ mod workspace_pipelines;
 mod workspace_policies;
 mod workspace_providers;
 mod workspace_redactions;
-mod workspace_retention_jobs;
 mod workspace_thread_anchors;
 mod workspace_thread_comments;
 mod workspace_thread_events;
@@ -73,7 +72,6 @@ pub use workspace_pipelines::{NewWorkspacePipeline, UpdateWorkspacePipeline, Wor
 pub use workspace_policies::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 pub use workspace_providers::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};
 pub use workspace_redactions::{NewWorkspaceRedaction, WorkspaceRedaction};
-pub use workspace_retention_jobs::{NewWorkspaceRetentionJob, WorkspaceRetentionJob};
 pub use workspace_thread_anchors::{NewWorkspaceThreadAnchor, WorkspaceThreadAnchor};
 pub use workspace_thread_comments::{
     NewWorkspaceThreadComment, UpdateWorkspaceThreadComment, WorkspaceThreadComment,

@@ -10,7 +10,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::query::{AccountRepository, WorkspaceMemberRepository};
-use nvisy_postgres::types::{Handle, WorkspaceRole};
+use nvisy_postgres::types::Handle;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
@@ -358,23 +358,21 @@ async fn leave_workspace(
             .with_message("You are not a member of this workspace"));
     };
 
-    // The sole owner cannot leave and orphan the workspace: transfer ownership
-    // first. A non-owner, or an owner with co-owners, may leave freely.
-    if member.member_role.is_owner()
-        && conn
-            .count_workspace_members_by_role(workspace.id, WorkspaceRole::Owner)
-            .await?
-            <= 1
-    {
-        return Err(ErrorKind::Conflict
-            .with_message("You are the only owner; transfer ownership before leaving")
-            .with_resource("workspace_member"));
-    }
+    let is_owner = member.member_role.is_owner();
 
     // Remove the member and record the departure atomically. A self-initiated
     // leave is the same domain fact as an admin removal, so it records
     // `MemberDeleted` with the leaving account as both actor and subject.
     conn.transaction(async |conn| {
+        // The sole owner cannot leave and orphan the workspace: transfer ownership
+        // first. The owner count is taken under a row lock inside this
+        // transaction, so two owners leaving at once cannot both pass the check.
+        if is_owner && conn.count_owners_for_update(workspace.id).await? <= 1 {
+            return Err(ErrorKind::Conflict
+                .with_message("You are the only owner; transfer ownership before leaving")
+                .with_resource("workspace_member"));
+        }
+
         conn.remove_workspace_member(workspace.id, auth_state.account_id)
             .await?;
         conn.emit_event(

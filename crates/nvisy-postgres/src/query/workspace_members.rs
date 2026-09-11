@@ -17,6 +17,13 @@ use crate::types::{
 };
 use crate::{Error, PgConnection, Result, schema};
 
+diesel::define_sql_function! {
+    /// `COALESCE(value, default)` for text, so a null display name sorts as the
+    /// empty string — keeping null-name members in the name-sorted listing rather
+    /// than filtering them out, and giving the keyset a total sort column.
+    fn coalesce(value: diesel::sql_types::Nullable<diesel::sql_types::Text>, default: diesel::sql_types::Text) -> diesel::sql_types::Text;
+}
+
 /// Keyset for paginating an account's workspaces: newest membership first by
 /// `created_at`, with the workspace id as the tiebreaker (a member row has a
 /// composite key, so there is no single `id` column).
@@ -159,12 +166,15 @@ pub trait WorkspaceMemberRepository {
         account_id_b: Uuid,
     ) -> impl Future<Output = Result<bool>> + Send;
 
-    /// Counts a workspace's members holding the given role. Backs the last-owner
-    /// guard, so a workspace cannot be left without an owner.
-    fn count_workspace_members_by_role(
+    /// Counts a workspace's owners while holding a row lock (`FOR UPDATE`) on each
+    /// owner membership, so concurrent owner removals serialize.
+    ///
+    /// Call inside the removal transaction: the lock makes the last-owner check
+    /// and the removal atomic, so two owners leaving at once cannot both pass the
+    /// check and leave the workspace ownerless.
+    fn count_owners_for_update(
         &mut self,
         workspace_id: Uuid,
-        role: WorkspaceRole,
     ) -> impl Future<Output = Result<i64>> + Send;
 }
 
@@ -406,9 +416,9 @@ impl WorkspaceMemberRepository for PgConnection {
         // after-comparison always agree.
         let direction = sort_by.order;
 
-        // The scoped builder (filters shared by the count and the page). When
-        // sorting by name, members with a null display name are excluded so the
-        // sort column is total (mirrors the invite email sort).
+        // The scoped builder (filters shared by the count and the page). The name
+        // sort coalesces a null display name to the empty string (below), so no
+        // member is excluded and the sort column is total.
         let scoped = || {
             let mut query = workspace_members::table
                 .inner_join(accounts::table.on(accounts::id.eq(workspace_members::account_id)))
@@ -417,9 +427,6 @@ impl WorkspaceMemberRepository for PgConnection {
                 .into_boxed();
             if let Some(role) = filter.role {
                 query = query.filter(workspace_members::member_role.eq(role));
-            }
-            if sort_by_name {
-                query = query.filter(accounts::display_name.is_not_null());
             }
             query
         };
@@ -450,7 +457,7 @@ impl WorkspaceMemberRepository for PgConnection {
                 };
                 keyset!(
                     scoped(),
-                    accounts::display_name,
+                    coalesce(accounts::display_name, ""),
                     workspace_members::account_id,
                     direction,
                     after
@@ -575,20 +582,22 @@ impl WorkspaceMemberRepository for PgConnection {
         Ok(shares)
     }
 
-    async fn count_workspace_members_by_role(
-        &mut self,
-        workspace_id: Uuid,
-        role: WorkspaceRole,
-    ) -> Result<i64> {
+    async fn count_owners_for_update(&mut self, workspace_id: Uuid) -> Result<i64> {
         use schema::workspace_members::{self, dsl};
 
-        workspace_members::table
+        // Lock the owner rows (`FOR UPDATE`) and count them. `count()` cannot be
+        // combined with a row lock, so select-and-lock the owner ids, then count
+        // in memory; the set is tiny (a workspace's owners).
+        let owner_ids: Vec<Uuid> = workspace_members::table
             .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::member_role.eq(role))
-            .count()
-            .get_result(self)
+            .filter(dsl::member_role.eq(WorkspaceRole::Owner))
+            .select(dsl::account_id)
+            .for_update()
+            .load(self)
             .await
-            .map_err(Error::from)
+            .map_err(Error::from)?;
+
+        Ok(owner_ids.len() as i64)
     }
 }
 

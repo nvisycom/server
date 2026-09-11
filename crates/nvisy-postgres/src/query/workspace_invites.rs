@@ -68,12 +68,17 @@ pub trait WorkspaceInviteRepository {
         changes: UpdateWorkspaceInvite,
     ) -> impl Future<Output = Result<WorkspaceInvite>> + Send;
 
-    /// Accepts a workspace invitation and marks it as successfully processed.
+    /// Atomically accepts a still-pending, unexpired invitation, returning it.
+    ///
+    /// The status/expiry check and the transition are one conditional UPDATE, so
+    /// concurrent accepts cannot both succeed. Returns `None` when no row matched
+    /// (already accepted/declined/cancelled, or expired) — the caller reports that
+    /// as an invalid-or-consumed invitation.
     fn accept_workspace_invite(
         &mut self,
         invite_id: Uuid,
-        _acceptor_id: Uuid,
-    ) -> impl Future<Output = Result<WorkspaceInvite>> + Send;
+        acceptor_id: Uuid,
+    ) -> impl Future<Output = Result<Option<WorkspaceInvite>>> + Send;
 
     /// Rejects or declines a workspace invitation.
     fn reject_workspace_invite(
@@ -181,14 +186,29 @@ impl WorkspaceInviteRepository for PgConnection {
         &mut self,
         invite_id: Uuid,
         acceptor_id: Uuid,
-    ) -> Result<WorkspaceInvite> {
-        let changes = UpdateWorkspaceInvite {
-            invite_status: Some(InviteStatus::Accepted),
-            responded_at: Some(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
-            updated_by: Some(acceptor_id),
-        };
+    ) -> Result<Option<WorkspaceInvite>> {
+        use diesel::dsl::now;
+        use schema::workspace_invites::{self, dsl};
 
-        self.update_workspace_invite(invite_id, changes).await
+        // Gate the transition on the invite still being pending and unexpired, in
+        // the UPDATE itself: a second concurrent accept (or an accept of an
+        // expired/consumed invite) matches no row and returns `None`.
+        diesel::update(
+            workspace_invites::table
+                .filter(dsl::id.eq(invite_id))
+                .filter(dsl::invite_status.eq(InviteStatus::Pending))
+                .filter(dsl::expires_at.gt(now)),
+        )
+        .set((
+            dsl::invite_status.eq(InviteStatus::Accepted),
+            dsl::responded_at.eq(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
+            dsl::updated_by.eq(acceptor_id),
+        ))
+        .returning(WorkspaceInvite::as_returning())
+        .get_result(self)
+        .await
+        .optional()
+        .map_err(Error::from)
     }
 
     async fn reject_workspace_invite(
@@ -412,7 +432,8 @@ mod tests {
             .await?;
         let accepted = conn
             .accept_workspace_invite(accepted.id, seeded.account_id)
-            .await?;
+            .await?
+            .expect("a pending invite is accepted");
         assert_eq!(accepted.invite_status, InviteStatus::Accepted);
         assert!(accepted.responded_at.is_some());
 

@@ -15,7 +15,6 @@ mod integration;
 mod notification;
 mod oidc;
 mod password;
-mod retention;
 mod run_blob_store;
 mod session_keys;
 mod user_agent;
@@ -77,7 +76,6 @@ pub use crate::service::oidc::{
     OidcAuthorization, OidcConfig, OidcError, OidcIdentity, OidcService, RedirectKind,
 };
 pub use crate::service::password::PasswordService;
-pub use crate::service::retention::{RetentionBackfillCoordinator, RetentionBackfillDrainer};
 pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
 pub use crate::service::user_agent::UserAgentParser;
@@ -128,10 +126,6 @@ pub struct ServiceState {
     // In-process wake signal from the assistant enqueue path to its outbox
     // drainer, shared by the per-request `AssistantQueue` and the drainer.
     pub assistant: AssistantCoordinator,
-
-    // In-process wake signal from the retention settings/override handlers to the
-    // retention-backfill drainer.
-    pub retention_backfill: RetentionBackfillCoordinator,
 
     // Operational: the app-wide shutdown signal (cancelled once on Ctrl+C/SIGTERM
     // so long-lived handlers and background workers wind down promptly) and the
@@ -226,7 +220,6 @@ impl ServiceState {
             engine,
             detection: DetectionCoordinator::new(),
             assistant: AssistantCoordinator::new(),
-            retention_backfill: RetentionBackfillCoordinator::new(),
             shutdown: CancellationToken::new(),
             health_cache: HealthCache::new(&health_config, health_checkers),
             password: PasswordService::new(),
@@ -279,10 +272,6 @@ impl ServiceState {
             self.assistant.clone(),
         ));
         workers.spawn(AssistantWorker::new(self.infra.clone()));
-        workers.spawn(RetentionBackfillDrainer::new(
-            self.infra.clone(),
-            self.retention_backfill.clone(),
-        ));
         workers
     }
 }
@@ -388,7 +377,6 @@ impl_di_field!(
     engine: EngineService,
     detection: DetectionCoordinator,
     assistant: AssistantCoordinator,
-    retention_backfill: RetentionBackfillCoordinator,
     shutdown: CancellationToken,
     health_cache: HealthCache,
     password: PasswordService,

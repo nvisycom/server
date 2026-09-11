@@ -1,12 +1,13 @@
-//! Deployment catalog: read-only reference data describing what this deployment
-//! offers, independent of any workspace.
+//! Deployment capabilities: read-only reference data describing what this
+//! deployment offers, independent of any workspace.
 //!
 //! Exposes the label taxonomy (the categories of sensitive data policies can
-//! target), the recognizers the engine has registered, and which connectors can
-//! be created. All are deployment-owned reference data, not persisted rows:
-//! labels come from the runtime's built-in [`LabelCatalog`], recognizers from
-//! the configured [`Engine`](elide_pipeline::Engine) lineup, and connector
-//! availability from the host's configuration.
+//! target), the recognizers the engine has registered, which connectors can be
+//! created, and which sign-in methods are available. All are deployment-owned
+//! reference data, not persisted rows: labels come from the runtime's built-in
+//! [`LabelCatalog`], recognizers from the configured
+//! [`Engine`](elide_pipeline::Engine) lineup, connector availability from the
+//! host's configuration, and sign-in methods from the configured auth providers.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
@@ -14,13 +15,14 @@ use axum::extract::State;
 use elide_pipeline::entity::LabelCatalog;
 use nvisy_file_service::FileService;
 use nvisy_file_service::provider::FileServiceProvider;
+use nvisy_postgres::types::IdentityProvider;
 use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::extract::{AuthState, Json};
 use crate::handler::response::RecognizerCatalog;
 use crate::response::ErrorResponse;
-use crate::service::{EngineService, ServiceState};
+use crate::service::{EngineService, OidcService, ServiceState};
 
 /// Lists the deployment's supported labels (the built-in taxonomy).
 async fn list_labels(_: AuthState) -> Json<LabelCatalog> {
@@ -100,7 +102,7 @@ impl FileProviders {
 /// always available.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ConnectorCatalog {
+pub struct ConnectorCapabilities {
     /// Availability of each OAuth file-service provider.
     pub file_services: FileProviders,
     /// Whether object-store connections can be created. Currently always `true` —
@@ -116,8 +118,8 @@ pub struct ConnectorCatalog {
 async fn list_connectors(
     State(file_service): State<FileService>,
     _: AuthState,
-) -> Json<ConnectorCatalog> {
-    Json(ConnectorCatalog {
+) -> Json<ConnectorCapabilities> {
+    Json(ConnectorCapabilities {
         file_services: FileProviders::from_service(&file_service),
         object_stores: true,
         inference: true,
@@ -132,25 +134,62 @@ fn list_connectors_docs(op: TransformOperation) -> TransformOperation {
              server, while object-store and inference connections carry their own credentials \
              and are always available. Use it to render the connect UI without probing.",
         )
-        .response::<200, Json<ConnectorCatalog>>()
+        .response::<200, Json<ConnectorCapabilities>>()
         .response::<401, Json<ErrorResponse>>()
 }
 
-/// Returns routes for the deployment catalog.
+/// The sign-in methods this deployment offers.
+///
+/// Lets a client render the login screen without probing: one ordered list of
+/// the identity providers a person can sign in with — `password`, plus exactly
+/// the OIDC providers (`google`, `microsoft`, ...) whose apps are configured on
+/// the server. This is pre-authentication reference data, so the endpoint is
+/// unauthenticated.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthCapabilities {
+    /// The available sign-in methods, in the order a client should present them:
+    /// `password` first, then each configured OIDC provider.
+    pub methods: Vec<IdentityProvider>,
+}
+
+/// Reports the deployment's available sign-in methods.
+async fn list_auth(State(oidc): State<OidcService>) -> Json<AuthCapabilities> {
+    // Password is always available; the configured OIDC providers follow.
+    let mut methods = vec![IdentityProvider::Password];
+    methods.extend(oidc.configured_providers());
+    Json(AuthCapabilities { methods })
+}
+
+fn list_auth_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List sign-in methods")
+        .description(
+            "Returns the deployment's available sign-in methods: whether password sign-in is \
+             enabled and which OIDC providers are configured. Unauthenticated, so a login screen \
+             can render the right buttons before anyone signs in.",
+        )
+        .response::<200, Json<AuthCapabilities>>()
+}
+
+/// Returns routes for the deployment capabilities.
 pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
-        .api_route("/catalog/labels/", get_with(list_labels, list_labels_docs))
         .api_route(
-            "/catalog/recognizers/",
+            "/capabilities/labels/",
+            get_with(list_labels, list_labels_docs),
+        )
+        .api_route(
+            "/capabilities/recognizers/",
             get_with(list_recognizers, list_recognizers_docs),
         )
         .api_route(
-            "/catalog/connectors/",
+            "/capabilities/connectors/",
             get_with(list_connectors, list_connectors_docs),
         )
-        .with_path_items(|item| item.tag("Catalog"))
+        .api_route("/capabilities/auth/", get_with(list_auth, list_auth_docs))
+        .with_path_items(|item| item.tag("Capabilities"))
 }
 
 #[cfg(test)]

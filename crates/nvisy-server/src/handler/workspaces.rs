@@ -8,12 +8,8 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
-use nvisy_postgres::model::{
-    NewWorkspaceMember, NewWorkspaceRetentionJob, Workspace as WorkspaceModel, WorkspaceMember,
-};
-use nvisy_postgres::query::{
-    RetentionJobOutboxRepository, WorkspaceMemberRepository, WorkspaceRepository,
-};
+use nvisy_postgres::model::{NewWorkspaceMember, Workspace as WorkspaceModel, WorkspaceMember};
+use nvisy_postgres::query::{WorkspaceMemberRepository, WorkspaceRepository};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 
 use crate::extract::{
@@ -28,9 +24,8 @@ use crate::handler::utility::resolve_account_ref;
 use crate::middleware::UploadConfig;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
-    AvatarService, EventEmitter, EventOrigin, MAX_AVATAR_UPLOAD_BYTES,
-    RetentionBackfillCoordinator, ServiceState, WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent,
-    WorkspaceUpdated,
+    AvatarService, EventEmitter, EventOrigin, MAX_AVATAR_UPLOAD_BYTES, ServiceState,
+    WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
 };
 
 /// Tracing target for workspace operations.
@@ -199,7 +194,6 @@ fn read_workspace_docs(op: TransformOperation) -> TransformOperation {
 async fn update_workspace(
     State(pg_client): State<PgClient>,
     State(upload): State<UploadConfig>,
-    State(retention_backfill): State<RetentionBackfillCoordinator>,
     authz: Authorized<markers::UpdateWorkspace>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWorkspace>,
@@ -211,24 +205,14 @@ async fn update_workspace(
     let member = authz.member;
     let mut conn = pg_client.get_connection().await?;
 
-    // If the settings changed, the existing files' precomputed `expires_at` must
-    // be reprojected. That is unbounded, so enqueue a backfill job (committed with
-    // the settings write) for the drainer to apply off the request path.
-    let settings_changed = request.settings.is_some();
-
     let update_data = request.into_model()?;
 
-    // The settings write, the backfill enqueue, and the update event commit
-    // together, so the event is never lost and the backfill is never queued for a
-    // settings change that rolled back.
+    // The settings write and the update event commit together, so the event is
+    // never lost nor recorded for a settings change that rolled back.
     let workspace_id = workspace.id;
     let updated = conn
         .transaction(async |conn| {
             let updated = conn.update_workspace(workspace_id, update_data).await?;
-            if settings_changed {
-                conn.enqueue_retention_job(NewWorkspaceRetentionJob::workspace(workspace_id))
-                    .await?;
-            }
             conn.emit_event(
                 EventOrigin {
                     workspace_id,
@@ -244,11 +228,6 @@ async fn update_workspace(
             Ok::<_, Error>(updated)
         })
         .await?;
-
-    // Wake the drainer so the just-committed backfill applies promptly.
-    if settings_changed {
-        retention_backfill.wake();
-    }
 
     let creator = find_workspace_creator(&mut conn, updated.slug.as_str()).await?;
 

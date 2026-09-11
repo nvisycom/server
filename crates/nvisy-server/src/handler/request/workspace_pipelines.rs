@@ -189,22 +189,16 @@ pub struct UpdatePipeline {
 }
 
 impl UpdatePipeline {
-    /// Splits this request into the update model, its reference ids, and the
-    /// retention override (when the request set one).
+    /// Splits this request into the update model and its reference ids.
     ///
     /// A missing `definition` leaves both the config column and the reference
     /// join table untouched (partial update); a present one replaces both, so
-    /// the references are returned only in that case. The returned override lets
-    /// the handler recompute `expires_at` on the pipeline's existing files when
-    /// its retention changed.
+    /// the references are returned only in that case. A supplied retention
+    /// override is merged into the metadata column (preserving other fields).
     pub fn into_parts(
         self,
         current_metadata: PipelineMetadata,
-    ) -> serde_json::Result<(
-        UpdatePipelineModel,
-        Option<PipelineReferences>,
-        Option<RetentionOverride>,
-    )> {
+    ) -> serde_json::Result<(UpdatePipelineModel, Option<PipelineReferences>)> {
         let (definition, references) = match self.definition {
             Some(definition) => {
                 let (config, policy_slugs) = definition.into_parts()?;
@@ -228,7 +222,7 @@ impl UpdatePipeline {
             metadata,
             ..Default::default()
         };
-        Ok((model, references, self.retention))
+        Ok((model, references))
     }
 }
 

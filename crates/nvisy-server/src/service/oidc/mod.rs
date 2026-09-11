@@ -175,6 +175,14 @@ impl OidcService {
         })
     }
 
+    /// The identity providers this deployment has configured for OIDC sign-in, in
+    /// configuration order. Only fully-configured providers are present, so a
+    /// client can offer exactly the sign-in buttons that will work.
+    #[must_use]
+    pub fn configured_providers(&self) -> Vec<IdentityProvider> {
+        self.providers.iter().map(|p| p.provider).collect()
+    }
+
     /// Classifies a caller-supplied `redirect_uri` as a permitted redirect target,
     /// or `None` if it is not allow-listed.
     ///

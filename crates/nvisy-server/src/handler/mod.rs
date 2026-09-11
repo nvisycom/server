@@ -15,7 +15,7 @@ mod account_api_tokens;
 mod account_identities;
 mod account_notifications;
 mod avatars;
-mod catalog;
+mod capabilities;
 mod connection_oauth;
 mod detection_audits;
 mod monitors;
@@ -98,7 +98,7 @@ fn private_routes(service_state: ServiceState) -> ApiRouter<ServiceState> {
         .merge(detection_audits::routes())
         .merge(workspace_redactions::routes())
         .merge(workspace_policies::routes())
-        .merge(catalog::routes())
+        .merge(capabilities::routes())
         .merge(account_api_tokens::routes())
         .merge(account_notifications::routes())
         .merge(workspace_invites::routes())
