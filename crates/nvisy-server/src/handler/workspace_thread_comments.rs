@@ -1,7 +1,8 @@
 //! Comment handlers: posting, editing, and deleting the messages within a
 //! thread. The thread lifecycle (open/close/reopen/rename/delete), anchors, and
-//! the timeline live in the sibling `threads` module, which also owns the
-//! helpers shared here (mention resolution, assistant enqueue, lookups).
+//! the timeline live in the sibling `workspace_threads` and
+//! `workspace_thread_anchors` modules; `workspace_threads` also owns the helpers
+//! shared here (mention resolution, assistant enqueue, lookups).
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
@@ -14,11 +15,11 @@ use nvisy_postgres::{AsyncConnection, PgClient};
 use crate::extract::{Authorized, Json, Path, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{CommentPathParams, CreateComment, ThreadPathParams, UpdateComment};
 use crate::handler::response::Comment;
-use crate::handler::threads::{
+use crate::handler::utility::resolve_account_ref;
+use crate::handler::workspace_threads::{
     MentionOutcome, TRACING_TARGET, emit_thread_event, enqueue_assistant_if_addressed,
     find_comment, find_thread, resolve_mentions, workspace_origin,
 };
-use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{AssistantQueue, ServiceState, ThreadCommentCreated, WorkspaceEvent};
 

@@ -1,9 +1,10 @@
-//! Comment-thread response types.
+//! Thread response types: the thread itself, its lifecycle events, and its
+//! interleaved timeline.
 
 use jiff::Timestamp;
 use nvisy_postgres::model::{
     WorkspaceThread as ThreadModel, WorkspaceThreadAnchor as AnchorModel,
-    WorkspaceThreadComment as CommentModel, WorkspaceThreadEvent as EventModel,
+    WorkspaceThreadEvent as EventModel,
 };
 use nvisy_postgres::query::{TimelineCursor, TimelineSource};
 use nvisy_postgres::types::ThreadEventKind;
@@ -11,8 +12,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{AccountRef, Page};
-use crate::handler::request::CommentAnchor;
+use super::{AccountRef, Comment, Page, ThreadAnchor};
 
 /// Response type for a comment thread.
 ///
@@ -44,36 +44,6 @@ pub struct Thread {
     /// When the thread was created.
     pub created_at: Timestamp,
     /// When the thread was last updated.
-    pub updated_at: Timestamp,
-}
-
-/// Response type for a thread anchor: one location pin within the thread's file.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ThreadAnchor {
-    /// Unique identifier of the anchor.
-    pub id: Uuid,
-    /// The modality-tagged location.
-    pub anchor: CommentAnchor,
-    /// When the anchor was added.
-    pub created_at: Timestamp,
-}
-
-/// Response type for a comment: one message within a thread.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct Comment {
-    /// Unique identifier of the comment.
-    pub id: Uuid,
-    /// Thread this message belongs to.
-    pub thread_id: Uuid,
-    /// Account that wrote the message.
-    pub author: AccountRef,
-    /// The message text.
-    pub body: String,
-    /// When the comment was created.
-    pub created_at: Timestamp,
-    /// When the comment was last updated.
     pub updated_at: Timestamp,
 }
 
@@ -157,35 +127,6 @@ impl Thread {
             closed_at: thread.closed_at.map(Into::into),
             created_at: thread.created_at.into(),
             updated_at: thread.updated_at.into(),
-        }
-    }
-}
-
-impl ThreadAnchor {
-    /// Creates an anchor response, decoding its stored JSON into the typed
-    /// anchor. Returns `None` for an anchor whose JSON no longer decodes (treated
-    /// as absent rather than failing the read).
-    pub fn from_model(anchor: AnchorModel) -> Option<Self> {
-        let decoded = serde_json::from_value(anchor.anchor).ok()?;
-        Some(Self {
-            id: anchor.id,
-            anchor: decoded,
-            created_at: anchor.created_at.into(),
-        })
-    }
-}
-
-impl Comment {
-    /// Creates a comment response from the database model and the resolved author
-    /// reference.
-    pub fn from_model(comment: CommentModel, author: AccountRef) -> Self {
-        Self {
-            id: comment.id,
-            thread_id: comment.thread_id,
-            author,
-            body: comment.body,
-            created_at: comment.created_at.into(),
-            updated_at: comment.updated_at.into(),
         }
     }
 }

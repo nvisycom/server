@@ -1,7 +1,8 @@
 //! Thread handlers: the thread lifecycle (open, list, close, reopen, rename,
-//! delete), its anchors, and its GitHub-issue-style timeline. The messages within
-//! a thread are handled by the sibling `comments` module, which draws on the
-//! mention-resolution, assistant-enqueue, and lookup helpers exported here.
+//! delete) and its GitHub-issue-style timeline. The messages within a thread are
+//! handled by the sibling `workspace_thread_comments` module, and its anchors by
+//! `workspace_thread_anchors`; both draw on the mention-resolution,
+//! assistant-enqueue, and lookup helpers exported here.
 //!
 //! A thread is the closable unit: it is opened by a workspace member with a
 //! first message, optionally pinned to a file and locations within it (anchors),
@@ -18,13 +19,12 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::model::{
-    NewWorkspaceAssistantJob, NewWorkspaceThread, NewWorkspaceThreadAnchor, WorkspaceThread,
-    WorkspaceThreadComment,
+    NewWorkspaceAssistantJob, NewWorkspaceThread, WorkspaceThread, WorkspaceThreadComment,
 };
 use nvisy_postgres::query::{
-    AddAnchorOutcome, AssistantJobOutboxRepository, MAX_THREAD_ANCHORS, TimelineCursor,
-    WorkspaceFileRepository, WorkspaceMemberRepository, WorkspaceThreadAnchorRepository,
-    WorkspaceThreadCommentRepository, WorkspaceThreadEventRepository, WorkspaceThreadRepository,
+    AssistantJobOutboxRepository, TimelineCursor, WorkspaceFileRepository,
+    WorkspaceMemberRepository, WorkspaceThreadAnchorRepository, WorkspaceThreadCommentRepository,
+    WorkspaceThreadEventRepository, WorkspaceThreadRepository,
 };
 use nvisy_postgres::types::{CursorPage, Direction, Handle};
 use nvisy_postgres::{ASSISTANT_ACCOUNT_ID, ASSISTANT_HANDLE, AsyncConnection, PgClient, PgConn};
@@ -32,18 +32,18 @@ use uuid::Uuid;
 
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
-    AddThreadAnchor, CommentAnchor, CursorPagination, OpenThread, RenameThread,
-    ThreadAnchorPathParams, ThreadPathParams, WorkspaceFilePathParams, WorkspaceThreadsQuery,
+    CursorPagination, OpenThread, RenameThread, ThreadPathParams, WorkspaceFilePathParams,
+    WorkspaceThreadsQuery,
 };
 use crate::handler::response::{
-    Comment, Thread, ThreadAnchor, ThreadEntry, ThreadEvent, ThreadsPage, TimelinePage,
+    Comment, Thread, ThreadEntry, ThreadEvent, ThreadsPage, TimelinePage,
 };
 use crate::handler::utility::resolve_account_ref;
+use crate::handler::workspace_thread_anchors::encode_anchors;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
-    AssistantJob, AssistantQueue, EventEmitter, EventOrigin, ServiceState, ThreadAnchorAdded,
-    ThreadAnchorRemoved, ThreadClosed, ThreadDeleted, ThreadOpened, ThreadRenamed, ThreadReopened,
-    WorkspaceEvent,
+    AssistantJob, AssistantQueue, EventEmitter, EventOrigin, ServiceState, ThreadClosed,
+    ThreadDeleted, ThreadOpened, ThreadRenamed, ThreadReopened, WorkspaceEvent,
 };
 
 /// Tracing target for comment operations.
@@ -542,149 +542,6 @@ fn rename_thread_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Adds an anchor (location pin) to a thread. Requires `Comment`.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-        thread_id = %path_params.thread_id,
-    )
-)]
-async fn add_anchor(
-    State(pg_client): State<PgClient>,
-    authz: Authorized<markers::Comment>,
-    Path(path_params): Path<ThreadPathParams>,
-    security: SecurityContext,
-    ValidateJson(request): ValidateJson<AddThreadAnchor>,
-) -> Result<(StatusCode, Json<ThreadAnchor>)> {
-    tracing::debug!(target: TRACING_TARGET, "Adding thread anchor");
-
-    let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let thread = find_thread(&mut conn, workspace.id, path_params.thread_id).await?;
-
-    // Only a file-pinned thread can carry anchors (there is no file to pin into
-    // for a workspace-level thread).
-    let file_id = thread.file_id.ok_or_else(|| {
-        ErrorKind::BadRequest.with_message("A workspace-level thread has no file to anchor to")
-    })?;
-
-    let anchor_json = encode_anchor(&request.anchor)?;
-
-    let anchor = conn
-        .transaction(async |conn| {
-            let AddAnchorOutcome::Added(anchor) = conn
-                .add_thread_anchor(
-                    workspace.id,
-                    NewWorkspaceThreadAnchor {
-                        thread_id: thread.id,
-                        anchor: anchor_json,
-                    },
-                    authz.account_id,
-                )
-                .await?
-            else {
-                return Err(ErrorKind::BadRequest.with_message(format!(
-                    "A thread may have at most {MAX_THREAD_ANCHORS} anchors"
-                )));
-            };
-            emit_thread_event(
-                conn,
-                workspace_origin(workspace.id, authz.account_id, &security),
-                WorkspaceEvent::ThreadAnchorAdded(ThreadAnchorAdded {
-                    thread_id: thread.id,
-                    anchor_id: anchor.id,
-                    file_id: Some(file_id),
-                }),
-            )
-            .await?;
-            Ok::<_, Error>(anchor)
-        })
-        .await?;
-
-    tracing::info!(target: TRACING_TARGET, anchor_id = %anchor.id, "Anchor added");
-
-    let response = ThreadAnchor::from_model(anchor)
-        .ok_or_else(|| ErrorKind::InternalServerError.with_message("Failed to encode anchor"))?;
-    Ok((StatusCode::CREATED, Json(response)))
-}
-
-fn add_anchor_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Add a thread anchor")
-        .description(
-            "Adds a location pin to a file thread, recording an anchor.added timeline \
-             event. Requires the Comment permission.",
-        )
-        .response::<201, Json<ThreadAnchor>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
-}
-
-/// Removes an anchor from a thread (soft delete). Requires `Comment`.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-        thread_id = %path_params.thread_id,
-        anchor_id = %path_params.anchor_id,
-    )
-)]
-async fn remove_anchor(
-    State(pg_client): State<PgClient>,
-    authz: Authorized<markers::Comment>,
-    Path(path_params): Path<ThreadAnchorPathParams>,
-    security: SecurityContext,
-) -> Result<StatusCode> {
-    tracing::debug!(target: TRACING_TARGET, "Removing thread anchor");
-
-    let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let thread = find_thread(&mut conn, workspace.id, path_params.thread_id).await?;
-    conn.find_thread_anchor(thread.id, path_params.anchor_id)
-        .await?
-        .ok_or_else(|| Error::not_found("workspace_thread_anchor"))?;
-
-    conn.transaction(async |conn| {
-        let anchor = conn
-            .remove_thread_anchor(workspace.id, path_params.anchor_id, authz.account_id)
-            .await?;
-        emit_thread_event(
-            conn,
-            workspace_origin(workspace.id, authz.account_id, &security),
-            WorkspaceEvent::ThreadAnchorRemoved(ThreadAnchorRemoved {
-                thread_id: thread.id,
-                anchor_id: anchor.id,
-                file_id: thread.file_id,
-            }),
-        )
-        .await?;
-        Ok::<_, Error>(())
-    })
-    .await?;
-
-    tracing::info!(target: TRACING_TARGET, "Anchor removed");
-
-    Ok(StatusCode::OK)
-}
-
-fn remove_anchor_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Remove a thread anchor")
-        .description(
-            "Soft-removes a location pin from a thread, recording an anchor.removed \
-             timeline event. Requires the Comment permission.",
-        )
-        .response::<200, ()>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
-}
-
 /// Returns a thread's full timeline: comments and lifecycle events interleaved,
 /// oldest first. Requires `ViewComments`.
 #[tracing::instrument(
@@ -788,20 +645,6 @@ pub(crate) async fn find_comment(
     conn.find_comment_in_workspace(workspace_id, comment_id)
         .await?
         .ok_or_else(|| Error::not_found("workspace_thread_comment"))
-}
-
-/// Encodes one typed anchor into its stored JSON.
-fn encode_anchor(anchor: &CommentAnchor) -> Result<serde_json::Value> {
-    serde_json::to_value(anchor).map_err(|err| {
-        ErrorKind::InternalServerError
-            .with_message("Failed to encode thread anchor")
-            .with_context(err.to_string())
-    })
-}
-
-/// Encodes a list of typed anchors into their stored JSON.
-fn encode_anchors(anchors: Vec<CommentAnchor>) -> Result<Vec<serde_json::Value>> {
-    anchors.iter().map(encode_anchor).collect()
 }
 
 /// Extracts the raw handle text of each `@username` mention in `body`.
@@ -952,7 +795,7 @@ pub(crate) async fn emit_thread_event(
     Ok(())
 }
 
-/// Returns an [`ApiRouter`] with all comment-thread routes.
+/// Returns an [`ApiRouter`] with the thread lifecycle and timeline routes.
 pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
@@ -975,14 +818,6 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/workspaces/{workspaceSlug}/threads/{threadId}/close/",
             post_with(close_thread, close_thread_docs)
                 .delete_with(reopen_thread, reopen_thread_docs),
-        )
-        .api_route(
-            "/workspaces/{workspaceSlug}/threads/{threadId}/anchors/",
-            post_with(add_anchor, add_anchor_docs),
-        )
-        .api_route(
-            "/workspaces/{workspaceSlug}/threads/{threadId}/anchors/{anchorId}/",
-            delete_with(remove_anchor, remove_anchor_docs),
         )
         .api_route(
             "/workspaces/{workspaceSlug}/threads/{threadId}/timeline/",

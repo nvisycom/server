@@ -16,13 +16,11 @@ mod account_identities;
 mod account_notifications;
 mod avatars;
 mod catalog;
-mod comments;
 mod connection_oauth;
 mod detection_audits;
 mod monitors;
 pub mod request;
 pub mod response;
-mod threads;
 mod utility;
 mod workspace_connection_syncs;
 mod workspace_connections;
@@ -34,6 +32,9 @@ mod workspace_pipelines;
 mod workspace_policies;
 mod workspace_providers;
 mod workspace_redactions;
+mod workspace_thread_anchors;
+mod workspace_thread_comments;
+mod workspace_threads;
 mod workspace_webhooks;
 mod workspaces;
 
@@ -82,8 +83,9 @@ fn private_routes(service_state: ServiceState) -> ApiRouter<ServiceState> {
         .merge(analytics::routes())
         .merge(workspace_members::routes())
         .merge(workspace_assignments::routes())
-        .merge(threads::routes())
-        .merge(comments::routes())
+        .merge(workspace_threads::routes())
+        .merge(workspace_thread_comments::routes())
+        .merge(workspace_thread_anchors::routes())
         .merge(workspace_connections::routes())
         .merge(workspace_providers::routes())
         .merge(connection_oauth::private_routes())
