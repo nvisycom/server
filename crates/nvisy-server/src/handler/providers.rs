@@ -25,8 +25,8 @@ use crate::handler::response::{ConnectionVerification, Provider, ProvidersPage};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
-    CryptoService, EventEmitter, EventOrigin, ProviderConfig, ProviderRef, ServiceState,
-    WorkspaceEvent,
+    CryptoService, EventEmitter, EventOrigin, ProviderConfig, ProviderCreated, ProviderDeleted,
+    ProviderUpdated, ServiceState, WorkspaceEvent,
 };
 
 /// Tracing target for workspace provider operations.
@@ -89,7 +89,7 @@ async fn create_provider(
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::ProviderCreated(ProviderRef {
+                WorkspaceEvent::ProviderCreated(ProviderCreated {
                     provider_id: created.id,
                     provider_name: created.display_name.clone(),
                 }),
@@ -304,7 +304,7 @@ async fn update_provider(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::ProviderUpdated(ProviderRef {
+            WorkspaceEvent::ProviderUpdated(ProviderUpdated {
                 provider_id,
                 provider_name,
             }),
@@ -373,7 +373,7 @@ async fn delete_provider(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::ProviderDeleted(ProviderRef {
+            WorkspaceEvent::ProviderDeleted(ProviderDeleted {
                 provider_id: existing.id,
                 provider_name: existing.display_name.clone(),
             }),

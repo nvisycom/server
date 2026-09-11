@@ -24,7 +24,10 @@ use crate::handler::request::{
 use crate::handler::response::{AccountRef, Page, Pipeline, PipelineSummary};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{EventEmitter, EventOrigin, PipelineRef, ServiceState, WorkspaceEvent};
+use crate::service::{
+    EventEmitter, EventOrigin, PipelineCreated, PipelineDeleted, PipelineUpdated, ServiceState,
+    WorkspaceEvent,
+};
 
 /// Tracing target for pipeline operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::pipelines";
@@ -68,7 +71,7 @@ async fn create_pipeline(
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::PipelineCreated(PipelineRef {
+                WorkspaceEvent::PipelineCreated(PipelineCreated {
                     pipeline_id: pipeline.id,
                     pipeline_slug: pipeline.slug.clone(),
                 }),
@@ -288,7 +291,7 @@ async fn update_pipeline(
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::PipelineUpdated(PipelineRef {
+                WorkspaceEvent::PipelineUpdated(PipelineUpdated {
                     pipeline_id,
                     pipeline_slug: pipeline.slug.clone(),
                 }),
@@ -364,7 +367,7 @@ async fn delete_pipeline(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::PipelineDeleted(PipelineRef {
+            WorkspaceEvent::PipelineDeleted(PipelineDeleted {
                 pipeline_id,
                 pipeline_slug,
             }),

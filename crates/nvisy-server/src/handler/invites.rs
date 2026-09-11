@@ -9,15 +9,9 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::{
-    Account, NewAccountNotification, NewWorkspaceMember, WorkspaceInvite, WorkspaceMember,
-};
+use nvisy_postgres::model::{Account, NewWorkspaceMember, WorkspaceInvite, WorkspaceMember};
 use nvisy_postgres::query::{
-    AccountNotificationRepository, AccountRepository, WorkspaceInviteRepository,
-    WorkspaceMemberRepository, WorkspaceRepository,
-};
-use nvisy_postgres::types::{
-    Handle, MemberInvitedParams, MemberJoinedParams, NotificationPayload, WorkspaceRole,
+    AccountRepository, WorkspaceInviteRepository, WorkspaceMemberRepository, WorkspaceRepository,
 };
 use nvisy_postgres::{AsyncConnection, Error as PgError, PgClient, PgConn};
 use uuid::Uuid;
@@ -35,8 +29,8 @@ use crate::handler::response::{
 };
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
-    EventEmitter, EventOrigin, InviteRef, MemberRef, NotificationEmitter, ServiceState,
-    WorkspaceEvent,
+    EventEmitter, EventOrigin, InviteAccepted, InviteCanceled, InviteCreated, InviteDeclined,
+    MemberAdded, ServiceState, WorkspaceEvent,
 };
 
 /// Tracing target for workspace invite operations.
@@ -44,14 +38,13 @@ const TRACING_TARGET: &str = "nvisy_server::handler::invites";
 
 /// Outcome of [`create_invite`].
 ///
-/// The invitee must already be a platform account, since the only delivery
-/// this server performs is an in-app notification. An email that maps to no
+/// The invitee must already be a platform account. An email that maps to no
 /// account produces [`InviteOutcome::UnknownEmail`] and no invite row is
 /// created — the caller reports success either way so the response cannot be
 /// used to probe whether an account exists.
 #[must_use]
 pub enum InviteOutcome {
-    /// The invite (and its notification) were created for an existing account.
+    /// The invite was created for an existing account.
     ///
     /// Boxed so this variant does not dominate the enum's size over the empty
     /// [`InviteOutcome::UnknownEmail`].
@@ -75,8 +68,8 @@ pub struct CreatedInvite {
 ///
 /// Assumes the caller has already authorized `InviteMembers` on the workspace.
 /// Rejects an email that already belongs to a member or has a pending invite.
-/// If the email resolves to an account, the invite and an in-app notification
-/// are created together in one transaction and returned as
+/// If the email resolves to an account, the invite is created and its
+/// `invite.created` event recorded in one transaction, returned as
 /// [`InviteOutcome::Created`]; otherwise [`InviteOutcome::UnknownEmail`] is
 /// returned without creating anything.
 ///
@@ -86,7 +79,6 @@ pub struct CreatedInvite {
 pub async fn create_invite(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    workspace_slug: &Handle,
     actor_id: Uuid,
     security: &SecurityContext,
     request: &CreateInvite,
@@ -116,24 +108,10 @@ pub async fn create_invite(
     }
 
     let new_invite = request.to_model(workspace_id, actor_id);
-    let account_id = account.id;
 
     let invite = conn
         .transaction(async |conn| {
             let invite = conn.create_workspace_invite(new_invite).await?;
-
-            let (notify_type, params) = NotificationPayload::MemberInvited(MemberInvitedParams {
-                workspace_slug: workspace_slug.clone(),
-                invited_by: None,
-            })
-            .into_stored();
-            conn.create_account_notification(NewAccountNotification {
-                account_id,
-                notify_type,
-                params,
-                expires_at: None,
-            })
-            .await?;
 
             conn.emit_event(
                 EventOrigin {
@@ -141,7 +119,7 @@ pub async fn create_invite(
                     account_id: actor_id,
                     security,
                 },
-                WorkspaceEvent::InviteCreated(InviteRef {
+                WorkspaceEvent::InviteCreated(InviteCreated {
                     invite_id: invite.id,
                     email: Some(request.invitee_email.clone()),
                 }),
@@ -160,11 +138,10 @@ pub async fn create_invite(
 
 /// Creates a new workspace invitation.
 ///
-/// Invites an existing platform user to the workspace and delivers an in-app
-/// notification. This server sends no email; if the address does not belong to
-/// a known account, the request still succeeds but nothing is created, so the
-/// response cannot reveal whether an account exists. Requires `InviteMembers`
-/// permission.
+/// Invites an existing platform user to the workspace. This server sends no
+/// email; if the address does not belong to a known account, the request still
+/// succeeds but nothing is created, so the response cannot reveal whether an
+/// account exists. Requires `InviteMembers` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -185,16 +162,7 @@ async fn send_invite(
     let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
 
-    match create_invite(
-        &mut conn,
-        workspace.id,
-        &workspace.slug,
-        account_id,
-        &security,
-        &request,
-    )
-    .await?
-    {
+    match create_invite(&mut conn, workspace.id, account_id, &security, &request).await? {
         InviteOutcome::Created(created) => {
             tracing::info!(
                 target: TRACING_TARGET,
@@ -213,10 +181,9 @@ async fn send_invite(
 fn send_invite_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Send invitation")
         .description(
-            "Invites an existing platform user to the workspace and delivers an in-app \
-             notification. No email is sent by this server. The response is identical whether \
-             or not the address belongs to a known account, so it cannot be used to determine \
-             whether an account exists.",
+            "Invites an existing platform user to the workspace. No email is sent by this \
+             server. The response is identical whether or not the address belongs to a known \
+             account, so it cannot be used to determine whether an account exists.",
         )
         .response::<200, Json<InviteSent>>()
         .response::<400, Json<ErrorResponse>>()
@@ -316,7 +283,7 @@ async fn cancel_invite(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::InviteCanceled(InviteRef {
+            WorkspaceEvent::InviteCanceled(InviteCanceled {
                 invite_id: invite.id,
                 email: invite.invitee_email,
             }),
@@ -356,7 +323,6 @@ fn cancel_invite_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn reply_to_invite(
     State(pg_client): State<PgClient>,
-    State(notification_emitter): State<NotificationEmitter>,
     auth_state: AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     security: SecurityContext,
@@ -382,24 +348,9 @@ async fn reply_to_invite(
 
         tracing::info!(target: TRACING_TARGET, "Invitation accepted");
 
-        // Notify the workspace's owners and admins that a new member joined,
-        // excluding the joiner themselves (best-effort).
-        let payload = NotificationPayload::MemberJoined(MemberJoinedParams {
-            workspace_slug: workspace.slug.clone(),
-            member_username: account.username.clone(),
-        });
-        if let Err(err) = notification_emitter
-            .notify_workspace_roles(
-                workspace.id,
-                &[WorkspaceRole::Owner, WorkspaceRole::Admin],
-                Some(auth_state.account_id),
-                payload,
-            )
-            .await
-        {
-            tracing::warn!(target: TRACING_TARGET, error = %err, "Failed to create member-joined notifications");
-        }
-
+        // The member.joined notification to owners and admins is raised by the
+        // MemberAdded event that accept_invite_as_member emits, through the
+        // drainer.
         let member = Member::from_model(workspace_member, account);
 
         Ok((StatusCode::CREATED, Json(Some(member))))
@@ -415,7 +366,7 @@ async fn reply_to_invite(
                     account_id: auth_state.account_id,
                     security: &security,
                 },
-                WorkspaceEvent::InviteDeclined(InviteRef {
+                WorkspaceEvent::InviteDeclined(InviteDeclined {
                     invite_id: invite.id,
                     email: invite.invitee_email.clone(),
                 }),
@@ -615,7 +566,7 @@ async fn reply_to_invite_code(
                     account_id: auth_state.account_id,
                     security: &security,
                 },
-                WorkspaceEvent::InviteDeclined(InviteRef {
+                WorkspaceEvent::InviteDeclined(InviteDeclined {
                     invite_id: invite.id,
                     email: invite.invitee_email.clone(),
                 }),
@@ -688,6 +639,14 @@ async fn accept_invite_as_member(
                 .await?
                 .ok_or_else(|| PgError::Unexpected("Member not found after insert".into()))?;
 
+            // The workspace slug names the joined workspace in the member.joined
+            // notification that `MemberAdded` fans out to owners and admins.
+            let workspace_slug = conn
+                .find_workspace_by_id(workspace_id)
+                .await?
+                .ok_or_else(|| PgError::Unexpected("Workspace not found for invite".into()))?
+                .slug;
+
             let origin = EventOrigin {
                 workspace_id,
                 account_id,
@@ -695,14 +654,15 @@ async fn accept_invite_as_member(
             };
             conn.emit_event(
                 origin,
-                WorkspaceEvent::InviteAccepted(InviteRef { invite_id, email }),
+                WorkspaceEvent::InviteAccepted(InviteAccepted { invite_id, email }),
             )
             .await?;
             conn.emit_event(
                 origin,
-                WorkspaceEvent::MemberAdded(MemberRef {
+                WorkspaceEvent::MemberAdded(MemberAdded {
                     member_id: account_id,
                     member_username: account.username.clone(),
+                    workspace_slug,
                 }),
             )
             .await?;

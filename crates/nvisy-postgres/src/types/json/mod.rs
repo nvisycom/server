@@ -23,8 +23,8 @@ pub use activity_params::{
 pub use detection_metadata::DetectionMetadata;
 pub use notification_params::{
     ConnectionSyncCompletedParams, ConnectionSyncFailedParams, DetectionCompletedParams,
-    DetectionFailedParams, FileAssignedParams, FileUnassignedParams, MemberInvitedParams,
-    MemberJoinedParams, NotificationPayload, RedactionCreatedParams,
+    DetectionFailedParams, FileAssignedParams, FileUnassignedParams, MemberJoinedParams,
+    NotificationPayload, RedactionCreatedParams,
 };
 pub use pipeline_metadata::{PipelineMetadata, RetentionOverride};
 pub use retention::{Retention, RetentionScope, RetentionSettings};

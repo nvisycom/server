@@ -32,7 +32,7 @@ use crate::extract::SecurityContext;
 use crate::handler::request::PipelineDefinition;
 use crate::response::{ErrorKind, Result};
 use crate::service::{
-    DetectionRef, EngineService, EventOrigin, Infra, RunBlobStore, Worker, WorkspaceEvent,
+    DetectionCompleted, EngineService, EventOrigin, Infra, RunBlobStore, Worker, WorkspaceEvent,
     event_outbox_row,
 };
 
@@ -489,14 +489,12 @@ impl DetectionWorker {
         // transaction is `PgError`-typed for its rollback sentinel, and insert it
         // alongside the finalize so the `Complete` event commits atomically with
         // the detection.
-        let completed_event = WorkspaceEvent::DetectionCompleted {
-            detection: DetectionRef {
-                detection_id: detection.id,
-                pipeline_slug: pipeline.slug.clone(),
-            },
+        let completed_event = WorkspaceEvent::DetectionCompleted(DetectionCompleted {
+            detection_id: detection.id,
+            pipeline_slug: pipeline.slug.clone(),
             input_file_name: Some(file.display_name.clone()),
             notify: detection.account_id,
-        };
+        });
         let outbox_row = event_outbox_row(
             EventOrigin {
                 workspace_id: job.workspace_id,

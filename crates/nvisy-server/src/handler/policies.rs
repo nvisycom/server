@@ -23,7 +23,8 @@ use crate::handler::response::{PoliciesPage, Policy, PolicySummary};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorResponse, Result};
 use crate::service::{
-    CryptoService, EventEmitter, EventOrigin, PolicyRef, ServiceState, WorkspaceEvent,
+    CryptoService, EventEmitter, EventOrigin, PolicyCreated, PolicyDeleted, PolicyUpdated,
+    ServiceState, WorkspaceEvent,
 };
 
 /// Tracing target for workspace policy operations.
@@ -87,7 +88,7 @@ async fn create_policy(
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::PolicyCreated(PolicyRef {
+                WorkspaceEvent::PolicyCreated(PolicyCreated {
                     policy_id: policy.id,
                     policy_slug: policy.slug.clone(),
                 }),
@@ -269,7 +270,7 @@ async fn update_policy(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::PolicyUpdated(PolicyRef {
+            WorkspaceEvent::PolicyUpdated(PolicyUpdated {
                 policy_id,
                 policy_slug,
             }),
@@ -336,7 +337,7 @@ async fn delete_policy(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::PolicyDeleted(PolicyRef {
+            WorkspaceEvent::PolicyDeleted(PolicyDeleted {
                 policy_id,
                 policy_slug,
             }),

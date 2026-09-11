@@ -36,8 +36,9 @@ use crate::handler::response::{Detection, DetectionsPage, RedactionResult};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, SseResponse};
 use crate::service::{
-    CryptoService, DetectionJob, DetectionQueue, DetectionRef, DetectionStatusEvent, EngineService,
-    EventEmitter, EventOrigin, RunBlobStore, ServiceState, WorkspaceEvent, resolve_policies,
+    CryptoService, DetectionJob, DetectionQueue, DetectionStarted, DetectionStatusEvent,
+    EngineService, EventEmitter, EventOrigin, RedactionCreated, RunBlobStore, ServiceState,
+    WorkspaceEvent, resolve_policies,
 };
 
 /// Tracing target for detection operations.
@@ -156,7 +157,7 @@ async fn create_detection(
                     account_id: authz.account_id,
                     security: &security,
                 },
-                WorkspaceEvent::DetectionStarted(DetectionRef {
+                WorkspaceEvent::DetectionStarted(DetectionStarted {
                     detection_id: detection_row.id,
                     pipeline_slug: pipeline.slug.clone(),
                 }),
@@ -704,15 +705,13 @@ async fn redact_detection(
                     account_id: authz.account_id,
                     security: &security,
                 },
-                WorkspaceEvent::RedactionCreated {
-                    detection: DetectionRef {
-                        detection_id: detection.id,
-                        pipeline_slug: pipeline.slug.clone(),
-                    },
+                WorkspaceEvent::RedactionCreated(RedactionCreated {
+                    detection_id: detection.id,
+                    pipeline_slug: pipeline.slug.clone(),
                     redaction_id: redaction.id,
                     input_file_name: Some(file.display_name.clone()),
                     notify: detection.account_id,
-                },
+                }),
             )
             .await?;
             Ok::<_, Error>(redaction)

@@ -21,7 +21,9 @@ use crate::extract::{
 use crate::handler::request::{CursorPagination, ListMembers, MemberPathParams, UpdateMember};
 use crate::handler::response::{Member, MembersPage, Page};
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{EventEmitter, EventOrigin, MemberRef, ServiceState, WorkspaceEvent};
+use crate::service::{
+    EventEmitter, EventOrigin, MemberDeleted, MemberUpdated, ServiceState, WorkspaceEvent,
+};
 
 /// Tracing target for workspace member operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::members";
@@ -192,7 +194,7 @@ async fn delete_member(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::MemberDeleted(MemberRef {
+            WorkspaceEvent::MemberDeleted(MemberDeleted {
                 member_id: member_account_id,
                 member_username: path_params.username.clone(),
             }),
@@ -281,7 +283,7 @@ async fn update_member(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::MemberUpdated(MemberRef {
+            WorkspaceEvent::MemberUpdated(MemberUpdated {
                 member_id: member_account_id,
                 member_username: path_params.username.clone(),
             }),
@@ -367,7 +369,7 @@ async fn leave_workspace(
                 account_id: auth_state.account_id,
                 security: &security,
             },
-            WorkspaceEvent::MemberDeleted(MemberRef {
+            WorkspaceEvent::MemberDeleted(MemberDeleted {
                 member_id: auth_state.account_id,
                 member_username: account.username.clone(),
             }),

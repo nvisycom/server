@@ -28,7 +28,8 @@ use crate::handler::response::{Webhook, WebhookCreated, WebhookResult, WebhooksP
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
-    CryptoService, EventEmitter, EventOrigin, ServiceState, WebhookRef, WorkspaceEvent,
+    CryptoService, EventEmitter, EventOrigin, ServiceState, WebhookCreated as WebhookCreatedEvent,
+    WebhookDeleted as WebhookDeletedEvent, WebhookUpdated as WebhookUpdatedEvent, WorkspaceEvent,
 };
 
 /// Tracing target for workspace webhook operations.
@@ -77,7 +78,7 @@ async fn create_webhook(
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::WebhookCreated(WebhookRef {
+                WorkspaceEvent::WebhookCreated(WebhookCreatedEvent {
                     webhook_id: webhook.id,
                     webhook_name: webhook.display_name.clone(),
                 }),
@@ -262,7 +263,7 @@ async fn update_webhook(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::WebhookUpdated(WebhookRef {
+            WorkspaceEvent::WebhookUpdated(WebhookUpdatedEvent {
                 webhook_id: existing.id,
                 webhook_name,
             }),
@@ -333,7 +334,7 @@ async fn delete_webhook(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::WebhookDeleted(WebhookRef {
+            WorkspaceEvent::WebhookDeleted(WebhookDeletedEvent {
                 webhook_id: existing.id,
                 webhook_name: existing.display_name.clone(),
             }),

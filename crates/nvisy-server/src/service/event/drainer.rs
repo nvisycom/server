@@ -19,25 +19,13 @@ use std::time::Duration;
 
 use nvisy_postgres::model::{EventOutbox, NewWorkspaceActivity};
 use nvisy_postgres::query::{EventOutboxRepository, WorkspaceActivityRepository};
-use nvisy_postgres::types::{
-    ActivityPayload, AssignmentActivityParams, ConnectionActivityParams, ConnectionId,
-    ConnectionSyncCompletedParams, ConnectionSyncFailedParams, DetectionActivityParams,
-    DetectionCompletedParams, DetectionFailedParams, DetectionId, FileActivityParams,
-    FileAssignedParams, FileUnassignedParams, Handle, InviteActivityParams, Json,
-    MemberActivityParams, NotificationPayload, PipelineActivityParams, PolicyActivityParams,
-    ProviderActivityParams, ProviderId, RedactionActivityParams, RedactionCreatedParams,
-    RedactionId, WebhookActivityParams, WebhookEvent, WebhookId, WorkspaceActivityParams,
-};
+use nvisy_postgres::types::Json;
 use nvisy_postgres::{AsyncConnection, PgConn};
-use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::response::{Error, Result};
-use crate::service::event::{
-    AssignmentRef, ConnectionRef, DetectionRef, FileRef, InviteRef, MemberRef, PolicyRef,
-    ProviderRef, WebhookRef, WorkspaceEvent, WorkspaceRef,
-};
+use crate::service::event::{Notification, NotifyTarget, WorkspaceEvent};
 use crate::service::{Infra, NotificationEmitter, WebhookEmitter, Worker};
 
 /// Tracing target for the outbox drainer.
@@ -233,7 +221,7 @@ impl EventOutboxDrainer {
             tracing::error!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to decode outbox event");
         })?;
 
-        let activity = activity_of(&event);
+        let activity = event.activity();
         let activity_row = NewWorkspaceActivity {
             workspace_id: row.workspace_id,
             account_id: row.account_id,
@@ -260,25 +248,47 @@ impl EventOutboxDrainer {
         let actor = row.account_id;
 
         // Webhook — only the events the webhook vocabulary carries.
-        if let Some((webhook_event, data)) = webhook_of(event) {
-            let resource_id = resource_id_of(event);
+        if let Some(delivery) = event.webhook() {
+            let resource_id = event.resource_id();
             if let Err(err) = self
                 .webhook
-                .emit(workspace_id, webhook_event, resource_id, Some(actor), data)
+                .emit(
+                    workspace_id,
+                    delivery.event,
+                    resource_id,
+                    Some(actor),
+                    delivery.body,
+                )
                 .await
             {
                 tracing::warn!(target: TRACING_TARGET, error = %err, %workspace_id, "Failed to emit webhook event");
             }
         }
 
-        // Notification — only the events that raise one.
-        if let Some((recipient, payload)) = notification_of(event.clone())
-            && let Err(err) = self
+        // Notifications — an event may raise several, each to its own audience.
+        for notification in event.clone().notification() {
+            self.dispatch_notification(workspace_id, notification).await;
+        }
+    }
+
+    /// Delivers one notification to its target audience, honoring recipient
+    /// preferences. Best-effort: a failure is logged, never propagated.
+    async fn dispatch_notification(&self, workspace_id: Uuid, notification: Notification) {
+        let Notification { target, payload } = notification;
+        let result = match target {
+            NotifyTarget::Account(recipient) => self
                 .notification
                 .notify_account(workspace_id, recipient, payload)
                 .await
-        {
-            tracing::warn!(target: TRACING_TARGET, error = %err, %workspace_id, %recipient, "Failed to notify");
+                .map(|_delivered| ()),
+            NotifyTarget::Roles { roles, exclude } => self
+                .notification
+                .notify_workspace_roles(workspace_id, &roles, exclude, payload)
+                .await
+                .map(|_count| ()),
+        };
+        if let Err(err) = result {
+            tracing::warn!(target: TRACING_TARGET, error = %err, %workspace_id, "Failed to deliver notification");
         }
     }
 }
@@ -292,377 +302,4 @@ fn retry_backoff(attempts: i32) -> i64 {
     RETRY_BACKOFF_BASE_SECS
         .saturating_mul(steps)
         .min(RETRY_BACKOFF_MAX_SECS)
-}
-
-/// The activity-log payload for an event. Total: every event is recorded.
-fn activity_of(event: &WorkspaceEvent) -> ActivityPayload {
-    use WorkspaceEvent as E;
-
-    let workspace = |w: &WorkspaceRef| WorkspaceActivityParams {
-        workspace_slug: w.workspace_slug.clone(),
-    };
-    let member = |m: &MemberRef| MemberActivityParams {
-        member_username: m.member_username.clone(),
-    };
-    let invite = |i: &InviteRef| InviteActivityParams {
-        invite_id: i.invite_id,
-        email: i.email.clone(),
-    };
-    let connection = |c: &ConnectionRef| ConnectionActivityParams {
-        connection_id: ConnectionId::from_uuid(c.connection_id),
-        connection_name: c.connection_name.clone(),
-    };
-    let connection_sync = |connection_id: Uuid, connection_name: &str| ConnectionActivityParams {
-        connection_id: ConnectionId::from_uuid(connection_id),
-        connection_name: connection_name.to_owned(),
-    };
-    let provider = |p: &ProviderRef| ProviderActivityParams {
-        provider_id: ProviderId::from_uuid(p.provider_id),
-        provider_name: p.provider_name.clone(),
-    };
-    let webhook = |w: &WebhookRef| WebhookActivityParams {
-        webhook_id: WebhookId::from_uuid(w.webhook_id),
-        webhook_name: w.webhook_name.clone(),
-    };
-    let file_params = |file: &FileRef| FileActivityParams {
-        file_id: file.file_id,
-        file_name: file.file_name.clone(),
-    };
-    let assignment_params = |a: &AssignmentRef| AssignmentActivityParams {
-        assignment_id: a.assignment_id,
-        file_name: a.file.file_name.clone(),
-        assignee_username: a.assignee_username.clone(),
-        status: a.status,
-    };
-    let pipeline = |pipeline_slug: &Handle| PipelineActivityParams {
-        pipeline_slug: pipeline_slug.clone(),
-    };
-    let detection = |detection: &DetectionRef| DetectionActivityParams {
-        pipeline_slug: detection.pipeline_slug.clone(),
-        detection_id: DetectionId::from_uuid(detection.detection_id),
-    };
-    let redaction = |detection: &DetectionRef, redaction_id: Uuid| RedactionActivityParams {
-        pipeline_slug: detection.pipeline_slug.clone(),
-        redaction_id: RedactionId::from_uuid(redaction_id),
-    };
-    let policy = |p: &PolicyRef| PolicyActivityParams {
-        policy_id: p.policy_id,
-        policy_slug: p.policy_slug.clone(),
-    };
-
-    match event {
-        E::WorkspaceCreated(w) => ActivityPayload::WorkspaceCreated(workspace(w)),
-        E::WorkspaceUpdated(w) => ActivityPayload::WorkspaceUpdated(workspace(w)),
-        E::WorkspaceDeleted(w) => ActivityPayload::WorkspaceDeleted(workspace(w)),
-        E::MemberAdded(m) => ActivityPayload::MemberAdded(member(m)),
-        E::MemberUpdated(m) => ActivityPayload::MemberUpdated(member(m)),
-        E::MemberDeleted(m) => ActivityPayload::MemberDeleted(member(m)),
-        E::InviteCreated(i) => ActivityPayload::InviteCreated(invite(i)),
-        E::InviteAccepted(i) => ActivityPayload::InviteAccepted(invite(i)),
-        E::InviteDeclined(i) => ActivityPayload::InviteDeclined(invite(i)),
-        E::InviteCanceled(i) => ActivityPayload::InviteCanceled(invite(i)),
-        E::ConnectionCreated(c) => ActivityPayload::ConnectionCreated(connection(c)),
-        E::ConnectionUpdated(c) => ActivityPayload::ConnectionUpdated(connection(c)),
-        E::ConnectionDeleted(c) => ActivityPayload::ConnectionDeleted(connection(c)),
-        E::ConnectionSyncStarted(c) => ActivityPayload::ConnectionSyncStarted(connection(c)),
-        E::ConnectionSyncCompleted {
-            connection_id,
-            connection_name,
-            ..
-        } => ActivityPayload::ConnectionSyncCompleted(connection_sync(
-            *connection_id,
-            connection_name,
-        )),
-        E::ConnectionSyncFailed {
-            connection_id,
-            connection_name,
-            ..
-        } => {
-            ActivityPayload::ConnectionSyncFailed(connection_sync(*connection_id, connection_name))
-        }
-        E::ProviderCreated(p) => ActivityPayload::ProviderCreated(provider(p)),
-        E::ProviderUpdated(p) => ActivityPayload::ProviderUpdated(provider(p)),
-        E::ProviderDeleted(p) => ActivityPayload::ProviderDeleted(provider(p)),
-        E::WebhookCreated(w) => ActivityPayload::WebhookCreated(webhook(w)),
-        E::WebhookUpdated(w) => ActivityPayload::WebhookUpdated(webhook(w)),
-        E::WebhookDeleted(w) => ActivityPayload::WebhookDeleted(webhook(w)),
-        E::FileCreated { file, .. } => ActivityPayload::FileCreated(file_params(file)),
-        E::FileUpdated(f) => ActivityPayload::FileUpdated(file_params(f)),
-        E::FileDeleted(f) => ActivityPayload::FileDeleted(file_params(f)),
-        E::FileAssigned { assignment, .. } => {
-            ActivityPayload::FileAssigned(assignment_params(assignment))
-        }
-        E::FileUnassigned { assignment, .. } => {
-            ActivityPayload::FileUnassigned(assignment_params(assignment))
-        }
-        E::AssignmentStatusChanged(a) => {
-            ActivityPayload::AssignmentStatusChanged(assignment_params(a))
-        }
-        E::PipelineCreated(p) => ActivityPayload::PipelineCreated(pipeline(&p.pipeline_slug)),
-        E::PipelineUpdated(p) => ActivityPayload::PipelineUpdated(pipeline(&p.pipeline_slug)),
-        E::PipelineDeleted(p) => ActivityPayload::PipelineDeleted(pipeline(&p.pipeline_slug)),
-        E::DetectionStarted(d) => ActivityPayload::DetectionStarted(detection(d)),
-        E::DetectionCompleted { detection: d, .. } => {
-            ActivityPayload::DetectionCompleted(detection(d))
-        }
-        E::DetectionFailed { detection: d, .. } => ActivityPayload::DetectionFailed(detection(d)),
-        E::RedactionCreated {
-            detection: d,
-            redaction_id,
-            ..
-        } => ActivityPayload::RedactionCreated(redaction(d, *redaction_id)),
-        E::PolicyCreated(p) => ActivityPayload::PolicyCreated(policy(p)),
-        E::PolicyUpdated(p) => ActivityPayload::PolicyUpdated(policy(p)),
-        E::PolicyDeleted(p) => ActivityPayload::PolicyDeleted(policy(p)),
-    }
-}
-
-/// The webhook event (and any extra body) for an event, or `None` for events the
-/// webhook vocabulary does not carry (workspace lifecycle, invites, webhook CRUD).
-fn webhook_of(event: &WorkspaceEvent) -> Option<(WebhookEvent, Option<Value>)> {
-    use WorkspaceEvent as E;
-    let webhook = match event {
-        E::MemberAdded(..) => (WebhookEvent::MemberAdded, None),
-        E::MemberUpdated(..) => (WebhookEvent::MemberUpdated, None),
-        E::MemberDeleted(..) => (WebhookEvent::MemberDeleted, None),
-        E::ConnectionCreated(..) => (WebhookEvent::ConnectionCreated, None),
-        E::ConnectionUpdated(..) => (WebhookEvent::ConnectionUpdated, None),
-        E::ConnectionDeleted(..) => (WebhookEvent::ConnectionDeleted, None),
-        E::ConnectionSyncStarted(..) => (WebhookEvent::ConnectionSyncStarted, None),
-        E::ConnectionSyncCompleted { .. } => (WebhookEvent::ConnectionSyncCompleted, None),
-        E::ConnectionSyncFailed { .. } => (WebhookEvent::ConnectionSyncFailed, None),
-        E::ProviderCreated(..) => (WebhookEvent::ProviderCreated, None),
-        E::ProviderUpdated(..) => (WebhookEvent::ProviderUpdated, None),
-        E::ProviderDeleted(..) => (WebhookEvent::ProviderDeleted, None),
-        E::FileCreated {
-            file,
-            file_size_bytes,
-        } => (
-            WebhookEvent::FileCreated,
-            Some(
-                serde_json::json!({ "displayName": file.file_name, "fileSizeBytes": file_size_bytes }),
-            ),
-        ),
-        E::FileUpdated(f) => (
-            WebhookEvent::FileUpdated,
-            Some(serde_json::json!({ "displayName": f.file_name })),
-        ),
-        E::FileDeleted(f) => (
-            WebhookEvent::FileDeleted,
-            Some(serde_json::json!({ "displayName": f.file_name })),
-        ),
-        E::FileAssigned { assignment, .. } => (
-            WebhookEvent::FileAssigned,
-            Some(serde_json::json!({
-                "displayName": assignment.file.file_name,
-                "assignee": assignment.assignee_username,
-                "status": assignment.status,
-            })),
-        ),
-        E::FileUnassigned { assignment, .. } => (
-            WebhookEvent::FileUnassigned,
-            Some(serde_json::json!({
-                "displayName": assignment.file.file_name,
-                "assignee": assignment.assignee_username,
-                "status": assignment.status,
-            })),
-        ),
-        E::AssignmentStatusChanged(assignment) => (
-            WebhookEvent::AssignmentStatusChanged,
-            Some(serde_json::json!({
-                "displayName": assignment.file.file_name,
-                "assignee": assignment.assignee_username,
-                "status": assignment.status,
-            })),
-        ),
-        E::PipelineCreated(..) => (WebhookEvent::PipelineCreated, None),
-        E::PipelineUpdated(..) => (WebhookEvent::PipelineUpdated, None),
-        E::PipelineDeleted(..) => (WebhookEvent::PipelineDeleted, None),
-        E::DetectionStarted(..) => (WebhookEvent::DetectionStarted, None),
-        E::DetectionCompleted { .. } => (WebhookEvent::DetectionCompleted, None),
-        E::DetectionFailed { .. } => (WebhookEvent::DetectionFailed, None),
-        E::RedactionCreated { .. } => (WebhookEvent::RedactionCreated, None),
-        E::PolicyCreated(..) => (WebhookEvent::PolicyCreated, None),
-        E::PolicyUpdated(..) => (WebhookEvent::PolicyUpdated, None),
-        E::PolicyDeleted(..) => (WebhookEvent::PolicyDeleted, None),
-        E::WorkspaceCreated(..)
-        | E::WorkspaceUpdated(..)
-        | E::WorkspaceDeleted(..)
-        | E::InviteCreated(..)
-        | E::InviteAccepted(..)
-        | E::InviteDeclined(..)
-        | E::InviteCanceled(..)
-        | E::WebhookCreated(..)
-        | E::WebhookUpdated(..)
-        | E::WebhookDeleted(..) => return None,
-    };
-    Some(webhook)
-}
-
-/// The in-app notification for an event — recipient and payload — or `None` for
-/// events that raise none. Consumes the event, moving its facts into the payload.
-fn notification_of(event: WorkspaceEvent) -> Option<(Uuid, NotificationPayload)> {
-    use WorkspaceEvent as E;
-    match event {
-        E::ConnectionSyncCompleted {
-            connection_id,
-            connection_name,
-            records_synced,
-            notify,
-        } => notify.map(|to| {
-            (
-                to,
-                NotificationPayload::ConnectionSyncCompleted(ConnectionSyncCompletedParams {
-                    connection_id: ConnectionId::from_uuid(connection_id),
-                    connection_name,
-                    records_synced,
-                }),
-            )
-        }),
-        E::ConnectionSyncFailed {
-            connection_id,
-            connection_name,
-            error,
-            notify,
-        } => notify.map(|to| {
-            (
-                to,
-                NotificationPayload::ConnectionSyncFailed(ConnectionSyncFailedParams {
-                    connection_id: ConnectionId::from_uuid(connection_id),
-                    connection_name,
-                    error,
-                }),
-            )
-        }),
-        E::DetectionCompleted {
-            detection,
-            input_file_name,
-            notify,
-        } => Some((
-            notify,
-            NotificationPayload::DetectionCompleted(DetectionCompletedParams {
-                detection_id: DetectionId::from_uuid(detection.detection_id),
-                pipeline_slug: detection.pipeline_slug,
-                input_file_name,
-            }),
-        )),
-        E::RedactionCreated {
-            detection,
-            redaction_id,
-            input_file_name,
-            notify,
-        } => Some((
-            notify,
-            NotificationPayload::RedactionCreated(RedactionCreatedParams {
-                redaction_id: RedactionId::from_uuid(redaction_id),
-                detection_id: DetectionId::from_uuid(detection.detection_id),
-                pipeline_slug: detection.pipeline_slug,
-                input_file_name,
-            }),
-        )),
-        E::DetectionFailed {
-            detection,
-            input_file_name,
-            error,
-            notify,
-        } => Some((
-            notify,
-            NotificationPayload::DetectionFailed(DetectionFailedParams {
-                detection_id: DetectionId::from_uuid(detection.detection_id),
-                pipeline_slug: detection.pipeline_slug,
-                input_file_name,
-                error,
-            }),
-        )),
-        E::FileAssigned { assignment, notify } => notify.map(|to| {
-            (
-                to,
-                NotificationPayload::FileAssigned(FileAssignedParams {
-                    assignment_id: assignment.assignment_id,
-                    file_id: assignment.file.file_id,
-                    file_name: assignment.file.file_name,
-                }),
-            )
-        }),
-        E::FileUnassigned { assignment, notify } => notify.map(|to| {
-            let file = assignment.file;
-            (
-                to,
-                NotificationPayload::FileUnassigned(FileUnassignedParams {
-                    file_id: file.file_id,
-                    // The handler encodes a removed file as an empty name; surface
-                    // that as `None` so the notification omits it rather than
-                    // showing a blank.
-                    file_name: (!file.file_name.is_empty()).then_some(file.file_name),
-                }),
-            )
-        }),
-        // Events that raise no in-app notification. Listed explicitly (no wildcard)
-        // so a new event forces a deliberate notify / no-notify decision here.
-        E::AssignmentStatusChanged(_)
-        | E::WorkspaceCreated(_)
-        | E::WorkspaceUpdated(_)
-        | E::WorkspaceDeleted(_)
-        | E::MemberAdded(_)
-        | E::MemberUpdated(_)
-        | E::MemberDeleted(_)
-        | E::InviteCreated(_)
-        | E::InviteAccepted(_)
-        | E::InviteDeclined(_)
-        | E::InviteCanceled(_)
-        | E::ConnectionCreated(_)
-        | E::ConnectionUpdated(_)
-        | E::ConnectionDeleted(_)
-        | E::ConnectionSyncStarted(_)
-        | E::ProviderCreated(_)
-        | E::ProviderUpdated(_)
-        | E::ProviderDeleted(_)
-        | E::WebhookCreated(_)
-        | E::WebhookUpdated(_)
-        | E::WebhookDeleted(_)
-        | E::FileCreated { .. }
-        | E::FileUpdated(_)
-        | E::FileDeleted(_)
-        | E::PipelineCreated(_)
-        | E::PipelineUpdated(_)
-        | E::PipelineDeleted(_)
-        | E::DetectionStarted(_)
-        | E::PolicyCreated(_)
-        | E::PolicyUpdated(_)
-        | E::PolicyDeleted(_) => None,
-    }
-}
-
-/// The affected resource's id, for the webhook payload. Every event carries its
-/// resource's id, so consumers always receive a real identifier.
-fn resource_id_of(event: &WorkspaceEvent) -> Uuid {
-    use WorkspaceEvent as E;
-    match event {
-        E::WorkspaceCreated(w) | E::WorkspaceUpdated(w) | E::WorkspaceDeleted(w) => w.workspace_id,
-        E::MemberAdded(m) | E::MemberUpdated(m) | E::MemberDeleted(m) => m.member_id,
-        E::InviteCreated(i)
-        | E::InviteAccepted(i)
-        | E::InviteDeclined(i)
-        | E::InviteCanceled(i) => i.invite_id,
-        E::ConnectionCreated(c)
-        | E::ConnectionUpdated(c)
-        | E::ConnectionDeleted(c)
-        | E::ConnectionSyncStarted(c) => c.connection_id,
-        E::ConnectionSyncCompleted { connection_id, .. }
-        | E::ConnectionSyncFailed { connection_id, .. } => *connection_id,
-        E::ProviderCreated(p) | E::ProviderUpdated(p) | E::ProviderDeleted(p) => p.provider_id,
-        E::WebhookCreated(w) | E::WebhookUpdated(w) | E::WebhookDeleted(w) => w.webhook_id,
-        E::FileCreated { file, .. } => file.file_id,
-        E::FileUpdated(f) | E::FileDeleted(f) => f.file_id,
-        E::FileAssigned { assignment, .. } | E::FileUnassigned { assignment, .. } => {
-            assignment.assignment_id
-        }
-        E::AssignmentStatusChanged(a) => a.assignment_id,
-        E::PipelineCreated(p) | E::PipelineUpdated(p) | E::PipelineDeleted(p) => p.pipeline_id,
-        E::DetectionStarted(d) => d.detection_id,
-        E::DetectionCompleted { detection, .. }
-        | E::DetectionFailed { detection, .. }
-        | E::RedactionCreated { detection, .. } => detection.detection_id,
-        E::PolicyCreated(p) | E::PolicyUpdated(p) | E::PolicyDeleted(p) => p.policy_id,
-    }
 }

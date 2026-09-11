@@ -11,18 +11,6 @@ use uuid::Uuid;
 use super::Json;
 use crate::types::{ConnectionId, DetectionId, Handle, NotificationEvent, RedactionId};
 
-/// Params of a `member.invited` notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct MemberInvitedParams {
-    /// Slug of the workspace the account was invited to.
-    pub workspace_slug: Handle,
-    /// Username of the account that sent the invite, if known.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub invited_by: Option<Handle>,
-}
-
 /// Params of a `member.joined` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -145,10 +133,6 @@ pub struct FileUnassignedParams {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", content = "data")]
 pub enum NotificationPayload {
-    /// The account was invited to a workspace.
-    #[serde(rename = "member.invited")]
-    MemberInvited(MemberInvitedParams),
-
     /// A new member joined a workspace.
     #[serde(rename = "member.joined")]
     MemberJoined(MemberJoinedParams),
@@ -186,7 +170,6 @@ impl NotificationPayload {
     /// The [`NotificationEvent`] this payload is for (its `type` tag).
     pub fn event(&self) -> NotificationEvent {
         match self {
-            NotificationPayload::MemberInvited(_) => NotificationEvent::MemberInvited,
             NotificationPayload::MemberJoined(_) => NotificationEvent::MemberJoined,
             NotificationPayload::ConnectionSyncCompleted(_) => {
                 NotificationEvent::ConnectionSyncCompleted

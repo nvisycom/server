@@ -40,8 +40,8 @@ use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJso
 use crate::handler::request::{OAuthCallbackQuery, OAuthStartPathParams, StartFileServiceOAuth};
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, connection_result_redirect};
 use crate::service::{
-    ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin, FileServiceRedirect,
-    ServiceState, WorkspaceEvent,
+    ConnectionConfig, ConnectionCreated, CryptoService, EventEmitter, EventOrigin,
+    FileServiceRedirect, ServiceState, WorkspaceEvent,
 };
 
 /// Tracing target for connection OAuth operations.
@@ -254,7 +254,7 @@ async fn complete_callback(
                     account_id: flow.account_id,
                     security,
                 },
-                WorkspaceEvent::ConnectionCreated(ConnectionRef {
+                WorkspaceEvent::ConnectionCreated(ConnectionCreated {
                     connection_id: connection.id,
                     connection_name: connection.display_name.clone(),
                 }),

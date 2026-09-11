@@ -49,9 +49,15 @@ pub use crate::service::detection::{
 };
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::event::{
-    AssignmentRef, ConnectionRef, DetectionRef, EventEmitter, EventOrigin, EventOutboxDrainer,
-    FileRef, InviteRef, MemberRef, PipelineRef, PolicyRef, ProviderRef, WebhookRef, WorkspaceEvent,
-    WorkspaceRef, event_outbox_row,
+    AssignmentStatusChanged, ConnectionCreated, ConnectionDeleted, ConnectionSyncCompleted,
+    ConnectionSyncFailed, ConnectionSyncStarted, ConnectionUpdated, DetectionCompleted,
+    DetectionFailed, DetectionStarted, EventEmitter, EventKind, EventOrigin, EventOutboxDrainer,
+    FileAssigned, FileCreated, FileDeleted, FileUnassigned, FileUpdated, InviteAccepted,
+    InviteCanceled, InviteCreated, InviteDeclined, MemberAdded, MemberDeleted, MemberUpdated,
+    Notification, NotifyTarget, PipelineCreated, PipelineDeleted, PipelineUpdated, PolicyCreated,
+    PolicyDeleted, PolicyUpdated, ProviderCreated, ProviderDeleted, ProviderUpdated,
+    RedactionCreated, WebhookCreated, WebhookDeleted, WebhookDelivery, WebhookUpdated,
+    WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated, event_outbox_row,
 };
 pub use crate::service::file_reaper::FileReaper;
 pub use crate::service::health::{HealthCache, HealthConfig};

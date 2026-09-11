@@ -35,8 +35,8 @@ use crate::handler::utility::{DownloadDocs, resolve_account_ref};
 use crate::middleware::UploadConfig;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, attachment_headers};
 use crate::service::{
-    CryptoService, EngineService, EventEmitter, EventOrigin, FileRef, HashingReader, LimitedReader,
-    RunBlobStore, ServiceState, WorkspaceEvent,
+    CryptoService, EngineService, EventEmitter, EventOrigin, FileCreated, FileDeleted, FileUpdated,
+    HashingReader, LimitedReader, RunBlobStore, ServiceState, WorkspaceEvent,
 };
 
 /// Tracing target for workspace file operations.
@@ -366,13 +366,11 @@ async fn upload_file(
                 let record = conn.create_workspace_file(file.record.clone()).await?;
                 conn.emit_event(
                     origin,
-                    WorkspaceEvent::FileCreated {
-                        file: FileRef {
-                            file_id: record.id,
-                            file_name: record.display_name.clone(),
-                        },
+                    WorkspaceEvent::FileCreated(FileCreated {
+                        file_id: record.id,
+                        file_name: record.display_name.clone(),
                         file_size_bytes: record.file_size_bytes,
-                    },
+                    }),
                 )
                 .await?;
                 created.push(record);
@@ -499,7 +497,7 @@ async fn update_file(
                 account_id: authz.account_id,
                 security: &security,
             },
-            WorkspaceEvent::FileUpdated(FileRef {
+            WorkspaceEvent::FileUpdated(FileUpdated {
                 file_id: path_params.file_id,
                 file_name: updated_file.display_name.clone(),
             }),
@@ -689,7 +687,7 @@ async fn delete_file(
                 account_id: authz.account_id,
                 security: &security,
             },
-            WorkspaceEvent::FileDeleted(FileRef {
+            WorkspaceEvent::FileDeleted(FileDeleted {
                 file_id: path_params.file_id,
                 file_name: file.display_name.clone(),
             }),
@@ -768,7 +766,7 @@ async fn bulk_delete_files(
                         account_id: authz.account_id,
                         security: &security,
                     },
-                    WorkspaceEvent::FileDeleted(FileRef {
+                    WorkspaceEvent::FileDeleted(FileDeleted {
                         file_id: file.id,
                         file_name: file.display_name.clone(),
                     }),

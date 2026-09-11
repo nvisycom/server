@@ -105,32 +105,6 @@ impl NotificationEmitter {
         }
     }
 
-    /// Notifies a single account unconditionally, without a workspace membership
-    /// or preference check.
-    ///
-    /// For events that target someone who is not (yet) a workspace member — e.g.
-    /// `member:invited`, where the recipient is being invited *to* the workspace.
-    /// Best-effort: callers log-and-continue on error.
-    pub async fn notify_account_direct(
-        &self,
-        account_id: Uuid,
-        payload: NotificationPayload,
-    ) -> Result<()> {
-        let (event, params) = payload.into_stored();
-        let mut conn = self.infra.postgres.get_connection().await?;
-        conn.create_account_notification(NewAccountNotification {
-            account_id,
-            notify_type: event,
-            params,
-            expires_at: None,
-        })
-        .await?;
-        tracing::debug!(target: TRACING_TARGET, %account_id, event = %event, "Notification created");
-
-        self.broadcast_unread(&mut conn, account_id).await;
-        Ok(())
-    }
-
     /// Notifies a single account of an event, honoring the recipient's in-app
     /// notification preferences within `workspace_id`.
     ///

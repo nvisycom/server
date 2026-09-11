@@ -97,8 +97,10 @@ pub struct FileActivityParams {
 pub struct AssignmentActivityParams {
     /// Id of the assignment.
     pub assignment_id: Uuid,
-    /// Display name of the file under review.
-    pub file_name: String,
+    /// Display name of the file under review, when it still exists. `None` (and
+    /// omitted) if the file was removed (e.g. by retention).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
     /// Username of the reviewer the file is assigned to.
     pub assignee_username: Handle,
     /// The reviewer's review status at the time of the activity.
@@ -459,7 +461,7 @@ impl ActivityPayload {
 
             ActivityPayload::FileAssigned(p)
             | ActivityPayload::FileUnassigned(p)
-            | ActivityPayload::AssignmentStatusChanged(p) => Some(p.file_name.clone()),
+            | ActivityPayload::AssignmentStatusChanged(p) => p.file_name.clone(),
 
             ActivityPayload::PipelineCreated(p)
             | ActivityPayload::PipelineUpdated(p)

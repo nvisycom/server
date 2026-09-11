@@ -3,14 +3,11 @@
 -- client renders copy from the event type and its typed params.
 
 -- Type of a notification event: what happened that the account is told about.
--- Only the baseline member values are declared here. Each later feature
--- (connections, detections, redactions, assignments) adds its own notification
--- values via ALTER TYPE ... ADD VALUE in its own migration, so a value is
--- introduced by the migration that introduces the object it describes.
-CREATE TYPE NOTIFICATION_EVENT AS ENUM (
-    'member.invited',              -- User was invited to a workspace
-    'member.joined'                -- A new member joined a workspace
-);
+-- Created empty here (the account_notifications column below needs the type to
+-- exist); every value is added by the migration that introduces the object it
+-- describes — members in the workspaces migration, connections/detections/
+-- redactions/assignments in theirs — via ALTER TYPE ... ADD VALUE.
+CREATE TYPE NOTIFICATION_EVENT AS ENUM ();
 
 COMMENT ON TYPE NOTIFICATION_EVENT IS 'Type of a notification event delivered to an account.';
 

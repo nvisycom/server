@@ -99,6 +99,11 @@ CREATE TYPE WORKSPACE_ROLE AS ENUM (
 
 COMMENT ON TYPE WORKSPACE_ROLE IS 'Access role of a workspace member: owner, admin, editor, or reviewer.';
 
+-- Membership is where "a member joined" first becomes meaningful, so the
+-- notification value for it is added here (the type is created empty by the
+-- notifications migration).
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'member.joined';
+
 -- Workspace members table: an account's membership in a workspace.
 CREATE TABLE workspace_members (
     -- Primary key (composite)

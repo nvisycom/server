@@ -10,9 +10,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::{
-    NewWorkspaceAssignment, UpdateWorkspaceAssignment, WorkspaceAssignment,
-};
+use nvisy_postgres::model::{NewWorkspaceAssignment, UpdateWorkspaceAssignment};
 use nvisy_postgres::query::{
     AccountRepository, CreateAssignmentOutcome, WorkspaceAssignmentRepository,
     WorkspaceFileRepository, WorkspaceMemberRepository,
@@ -32,7 +30,8 @@ use crate::handler::response::{Assignment, AssignmentsPage};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
-    AssignmentRef, EventEmitter, EventOrigin, FileRef, ServiceState, WorkspaceEvent,
+    AssignmentStatusChanged, EventEmitter, EventOrigin, FileAssigned, FileUnassigned, ServiceState,
+    WorkspaceEvent,
 };
 
 /// Tracing target for assignment operations.
@@ -94,16 +93,16 @@ async fn create_assignment(
                     emit_assignment_event(
                         conn,
                         workspace_origin(workspace.id, authz.account_id, &security),
-                        WorkspaceEvent::FileAssigned {
-                            assignment: assignment_ref(
-                                &assignment,
-                                &file.display_name,
-                                &request.assignee,
-                            ),
+                        WorkspaceEvent::FileAssigned(FileAssigned {
+                            assignment_id: assignment.id,
+                            file_id: assignment.file_id,
+                            file_name: file.display_name.clone(),
+                            assignee_username: request.assignee.clone(),
+                            status: assignment.status,
                             // No self-notification: the actor already knows they
                             // assigned themselves.
                             notify: notify_target(assignee, authz.account_id),
-                        },
+                        }),
                     )
                     .await?;
                     Ok::<_, Error>((assignment, true))
@@ -323,11 +322,13 @@ async fn update_assignment(
             emit_assignment_event(
                 conn,
                 workspace_origin(workspace.id, authz.account_id, &security),
-                WorkspaceEvent::AssignmentStatusChanged(assignment_ref(
-                    &updated,
-                    file_name.as_deref().unwrap_or_default(),
-                    &assignee_handle,
-                )),
+                WorkspaceEvent::AssignmentStatusChanged(AssignmentStatusChanged {
+                    assignment_id: updated.id,
+                    file_id: updated.file_id,
+                    file_name: file_name.clone(),
+                    assignee_username: assignee_handle.clone(),
+                    status: updated.status,
+                }),
             )
             .await?;
             Ok::<_, Error>(updated)
@@ -386,8 +387,7 @@ async fn delete_assignment(
     let file_name = conn
         .find_file_in_workspace(workspace.id, assignment.file_id)
         .await?
-        .map(|f| f.display_name)
-        .unwrap_or_default();
+        .map(|f| f.display_name);
     let assignee_handle = resolve_account_ref(&mut conn, assignment.assignee_account_id)
         .await?
         .username;
@@ -397,11 +397,15 @@ async fn delete_assignment(
         emit_assignment_event(
             conn,
             workspace_origin(workspace.id, authz.account_id, &security),
-            WorkspaceEvent::FileUnassigned {
-                assignment: assignment_ref(&assignment, &file_name, &assignee_handle),
+            WorkspaceEvent::FileUnassigned(FileUnassigned {
+                assignment_id: assignment.id,
+                file_id: assignment.file_id,
+                file_name: file_name.clone(),
+                assignee_username: assignee_handle.clone(),
+                status: assignment.status,
                 // No self-notification when the actor unassigned themselves.
                 notify: notify_target(assignment.assignee_account_id, authz.account_id),
-            },
+            }),
         )
         .await?;
         Ok::<_, Error>(())
@@ -457,24 +461,6 @@ fn workspace_origin<'a>(
         workspace_id,
         account_id,
         security,
-    }
-}
-
-/// Builds an [`AssignmentRef`] from an assignment row, its file name, and the
-/// assignee's handle.
-fn assignment_ref(
-    assignment: &WorkspaceAssignment,
-    file_name: &str,
-    assignee_username: &Handle,
-) -> AssignmentRef {
-    AssignmentRef {
-        assignment_id: assignment.id,
-        file: FileRef {
-            file_id: assignment.file_id,
-            file_name: file_name.to_owned(),
-        },
-        assignee_username: assignee_username.clone(),
-        status: assignment.status,
     }
 }
 

@@ -29,7 +29,7 @@ use crate::middleware::UploadConfig;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
     AvatarService, EventEmitter, EventOrigin, MAX_AVATAR_UPLOAD_BYTES, ServiceState,
-    WorkspaceEvent, WorkspaceRef,
+    WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
 };
 
 /// Tracing target for workspace operations.
@@ -94,7 +94,7 @@ async fn create_workspace(
                     account_id: creator_id,
                     security: &security,
                 },
-                WorkspaceEvent::WorkspaceCreated(WorkspaceRef {
+                WorkspaceEvent::WorkspaceCreated(WorkspaceCreated {
                     workspace_id: workspace.id,
                     workspace_slug: workspace.slug.clone(),
                 }),
@@ -256,7 +256,7 @@ async fn update_workspace(
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::WorkspaceUpdated(WorkspaceRef {
+                WorkspaceEvent::WorkspaceUpdated(WorkspaceUpdated {
                     workspace_id: updated.id,
                     workspace_slug: updated.slug.clone(),
                 }),
@@ -319,7 +319,7 @@ async fn delete_workspace(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::WorkspaceDeleted(WorkspaceRef {
+            WorkspaceEvent::WorkspaceDeleted(WorkspaceDeleted {
                 workspace_id: workspace.id,
                 workspace_slug: workspace.slug.clone(),
             }),

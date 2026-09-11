@@ -43,8 +43,9 @@ use crate::handler::response::{Connection, ConnectionVerification, ConnectionsPa
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
-    ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin, ExternalObjectStore,
-    ServiceState, StandardCronSchedule, WorkspaceEvent, persist_refreshed_tokens,
+    ConnectionConfig, ConnectionCreated, ConnectionDeleted, ConnectionUpdated, CryptoService,
+    EventEmitter, EventOrigin, ExternalObjectStore, ServiceState, StandardCronSchedule,
+    WorkspaceEvent, persist_refreshed_tokens,
 };
 
 /// Tracing target for workspace connection operations.
@@ -135,7 +136,7 @@ async fn create_connection(
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::ConnectionCreated(ConnectionRef {
+                WorkspaceEvent::ConnectionCreated(ConnectionCreated {
                     connection_id: connection.id,
                     connection_name: connection.display_name.clone(),
                 }),
@@ -440,7 +441,7 @@ async fn update_connection(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::ConnectionUpdated(ConnectionRef {
+            WorkspaceEvent::ConnectionUpdated(ConnectionUpdated {
                 connection_id,
                 connection_name,
             }),
@@ -518,7 +519,7 @@ async fn delete_connection(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::ConnectionDeleted(ConnectionRef {
+            WorkspaceEvent::ConnectionDeleted(ConnectionDeleted {
                 connection_id: existing.id,
                 connection_name: existing.display_name.clone(),
             }),
