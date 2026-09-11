@@ -15,7 +15,7 @@ use crate::extract::{Authorized, Json, Path, SecurityContext, ValidateJson, mark
 use crate::handler::request::{CommentPathParams, CreateComment, ThreadPathParams, UpdateComment};
 use crate::handler::response::Comment;
 use crate::handler::threads::{
-    MentionOutcome, TRACING_TARGET, emit_comment_event, enqueue_assistant_if_addressed,
+    MentionOutcome, TRACING_TARGET, emit_thread_event, enqueue_assistant_if_addressed,
     find_comment, find_thread, resolve_mentions, workspace_origin,
 };
 use crate::handler::utility::resolve_account_ref;
@@ -50,6 +50,13 @@ async fn create_comment(
     // The thread must exist in the workspace (and be live).
     let thread = find_thread(&mut conn, workspace.id, path_params.thread_id).await?;
 
+    // A closed thread is a finished discussion: reject new comments with a 409
+    // rather than appending to it. Reopen the thread to continue.
+    if thread.closed_at.is_some() {
+        return Err(ErrorKind::Conflict
+            .with_message("This thread is closed; reopen it before posting a comment"));
+    }
+
     let MentionOutcome {
         recipients,
         addressed_assistant,
@@ -73,7 +80,7 @@ async fn create_comment(
                 })
                 .await?;
 
-            emit_comment_event(
+            emit_thread_event(
                 conn,
                 workspace_origin(workspace.id, authz.account_id, &security),
                 WorkspaceEvent::ThreadCommentCreated(ThreadCommentCreated {
@@ -117,13 +124,15 @@ fn create_comment_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Post a comment")
         .description(
             "Posts a comment (message) in a thread. @username mentions notify those \
-             members. Requires the Comment permission.",
+             members. Requires the Comment permission. Returns 409 if the thread is \
+             closed.",
         )
         .response::<201, Json<Comment>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
 }
 
 /// Edits a comment's body. Restricted to the comment's author.

@@ -94,7 +94,7 @@ impl From<WorkspaceThreadCommentConstraints> for Error<'static> {
                 .with_message("Comment body must be between 1 and 10000 characters"),
         };
 
-        error.with_resource("workspace_comment")
+        error.with_resource("workspace_thread_comment")
     }
 }
 

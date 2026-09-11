@@ -229,6 +229,19 @@ impl WorkspaceThreadCommentRepository for PgConnection {
     ) -> Result<WorkspaceThreadComment> {
         use schema::workspace_thread_comments::{self, dsl};
 
+        // An all-`None` changeset (here, no `body`) would make Diesel emit an empty
+        // `SET` clause and fail with a query-builder error, so treat it as a no-op
+        // and return the current comment unchanged.
+        if updates.body.is_none() {
+            return workspace_thread_comments::table
+                .filter(dsl::id.eq(comment_id))
+                .filter(dsl::deleted_at.is_null())
+                .select(WorkspaceThreadComment::as_select())
+                .get_result(self)
+                .await
+                .map_err(Error::from);
+        }
+
         diesel::update(
             workspace_thread_comments::table
                 .filter(dsl::id.eq(comment_id))

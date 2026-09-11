@@ -82,6 +82,9 @@ pub struct OpenThread {
     pub body: String,
     /// Locations within the file the thread is pinned to. Empty for a file-level
     /// thread (no pin). Ignored for a workspace-level thread (no file).
+    ///
+    /// The `max = 32` limit is the same cap `add_anchor` enforces per thread
+    /// (`nvisy_postgres::query::MAX_THREAD_ANCHORS`); keep the two in sync.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[garde(length(max = 32))]
     pub anchors: Vec<CommentAnchor>,
@@ -92,10 +95,13 @@ pub struct OpenThread {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct RenameThread {
-    /// The new title (1-255 characters), or `null` to clear it.
+    /// The new title (1-255 characters), or `null` to clear it. Omitting the
+    /// field leaves the current title unchanged; only an explicit `null` clears
+    /// it. The outer `Option` distinguishes "absent" (`None`) from "explicit
+    /// null" (`Some(None)`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[garde(inner(length(chars, min = 1, max = 255), custom(validate_non_blank)))]
-    pub display_name: Option<String>,
+    #[garde(inner(inner(length(chars, min = 1, max = 255), custom(validate_non_blank))))]
+    pub display_name: Option<Option<String>>,
 }
 
 /// Request payload to add an anchor (location pin) to a thread.

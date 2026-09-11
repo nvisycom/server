@@ -22,9 +22,9 @@ use nvisy_postgres::model::{
     WorkspaceThreadComment,
 };
 use nvisy_postgres::query::{
-    AssistantJobOutboxRepository, TimelineCursor, WorkspaceFileRepository,
-    WorkspaceMemberRepository, WorkspaceThreadAnchorRepository, WorkspaceThreadCommentRepository,
-    WorkspaceThreadEventRepository, WorkspaceThreadRepository,
+    AddAnchorOutcome, AssistantJobOutboxRepository, MAX_THREAD_ANCHORS, TimelineCursor,
+    WorkspaceFileRepository, WorkspaceMemberRepository, WorkspaceThreadAnchorRepository,
+    WorkspaceThreadCommentRepository, WorkspaceThreadEventRepository, WorkspaceThreadRepository,
 };
 use nvisy_postgres::types::{CursorPage, Direction, Handle};
 use nvisy_postgres::{ASSISTANT_ACCOUNT_ID, ASSISTANT_HANDLE, AsyncConnection, PgClient, PgConn};
@@ -200,7 +200,7 @@ async fn open_thread(
         .transaction(async |conn| {
             let (thread, opening) = conn.open_thread(new_thread, request.body, anchors).await?;
 
-            emit_comment_event(
+            emit_thread_event(
                 conn,
                 workspace_origin(workspace_id, author_id, security),
                 WorkspaceEvent::ThreadOpened(ThreadOpened {
@@ -328,7 +328,7 @@ async fn delete_thread(
 
     conn.transaction(async |conn| {
         conn.delete_thread(thread.id).await?;
-        emit_comment_event(
+        emit_thread_event(
             conn,
             workspace_origin(workspace.id, authz.account_id, &security),
             WorkspaceEvent::ThreadDeleted(ThreadDeleted {
@@ -387,7 +387,7 @@ async fn close_thread(
     let closed = conn
         .transaction(async |conn| {
             let closed = conn.close_thread(thread.id, authz.account_id).await?;
-            emit_comment_event(
+            emit_thread_event(
                 conn,
                 workspace_origin(workspace.id, authz.account_id, &security),
                 WorkspaceEvent::ThreadClosed(ThreadClosed {
@@ -447,7 +447,7 @@ async fn reopen_thread(
     let reopened = conn
         .transaction(async |conn| {
             let reopened = conn.reopen_thread(thread.id, authz.account_id).await?;
-            emit_comment_event(
+            emit_thread_event(
                 conn,
                 workspace_origin(workspace.id, authz.account_id, &security),
                 WorkspaceEvent::ThreadReopened(ThreadReopened {
@@ -476,7 +476,7 @@ fn reopen_thread_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Renames a thread (sets or clears its title). Requires `Comment`.
+/// Renames a thread (sets or clears its title). Requires `CloseComments`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -487,7 +487,7 @@ fn reopen_thread_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn rename_thread(
     State(pg_client): State<PgClient>,
-    authz: Authorized<markers::Comment>,
+    authz: Authorized<markers::CloseComments>,
     Path(path_params): Path<ThreadPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<RenameThread>,
@@ -499,12 +499,20 @@ async fn rename_thread(
 
     let thread = find_thread(&mut conn, workspace.id, path_params.thread_id).await?;
 
+    // The field is `Option<Option<String>>`: an absent `displayName` (`None`)
+    // leaves the title unchanged, while an explicit `null` (`Some(None)`) clears
+    // it. Only an explicit value triggers the update and its timeline event.
+    let Some(display_name) = request.display_name else {
+        let response = thread_response(&mut conn, thread).await?;
+        return Ok((StatusCode::OK, Json(response)));
+    };
+
     let renamed = conn
         .transaction(async |conn| {
             let renamed = conn
-                .rename_thread(thread.id, request.display_name, authz.account_id)
+                .rename_thread(thread.id, display_name, authz.account_id)
                 .await?;
-            emit_comment_event(
+            emit_thread_event(
                 conn,
                 workspace_origin(workspace.id, authz.account_id, &security),
                 WorkspaceEvent::ThreadRenamed(ThreadRenamed {
@@ -526,7 +534,7 @@ async fn rename_thread(
 
 fn rename_thread_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Rename a thread")
-        .description("Sets or clears a thread's title. Requires the Comment permission.")
+        .description("Sets or clears a thread's title. Requires CloseComments.")
         .response::<200, Json<Thread>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
@@ -567,7 +575,7 @@ async fn add_anchor(
 
     let anchor = conn
         .transaction(async |conn| {
-            let anchor = conn
+            let AddAnchorOutcome::Added(anchor) = conn
                 .add_thread_anchor(
                     workspace.id,
                     NewWorkspaceThreadAnchor {
@@ -576,8 +584,13 @@ async fn add_anchor(
                     },
                     authz.account_id,
                 )
-                .await?;
-            emit_comment_event(
+                .await?
+            else {
+                return Err(ErrorKind::BadRequest.with_message(format!(
+                    "A thread may have at most {MAX_THREAD_ANCHORS} anchors"
+                )));
+            };
+            emit_thread_event(
                 conn,
                 workspace_origin(workspace.id, authz.account_id, &security),
                 WorkspaceEvent::ThreadAnchorAdded(ThreadAnchorAdded {
@@ -641,7 +654,7 @@ async fn remove_anchor(
         let anchor = conn
             .remove_thread_anchor(workspace.id, path_params.anchor_id, authz.account_id)
             .await?;
-        emit_comment_event(
+        emit_thread_event(
             conn,
             workspace_origin(workspace.id, authz.account_id, &security),
             WorkspaceEvent::ThreadAnchorRemoved(ThreadAnchorRemoved {
@@ -774,7 +787,7 @@ pub(crate) async fn find_comment(
 ) -> Result<WorkspaceThreadComment> {
     conn.find_comment_in_workspace(workspace_id, comment_id)
         .await?
-        .ok_or_else(|| Error::not_found("workspace_comment"))
+        .ok_or_else(|| Error::not_found("workspace_thread_comment"))
 }
 
 /// Encodes one typed anchor into its stored JSON.
@@ -928,8 +941,9 @@ pub(crate) fn workspace_origin<'a>(
     }
 }
 
-/// Emits one comment event onto the outbox.
-pub(crate) async fn emit_comment_event(
+/// Emits one thread collaboration event (a lifecycle change, an anchor change,
+/// or a new comment) onto the outbox.
+pub(crate) async fn emit_thread_event(
     conn: &mut PgConn,
     origin: EventOrigin<'_>,
     event: WorkspaceEvent,

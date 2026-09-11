@@ -14,16 +14,35 @@ use crate::model::{NewWorkspaceThreadAnchor, NewWorkspaceThreadEvent, WorkspaceT
 use crate::types::ThreadEventKind;
 use crate::{AsyncConnection, Error, PgConnection, Result, schema};
 
+/// The most live anchors one thread may carry. The initial anchors at open time
+/// and each incremental add are held to the same cap so a thread's anchor set —
+/// loaded and serialized on every thread response — cannot grow without bound.
+pub const MAX_THREAD_ANCHORS: i64 = 32;
+
+/// The result of an
+/// [`add_thread_anchor`](WorkspaceThreadAnchorRepository::add_thread_anchor) call.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AddAnchorOutcome {
+    /// The anchor was added.
+    Added(WorkspaceThreadAnchor),
+    /// The thread already holds [`MAX_THREAD_ANCHORS`] live anchors; nothing was
+    /// added. The caller reports this as a client error.
+    LimitReached,
+}
+
 /// Read and write operations on a thread's anchors.
 pub trait WorkspaceThreadAnchorRepository {
     /// Adds an anchor to a thread, recording an `anchor.added` timeline event, in
-    /// one transaction. Returns the created anchor.
+    /// one transaction. Returns [`AddAnchorOutcome::LimitReached`] without adding
+    /// when the thread already holds [`MAX_THREAD_ANCHORS`] live anchors; the count
+    /// and the insert share the transaction so concurrent adds cannot race past
+    /// the cap.
     fn add_thread_anchor(
         &mut self,
         workspace_id: Uuid,
         new_anchor: NewWorkspaceThreadAnchor,
         actor: Uuid,
-    ) -> impl Future<Output = Result<WorkspaceThreadAnchor>> + Send;
+    ) -> impl Future<Output = Result<AddAnchorOutcome>> + Send;
 
     /// Soft-removes an anchor, recording an `anchor.removed` timeline event, in
     /// one transaction. Returns the removed anchor.
@@ -62,9 +81,23 @@ impl WorkspaceThreadAnchorRepository for PgConnection {
         workspace_id: Uuid,
         new_anchor: NewWorkspaceThreadAnchor,
         actor: Uuid,
-    ) -> Result<WorkspaceThreadAnchor> {
+    ) -> Result<AddAnchorOutcome> {
         self.transaction(async |conn| {
-            use schema::{workspace_thread_anchors, workspace_thread_events};
+            use schema::workspace_thread_anchors::{self, dsl};
+            use schema::workspace_thread_events;
+
+            // Count the thread's live anchors inside the transaction and stop at the
+            // cap, so concurrent adds cannot race past it.
+            let live_anchors: i64 = workspace_thread_anchors::table
+                .filter(dsl::thread_id.eq(new_anchor.thread_id))
+                .filter(dsl::deleted_at.is_null())
+                .count()
+                .get_result(conn)
+                .await
+                .map_err(Error::from)?;
+            if live_anchors >= MAX_THREAD_ANCHORS {
+                return Ok(AddAnchorOutcome::LimitReached);
+            }
 
             let anchor = diesel::insert_into(workspace_thread_anchors::table)
                 .values(&new_anchor)
@@ -87,7 +120,7 @@ impl WorkspaceThreadAnchorRepository for PgConnection {
                 .await
                 .map_err(Error::from)?;
 
-            Ok(anchor)
+            Ok(AddAnchorOutcome::Added(anchor))
         })
         .await
     }

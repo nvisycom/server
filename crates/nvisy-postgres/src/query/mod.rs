@@ -78,7 +78,9 @@ pub use workspace_policy::{PolicyCursor, WorkspacePolicyRepository};
 pub use workspace_provider::{ProviderCursor, WorkspaceProviderRepository};
 pub use workspace_redaction::{RedactionCursor, WorkspaceRedactionRepository};
 pub use workspace_thread::{ThreadCursor, WorkspaceThreadRepository};
-pub use workspace_thread_anchor::WorkspaceThreadAnchorRepository;
+pub use workspace_thread_anchor::{
+    AddAnchorOutcome, MAX_THREAD_ANCHORS, WorkspaceThreadAnchorRepository,
+};
 pub use workspace_thread_comment::WorkspaceThreadCommentRepository;
 pub use workspace_thread_event::{TimelineCursor, TimelineSource, WorkspaceThreadEventRepository};
 pub use workspace_webhook::{WebhookCursor, WorkspaceWebhookRepository};

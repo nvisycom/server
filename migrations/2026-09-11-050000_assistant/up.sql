@@ -9,15 +9,44 @@
 -- it never uses the HTTP write path (the worker writes its comments
 -- server-internally). Its id is a fixed, well-known constant (mirrored in the
 -- Rust layer as ASSISTANT_ACCOUNT_ID) so code references it without a lookup.
-INSERT INTO accounts (id, is_verified, username, display_name, email_address)
-VALUES (
-    '00000000-0000-0000-0000-000000000a11',
-    TRUE,
-    'assistant',
-    'Assistant',
-    'assistant@system.nvisy.internal'
-)
-ON CONFLICT (id) DO NOTHING;
+--
+-- The `accounts` table has case-insensitive partial unique indexes on
+-- `lower(username)` and `lower(email_address)` (where `deleted_at IS NULL`), which
+-- `ON CONFLICT (id)` does not cover. A live account under a *different* id already
+-- holding this username or email would make a bare insert fail with an opaque
+-- index violation, so guard the insert: skip it if the reserved id already exists,
+-- and otherwise fail with a clear, actionable message if the reserved identifiers
+-- are taken by another live account (the reserved handle/email must be free).
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM accounts WHERE id = '00000000-0000-0000-0000-000000000a11'
+    ) THEN
+        RETURN;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM accounts
+        WHERE deleted_at IS NULL
+          AND (lower(username) = 'assistant'
+               OR lower(email_address) = 'assistant@nvisy.com')
+    ) THEN
+        RAISE EXCEPTION
+            'Cannot create the reserved assistant account: the username '
+            '"assistant" or email "assistant@nvisy.com" is already '
+            'held by another live account. Free those identifiers, then re-run.';
+    END IF;
+
+    INSERT INTO accounts (id, is_verified, username, display_name, email_address)
+    VALUES (
+        '00000000-0000-0000-0000-000000000a11',
+        TRUE,
+        'assistant',
+        'Assistant',
+        'assistant@nvisy.com'
+    );
+END
+$$;
 
 -- Assistant-reply outbox: when a user posts a comment addressing the assistant, a
 -- job row is inserted in the same transaction as the comment, then relayed by the

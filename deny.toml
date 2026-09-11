@@ -32,6 +32,16 @@ ignore = [
     # decryption oracle), so the practical exposure is minimal, and no fixed
     # `rsa` release exists yet. Revisit when `rsa` ships a constant-time fix.
     "RUSTSEC-2023-0071",
+    # Two `quick-xml` DoS advisories (quadratic attribute-duplicate check;
+    # unbounded namespace-declaration allocation), both patched in >= 0.41.0.
+    # Only the 0.37.5 copy is affected, pulled transitively via `little_exif`
+    # 0.6.23 (through `elide-image`). `little_exif` pins `quick-xml = "^0.37"`,
+    # so there is no workspace-level fix: the bump must land upstream in
+    # `little_exif` itself, after which `elide` picks up the new release. We
+    # never feed attacker-controlled XML through `little_exif`'s EXIF path.
+    # Remove once `little_exif` moves off the affected `quick-xml`.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
 
 [licenses]

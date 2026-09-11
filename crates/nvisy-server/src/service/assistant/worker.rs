@@ -46,6 +46,10 @@ const PREAMBLE: &str = "You are the assistant for a document redaction platform.
 /// Fallback concurrency when the runtime cannot report available parallelism.
 const DEFAULT_ASSISTANT_CONCURRENCY: usize = 4;
 
+/// Upper bound on one inference call, so a hung provider cannot pin a worker
+/// task indefinitely. A timeout is transient — the job is redelivered.
+const INFERENCE_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// Background worker that answers assistant mentions off the request thread.
 ///
 /// Cheaply cloneable (every field is `Arc`-backed); a clone is handed to each
@@ -185,15 +189,7 @@ impl AssistantWorker {
     /// provider configured — return [`JobOutcome::Done`]: retrying would not help.
     #[tracing::instrument(skip_all, fields(thread_id = %job.thread_id, comment_id = %job.comment_id, workspace_id = %job.workspace_id))]
     async fn run_job(&self, job: AssistantJob) -> JobOutcome {
-        let mut conn = match self.infra.postgres.get_connection().await {
-            Ok(conn) => conn,
-            Err(err) => {
-                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to get connection for assistant job");
-                return JobOutcome::Retry;
-            }
-        };
-
-        match self.reply(&mut conn, &job).await {
+        match self.reply(&job).await {
             Ok(()) => JobOutcome::Done,
             Err(ReplyError::Transient(err)) => {
                 tracing::error!(target: TRACING_TARGET, error = %err, "Assistant reply failed transiently; will retry");
@@ -208,71 +204,110 @@ impl AssistantWorker {
 
     /// Loads the conversation, runs the model, and posts the reply. Distinguishes
     /// transient failures (worth a redelivery) from terminal ones (drop the job).
-    async fn reply(
-        &self,
-        conn: &mut PgConn,
-        job: &AssistantJob,
-    ) -> std::result::Result<(), ReplyError> {
-        // The thread must still exist and be live.
-        let thread = conn
-            .find_thread_in_workspace(job.workspace_id, job.thread_id)
-            .await
-            .map_err(ReplyError::transient)?
-            .ok_or_else(|| ReplyError::terminal("thread no longer exists"))?;
+    ///
+    /// A pooled connection is held only for the two database phases (the load and
+    /// the post), never across the model call in between: inference is unbounded
+    /// I/O against the provider, so pinning a pool connection to it would starve
+    /// the pool under a slow provider. The `chat` call itself carries a timeout.
+    async fn reply(&self, job: &AssistantJob) -> std::result::Result<(), ReplyError> {
+        // Load phase: read the thread, the conversation, and the model client on
+        // one connection, then drop it before inference.
+        let (thread, prompt, history, client) = {
+            let mut conn = self
+                .infra
+                .postgres
+                .get_connection()
+                .await
+                .map_err(ReplyError::transient)?;
 
-        // Read the conversation oldest-first.
-        let comments = conn
-            .list_thread_comments(job.workspace_id, job.thread_id)
-            .await
-            .map_err(ReplyError::transient)?;
+            // The thread must still exist and be live.
+            let thread = conn
+                .find_thread_in_workspace(job.workspace_id, job.thread_id)
+                .await
+                .map_err(ReplyError::transient)?
+                .ok_or_else(|| ReplyError::terminal("thread no longer exists"))?;
 
-        // Idempotency: if the assistant has already replied to (i.e. after) the
-        // triggering comment, this is a redelivery — do not post a second reply.
-        if already_replied(&comments, job.comment_id) {
-            return Err(ReplyError::terminal("assistant already replied"));
-        }
+            // Read the conversation oldest-first.
+            let comments = conn
+                .list_thread_comments(job.workspace_id, job.thread_id)
+                .await
+                .map_err(ReplyError::transient)?;
 
-        // Resolve the workspace's language-model client. A workspace with no model
-        // provider configured is a terminal condition — retrying will not conjure
-        // one — so drop the job rather than redeliver forever.
-        let client = self
-            .resolve_client(conn, job.workspace_id)
-            .await
-            .map_err(|_| ReplyError::terminal("no language model provider configured"))?;
-
-        // Build the turn: prior comments become history, the triggering comment is
-        // the prompt. Skip the triggering comment in the history so it is not
-        // duplicated as both history and prompt.
-        let mut history = Vec::with_capacity(comments.len() + 1);
-        history.push(ChatTurn::system(PREAMBLE));
-        let mut prompt = String::new();
-        for row in &comments {
-            if row.item.id == job.comment_id {
-                prompt = row.item.body.clone();
-                continue;
+            // Idempotency: if the assistant has already replied to the triggering
+            // comment, this is a redelivery — do not post a second reply.
+            if already_replied(&comments, job.comment_id) {
+                return Err(ReplyError::terminal("assistant already replied"));
             }
-            history.push(turn_for(&row.item));
-        }
-        if prompt.is_empty() {
-            // The triggering comment vanished (deleted) between enqueue and now.
-            return Err(ReplyError::terminal("triggering comment no longer exists"));
-        }
 
-        let answer = client
-            .chat(&prompt, history)
+            // Resolve the workspace's language-model client. Only a genuinely
+            // missing provider is terminal (retrying will not conjure one); a
+            // decryption or client-build failure is transient, so redeliver rather
+            // than silently dropping the job. `resolve_client` reports the
+            // missing-provider case as a `Conflict`; every other failure is
+            // treated as transient.
+            let client = self
+                .resolve_client(&mut conn, job.workspace_id)
+                .await
+                .map_err(|err| {
+                    if err.kind() == ErrorKind::Conflict {
+                        ReplyError::terminal("no language model provider configured")
+                    } else {
+                        ReplyError::transient(err)
+                    }
+                })?;
+
+            // Build the turn: prior comments become history, the triggering comment
+            // is the prompt. Skip the triggering comment in the history so it is not
+            // duplicated as both history and prompt.
+            let mut history = Vec::with_capacity(comments.len() + 1);
+            history.push(ChatTurn::system(PREAMBLE));
+            let mut prompt = String::new();
+            for row in &comments {
+                if row.item.id == job.comment_id {
+                    prompt = row.item.body.clone();
+                    continue;
+                }
+                history.push(turn_for(&row.item));
+            }
+            if prompt.is_empty() {
+                // The triggering comment vanished (deleted) between enqueue and now.
+                return Err(ReplyError::terminal("triggering comment no longer exists"));
+            }
+
+            (thread, prompt, history, client)
+            // `conn` is dropped here, back to the pool, before inference runs.
+        };
+
+        // Inference phase: no connection held. Failures — provider timeouts, rate
+        // limits (429), and 5xx — are transient: nack so the message is
+        // redelivered rather than acking and leaving the user with no reply after a
+        // short provider outage. A hung provider is bounded by `INFERENCE_TIMEOUT`.
+        let answer = tokio::time::timeout(INFERENCE_TIMEOUT, client.chat(&prompt, history))
             .await
-            .map_err(|err| ReplyError::terminal(format!("inference failed: {err}")))?;
+            .map_err(|_| {
+                ReplyError::transient(
+                    ErrorKind::ServiceUnavailable.with_message("Inference timed out"),
+                )
+            })?
+            .map_err(ReplyError::transient)?;
         let answer = answer.trim();
         if answer.is_empty() {
             return Err(ReplyError::terminal("model returned an empty reply"));
         }
 
-        // Post the reply. The database's partial unique index on the triggering
-        // comment is the airtight guard: if a live reply already exists (a
-        // redelivered job that raced past the `already_replied` pre-check), the
-        // insert is rejected and nothing is posted.
+        // Post phase: acquire a fresh connection for the write. The database's
+        // partial unique index on the triggering comment is the airtight guard: if
+        // a live reply already exists (a redelivered job that raced past the
+        // `already_replied` pre-check), the insert is rejected and nothing is
+        // posted.
+        let mut conn = self
+            .infra
+            .postgres
+            .get_connection()
+            .await
+            .map_err(ReplyError::transient)?;
         let posted = self
-            .post_reply(conn, &thread, job.comment_id, answer)
+            .post_reply(&mut conn, &thread, job.comment_id, answer)
             .await
             .map_err(ReplyError::transient)?;
         if !posted {
@@ -369,26 +404,20 @@ impl AssistantWorker {
     }
 }
 
-/// Whether the assistant has already posted a comment at or after `comment_id`
-/// (the triggering message) in this thread — the redelivery-dedup check.
+/// Whether the assistant has already replied to `comment_id` (the triggering
+/// message) in this thread — the redelivery-dedup pre-check.
 ///
-/// `comments` is oldest-first, so once the triggering comment is seen, any
-/// later assistant-authored comment is a reply the worker already produced.
+/// A reply is the assistant-authored comment whose `parent_id` is the triggering
+/// comment (`post_reply` sets exactly that), so match it directly rather than by
+/// iteration order. The database's partial unique index on `parent_id` is the
+/// airtight guard; this only avoids the wasted inference of an obvious redelivery.
 fn already_replied(
     comments: &[nvisy_postgres::types::WithAccountRef<WorkspaceThreadComment>],
     comment_id: Uuid,
 ) -> bool {
-    let mut seen_trigger = false;
-    for row in comments {
-        if row.item.id == comment_id {
-            seen_trigger = true;
-            continue;
-        }
-        if seen_trigger && row.item.author_account_id == ASSISTANT_ACCOUNT_ID {
-            return true;
-        }
-    }
-    false
+    comments.iter().any(|row| {
+        row.item.author_account_id == ASSISTANT_ACCOUNT_ID && row.item.parent_id == Some(comment_id)
+    })
 }
 
 /// Maps one stored comment to a chat turn: the assistant's own messages are the

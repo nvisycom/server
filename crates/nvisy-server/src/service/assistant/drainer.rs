@@ -9,14 +9,14 @@
 
 use std::time::Duration;
 
+use nvisy_nats::stream::EventPublisher;
 use nvisy_postgres::AsyncConnection;
 use nvisy_postgres::model::WorkspaceAssistantJob;
 use nvisy_postgres::query::AssistantJobOutboxRepository;
 use tokio_util::sync::CancellationToken;
 
 use super::coordinator::AssistantCoordinator;
-use super::job::AssistantJob;
-use super::service::AssistantQueue;
+use super::job::{AssistantJob, AssistantStream};
 use crate::response::{Error, Result};
 use crate::service::{Infra, Worker};
 
@@ -52,7 +52,6 @@ const PUBLISH_TIMEOUT: Duration = Duration::from_secs(5);
 /// Drains the assistant-job outbox, publishing each pending job to the work-queue.
 pub struct AssistantOutboxDrainer {
     infra: Infra,
-    queue: AssistantQueue,
     coordinator: AssistantCoordinator,
 }
 
@@ -98,14 +97,10 @@ impl Worker for AssistantOutboxDrainer {
 impl AssistantOutboxDrainer {
     /// Creates a new [`AssistantOutboxDrainer`].
     ///
-    /// Shares the [`AssistantCoordinator`] with the enqueue-side [`AssistantQueue`]
+    /// Shares the [`AssistantCoordinator`] with the enqueue-side `AssistantQueue`
     /// so a job committed on this instance wakes this drainer at once.
     pub fn new(infra: Infra, coordinator: AssistantCoordinator) -> Self {
-        Self {
-            queue: AssistantQueue::new(infra.clone(), coordinator.clone()),
-            infra,
-            coordinator,
-        }
+        Self { infra, coordinator }
     }
 
     /// One drain pass: claim and publish batches until a short page signals the due
@@ -155,6 +150,11 @@ impl AssistantOutboxDrainer {
     async fn drain_batch(&self) -> Result<DrainPass> {
         let mut conn = self.infra.postgres.get_connection().await?;
 
+        // Build the stream publisher once per pass rather than per row: it runs the
+        // JetStream stream lookup/reconciliation on construction, which need not
+        // repeat for each of the (up to `DRAIN_BATCH`) rows.
+        let publisher = self.infra.nats.event_publisher::<AssistantStream>().await?;
+
         conn.transaction(async |conn| {
             let batch = conn.claim_assistant_job_batch(DRAIN_BATCH).await?;
             let mut pass = DrainPass {
@@ -165,8 +165,8 @@ impl AssistantOutboxDrainer {
             };
 
             for row in batch {
-                match self.publish(&row).await {
-                    Ok(()) => {
+                match publish(&publisher, &row).await {
+                    PublishOutcome::Published => {
                         conn.mark_assistant_job_processed(row.id).await?;
                         pass.processed += 1;
                     }
@@ -174,15 +174,27 @@ impl AssistantOutboxDrainer {
                     // `attempts + 1`. Once that reaches the cap, dead-letter the row
                     // instead of deferring it forever. A dead-lettered reply job just
                     // means the assistant never answers this message.
-                    Err(()) if row.attempts + 1 >= MAX_ATTEMPTS => {
+                    PublishOutcome::Failed if row.attempts + 1 >= MAX_ATTEMPTS => {
                         tracing::error!(target: TRACING_TARGET, id = %row.id, comment_id = %row.comment_id, attempts = row.attempts + 1, "Dead-lettering assistant job after too many failed attempts");
                         conn.mark_assistant_job_failed(row.id).await?;
                         pass.dead_lettered += 1;
                     }
-                    Err(()) => {
+                    PublishOutcome::Failed => {
                         conn.defer_assistant_job_attempt(row.id, retry_backoff(row.attempts))
                             .await?;
                         pass.deferred += 1;
+                    }
+                    // A publish timeout signals NATS is unavailable or hung. Do not
+                    // burn `PUBLISH_TIMEOUT` on each remaining row — that could hold
+                    // the batch's `FOR UPDATE SKIP LOCKED` locks and the pooled
+                    // connection for `DRAIN_BATCH * PUBLISH_TIMEOUT`. Defer this row
+                    // and stop the pass; the next tick retries the rest.
+                    PublishOutcome::TimedOut => {
+                        conn.defer_assistant_job_attempt(row.id, retry_backoff(row.attempts))
+                            .await?;
+                        pass.deferred += 1;
+                        tracing::warn!(target: TRACING_TARGET, id = %row.id, "Assistant-job publish timed out; deferring the rest of the batch");
+                        break;
                     }
                 }
             }
@@ -191,27 +203,39 @@ impl AssistantOutboxDrainer {
         })
         .await
     }
+}
 
-    /// Decodes a row's job and publishes it to the work-queue. Returns `Err` if the
-    /// payload cannot decode or the publish fails, so the caller defers or
-    /// dead-letters it.
-    async fn publish(&self, row: &WorkspaceAssistantJob) -> std::result::Result<(), ()> {
-        let job = serde_json::from_value::<AssistantJob>(row.job.clone()).map_err(|err| {
-            tracing::error!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to decode assistant job");
-        })?;
-        // Bound the publish so a hung NATS cannot hold the batch transaction's locks
-        // open; a timeout is a failed attempt like any other.
-        match tokio::time::timeout(PUBLISH_TIMEOUT, self.queue.enqueue(job)).await {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(err)) => {
-                tracing::warn!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to publish assistant job; deferring");
-                Err(())
-            }
-            Err(_elapsed) => {
-                tracing::warn!(target: TRACING_TARGET, id = %row.id, "Assistant-job publish timed out; deferring");
-                Err(())
-            }
+/// The result of one publish attempt: published, failed (decode or NATS error),
+/// or timed out (NATS unavailable/hung — the caller stops the batch).
+enum PublishOutcome {
+    /// Published to the work-queue.
+    Published,
+    /// The payload could not decode or NATS rejected the publish.
+    Failed,
+    /// The publish exceeded [`PUBLISH_TIMEOUT`]; NATS is likely down.
+    TimedOut,
+}
+
+/// Decodes a row's job and publishes it to the work-queue with the shared
+/// publisher. A decode error or NATS error is [`Failed`](PublishOutcome::Failed);
+/// exceeding [`PUBLISH_TIMEOUT`] is [`TimedOut`](PublishOutcome::TimedOut).
+async fn publish(
+    publisher: &EventPublisher<AssistantStream>,
+    row: &WorkspaceAssistantJob,
+) -> PublishOutcome {
+    let Ok(job) = serde_json::from_value::<AssistantJob>(row.job.clone()) else {
+        tracing::error!(target: TRACING_TARGET, id = %row.id, "Failed to decode assistant job");
+        return PublishOutcome::Failed;
+    };
+    // Bound the publish so a hung NATS cannot hold the batch transaction's locks
+    // open; a timeout stops the whole pass (see the caller).
+    match tokio::time::timeout(PUBLISH_TIMEOUT, publisher.publish(&job)).await {
+        Ok(Ok(())) => PublishOutcome::Published,
+        Ok(Err(err)) => {
+            tracing::warn!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to publish assistant job; deferring");
+            PublishOutcome::Failed
         }
+        Err(_elapsed) => PublishOutcome::TimedOut,
     }
 }
 

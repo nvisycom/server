@@ -264,10 +264,15 @@ impl WorkspaceThreadRepository for PgConnection {
         self.transaction(async |conn| {
             use schema::workspace_threads::{self, dsl};
 
+            // The `closed_at IS NULL` predicate makes the transition atomic: a
+            // thread that is already closed matches no row, so a second concurrent
+            // close returns `NotFound` instead of overwriting `closed_at`/
+            // `closed_by` and recording a duplicate `Closed` event.
             let thread = diesel::update(
                 workspace_threads::table
                     .filter(dsl::id.eq(thread_id))
-                    .filter(dsl::deleted_at.is_null()),
+                    .filter(dsl::deleted_at.is_null())
+                    .filter(dsl::closed_at.is_null()),
             )
             .set((dsl::closed_at.eq(now), dsl::closed_by.eq(actor)))
             .returning(WorkspaceThread::as_returning())
@@ -285,10 +290,15 @@ impl WorkspaceThreadRepository for PgConnection {
         self.transaction(async |conn| {
             use schema::workspace_threads::{self, dsl};
 
+            // The `closed_at IS NOT NULL` predicate makes the transition atomic: a
+            // thread that is already open matches no row, so a second concurrent
+            // reopen returns `NotFound` instead of recording a duplicate
+            // `Reopened` event.
             let thread = diesel::update(
                 workspace_threads::table
                     .filter(dsl::id.eq(thread_id))
-                    .filter(dsl::deleted_at.is_null()),
+                    .filter(dsl::deleted_at.is_null())
+                    .filter(dsl::closed_at.is_not_null()),
             )
             .set((
                 dsl::closed_at.eq(None::<jiff_diesel::Timestamp>),
@@ -374,9 +384,9 @@ mod tests {
         UpdateWorkspaceThreadComment,
     };
     use crate::query::{
-        AccountRepository, TimelineCursor, TimelineSource, WorkspaceThreadAnchorRepository,
-        WorkspaceThreadCommentRepository, WorkspaceThreadEventRepository,
-        WorkspaceThreadRepository,
+        AccountRepository, AddAnchorOutcome, TimelineCursor, TimelineSource,
+        WorkspaceThreadAnchorRepository, WorkspaceThreadCommentRepository,
+        WorkspaceThreadEventRepository, WorkspaceThreadRepository,
     };
     use crate::test_util::TestDatabase;
     use crate::types::{CursorPagination, ThreadEventKind, ThreadFilter};
@@ -512,7 +522,7 @@ mod tests {
         assert_eq!(opening_kinds, vec![ThreadEventKind::Opened]);
 
         // Add a second anchor -> one anchor.added event.
-        let added = conn
+        let AddAnchorOutcome::Added(added) = conn
             .add_thread_anchor(
                 seeded.workspace_id,
                 NewWorkspaceThreadAnchor {
@@ -521,7 +531,10 @@ mod tests {
                 },
                 seeded.account_id,
             )
-            .await?;
+            .await?
+        else {
+            panic!("adding a second anchor should not hit the limit");
+        };
         assert_eq!(conn.list_thread_anchors(thread.id).await?.len(), 2);
 
         // Remove it -> anchor.removed event; live anchors back to one.
