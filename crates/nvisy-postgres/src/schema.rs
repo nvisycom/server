@@ -14,10 +14,6 @@ pub mod sql_types {
     pub struct AssignmentStatus;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "chat_role"))]
-    pub struct ChatRole;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "connection_type"))]
     pub struct ConnectionType;
 
@@ -72,6 +68,10 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "sync_trigger_type"))]
     pub struct SyncTriggerType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "thread_event_kind"))]
+    pub struct ThreadEventKind;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "webhook_event"))]
@@ -158,35 +158,6 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-    use super::sql_types::ChatRole;
-
-    chat_messages (id) {
-        id -> Uuid,
-        session_id -> Uuid,
-        parent_id -> Nullable<Uuid>,
-        role -> ChatRole,
-        content -> Bytea,
-        created_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-
-    chat_sessions (id) {
-        id -> Uuid,
-        workspace_id -> Uuid,
-        account_id -> Uuid,
-        title -> Text,
-        current_message_id -> Nullable<Uuid>,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
     use super::sql_types::OutboxStatus;
 
     event_outbox (id) {
@@ -238,20 +209,17 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+    use super::sql_types::OutboxStatus;
 
-    workspace_comments (id) {
+    workspace_assistant_jobs (id) {
         id -> Uuid,
-        workspace_id -> Uuid,
-        file_id -> Uuid,
-        author_account_id -> Uuid,
-        parent_id -> Nullable<Uuid>,
-        body -> Text,
-        anchor -> Nullable<Jsonb>,
-        resolved_at -> Nullable<Timestamptz>,
-        resolved_by -> Nullable<Uuid>,
+        comment_id -> Uuid,
+        job -> Jsonb,
+        status -> OutboxStatus,
+        attempts -> Int4,
+        next_attempt_at -> Timestamptz,
         created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
+        resolved_at -> Nullable<Timestamptz>,
     }
 }
 
@@ -533,6 +501,66 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+
+    workspace_thread_anchors (id) {
+        id -> Uuid,
+        thread_id -> Uuid,
+        anchor -> Jsonb,
+        created_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
+    workspace_thread_comments (id) {
+        id -> Uuid,
+        parent_id -> Nullable<Uuid>,
+        workspace_id -> Uuid,
+        thread_id -> Uuid,
+        author_account_id -> Uuid,
+        body -> Text,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::ThreadEventKind;
+
+    workspace_thread_events (id) {
+        id -> Uuid,
+        workspace_id -> Uuid,
+        thread_id -> Uuid,
+        kind -> ThreadEventKind,
+        actor_account_id -> Nullable<Uuid>,
+        target -> Nullable<Jsonb>,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
+    workspace_threads (id) {
+        id -> Uuid,
+        workspace_id -> Uuid,
+        file_id -> Nullable<Uuid>,
+        author_account_id -> Uuid,
+        display_name -> Nullable<Text>,
+        closed_at -> Nullable<Timestamptz>,
+        closed_by -> Nullable<Uuid>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
     use super::sql_types::WebhookEvent;
     use super::sql_types::WebhookStatus;
 
@@ -577,14 +605,12 @@ diesel::table! {
 diesel::joinable!(account_api_tokens -> accounts (account_id));
 diesel::joinable!(account_identities -> accounts (account_id));
 diesel::joinable!(account_notifications -> accounts (account_id));
-diesel::joinable!(chat_sessions -> accounts (account_id));
-diesel::joinable!(chat_sessions -> workspaces (workspace_id));
 diesel::joinable!(event_outbox -> accounts (account_id));
 diesel::joinable!(event_outbox -> workspaces (workspace_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
 diesel::joinable!(workspace_assignments -> workspaces (workspace_id));
-diesel::joinable!(workspace_comments -> workspaces (workspace_id));
+diesel::joinable!(workspace_assistant_jobs -> workspace_thread_comments (comment_id));
 diesel::joinable!(workspace_connection_schedule -> workspace_connections (connection_id));
 diesel::joinable!(workspace_connection_syncs -> accounts (account_id));
 diesel::joinable!(workspace_connection_syncs -> workspace_connections (connection_id));
@@ -611,6 +637,14 @@ diesel::joinable!(workspace_providers -> accounts (account_id));
 diesel::joinable!(workspace_providers -> workspaces (workspace_id));
 diesel::joinable!(workspace_redactions -> accounts (account_id));
 diesel::joinable!(workspace_redactions -> workspace_detections (detection_id));
+diesel::joinable!(workspace_thread_anchors -> workspace_threads (thread_id));
+diesel::joinable!(workspace_thread_comments -> accounts (author_account_id));
+diesel::joinable!(workspace_thread_comments -> workspace_threads (thread_id));
+diesel::joinable!(workspace_thread_comments -> workspaces (workspace_id));
+diesel::joinable!(workspace_thread_events -> accounts (actor_account_id));
+diesel::joinable!(workspace_thread_events -> workspace_threads (thread_id));
+diesel::joinable!(workspace_thread_events -> workspaces (workspace_id));
+diesel::joinable!(workspace_threads -> workspaces (workspace_id));
 diesel::joinable!(workspace_webhooks -> accounts (created_by));
 diesel::joinable!(workspace_webhooks -> workspaces (workspace_id));
 diesel::joinable!(workspaces -> accounts (created_by));
@@ -620,12 +654,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     account_identities,
     account_notifications,
     accounts,
-    chat_messages,
-    chat_sessions,
     event_outbox,
     workspace_activities,
     workspace_assignments,
-    workspace_comments,
+    workspace_assistant_jobs,
     workspace_connection_schedule,
     workspace_connection_syncs,
     workspace_connections,
@@ -642,6 +674,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_policies,
     workspace_providers,
     workspace_redactions,
+    workspace_thread_anchors,
+    workspace_thread_comments,
+    workspace_thread_events,
+    workspace_threads,
     workspace_webhooks,
     workspaces,
 );

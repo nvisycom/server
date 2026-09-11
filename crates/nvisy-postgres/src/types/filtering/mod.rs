@@ -8,7 +8,7 @@ mod invites;
 mod members;
 
 pub use assignments::AssignmentFilter;
-pub use comments::CommentFilter;
+pub use comments::ThreadFilter;
 pub use detections::DetectionFilter;
 pub use files::FileFilter;
 pub use invites::InviteFilter;

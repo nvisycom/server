@@ -1,22 +1,22 @@
-//! Comment request types (post a comment/reply, edit, filter).
+//! Comment-thread request types (open a thread, post a comment, edit, filter).
 
 use elide_pipeline::modality::audio::AudioLocation;
 use elide_pipeline::modality::image::ImageLocation;
 use elide_pipeline::modality::tabular::TabularLocation;
 use elide_pipeline::modality::text::TextLocation;
 use garde::Validate;
-use nvisy_postgres::types::CommentFilter;
+use nvisy_postgres::types::ThreadFilter;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::extract::validators::validate_non_blank;
 
-/// Where a comment is pinned within a file: a location in one of the four
+/// Where a thread is pinned within a file: a location in one of the four
 /// modalities, tagged so a single stored JSON value carries its own modality.
 ///
 /// Each variant wraps the engine's own location type ([`elide_pipeline`]), so a
-/// comment anchors to exactly what a detection/redaction does — a page region for
+/// thread anchors to exactly what a detection/redaction does — a page region for
 /// paginated/image documents, a time span for audio/video, a text span for
 /// transcripts, a cell for tabular data. The engine's location types carry no
 /// modality discriminator of their own, so the `modality` tag here supplies it.
@@ -34,6 +34,15 @@ pub enum CommentAnchor {
     Tabular(TabularLocation),
 }
 
+/// Path parameters addressing one thread by its opaque id.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadPathParams {
+    /// Unique identifier of the thread.
+    pub thread_id: Uuid,
+}
+
 /// Path parameters addressing one comment by its opaque id.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -43,9 +52,64 @@ pub struct CommentPathParams {
     pub comment_id: Uuid,
 }
 
-/// Request payload to post a comment on a file, or a reply to another comment.
+/// Path parameters addressing one thread anchor by its opaque id.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadAnchorPathParams {
+    /// Unique identifier of the thread.
+    pub thread_id: Uuid,
+    /// Unique identifier of the anchor.
+    pub anchor_id: Uuid,
+}
+
+/// Request payload to open a comment thread with its first message.
 ///
-/// Omit `parent_id` for a top-level comment; set it to reply (one level only).
+/// A thread pins a discussion to a location within a file (`anchor`), to a file
+/// as a whole (no anchor), or — when opened on the workspace endpoint — to no
+/// file at all. `@username` mentions in the opening body notify those members.
+#[must_use]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenThread {
+    /// Optional title for the thread (1-255 characters). Omit for an untitled
+    /// thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[garde(inner(length(chars, min = 1, max = 255), custom(validate_non_blank)))]
+    pub display_name: Option<String>,
+    /// The opening message text (1-10000 characters).
+    #[garde(length(chars, min = 1, max = 10_000), custom(validate_non_blank))]
+    pub body: String,
+    /// Locations within the file the thread is pinned to. Empty for a file-level
+    /// thread (no pin). Ignored for a workspace-level thread (no file).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[garde(length(max = 32))]
+    pub anchors: Vec<CommentAnchor>,
+}
+
+/// Request payload to rename a thread (set or clear its title).
+#[must_use]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameThread {
+    /// The new title (1-255 characters), or `null` to clear it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[garde(inner(length(chars, min = 1, max = 255), custom(validate_non_blank)))]
+    pub display_name: Option<String>,
+}
+
+/// Request payload to add an anchor (location pin) to a thread.
+#[must_use]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct AddThreadAnchor {
+    /// The location to pin.
+    #[garde(skip)]
+    pub anchor: CommentAnchor,
+}
+
+/// Request payload to post a comment (message) in a thread.
+///
 /// `@username` mentions in the body notify those workspace members.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
@@ -54,16 +118,6 @@ pub struct CreateComment {
     /// The comment text (1-10000 characters).
     #[garde(length(chars, min = 1, max = 10_000), custom(validate_non_blank))]
     pub body: String,
-    /// The comment this replies to, for a one-level thread. Omit for a top-level
-    /// comment.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[garde(skip)]
-    pub parent_id: Option<Uuid>,
-    /// Where in the file the comment is pinned. Omit for a file-level comment
-    /// (no pin).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[garde(skip)]
-    pub anchor: Option<CommentAnchor>,
 }
 
 /// Request payload to edit a comment's body.
@@ -76,26 +130,26 @@ pub struct UpdateComment {
     pub body: String,
 }
 
-/// Query parameters for listing a workspace's comments.
+/// Query parameters for listing a workspace's threads.
 ///
 /// Every field is an optional filter; unset fields impose no constraint.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct WorkspaceCommentsQuery {
-    /// Filter by the file the comment is on.
+pub struct WorkspaceThreadsQuery {
+    /// Filter by the file the thread is pinned to.
     pub file_id: Option<Uuid>,
-    /// Filter by the comment's author.
+    /// Filter by the thread's opening author.
     pub author: Option<Uuid>,
-    /// Filter by resolution state: `true` = resolved only, `false` = open only.
-    pub resolved: Option<bool>,
+    /// Filter by open/closed state: `true` = closed only, `false` = open only.
+    pub closed: Option<bool>,
 }
 
-impl From<WorkspaceCommentsQuery> for CommentFilter {
-    fn from(query: WorkspaceCommentsQuery) -> Self {
-        CommentFilter {
+impl From<WorkspaceThreadsQuery> for ThreadFilter {
+    fn from(query: WorkspaceThreadsQuery) -> Self {
+        ThreadFilter {
             file_id: query.file_id,
             author_account_id: query.author,
-            resolved: query.resolved,
+            closed: query.closed,
         }
     }
 }

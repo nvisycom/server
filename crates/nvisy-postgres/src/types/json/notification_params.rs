@@ -130,8 +130,12 @@ pub struct FileUnassignedParams {
 pub struct CommentMentionedParams {
     /// Id of the comment the account was mentioned in.
     pub comment_id: Uuid,
-    /// Id of the file the comment is on.
-    pub file_id: Uuid,
+    /// Id of the thread the comment is in.
+    pub thread_id: Uuid,
+    /// Id of the file the thread is on, when it is file-pinned; `None` for a
+    /// workspace-level thread.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_id: Option<Uuid>,
     /// Username of the account that wrote the comment (the mentioner).
     pub author_username: Handle,
 }

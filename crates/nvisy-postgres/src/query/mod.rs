@@ -18,15 +18,13 @@ mod account_api_token;
 mod account_identity;
 mod account_notification;
 mod analytics;
-mod chat_message;
-mod chat_session;
 mod event_outbox;
 mod pipeline_reference;
 mod search;
 mod workspace;
 mod workspace_activity;
 mod workspace_assignment;
-mod workspace_comment;
+mod workspace_assistant_job;
 mod workspace_connection;
 mod workspace_connection_schedule;
 mod workspace_connection_sync;
@@ -39,6 +37,10 @@ mod workspace_pipeline;
 mod workspace_policy;
 mod workspace_provider;
 mod workspace_redaction;
+mod workspace_thread;
+mod workspace_thread_anchor;
+mod workspace_thread_comment;
+mod workspace_thread_event;
 mod workspace_webhook;
 
 pub use account::AccountRepository;
@@ -49,8 +51,6 @@ pub use analytics::{
     AnalyticsSnapshot, DetectionDayPoint, DetectionDurations, DetectionStatusCount, StorageByKind,
     UsageByModel, WorkspaceAnalyticsRepository,
 };
-pub use chat_message::{AppendSessionUpdate, ChatMessageRepository};
-pub use chat_session::ChatSessionRepository;
 pub use event_outbox::EventOutboxRepository;
 pub use pipeline_reference::PipelineReferenceRepository;
 pub use workspace::WorkspaceRepository;
@@ -58,7 +58,7 @@ pub use workspace_activity::{ActivityFilter, WorkspaceActivityRepository};
 pub use workspace_assignment::{
     AssignmentListRow, CreateAssignmentOutcome, WorkspaceAssignmentRepository,
 };
-pub use workspace_comment::{ReplyParentError, WorkspaceCommentRepository};
+pub use workspace_assistant_job::AssistantJobOutboxRepository;
 pub use workspace_connection::{ScheduledConnection, WorkspaceConnectionRepository};
 pub use workspace_connection_schedule::WorkspaceConnectionScheduleRepository;
 pub use workspace_connection_sync::WorkspaceConnectionSyncRepository;
@@ -71,4 +71,8 @@ pub use workspace_pipeline::WorkspacePipelineRepository;
 pub use workspace_policy::WorkspacePolicyRepository;
 pub use workspace_provider::WorkspaceProviderRepository;
 pub use workspace_redaction::WorkspaceRedactionRepository;
+pub use workspace_thread::WorkspaceThreadRepository;
+pub use workspace_thread_anchor::WorkspaceThreadAnchorRepository;
+pub use workspace_thread_comment::WorkspaceThreadCommentRepository;
+pub use workspace_thread_event::WorkspaceThreadEventRepository;
 pub use workspace_webhook::WorkspaceWebhookRepository;

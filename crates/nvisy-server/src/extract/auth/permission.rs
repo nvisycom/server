@@ -63,18 +63,14 @@ pub enum Permission {
     ViewComments,
     /// Can write comments and replies (and edit or delete one's own).
     Comment,
-    /// Can resolve and reopen comment threads.
-    ResolveComments,
+    /// Can close and reopen comment threads.
+    CloseComments,
 
     // Reporting permissions
     /// Can view workspace analytics.
     ViewAnalytics,
     /// Can view the workspace activity log.
     ViewActivity,
-
-    // Chat permissions
-    /// Can use workspace chat sessions.
-    UseChat,
 
     // Member management permissions
     /// Can view workspace members and their roles.
@@ -143,7 +139,7 @@ impl Permission {
             | Self::ViewAssignments
             | Self::ViewComments
             | Self::Comment
-            | Self::ResolveComments
+            | Self::CloseComments
             | Self::ViewAnalytics
             | Self::ViewActivity
             | Self::ViewMembers
@@ -163,7 +159,6 @@ impl Permission {
             | Self::RunDetections
             | Self::RunRedactions
             | Self::AssignTasks
-            | Self::UseChat
             | Self::RunConnectionSyncs => WorkspaceRole::Editor,
 
             // Admin-level permissions (manage workspace resources)

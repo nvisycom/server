@@ -1,9 +1,9 @@
 //! Application state and dependency injection.
 
 mod account_provisioner;
+mod assistant;
 mod auth_issuer;
 mod avatar;
-mod chat;
 mod crypto;
 mod detection;
 mod engine;
@@ -37,9 +37,11 @@ use tokio_util::sync::CancellationToken;
 use crate::middleware::UploadConfig;
 use crate::response::CookieConfig;
 pub use crate::service::account_provisioner::AccountProvisioner;
+pub use crate::service::assistant::{
+    AssistantCoordinator, AssistantJob, AssistantOutboxDrainer, AssistantQueue, AssistantWorker,
+};
 pub use crate::service::auth_issuer::AuthIssuer;
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
-pub use crate::service::chat::{ChatService, TurnLocation};
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
 pub(crate) use crate::service::detection::resolve_policies;
@@ -49,14 +51,15 @@ pub use crate::service::detection::{
 };
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::event::{
-    AssignmentStatusChanged, CommentCreated, CommentDeleted, CommentResolved, ConnectionCreated,
-    ConnectionDeleted, ConnectionSyncCompleted, ConnectionSyncFailed, ConnectionSyncStarted,
-    ConnectionUpdated, DetectionCompleted, DetectionFailed, DetectionStarted, EventEmitter,
-    EventKind, EventOrigin, EventOutboxDrainer, FileAssigned, FileCreated, FileDeleted,
-    FileUnassigned, FileUpdated, InviteAccepted, InviteCanceled, InviteCreated, InviteDeclined,
-    MemberAdded, MemberDeleted, MemberUpdated, Notification, NotifyTarget, PipelineCreated,
-    PipelineDeleted, PipelineUpdated, PolicyCreated, PolicyDeleted, PolicyUpdated, ProviderCreated,
-    ProviderDeleted, ProviderUpdated, RedactionCreated, WebhookCreated, WebhookDeleted,
+    AssignmentStatusChanged, ConnectionCreated, ConnectionDeleted, ConnectionSyncCompleted,
+    ConnectionSyncFailed, ConnectionSyncStarted, ConnectionUpdated, DetectionCompleted,
+    DetectionFailed, DetectionStarted, EventEmitter, EventKind, EventOrigin, EventOutboxDrainer,
+    FileAssigned, FileCreated, FileDeleted, FileUnassigned, FileUpdated, InviteAccepted,
+    InviteCanceled, InviteCreated, InviteDeclined, MemberAdded, MemberDeleted, MemberUpdated,
+    Notification, NotifyTarget, PipelineCreated, PipelineDeleted, PipelineUpdated, PolicyCreated,
+    PolicyDeleted, PolicyUpdated, ProviderCreated, ProviderDeleted, ProviderUpdated,
+    RedactionCreated, ThreadAnchorAdded, ThreadAnchorRemoved, ThreadClosed, ThreadCommentCreated,
+    ThreadDeleted, ThreadOpened, ThreadRenamed, ThreadReopened, WebhookCreated, WebhookDeleted,
     WebhookDelivery, WebhookUpdated, WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent,
     WorkspaceUpdated, event_outbox_row,
 };
@@ -119,6 +122,10 @@ pub struct ServiceState {
     // In-process wake signal from the detection enqueue path to the outbox
     // drainer, shared by the per-request `DetectionQueue` and the drainer.
     pub detection: DetectionCoordinator,
+
+    // In-process wake signal from the assistant enqueue path to its outbox
+    // drainer, shared by the per-request `AssistantQueue` and the drainer.
+    pub assistant: AssistantCoordinator,
 
     // Operational: the app-wide shutdown signal (cancelled once on Ctrl+C/SIGTERM
     // so long-lived handlers and background workers wind down promptly) and the
@@ -212,6 +219,7 @@ impl ServiceState {
             endpoint_policy,
             engine,
             detection: DetectionCoordinator::new(),
+            assistant: AssistantCoordinator::new(),
             shutdown: CancellationToken::new(),
             health_cache: HealthCache::new(&health_config, health_checkers),
             password: PasswordService::new(),
@@ -259,6 +267,11 @@ impl ServiceState {
             RunBlobStore::from_ref(self),
             DetectionQueue::from_ref(self),
         ));
+        workers.spawn(AssistantOutboxDrainer::new(
+            self.infra.clone(),
+            self.assistant.clone(),
+        ));
+        workers.spawn(AssistantWorker::new(self.infra.clone()));
         workers
     }
 }
@@ -363,6 +376,7 @@ impl_di_field!(
     endpoint_policy: EndpointPolicy,
     engine: EngineService,
     detection: DetectionCoordinator,
+    assistant: AssistantCoordinator,
     shutdown: CancellationToken,
     health_cache: HealthCache,
     password: PasswordService,
@@ -376,7 +390,6 @@ impl_di_field!(
 // Stateless services, composed from `Infra` on extraction:
 impl_di_compose!(
     AvatarService => AvatarService::new,
-    ChatService => ChatService::new,
     RunBlobStore => RunBlobStore::new,
     WebhookEmitter => WebhookEmitter::new,
     NotificationEmitter => NotificationEmitter::new,
@@ -388,6 +401,14 @@ impl_di_compose!(
 impl axum::extract::FromRef<ServiceState> for DetectionQueue {
     fn from_ref(state: &ServiceState) -> Self {
         DetectionQueue::new(state.infra.clone(), state.detection.clone())
+    }
+}
+
+// `AssistantQueue` likewise composes from `Infra` and the shared
+// `AssistantCoordinator`, so it needs a hand-written `FromRef`.
+impl axum::extract::FromRef<ServiceState> for AssistantQueue {
+    fn from_ref(state: &ServiceState) -> Self {
+        AssistantQueue::new(state.infra.clone(), state.assistant.clone())
     }
 }
 

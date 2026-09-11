@@ -1,9 +1,9 @@
 //! Workspace-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    WorkspaceActivitiesConstraints, WorkspaceAssignmentConstraints, WorkspaceCommentConstraints,
-    WorkspaceConstraints, WorkspaceInviteConstraints, WorkspaceMemberConstraints,
-    WorkspaceWebhookConstraints,
+    WorkspaceActivitiesConstraints, WorkspaceAssignmentConstraints, WorkspaceConstraints,
+    WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspaceThreadAnchorConstraints,
+    WorkspaceThreadCommentConstraints, WorkspaceThreadConstraints, WorkspaceWebhookConstraints,
 };
 
 use super::{Error, ErrorKind};
@@ -62,14 +62,36 @@ impl From<WorkspaceAssignmentConstraints> for Error<'static> {
     }
 }
 
-impl From<WorkspaceCommentConstraints> for Error<'static> {
-    fn from(c: WorkspaceCommentConstraints) -> Self {
+impl From<WorkspaceThreadConstraints> for Error<'static> {
+    fn from(c: WorkspaceThreadConstraints) -> Self {
         let error = match c {
-            WorkspaceCommentConstraints::BodyLength => ErrorKind::BadRequest
-                .with_message("Comment body must be between 1 and 10000 characters"),
-            WorkspaceCommentConstraints::AnchorSize => {
-                ErrorKind::BadRequest.with_message("Comment anchor is too large")
+            WorkspaceThreadConstraints::DisplayNameLength => ErrorKind::BadRequest
+                .with_message("Thread title must be between 1 and 255 characters"),
+            WorkspaceThreadConstraints::ClosedConsistent => ErrorKind::InternalServerError
+                .with_message("Thread open/closed state is inconsistent"),
+        };
+
+        error.with_resource("workspace_thread")
+    }
+}
+
+impl From<WorkspaceThreadAnchorConstraints> for Error<'static> {
+    fn from(c: WorkspaceThreadAnchorConstraints) -> Self {
+        let error = match c {
+            WorkspaceThreadAnchorConstraints::Size => {
+                ErrorKind::BadRequest.with_message("Thread anchor is too large")
             }
+        };
+
+        error.with_resource("workspace_thread_anchor")
+    }
+}
+
+impl From<WorkspaceThreadCommentConstraints> for Error<'static> {
+    fn from(c: WorkspaceThreadCommentConstraints) -> Self {
+        let error = match c {
+            WorkspaceThreadCommentConstraints::BodyLength => ErrorKind::BadRequest
+                .with_message("Comment body must be between 1 and 10000 characters"),
         };
 
         error.with_resource("workspace_comment")

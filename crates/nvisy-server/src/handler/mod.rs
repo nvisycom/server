@@ -13,7 +13,6 @@ mod authentication;
 pub(crate) use auth_oidc::consume_reauth_proof;
 mod avatars;
 mod catalog;
-mod chat;
 mod comments;
 mod connection_oauth;
 mod connection_syncs;
@@ -32,6 +31,7 @@ mod providers;
 mod redactions;
 pub mod request;
 pub mod response;
+mod threads;
 mod tokens;
 mod utility;
 mod webhooks;
@@ -82,11 +82,11 @@ fn private_routes(service_state: ServiceState) -> ApiRouter<ServiceState> {
         .merge(analytics::routes())
         .merge(members::routes())
         .merge(assignments::routes())
+        .merge(threads::routes())
         .merge(comments::routes())
         .merge(connections::routes())
         .merge(providers::routes())
         .merge(connection_oauth::private_routes())
-        .merge(chat::routes())
         .merge(connection_syncs::routes())
         .merge(files::routes(service_state.upload.max_file_body_bytes))
         .merge(pipelines::routes())

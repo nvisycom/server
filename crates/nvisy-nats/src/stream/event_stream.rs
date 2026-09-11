@@ -99,6 +99,38 @@ where
     const SUBJECT: &'static str = "pipeline.detection.jobs";
 }
 
+/// Work queue for assistant-reply jobs.
+///
+/// When a user addresses the assistant in a comment thread, a job is enqueued
+/// here; a single shared durable consumer delivers it to one worker at a time
+/// (at-least-once). The worker is idempotent on the triggering comment so a
+/// redelivery does not post a second reply. Inference can be slow, so `ACK_WAIT`
+/// exceeds the longest expected turn; `MAX_DELIVER` bounds retries so a job that
+/// can never succeed (e.g. a workspace with no model provider) is not redelivered
+/// forever. Messages expire after 1 hour so a backlog cannot pile up.
+///
+/// Generic over its payload `M`; a consumer pins it with a type alias, e.g.
+/// `type AssistantStream = nvisy_nats::stream::AssistantStream<AssistantJob>`.
+pub enum AssistantStream<M> {
+    #[doc(hidden)]
+    Never(PhantomData<fn() -> M>),
+}
+
+impl<M> EventStream for AssistantStream<M>
+where
+    M: Serialize + DeserializeOwned + Send + Sync + 'static,
+{
+    type Message = M;
+
+    const ACK_WAIT: Option<Duration> = Some(Duration::from_secs(5 * 60));
+    const CONSUMER_NAME: &'static str = "assistant-worker";
+    const DESCRIPTION: &'static str = "Assistant reply jobs";
+    const MAX_AGE: Option<Duration> = Some(Duration::from_secs(60 * 60));
+    const MAX_DELIVER: Option<i64> = Some(5);
+    const NAME: &'static str = "ASSISTANT";
+    const SUBJECT: &'static str = "assistant.replies";
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

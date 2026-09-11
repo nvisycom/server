@@ -7,14 +7,12 @@ mod account;
 mod account_api_token;
 mod account_identity;
 mod account_notification;
-mod chat_message;
-mod chat_session;
 mod event_outbox;
 mod pipeline_reference;
 mod workspace;
 mod workspace_activity;
 mod workspace_assignment;
-mod workspace_comment;
+mod workspace_assistant_job;
 mod workspace_connection;
 mod workspace_connection_schedule;
 mod workspace_connection_sync;
@@ -30,6 +28,10 @@ mod workspace_pipeline;
 mod workspace_policy;
 mod workspace_provider;
 mod workspace_redaction;
+mod workspace_thread;
+mod workspace_thread_anchor;
+mod workspace_thread_comment;
+mod workspace_thread_event;
 mod workspace_webhook;
 
 // Account models
@@ -39,9 +41,6 @@ pub use account_identity::{AccountIdentity, NewAccountIdentity};
 pub use account_notification::{
     AccountNotification, NewAccountNotification, UpdateAccountNotification,
 };
-// Chat models
-pub use chat_message::{ChatMessage, NewChatMessage};
-pub use chat_session::{ChatSession, NewChatSession, UpdateChatSession};
 pub use event_outbox::{EventOutbox, NewEventOutbox};
 pub use pipeline_reference::PipelinePolicy;
 // Workspace models
@@ -50,7 +49,7 @@ pub use workspace_activity::{NewWorkspaceActivity, WorkspaceActivity};
 pub use workspace_assignment::{
     NewWorkspaceAssignment, UpdateWorkspaceAssignment, WorkspaceAssignment,
 };
-pub use workspace_comment::{NewWorkspaceComment, UpdateWorkspaceComment, WorkspaceComment};
+pub use workspace_assistant_job::{NewWorkspaceAssistantJob, WorkspaceAssistantJob};
 pub use workspace_connection::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
@@ -75,4 +74,10 @@ pub use workspace_pipeline::{NewWorkspacePipeline, UpdateWorkspacePipeline, Work
 pub use workspace_policy::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 pub use workspace_provider::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};
 pub use workspace_redaction::{NewWorkspaceRedaction, WorkspaceRedaction};
+pub use workspace_thread::{NewWorkspaceThread, UpdateWorkspaceThread, WorkspaceThread};
+pub use workspace_thread_anchor::{NewWorkspaceThreadAnchor, WorkspaceThreadAnchor};
+pub use workspace_thread_comment::{
+    NewWorkspaceThreadComment, UpdateWorkspaceThreadComment, WorkspaceThreadComment,
+};
+pub use workspace_thread_event::{NewWorkspaceThreadEvent, WorkspaceThreadEvent};
 pub use workspace_webhook::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};

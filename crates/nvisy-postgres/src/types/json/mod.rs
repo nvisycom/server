@@ -15,10 +15,11 @@ mod workspace_metadata;
 mod workspace_settings;
 
 pub use activity_params::{
-    ActivityPayload, AssignmentActivityParams, CommentActivityParams, ConnectionActivityParams,
-    DetectionActivityParams, FileActivityParams, InviteActivityParams, MemberActivityParams,
-    PipelineActivityParams, PolicyActivityParams, ProviderActivityParams, RedactionActivityParams,
-    WebhookActivityParams, WorkspaceActivityParams,
+    ActivityPayload, AssignmentActivityParams, ConnectionActivityParams, DetectionActivityParams,
+    FileActivityParams, InviteActivityParams, MemberActivityParams, PipelineActivityParams,
+    PolicyActivityParams, ProviderActivityParams, RedactionActivityParams, ThreadActivityParams,
+    ThreadAnchorActivityParams, ThreadCommentActivityParams, WebhookActivityParams,
+    WorkspaceActivityParams,
 };
 pub use detection_metadata::DetectionMetadata;
 pub use notification_params::{

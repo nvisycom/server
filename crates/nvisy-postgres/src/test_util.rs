@@ -236,8 +236,6 @@ pub mod backdate {
         };
     }
 
-    backdate!(chat_session_created_at = chat_sessions.created_at);
-    backdate!(chat_message_created_at = chat_messages.created_at);
     backdate!(activity_created_at = workspace_activities.created_at);
     backdate!(notification_created_at = account_notifications.created_at);
     backdate!(policy_created_at = workspace_policies.created_at);

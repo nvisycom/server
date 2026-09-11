@@ -10,9 +10,6 @@ pub mod identity_provider;
 pub mod notification_event;
 pub mod outbox_status;
 
-// Chat-related enumerations
-pub mod chat_role;
-
 // Connection-related enumerations
 pub mod connection_type;
 pub mod provider_type;
@@ -39,10 +36,11 @@ pub mod pipeline_trigger_type;
 // Assignment-related enumerations
 pub mod assignment_status;
 
+pub mod thread_event_kind;
+
 pub use activity_type::ActivityType;
 pub use api_token_type::ApiTokenType;
 pub use assignment_status::AssignmentStatus;
-pub use chat_role::ChatRole;
 pub use connection_type::ConnectionType;
 pub use detection_status::DetectionStatus;
 pub use file_kind::FileKind;
@@ -57,6 +55,7 @@ pub use sync_deletion_policy::SyncDeletionPolicy;
 pub use sync_mode::SyncMode;
 pub use sync_status::SyncStatus;
 pub use sync_trigger_type::SyncTriggerType;
+pub use thread_event_kind::ThreadEventKind;
 pub use webhook_event::WebhookEvent;
 pub use webhook_status::WebhookStatus;
 pub use workspace_role::WorkspaceRole;
