@@ -89,7 +89,7 @@ impl Policy {
         workspace_slug: Handle,
         created_by: AccountRef,
         crypto: &CryptoService,
-    ) -> crate::handler::Result<Self> {
+    ) -> crate::response::Result<Self> {
         let definition =
             crypto.decrypt_json::<PolicyDefinition>(policy.workspace_id, &policy.definition)?;
 

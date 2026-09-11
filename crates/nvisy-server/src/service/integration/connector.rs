@@ -12,7 +12,7 @@ use nvisy_file_service::oauth::OAuthTokens;
 use nvisy_postgres::model::WorkspaceConnection;
 
 use super::file_source::{FileServiceSource, FileSource, ObjectStoreSource};
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 use crate::service::{ConnectionConfig, ExternalObjectStore, Infra, persist_refreshed_tokens};
 
 /// Tracing target for connection sync operations.

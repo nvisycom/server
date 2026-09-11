@@ -36,8 +36,12 @@ pub mod detection_status;
 pub mod pipeline_status;
 pub mod pipeline_trigger_type;
 
+// Assignment-related enumerations
+pub mod assignment_status;
+
 pub use activity_type::ActivityType;
 pub use api_token_type::ApiTokenType;
+pub use assignment_status::AssignmentStatus;
 pub use chat_role::ChatRole;
 pub use connection_type::ConnectionType;
 pub use detection_status::DetectionStatus;

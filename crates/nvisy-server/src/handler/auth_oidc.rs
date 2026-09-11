@@ -57,9 +57,8 @@ use uuid::Uuid;
 
 use crate::extract::{AuthState, Json, Path, Query, SecurityContext, ValidateJson};
 use crate::handler::request::{DesktopTokenRequest, IdentityPathParams, OidcCallbackQuery};
-use crate::handler::response::{DesktopToken, ErrorResponse};
-use crate::handler::{ErrorKind, Result};
-use crate::response::{CookieConfig, RedirectResult, WebSession};
+use crate::handler::response::DesktopToken;
+use crate::response::{CookieConfig, ErrorKind, ErrorResponse, RedirectResult, Result, WebSession};
 use crate::service::{
     AccountProvisioner, AuthIssuer, OidcAuthorization, OidcService, RedirectKind, ServiceState,
 };

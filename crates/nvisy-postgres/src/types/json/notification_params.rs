@@ -6,21 +6,10 @@
 //! text is stored; the client localizes copy from `type` and the params.
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::Json;
 use crate::types::{ConnectionId, DetectionId, Handle, NotificationEvent, RedactionId};
-
-/// Params of a `member.invited` notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct MemberInvitedParams {
-    /// Slug of the workspace the account was invited to.
-    pub workspace_slug: Handle,
-    /// Username of the account that sent the invite, if known.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub invited_by: Option<Handle>,
-}
 
 /// Params of a `member.joined` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,6 +97,32 @@ pub struct DetectionFailedParams {
     pub error: Option<String>,
 }
 
+/// Params of a `file.assigned` notification, sent to the reviewer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct FileAssignedParams {
+    /// Id of the assignment.
+    pub assignment_id: Uuid,
+    /// Id of the file the reviewer was assigned.
+    pub file_id: Uuid,
+    /// Display name of the file the reviewer was assigned.
+    pub file_name: String,
+}
+
+/// Params of a `file.unassigned` notification, sent to the former reviewer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct FileUnassignedParams {
+    /// Id of the file the reviewer was unassigned from.
+    pub file_id: Uuid,
+    /// Display name of the file the reviewer was unassigned from, when the file
+    /// still exists. `None` (and omitted) if it was removed (e.g. by retention).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+}
+
 /// The typed payload of a notification, tagged by `type` with its params under
 /// `data` (the same `{type, data}` envelope the activity log and outbox event use).
 ///
@@ -118,10 +133,6 @@ pub struct DetectionFailedParams {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", content = "data")]
 pub enum NotificationPayload {
-    /// The account was invited to a workspace.
-    #[serde(rename = "member.invited")]
-    MemberInvited(MemberInvitedParams),
-
     /// A new member joined a workspace.
     #[serde(rename = "member.joined")]
     MemberJoined(MemberJoinedParams),
@@ -145,13 +156,20 @@ pub enum NotificationPayload {
     /// A detection failed.
     #[serde(rename = "pipeline.detection.failed")]
     DetectionFailed(DetectionFailedParams),
+
+    /// A file was assigned to the reviewer for review.
+    #[serde(rename = "file.assigned")]
+    FileAssigned(FileAssignedParams),
+
+    /// The reviewer was unassigned from a file.
+    #[serde(rename = "file.unassigned")]
+    FileUnassigned(FileUnassignedParams),
 }
 
 impl NotificationPayload {
     /// The [`NotificationEvent`] this payload is for (its `type` tag).
     pub fn event(&self) -> NotificationEvent {
         match self {
-            NotificationPayload::MemberInvited(_) => NotificationEvent::MemberInvited,
             NotificationPayload::MemberJoined(_) => NotificationEvent::MemberJoined,
             NotificationPayload::ConnectionSyncCompleted(_) => {
                 NotificationEvent::ConnectionSyncCompleted
@@ -160,6 +178,8 @@ impl NotificationPayload {
             NotificationPayload::DetectionCompleted(_) => NotificationEvent::DetectionCompleted,
             NotificationPayload::RedactionCreated(_) => NotificationEvent::RedactionCreated,
             NotificationPayload::DetectionFailed(_) => NotificationEvent::DetectionFailed,
+            NotificationPayload::FileAssigned(_) => NotificationEvent::FileAssigned,
+            NotificationPayload::FileUnassigned(_) => NotificationEvent::FileUnassigned,
         }
     }
 

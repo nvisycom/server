@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use super::service::DetectionQueue;
 use crate::extract::SecurityContext;
-use crate::handler::Result;
-use crate::service::{CryptoService, DetectionRef, EventEmitter, EventOrigin, WorkspaceEvent};
+use crate::response::Result;
+use crate::service::{CryptoService, DetectionFailed, EventEmitter, EventOrigin, WorkspaceEvent};
 
 /// Tracing target for shared detection operations.
 const TRACING_TARGET: &str = "nvisy_server::service::detection";
@@ -202,15 +202,13 @@ pub(crate) async fn fail_detection(
                 account_id: triggered_by,
                 security: &SecurityContext::default(),
             },
-            WorkspaceEvent::DetectionFailed {
-                detection: DetectionRef {
-                    detection_id,
-                    pipeline_slug,
-                },
+            WorkspaceEvent::DetectionFailed(DetectionFailed {
+                detection_id,
+                pipeline_slug,
                 input_file_name: None,
                 error: Some(reason.to_owned()),
                 notify: triggered_by,
-            },
+            }),
         )
         .await
     {

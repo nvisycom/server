@@ -20,7 +20,7 @@ use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 
 use crate::extract::Json;
-use crate::handler::{Error, ErrorKind};
+use crate::response::{Error, ErrorKind};
 
 /// JSON extractor that deserializes and then validates the request body.
 ///

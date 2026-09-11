@@ -52,6 +52,12 @@ pub enum Permission {
     /// Can run redactions (apply policies and produce a redacted file).
     RunRedactions,
 
+    // Assignment permissions
+    /// Can view file review assignments (who is reviewing what).
+    ViewAssignments,
+    /// Can assign files to reviewers and unassign them.
+    AssignTasks,
+
     // Reporting permissions
     /// Can view workspace analytics.
     ViewAnalytics,
@@ -126,6 +132,7 @@ impl Permission {
             | Self::DownloadAudit
             | Self::ViewPipelines
             | Self::ViewDetections
+            | Self::ViewAssignments
             | Self::ViewAnalytics
             | Self::ViewActivity
             | Self::ViewMembers
@@ -144,6 +151,7 @@ impl Permission {
             | Self::DeletePipelines
             | Self::RunDetections
             | Self::RunRedactions
+            | Self::AssignTasks
             | Self::UseChat
             | Self::RunConnectionSyncs => WorkspaceRole::Editor,
 

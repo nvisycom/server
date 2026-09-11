@@ -44,3 +44,8 @@ COMMENT ON COLUMN workspace_redactions.account_id IS 'Account that requested the
 COMMENT ON COLUMN workspace_redactions.review_file_id IS 'Review audit (file_kind=review) recording the applied edits and redaction outcome';
 COMMENT ON COLUMN workspace_redactions.output_file_id IS 'Redacted document this redaction produced';
 COMMENT ON COLUMN workspace_redactions.created_at IS 'When the redaction was created';
+
+-- Redaction creation feeds the activity log, webhooks, and in-app notifications.
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.redaction.created';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.redaction.created';
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'pipeline.redaction.created';

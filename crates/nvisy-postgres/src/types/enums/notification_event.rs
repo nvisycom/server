@@ -10,8 +10,6 @@ db_enum! {
     /// The values mirror the [`WebhookEvent`](super::WebhookEvent) naming for the
     /// events the two channels share.
     pub enum NotificationEvent = "crate::schema::sql_types::NotificationEvent" {
-        /// User was invited to a workspace.
-        MemberInvited = "member.invited",
         /// A new member joined a workspace.
         MemberJoined = "member.joined",
         /// A connection sync completed.
@@ -24,5 +22,9 @@ db_enum! {
         RedactionCreated = "pipeline.redaction.created",
         /// A detection failed.
         DetectionFailed = "pipeline.detection.failed",
+        /// A file was assigned to the reviewer.
+        FileAssigned = "file.assigned",
+        /// The reviewer was unassigned from a file.
+        FileUnassigned = "file.unassigned",
     }
 }

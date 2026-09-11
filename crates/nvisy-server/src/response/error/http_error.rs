@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use strum::EnumIter;
 
-use crate::handler::response::ErrorResponse;
+use super::ErrorResponse;
 
 /// The error type for HTTP handlers in the server.
 ///

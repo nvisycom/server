@@ -28,6 +28,9 @@ mod detections;
 mod pipeline_references;
 mod pipelines;
 
+// Assignment-related constraint modules
+mod assignments;
+
 mod workspace_connection_syncs;
 mod workspace_connections;
 mod workspace_policies;
@@ -36,6 +39,7 @@ pub use self::account_api_tokens::AccountApiTokenConstraints;
 pub use self::account_identities::AccountIdentityConstraints;
 pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
+pub use self::assignments::WorkspaceAssignmentConstraints;
 pub use self::chat_messages::ChatMessageConstraints;
 pub use self::chat_sessions::ChatSessionConstraints;
 pub use self::detections::WorkspaceDetectionConstraints;
@@ -77,6 +81,9 @@ pub enum ConstraintViolation {
 
     // File-related constraints
     WorkspaceFile(WorkspaceFileConstraints),
+
+    // Assignment-related constraints
+    WorkspaceAssignment(WorkspaceAssignmentConstraints),
 
     // Detection / pipeline-related constraints
     WorkspacePipeline(WorkspacePipelineConstraints),
@@ -135,6 +142,7 @@ impl ConstraintViolation {
             WorkspaceActivityLog,
             WorkspaceWebhook,
             WorkspaceFile,
+            WorkspaceAssignment,
             WorkspacePipeline,
             WorkspaceDetection,
             WorkspacePipelineReference,

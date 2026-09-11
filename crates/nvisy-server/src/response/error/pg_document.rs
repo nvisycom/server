@@ -2,7 +2,7 @@
 
 use nvisy_postgres::types::WorkspaceFileConstraints;
 
-use crate::handler::{Error, ErrorKind};
+use super::{Error, ErrorKind};
 
 impl From<WorkspaceFileConstraints> for Error<'static> {
     fn from(c: WorkspaceFileConstraints) -> Self {

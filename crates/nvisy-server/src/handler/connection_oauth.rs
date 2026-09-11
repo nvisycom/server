@@ -36,16 +36,12 @@ use nvisy_postgres::{AsyncConnection, PgClient};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::extract::{
-    Authorized, Json, ManageConnections, Path, Query, SecurityContext, ValidateJson,
-};
+use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{OAuthCallbackQuery, OAuthStartPathParams, StartFileServiceOAuth};
-use crate::handler::response::ErrorResponse;
-use crate::handler::{Error, ErrorKind, Result};
-use crate::response::connection_result_redirect;
+use crate::response::{Error, ErrorKind, ErrorResponse, Result, connection_result_redirect};
 use crate::service::{
-    ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin, FileServiceRedirect,
-    ServiceState, WorkspaceEvent,
+    ConnectionConfig, ConnectionCreated, CryptoService, EventEmitter, EventOrigin,
+    FileServiceRedirect, ServiceState, WorkspaceEvent,
 };
 
 /// Tracing target for connection OAuth operations.
@@ -104,7 +100,7 @@ pub struct OAuthStartResponse {
 async fn start_oauth(
     State(nats): State<NatsClient>,
     State(cloud): State<FileService>,
-    authz: Authorized<ManageConnections>,
+    authz: Authorized<markers::ManageConnections>,
     Path(path_params): Path<OAuthStartPathParams>,
     ValidateJson(request): ValidateJson<StartFileServiceOAuth>,
 ) -> Result<(StatusCode, Json<OAuthStartResponse>)> {
@@ -258,7 +254,7 @@ async fn complete_callback(
                     account_id: flow.account_id,
                     security,
                 },
-                WorkspaceEvent::ConnectionCreated(ConnectionRef {
+                WorkspaceEvent::ConnectionCreated(ConnectionCreated {
                     connection_id: connection.id,
                     connection_name: connection.display_name.clone(),
                 }),

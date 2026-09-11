@@ -8,10 +8,11 @@ use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceAnalyticsRepository;
 
-use crate::extract::{Authorized, Json, Query, ViewAnalytics};
+use crate::extract::{Authorized, Json, Query, markers};
+use crate::handler::ServiceState;
 use crate::handler::request::DateWindow;
-use crate::handler::response::{DetectionTimeSeries, ErrorResponse, WorkspaceAnalytics};
-use crate::handler::{Result, ServiceState};
+use crate::handler::response::{DetectionTimeSeries, WorkspaceAnalytics};
+use crate::response::{ErrorResponse, Result};
 
 /// Tracing target for workspace analytics operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::analytics";
@@ -26,7 +27,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::analytics";
 )]
 async fn get_analytics(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewAnalytics>,
+    authz: Authorized<markers::ViewAnalytics>,
 ) -> Result<(StatusCode, Json<WorkspaceAnalytics>)> {
     tracing::debug!(target: TRACING_TARGET, "Computing workspace analytics");
 
@@ -60,7 +61,7 @@ fn get_analytics_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn get_detection_timeseries(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewAnalytics>,
+    authz: Authorized<markers::ViewAnalytics>,
     Query(window): Query<DateWindow>,
 ) -> Result<(StatusCode, Json<DetectionTimeSeries>)> {
     tracing::debug!(target: TRACING_TARGET, "Computing detection time series");

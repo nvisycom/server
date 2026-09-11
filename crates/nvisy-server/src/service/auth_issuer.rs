@@ -19,7 +19,7 @@ use nvisy_postgres::query::AccountApiTokenRepository;
 use nvisy_postgres::types::{ApiTokenType, session};
 
 use crate::extract::{AuthClaims, SecurityContext};
-use crate::handler::Result;
+use crate::response::Result;
 use crate::service::{SessionKeys, UserAgentParser};
 
 /// Tracing target for token issuance.

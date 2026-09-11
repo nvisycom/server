@@ -8,7 +8,7 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 
-use crate::handler::ErrorKind;
+use crate::response::ErrorKind;
 
 /// Tracing target for frontend-redirect construction.
 const TRACING_TARGET: &str = "nvisy_server::response::redirect";

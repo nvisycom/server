@@ -1,11 +1,11 @@
 //! Workspace-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    WorkspaceActivitiesConstraints, WorkspaceConstraints, WorkspaceInviteConstraints,
-    WorkspaceMemberConstraints, WorkspaceWebhookConstraints,
+    WorkspaceActivitiesConstraints, WorkspaceAssignmentConstraints, WorkspaceConstraints,
+    WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspaceWebhookConstraints,
 };
 
-use crate::handler::{Error, ErrorKind};
+use super::{Error, ErrorKind};
 
 impl From<WorkspaceConstraints> for Error<'static> {
     fn from(c: WorkspaceConstraints) -> Self {
@@ -46,6 +46,18 @@ impl From<WorkspaceMemberConstraints> for Error<'static> {
         };
 
         error.with_resource("workspace_member")
+    }
+}
+
+impl From<WorkspaceAssignmentConstraints> for Error<'static> {
+    fn from(c: WorkspaceAssignmentConstraints) -> Self {
+        let error = match c {
+            WorkspaceAssignmentConstraints::FileAssigneeUnique => {
+                ErrorKind::Conflict.with_message("This reviewer is already assigned to the file")
+            }
+        };
+
+        error.with_resource("workspace_assignment")
     }
 }
 

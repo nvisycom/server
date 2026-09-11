@@ -16,7 +16,7 @@ use tower::timeout::TimeoutLayer;
 use tower::{BoxError, ServiceBuilder};
 use tower_http::catch_panic::CatchPanicLayer;
 
-use crate::handler::{Error, ErrorKind};
+use crate::response::{Error, ErrorKind};
 
 /// Tracing target for error recovery.
 const TRACING_TARGET_ERROR: &str = "nvisy_server::recovery::error";

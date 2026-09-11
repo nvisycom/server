@@ -34,22 +34,18 @@ use nvisy_postgres::types::{ConnectionId, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
-use crate::extract::{
-    Authorized, Json, ManageConnections, Path, Query, RunConnectionSyncs, SecurityContext,
-    ValidateJson, ViewConnections,
-};
+use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
     ConnectionPathParams, ConnectionsQuery, CreateConnection, CursorPagination, PickerTokenRequest,
     SyncScheduleInput, UpdateConnection,
 };
-use crate::handler::response::{
-    Connection, ConnectionVerification, ConnectionsPage, ErrorResponse, PickerToken,
-};
+use crate::handler::response::{Connection, ConnectionVerification, ConnectionsPage, PickerToken};
 use crate::handler::utility::resolve_account_ref;
-use crate::handler::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
-    ConnectionConfig, ConnectionRef, CryptoService, EventEmitter, EventOrigin, ExternalObjectStore,
-    ServiceState, StandardCronSchedule, WorkspaceEvent, persist_refreshed_tokens,
+    ConnectionConfig, ConnectionCreated, ConnectionDeleted, ConnectionUpdated, CryptoService,
+    EventEmitter, EventOrigin, ExternalObjectStore, ServiceState, StandardCronSchedule,
+    WorkspaceEvent, persist_refreshed_tokens,
 };
 
 /// Tracing target for workspace connection operations.
@@ -70,7 +66,7 @@ async fn create_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(endpoint_policy): State<EndpointPolicy>,
-    authz: Authorized<ManageConnections>,
+    authz: Authorized<markers::ManageConnections>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateConnection>,
 ) -> Result<(StatusCode, Json<Connection>)> {
@@ -140,7 +136,7 @@ async fn create_connection(
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::ConnectionCreated(ConnectionRef {
+                WorkspaceEvent::ConnectionCreated(ConnectionCreated {
                     connection_id: connection.id,
                     connection_name: connection.display_name.clone(),
                 }),
@@ -199,7 +195,7 @@ fn create_connection_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn list_connections(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewConnections>,
+    authz: Authorized<markers::ViewConnections>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<ConnectionsQuery>,
 ) -> Result<(StatusCode, Json<ConnectionsPage>)> {
@@ -278,7 +274,7 @@ fn list_connections_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn read_connection(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewConnections>,
+    authz: Authorized<markers::ViewConnections>,
     Path(path_params): Path<ConnectionPathParams>,
 ) -> Result<(StatusCode, Json<Connection>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace connection");
@@ -330,7 +326,7 @@ async fn update_connection(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(endpoint_policy): State<EndpointPolicy>,
-    authz: Authorized<ManageConnections>,
+    authz: Authorized<markers::ManageConnections>,
     Path(path_params): Path<ConnectionPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateConnection>,
@@ -445,7 +441,7 @@ async fn update_connection(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::ConnectionUpdated(ConnectionRef {
+            WorkspaceEvent::ConnectionUpdated(ConnectionUpdated {
                 connection_id,
                 connection_name,
             }),
@@ -498,7 +494,7 @@ fn update_connection_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_connection(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ManageConnections>,
+    authz: Authorized<markers::ManageConnections>,
     Path(path_params): Path<ConnectionPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
@@ -523,7 +519,7 @@ async fn delete_connection(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::ConnectionDeleted(ConnectionRef {
+            WorkspaceEvent::ConnectionDeleted(ConnectionDeleted {
                 connection_id: existing.id,
                 connection_name: existing.display_name.clone(),
             }),
@@ -567,7 +563,7 @@ async fn verify_connection(
     State(crypto): State<CryptoService>,
     State(object): State<ExternalObjectStore>,
     State(cloud): State<FileService>,
-    authz: Authorized<ViewConnections>,
+    authz: Authorized<markers::ViewConnections>,
     Path(path_params): Path<ConnectionPathParams>,
 ) -> Result<(StatusCode, Json<ConnectionVerification>)> {
     tracing::debug!(target: TRACING_TARGET, "Verifying workspace connection");
@@ -677,7 +673,7 @@ async fn mint_picker_token(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     State(cloud): State<FileService>,
-    authz: Authorized<RunConnectionSyncs>,
+    authz: Authorized<markers::RunConnectionSyncs>,
     Path(path_params): Path<ConnectionPathParams>,
     // Optional body: a picker that names a resource per `authenticate` command
     // (OneDrive) sends `{ resource }`; single-token pickers send no body.

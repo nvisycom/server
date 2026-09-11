@@ -11,7 +11,7 @@ use axum::extract::{FromRequest, Multipart as AxumMultipart, Request};
 use derive_more::{Deref, DerefMut, From};
 
 use super::sanitize_error_message;
-use crate::handler::{Error, ErrorKind};
+use crate::response::{Error, ErrorKind};
 
 /// Enhanced Multipart extractor with improved error handling.
 ///

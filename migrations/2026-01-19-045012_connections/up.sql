@@ -299,3 +299,22 @@ COMMENT ON COLUMN workspace_file_exports.file_id IS 'The workspace file that was
 COMMENT ON COLUMN workspace_file_exports.connection_id IS 'Connection the file was exported to';
 COMMENT ON COLUMN workspace_file_exports.remote_key IS 'Remote key the file was written to on the provider';
 COMMENT ON COLUMN workspace_file_exports.exported_at IS 'When the file was exported';
+
+-- Connection lifecycle and sync events feed the activity log, webhooks, and (for
+-- sync completion/failure) in-app notifications.
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'connection.created';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'connection.updated';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'connection.deleted';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'connection.sync.started';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'connection.sync.completed';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'connection.sync.failed';
+
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'connection.created';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'connection.updated';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'connection.deleted';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'connection.sync.started';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'connection.sync.completed';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'connection.sync.failed';
+
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'connection.sync.completed';
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'connection.sync.failed';

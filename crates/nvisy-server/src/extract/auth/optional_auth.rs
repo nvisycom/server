@@ -11,7 +11,7 @@ use nvisy_postgres::PgClient;
 use serde::Deserialize;
 
 use super::AuthState;
-use crate::handler::{Error, Result};
+use crate::response::{Error, Result};
 use crate::service::SessionKeys;
 
 /// Optional [`AuthState`] for an endpoint that runs with or without a token.

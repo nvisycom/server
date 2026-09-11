@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::types::{
-    ActivityType, ConnectionId, DetectionId, Handle, ProviderId, RedactionId, WebhookEvent,
-    WebhookId,
+    ActivityType, AssignmentStatus, ConnectionId, DetectionId, Handle, ProviderId, RedactionId,
+    WebhookEvent, WebhookId,
 };
 
 /// Params of a workspace-scoped activity (`workspace.*`).
@@ -87,6 +87,24 @@ pub struct FileActivityParams {
     pub file_id: Uuid,
     /// Display name of the file.
     pub file_name: String,
+}
+
+/// Params of a file-assignment activity (`file.assigned`, `file.unassigned`,
+/// `file.assignment.updated`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct AssignmentActivityParams {
+    /// Id of the assignment.
+    pub assignment_id: Uuid,
+    /// Display name of the file under review, when it still exists. `None` (and
+    /// omitted) if the file was removed (e.g. by retention).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+    /// Username of the reviewer the file is assigned to.
+    pub assignee_username: Handle,
+    /// The reviewer's review status at the time of the activity.
+    pub status: AssignmentStatus,
 }
 
 /// Params of a pipeline activity (`pipeline.*`, non-run).
@@ -223,6 +241,15 @@ pub enum ActivityPayload {
     /// A file was deleted.
     #[serde(rename = "file.deleted")]
     FileDeleted(FileActivityParams),
+    /// A file was assigned to a reviewer.
+    #[serde(rename = "file.assigned")]
+    FileAssigned(AssignmentActivityParams),
+    /// A reviewer was unassigned from a file.
+    #[serde(rename = "file.unassigned")]
+    FileUnassigned(AssignmentActivityParams),
+    /// A file assignment's review status changed.
+    #[serde(rename = "file.assignment.updated")]
+    AssignmentStatusChanged(AssignmentActivityParams),
 
     /// A pipeline was created.
     #[serde(rename = "pipeline.created")]
@@ -287,6 +314,9 @@ impl ActivityPayload {
             ActivityPayload::FileCreated(_) => ActivityType::FileCreated,
             ActivityPayload::FileUpdated(_) => ActivityType::FileUpdated,
             ActivityPayload::FileDeleted(_) => ActivityType::FileDeleted,
+            ActivityPayload::FileAssigned(_) => ActivityType::FileAssigned,
+            ActivityPayload::FileUnassigned(_) => ActivityType::FileUnassigned,
+            ActivityPayload::AssignmentStatusChanged(_) => ActivityType::AssignmentStatusChanged,
             ActivityPayload::PipelineCreated(_) => ActivityType::PipelineCreated,
             ActivityPayload::PipelineUpdated(_) => ActivityType::PipelineUpdated,
             ActivityPayload::PipelineDeleted(_) => ActivityType::PipelineDeleted,
@@ -332,6 +362,9 @@ impl ActivityPayload {
             ActivityPayload::FileCreated(_) => W::FileCreated,
             ActivityPayload::FileUpdated(_) => W::FileUpdated,
             ActivityPayload::FileDeleted(_) => W::FileDeleted,
+            ActivityPayload::FileAssigned(_) => W::FileAssigned,
+            ActivityPayload::FileUnassigned(_) => W::FileUnassigned,
+            ActivityPayload::AssignmentStatusChanged(_) => W::AssignmentStatusChanged,
             ActivityPayload::PipelineCreated(_) => W::PipelineCreated,
             ActivityPayload::PipelineUpdated(_) => W::PipelineUpdated,
             ActivityPayload::PipelineDeleted(_) => W::PipelineDeleted,
@@ -378,6 +411,10 @@ impl ActivityPayload {
             | ActivityPayload::FileUpdated(p)
             | ActivityPayload::FileDeleted(p) => Some(p.file_id.to_string()),
 
+            ActivityPayload::FileAssigned(p)
+            | ActivityPayload::FileUnassigned(p)
+            | ActivityPayload::AssignmentStatusChanged(p) => Some(p.assignment_id.to_string()),
+
             ActivityPayload::DetectionStarted(p)
             | ActivityPayload::DetectionCompleted(p)
             | ActivityPayload::DetectionFailed(p) => Some(p.detection_id.to_string()),
@@ -421,6 +458,10 @@ impl ActivityPayload {
             ActivityPayload::FileCreated(p)
             | ActivityPayload::FileUpdated(p)
             | ActivityPayload::FileDeleted(p) => Some(p.file_name.clone()),
+
+            ActivityPayload::FileAssigned(p)
+            | ActivityPayload::FileUnassigned(p)
+            | ActivityPayload::AssignmentStatusChanged(p) => p.file_name.clone(),
 
             ActivityPayload::PipelineCreated(p)
             | ActivityPayload::PipelineUpdated(p)

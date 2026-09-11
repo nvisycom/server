@@ -6,7 +6,7 @@ use nvisy_postgres::query::WorkspaceConnectionRepository;
 use nvisy_postgres::{AsyncConnection, PgConn};
 use uuid::Uuid;
 
-use crate::handler::Result;
+use crate::response::Result;
 use crate::service::{ConnectionConfig, CryptoService};
 
 /// Persists refreshed OAuth tokens, merging them onto the connection's *current*
@@ -47,7 +47,7 @@ pub async fn persist_refreshed_tokens(
         };
         conn.update_workspace_connection(connection_id, update)
             .await?;
-        Ok::<_, crate::handler::Error>(())
+        Ok::<_, crate::response::Error>(())
     })
     .await?;
     Ok(())

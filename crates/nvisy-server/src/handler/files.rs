@@ -23,21 +23,20 @@ use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthState, Authorized, DeleteFiles, Json, Multipart, Path, Permission, Query, SecurityContext,
-    UpdateFiles, UploadFiles, ValidateJson, ViewFiles, WorkspaceContext,
+    AuthState, Authorized, Json, Multipart, Path, Permission, Query, SecurityContext, ValidateJson,
+    WorkspaceContext, markers,
 };
 use crate::handler::request::{
     CursorPagination, DeleteFiles as DeleteFilesRequest, ListFiles, UpdateFile,
     WorkspaceFilePathParams,
 };
-use crate::handler::response::{self, ErrorResponse, File, Files, FilesPage};
+use crate::handler::response::{self, File, Files, FilesPage};
 use crate::handler::utility::{DownloadDocs, resolve_account_ref};
-use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::UploadConfig;
-use crate::response::attachment_headers;
+use crate::response::{Error, ErrorKind, ErrorResponse, Result, attachment_headers};
 use crate::service::{
-    CryptoService, EngineService, EventEmitter, EventOrigin, FileRef, HashingReader, LimitedReader,
-    RunBlobStore, ServiceState, WorkspaceEvent,
+    CryptoService, EngineService, EventEmitter, EventOrigin, FileCreated, FileDeleted, FileUpdated,
+    HashingReader, LimitedReader, RunBlobStore, ServiceState, WorkspaceEvent,
 };
 
 /// Tracing target for workspace file operations.
@@ -73,7 +72,7 @@ async fn find_file_with_creator(
 async fn list_files(
     State(pg_client): State<PgClient>,
     State(engine): State<EngineService>,
-    authz: Authorized<ViewFiles>,
+    authz: Authorized<markers::ViewFiles>,
     Query(files_query): Query<ListFiles>,
     Query(cursor_pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<FilesPage>)> {
@@ -303,7 +302,7 @@ async fn upload_file(
     State(crypto): State<CryptoService>,
     State(engine): State<EngineService>,
     State(upload): State<UploadConfig>,
-    authz: Authorized<UploadFiles>,
+    authz: Authorized<markers::UploadFiles>,
     security: SecurityContext,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Files>)> {
@@ -367,13 +366,11 @@ async fn upload_file(
                 let record = conn.create_workspace_file(file.record.clone()).await?;
                 conn.emit_event(
                     origin,
-                    WorkspaceEvent::FileCreated {
-                        file: FileRef {
-                            file_id: record.id,
-                            file_name: record.display_name.clone(),
-                        },
+                    WorkspaceEvent::FileCreated(FileCreated {
+                        file_id: record.id,
+                        file_name: record.display_name.clone(),
                         file_size_bytes: record.file_size_bytes,
-                    },
+                    }),
                 )
                 .await?;
                 created.push(record);
@@ -427,7 +424,7 @@ fn upload_file_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn read_file(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewFiles>,
+    authz: Authorized<markers::ViewFiles>,
     Path(path_params): Path<WorkspaceFilePathParams>,
 ) -> Result<(StatusCode, Json<File>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading file metadata");
@@ -469,7 +466,7 @@ fn read_file_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_file(
     State(pg_client): State<PgClient>,
-    authz: Authorized<UpdateFiles>,
+    authz: Authorized<markers::UpdateFiles>,
     Path(path_params): Path<WorkspaceFilePathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateFile>,
@@ -500,7 +497,7 @@ async fn update_file(
                 account_id: authz.account_id,
                 security: &security,
             },
-            WorkspaceEvent::FileUpdated(FileRef {
+            WorkspaceEvent::FileUpdated(FileUpdated {
                 file_id: path_params.file_id,
                 file_name: updated_file.display_name.clone(),
             }),
@@ -668,7 +665,7 @@ fn download_file_docs(op: TransformOperation) -> TransformOperation {
 async fn delete_file(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
-    authz: Authorized<DeleteFiles>,
+    authz: Authorized<markers::DeleteFiles>,
     Path(path_params): Path<WorkspaceFilePathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
@@ -690,7 +687,7 @@ async fn delete_file(
                 account_id: authz.account_id,
                 security: &security,
             },
-            WorkspaceEvent::FileDeleted(FileRef {
+            WorkspaceEvent::FileDeleted(FileDeleted {
                 file_id: path_params.file_id,
                 file_name: file.display_name.clone(),
             }),
@@ -738,7 +735,7 @@ fn delete_file_docs(op: TransformOperation) -> TransformOperation {
 async fn bulk_delete_files(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
-    authz: Authorized<DeleteFiles>,
+    authz: Authorized<markers::DeleteFiles>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<DeleteFilesRequest>,
 ) -> Result<(StatusCode, Json<response::DeletedFiles>)> {
@@ -769,7 +766,7 @@ async fn bulk_delete_files(
                         account_id: authz.account_id,
                         security: &security,
                     },
-                    WorkspaceEvent::FileDeleted(FileRef {
+                    WorkspaceEvent::FileDeleted(FileDeleted {
                         file_id: file.id,
                         file_name: file.display_name.clone(),
                     }),

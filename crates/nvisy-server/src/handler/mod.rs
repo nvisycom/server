@@ -6,6 +6,7 @@
 mod accounts;
 mod activities;
 mod analytics;
+mod assignments;
 mod auth_oidc;
 mod authentication;
 
@@ -18,7 +19,6 @@ mod connection_syncs;
 mod connections;
 mod detection_audits;
 mod detections;
-mod error;
 mod files;
 mod identities;
 mod invites;
@@ -41,11 +41,11 @@ use axum::extract::FromRef;
 use axum::http::{Method, Uri};
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
-pub use error::{Error, ErrorKind, Result};
 pub use invites::{CreatedInvite, InviteOutcome, create_invite};
 pub use utility::CustomRoutes;
 
 use crate::middleware::{csrf_protect, require_authentication, slide_session};
+use crate::response::ErrorKind;
 use crate::service::ServiceState;
 
 /// Tracing target for unmatched-route fallbacks.
@@ -80,6 +80,7 @@ fn private_routes(service_state: ServiceState) -> ApiRouter<ServiceState> {
         .merge(activities::routes())
         .merge(analytics::routes())
         .merge(members::routes())
+        .merge(assignments::routes())
         .merge(connections::routes())
         .merge(providers::routes())
         .merge(connection_oauth::private_routes())

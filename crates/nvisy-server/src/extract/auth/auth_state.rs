@@ -22,7 +22,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{AuthClaims, Permission, SessionToken};
-use crate::handler::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Result};
 use crate::service::SessionKeys;
 
 /// Tracing target for authentication operations.
@@ -36,14 +36,14 @@ const TRACING_TARGET: &str = "nvisy_server::authentication";
 ///
 /// - A cryptographically valid JWT token
 /// - A verified and active account
-/// - Current privilege levels matching the database
+/// - A token that has not been revoked
 ///
 /// # Security Guarantees
 ///
 /// When [`AuthState`] extraction succeeds, you can be confident that:
 /// - The user is who they claim to be (authentication)
 /// - Their account is in good standing
-/// - Their privileges are current and accurate
+/// - The backing token is still active (not revoked or expired)
 ///
 /// # Performance Characteristics
 ///
@@ -78,12 +78,10 @@ impl<T> AuthState<T> {
     }
 
     /// Authorizes the caller for `permission` in `workspace_id`, returning their
-    /// membership on success (or `None` for a global admin, who is authorized
-    /// without being a member).
+    /// membership on success.
     ///
-    /// A global admin bypasses the workspace check. Otherwise the caller must be a
-    /// member whose role satisfies `permission`; a non-member or an insufficient
-    /// role is `403 Forbidden`.
+    /// The caller must be a member whose role satisfies `permission`; a non-member
+    /// or an insufficient role is `403 Forbidden`.
     ///
     /// # Errors
     ///
@@ -94,19 +92,7 @@ impl<T> AuthState<T> {
         conn: &mut PgConn,
         workspace_id: Uuid,
         permission: Permission,
-    ) -> Result<Option<WorkspaceMember>> {
-        // Global administrators bypass workspace-level permissions.
-        if self.0.is_admin {
-            tracing::debug!(
-                target: TRACING_TARGET,
-                account_id = %self.0.account_id,
-                workspace_id = %workspace_id,
-                permission = ?permission,
-                "access granted: global administrator"
-            );
-            return Ok(None);
-        }
-
+    ) -> Result<WorkspaceMember> {
         let member = conn
             .find_workspace_member(workspace_id, self.0.account_id)
             .await
@@ -133,7 +119,7 @@ impl<T> AuthState<T> {
                 role = ?member.member_role,
                 "access granted: sufficient role"
             );
-            Ok(Some(member))
+            Ok(member)
         } else {
             tracing::warn!(
                 target: TRACING_TARGET,
@@ -165,7 +151,7 @@ where
     /// 1. **JWT Token Extraction**: Extracts and validates JWT structure (including expiration)
     /// 2. **Database Connection**: Acquires connection with error handling
     /// 3. **Account Verification**: Validates account exists and is in good standing
-    /// 4. **Privilege Consistency**: Ensures token claims match database state
+    /// 4. **Token Revocation**: Ensures the backing token has not been revoked
     ///
     /// # Arguments
     ///
@@ -181,7 +167,7 @@ where
     /// Returns specific error types for different failure modes:
     ///
     /// * [`ErrorKind::InternalServerError`]: Database connection or query failures
-    /// * [`ErrorKind::Unauthorized`]: Account not found or privilege mismatch
+    /// * [`ErrorKind::Unauthorized`]: Account not found or token revoked
     /// * [`ErrorKind::Forbidden`]: Account verification incomplete or suspended
     ///
     /// # Database Impact
@@ -199,7 +185,6 @@ where
             token_id = %auth_claims.token_id,
             account_id = %auth_claims.account_id,
             expires_at = %auth_claims.expires_at,
-            is_admin_claim = auth_claims.is_admin,
             "beginning authentication verification"
         );
 
@@ -215,12 +200,9 @@ where
         })?;
 
         // Step 1: Verify account exists and is in good standing
-        let account = Self::verify_account_status(&mut conn, &auth_claims).await?;
+        Self::verify_account_status(&mut conn, &auth_claims).await?;
 
-        // Step 2: Ensure token claims match current account state
-        Self::verify_privilege_consistency(&auth_claims, &account)?;
-
-        // Step 3: Ensure the token itself has not been revoked. The JWT's own
+        // Step 2: Ensure the token itself has not been revoked. The JWT's own
         // expiry bounds its lifetime, but revocation must take effect
         // immediately, so the backing token row is checked on every request.
         Self::verify_token_active(&mut conn, &auth_claims).await?;
@@ -229,7 +211,6 @@ where
             target: TRACING_TARGET,
             account_id = %auth_claims.account_id,
             token_id = %auth_claims.token_id,
-            is_admin = account.is_admin,
             "authentication verification completed successfully"
         );
 
@@ -303,62 +284,10 @@ where
         tracing::debug!(
             target: TRACING_TARGET,
             account_id = %auth_claims.account_id,
-            is_admin = account.is_admin,
             "account validation successful"
         );
 
         Ok(account)
-    }
-
-    /// Verifies that privilege claims in the JWT token match the current database state.
-    ///
-    /// This critical security check ensures that privilege changes (admin promotion/demotion)
-    /// are immediately effective by comparing token claims with current database records.
-    ///
-    /// # Security Importance
-    ///
-    /// - **Real-time Privilege Enforcement**: Admin changes take effect immediately
-    /// - **Token Invalidation**: Forces re-authentication when privileges change
-    /// - **Privilege Escalation Prevention**: Prevents use of stale admin tokens
-    /// - **Audit Compliance**: Ensures privilege records are consistent
-    ///
-    /// # Arguments
-    ///
-    /// * `auth_claims` - JWT claims containing privilege assertions
-    /// * `account` - Current account record from database
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if privileges are consistent.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ErrorKind::Unauthorized`] if privilege claims don't match database.
-    fn verify_privilege_consistency(auth_claims: &AuthClaims<T>, account: &Account) -> Result<()> {
-        if auth_claims.is_admin != account.is_admin {
-            tracing::error!(
-                target: TRACING_TARGET,
-                account_id = %auth_claims.account_id,
-                token_id = %auth_claims.token_id,
-                token_admin_claim = auth_claims.is_admin,
-                current_admin_status = account.is_admin,
-                "critical: admin privilege mismatch detected between token and database"
-            );
-
-            return Err(ErrorKind::Unauthorized
-                .with_message("Your account privileges have changed")
-                .with_context("Please sign in again to access your updated permissions")
-                .with_resource("authentication"));
-        }
-
-        tracing::debug!(
-            target: TRACING_TARGET,
-            account_id = %auth_claims.account_id,
-            is_admin = account.is_admin,
-            "privilege consistency verification successful"
-        );
-
-        Ok(())
     }
 
     /// Verifies that the token backing this request has not been revoked.
@@ -458,7 +387,7 @@ where
         parts: &mut Parts,
         state: &S,
     ) -> Result<Option<Self>, Self::Rejection> {
-        use crate::handler::ErrorKind;
+        use crate::response::ErrorKind;
 
         match <Self as FromRequestParts<S>>::from_request_parts(parts, state).await {
             Ok(auth_state) => Ok(Some(auth_state)),
@@ -490,58 +419,5 @@ where
         // The Bearer token is required: the only way to satisfy the operation is
         // to present it.
         operation.security = vec![[("BearerAuth".to_string(), vec![])].into()];
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use nvisy_postgres::model::{Account, AccountApiToken};
-    use nvisy_postgres::types::ApiTokenType;
-
-    use super::{AuthClaims, AuthState};
-
-    /// Builds claims for `account` (the claim's `is_admin` mirrors the account it
-    /// was minted from).
-    fn claims_for(account: &Account) -> AuthClaims<()> {
-        let token = AccountApiToken::test(account.id, ApiTokenType::Web);
-        AuthClaims::new(account, &token)
-    }
-
-    #[test]
-    fn privilege_consistency_accepts_a_matching_admin_flag() {
-        let mut admin = Account::test();
-        admin.is_admin = true;
-        assert!(AuthState::<()>::verify_privilege_consistency(&claims_for(&admin), &admin).is_ok());
-
-        let user = Account::test(); // is_admin: false
-        assert!(AuthState::<()>::verify_privilege_consistency(&claims_for(&user), &user).is_ok());
-    }
-
-    #[test]
-    fn privilege_consistency_rejects_a_stale_admin_claim() {
-        // Token was minted while the account was admin; the account has since been
-        // demoted. The stale admin claim must be rejected (fail closed).
-        let mut was_admin = Account::test();
-        was_admin.is_admin = true;
-        let stale_claims = claims_for(&was_admin);
-
-        let mut now_demoted = was_admin.clone();
-        now_demoted.is_admin = false;
-
-        assert!(
-            AuthState::<()>::verify_privilege_consistency(&stale_claims, &now_demoted).is_err()
-        );
-    }
-
-    #[test]
-    fn privilege_consistency_rejects_a_forged_admin_claim() {
-        // A non-admin account whose token nonetheless claims admin must be
-        // rejected — a claim can never grant a privilege the DB does not hold.
-        let mut forged = Account::test();
-        forged.is_admin = true;
-        let forged_claims = claims_for(&forged);
-
-        let real = Account::test(); // is_admin: false
-        assert!(AuthState::<()>::verify_privilege_consistency(&forged_claims, &real).is_err());
     }
 }

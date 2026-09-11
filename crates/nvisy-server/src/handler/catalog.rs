@@ -18,7 +18,8 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::extract::{AuthState, Json};
-use crate::handler::response::{ErrorResponse, RecognizerCatalog};
+use crate::handler::response::RecognizerCatalog;
+use crate::response::ErrorResponse;
 use crate::service::{EngineService, ServiceState};
 
 /// Lists the deployment's supported labels (the built-in taxonomy).

@@ -13,7 +13,7 @@ use nvisy_postgres::types::{ApiTokenType, session};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 
 /// Tracing target for authentication operations.
 const TRACING_TARGET: &str = "nvisy_server::authentication";
@@ -53,9 +53,6 @@ pub struct AuthClaims<T = ()> {
     // Private (or custom) claims
     #[serde(flatten)]
     pub custom_claims: T,
-    /// Is administrator flag.
-    #[serde(rename = "adm")]
-    pub is_admin: bool,
 }
 
 impl AuthClaims<()> {
@@ -135,7 +132,6 @@ impl<T> AuthClaims<T> {
             issued_at: issued_at.as_second(),
             expires_at: expires_at.as_second(),
             custom_claims,
-            is_admin: account_model.is_admin,
         }
     }
 }
@@ -213,7 +209,7 @@ where
         validation.validate_aud = true;
         validation.set_audience(&[Self::JWT_AUDIENCE]);
         validation.set_issuer(&[Self::JWT_ISSUER]);
-        validation.set_required_spec_claims(&["iss", "aud", "jti", "sub", "iat", "exp", "adm"]);
+        validation.set_required_spec_claims(&["iss", "aud", "jti", "sub", "iat", "exp"]);
 
         tracing::debug!(
             target: TRACING_TARGET,
@@ -239,7 +235,6 @@ where
             target: TRACING_TARGET,
             token_id = %claims.token_id,
             account_id = %claims.account_id,
-            is_admin = claims.is_admin,
             "JWT token validation completed successfully"
         );
 

@@ -17,21 +17,19 @@ use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{
-    AuthState, Authorized, AvatarUpload, DeleteWorkspace, Json, Query, SecurityContext,
-    UpdateWorkspace as UpdateWorkspacePerm, ValidateJson, ViewWorkspace, WorkspaceContext,
+    AuthState, Authorized, AvatarUpload, Json, Query, SecurityContext, ValidateJson,
+    WorkspaceContext, markers,
 };
 use crate::handler::request::{
     CreateWorkspace, CursorPagination, UpdateNotificationSettings, UpdateWorkspace,
 };
-use crate::handler::response::{
-    AccountRef, ErrorResponse, NotificationSettings, Page, Workspace, WorkspacesPage,
-};
+use crate::handler::response::{AccountRef, NotificationSettings, Page, Workspace, WorkspacesPage};
 use crate::handler::utility::resolve_account_ref;
-use crate::handler::{Error, ErrorKind, Result};
 use crate::middleware::UploadConfig;
+use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
     AvatarService, EventEmitter, EventOrigin, MAX_AVATAR_UPLOAD_BYTES, ServiceState,
-    WorkspaceEvent, WorkspaceRef,
+    WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
 };
 
 /// Tracing target for workspace operations.
@@ -96,7 +94,7 @@ async fn create_workspace(
                     account_id: creator_id,
                     security: &security,
                 },
-                WorkspaceEvent::WorkspaceCreated(WorkspaceRef {
+                WorkspaceEvent::WorkspaceCreated(WorkspaceCreated {
                     workspace_id: workspace.id,
                     workspace_slug: workspace.slug.clone(),
                 }),
@@ -187,7 +185,7 @@ fn list_workspaces_docs(op: TransformOperation) -> TransformOperation {
 async fn read_workspace(
     State(pg_client): State<PgClient>,
     State(upload): State<UploadConfig>,
-    authz: Authorized<ViewWorkspace>,
+    authz: Authorized<markers::ViewWorkspace>,
 ) -> Result<(StatusCode, Json<Workspace>)> {
     let workspace = authz.workspace;
     let member = authz.member;
@@ -198,10 +196,7 @@ async fn read_workspace(
     tracing::info!(target: TRACING_TARGET, "Workspace read");
 
     let hard = upload.max_file_bytes();
-    let response = match member {
-        Some(member) => Workspace::from_model_with_membership(workspace, member, creator, hard),
-        None => Workspace::from_model(workspace, creator, hard),
-    };
+    let response = Workspace::from_model_with_membership(workspace, member, creator, hard);
     Ok((StatusCode::OK, Json(response)))
 }
 
@@ -227,7 +222,7 @@ fn read_workspace_docs(op: TransformOperation) -> TransformOperation {
 async fn update_workspace(
     State(pg_client): State<PgClient>,
     State(upload): State<UploadConfig>,
-    authz: Authorized<UpdateWorkspacePerm>,
+    authz: Authorized<markers::UpdateWorkspace>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWorkspace>,
 ) -> Result<(StatusCode, Json<Workspace>)> {
@@ -261,7 +256,7 @@ async fn update_workspace(
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::WorkspaceUpdated(WorkspaceRef {
+                WorkspaceEvent::WorkspaceUpdated(WorkspaceUpdated {
                     workspace_id: updated.id,
                     workspace_slug: updated.slug.clone(),
                 }),
@@ -276,10 +271,7 @@ async fn update_workspace(
     tracing::info!(target: TRACING_TARGET, "Workspace updated");
 
     let hard = upload.max_file_bytes();
-    let response = match member {
-        Some(member) => Workspace::from_model_with_membership(updated, member, creator, hard),
-        None => Workspace::from_model(updated, creator, hard),
-    };
+    let response = Workspace::from_model_with_membership(updated, member, creator, hard);
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -308,7 +300,7 @@ fn update_workspace_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_workspace(
     State(pg_client): State<PgClient>,
-    authz: Authorized<DeleteWorkspace>,
+    authz: Authorized<markers::DeleteWorkspace>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace");
@@ -327,7 +319,7 @@ async fn delete_workspace(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::WorkspaceDeleted(WorkspaceRef {
+            WorkspaceEvent::WorkspaceDeleted(WorkspaceDeleted {
                 workspace_id: workspace.id,
                 workspace_slug: workspace.slug.clone(),
             }),
@@ -458,7 +450,7 @@ async fn find_workspace_creator(conn: &mut PgConn, slug: &str) -> Result<Account
 #[tracing::instrument(skip_all, fields(account_id = %authz.account_id, workspace_id = %authz.workspace.id))]
 async fn upload_workspace_avatar(
     State(avatar): State<AvatarService>,
-    authz: Authorized<UpdateWorkspacePerm>,
+    authz: Authorized<markers::UpdateWorkspace>,
     AvatarUpload(bytes): AvatarUpload,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Uploading workspace avatar");
@@ -487,7 +479,7 @@ fn upload_workspace_avatar_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(skip_all, fields(account_id = %authz.account_id, workspace_id = %authz.workspace.id))]
 async fn delete_workspace_avatar(
     State(avatar): State<AvatarService>,
-    authz: Authorized<UpdateWorkspacePerm>,
+    authz: Authorized<markers::UpdateWorkspace>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace avatar");
 

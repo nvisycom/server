@@ -38,6 +38,12 @@ db_enum! {
         ProviderUpdated = "provider.updated",
         /// A provider was deleted.
         ProviderDeleted = "provider.deleted",
+        /// A file was assigned to a reviewer.
+        FileAssigned = "file.assigned",
+        /// A reviewer was unassigned from a file.
+        FileUnassigned = "file.unassigned",
+        /// A file assignment's review status changed.
+        AssignmentStatusChanged = "file.assignment.updated",
         /// A pipeline was created.
         PipelineCreated = "pipeline.created",
         /// A pipeline was updated.
@@ -65,9 +71,12 @@ impl WebhookEvent {
     /// Returns the event category as a string.
     pub fn category(&self) -> &'static str {
         match self {
-            WebhookEvent::FileCreated | WebhookEvent::FileUpdated | WebhookEvent::FileDeleted => {
-                "file"
-            }
+            WebhookEvent::FileCreated
+            | WebhookEvent::FileUpdated
+            | WebhookEvent::FileDeleted
+            | WebhookEvent::FileAssigned
+            | WebhookEvent::FileUnassigned
+            | WebhookEvent::AssignmentStatusChanged => "file",
             WebhookEvent::MemberAdded
             | WebhookEvent::MemberDeleted
             | WebhookEvent::MemberUpdated => "member",

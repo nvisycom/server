@@ -14,7 +14,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 
 /// Request payload for creating a new workspace webhook.
 #[must_use]

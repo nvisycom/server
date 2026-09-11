@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::extract::SecurityContext;
-use crate::handler::Result;
+use crate::response::Result;
 
 /// Expiration options for API tokens.
 #[must_use]
@@ -95,7 +95,7 @@ impl CreateApiToken {
     ) -> Result<NewAccountApiToken> {
         let sanitized_name = self.display_name.trim().to_string();
         if sanitized_name.is_empty() {
-            return Err(crate::handler::ErrorKind::BadRequest
+            return Err(crate::response::ErrorKind::BadRequest
                 .with_resource("api_token")
                 .with_message("Token name cannot be empty or whitespace only"));
         }

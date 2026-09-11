@@ -9,7 +9,7 @@ use zxcvbn::feedback::Feedback;
 use zxcvbn::time_estimates::CrackTimeSeconds;
 use zxcvbn::zxcvbn;
 
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 
 /// Tracing target for password strength operations.
 const TRACING_TARGET: &str = "nvisy_server::password_strength";

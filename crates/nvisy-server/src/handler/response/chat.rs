@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::Page;
-use crate::handler::Result;
+use crate::response::Result;
 use crate::service::ChatService;
 
 /// A chat session.

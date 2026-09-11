@@ -19,11 +19,8 @@ use uuid::Uuid;
 
 use crate::extract::{AuthState, Json, Path, Query};
 use crate::handler::request::{CursorPagination, NotificationPathParams};
-use crate::handler::response::{
-    ErrorResponse, MarkedReadStatus, Notification, NotificationsPage, UnreadStatus,
-};
-use crate::handler::{Error, Result};
-use crate::response::SseResponse;
+use crate::handler::response::{MarkedReadStatus, Notification, NotificationsPage, UnreadStatus};
+use crate::response::{Error, ErrorResponse, Result, SseResponse};
 use crate::service::{NotificationEmitter, ServiceState, UnreadCountEvent};
 
 /// Tracing target for notification operations.

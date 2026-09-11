@@ -17,11 +17,9 @@ use nvisy_postgres::types::IdentityProvider;
 use nvisy_postgres::{AsyncConnection, Error as PgError, PgClient};
 
 use super::request::{Login, Signup};
-use super::response::ErrorResponse;
 use crate::extract::{AuthState, Json, SecurityContext, ValidateJson};
 use crate::handler::utility::build_password_user_inputs;
-use crate::handler::{ErrorKind, Result};
-use crate::response::{ClearedSession, CookieConfig, WebSession};
+use crate::response::{ClearedSession, CookieConfig, ErrorKind, ErrorResponse, Result, WebSession};
 use crate::service::{AuthIssuer, PasswordService, ServiceState};
 
 /// Tracing target for authentication operations.

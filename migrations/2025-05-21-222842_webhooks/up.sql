@@ -13,43 +13,15 @@ COMMENT ON TYPE WEBHOOK_STATUS IS
     'Defines the operational status of workspace webhooks.';
 
 -- Event types a webhook can subscribe to, grouped by resource.
+-- Only the values for objects that exist by this migration are declared here.
+-- Each later feature (connections, providers, files, policies, pipelines,
+-- detections, redactions, assignments) adds its own values via
+-- ALTER TYPE ... ADD VALUE in its own migration.
 CREATE TYPE WEBHOOK_EVENT AS ENUM (
-    -- File events
-    'file.created',
-    'file.updated',
-    'file.deleted',
-
     -- Member events
     'member.added',
     'member.deleted',
-    'member.updated',
-
-    -- Connection events
-    'connection.created',
-    'connection.updated',
-    'connection.deleted',
-    'connection.sync.started',
-    'connection.sync.completed',
-    'connection.sync.failed',
-
-    -- Provider events
-    'provider.created',
-    'provider.updated',
-    'provider.deleted',
-
-    -- Pipeline, detection, and redaction events
-    'pipeline.created',
-    'pipeline.updated',
-    'pipeline.deleted',
-    'pipeline.detection.started',
-    'pipeline.detection.completed',
-    'pipeline.detection.failed',
-    'pipeline.redaction.created',
-
-    -- Policy events
-    'policy.created',
-    'policy.updated',
-    'policy.deleted'
+    'member.updated'
 );
 
 COMMENT ON TYPE WEBHOOK_EVENT IS
@@ -144,3 +116,9 @@ COMMENT ON COLUMN workspace_webhooks.created_by IS 'Account that created the web
 COMMENT ON COLUMN workspace_webhooks.created_at IS 'Webhook creation timestamp';
 COMMENT ON COLUMN workspace_webhooks.updated_at IS 'Timestamp when webhook was last modified';
 COMMENT ON COLUMN workspace_webhooks.deleted_at IS 'Soft-deletion timestamp; NULL means live';
+
+-- Webhook lifecycle is recorded in the activity log (webhooks do not fire on
+-- their own management, so no WEBHOOK_EVENT values here).
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'webhook.created';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'webhook.updated';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'webhook.deleted';

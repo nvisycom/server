@@ -10,7 +10,7 @@ use nvisy_postgres::types::Handle;
 use uuid::Uuid;
 
 use crate::handler::response::AccountRef;
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 
 /// The outcome of resolving an actor filter (a username supplied by the client)
 /// against the accounts table.

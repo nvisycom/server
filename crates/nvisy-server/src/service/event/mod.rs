@@ -11,6 +11,8 @@
 
 mod drainer;
 mod emitter;
+mod kind;
+mod macros;
 mod workspace_event;
 
 use uuid::Uuid;
@@ -18,9 +20,16 @@ use uuid::Uuid;
 use crate::extract::SecurityContext;
 pub use crate::service::event::drainer::EventOutboxDrainer;
 pub use crate::service::event::emitter::{EventEmitter, event_outbox_row};
+pub use crate::service::event::kind::{EventKind, Notification, NotifyTarget, WebhookDelivery};
 pub use crate::service::event::workspace_event::{
-    ConnectionRef, DetectionRef, FileRef, InviteRef, MemberRef, PipelineRef, PolicyRef,
-    ProviderRef, WebhookRef, WorkspaceEvent, WorkspaceRef,
+    AssignmentStatusChanged, ConnectionCreated, ConnectionDeleted, ConnectionSyncCompleted,
+    ConnectionSyncFailed, ConnectionSyncStarted, ConnectionUpdated, DetectionCompleted,
+    DetectionFailed, DetectionStarted, FileAssigned, FileCreated, FileDeleted, FileUnassigned,
+    FileUpdated, InviteAccepted, InviteCanceled, InviteCreated, InviteDeclined, MemberAdded,
+    MemberDeleted, MemberUpdated, PipelineCreated, PipelineDeleted, PipelineUpdated, PolicyCreated,
+    PolicyDeleted, PolicyUpdated, ProviderCreated, ProviderDeleted, ProviderUpdated,
+    RedactionCreated, WebhookCreated, WebhookDeleted, WebhookUpdated, WorkspaceCreated,
+    WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
 };
 
 /// Who raised an event and where.

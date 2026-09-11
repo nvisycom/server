@@ -15,8 +15,6 @@ pub struct Account {
     pub username: Handle,
     /// Whether the account email has been verified.
     pub is_activated: bool,
-    /// Whether the account has administrator privileges.
-    pub is_admin: bool,
     /// Whether the account is currently suspended.
     pub is_suspended: bool,
 
@@ -40,7 +38,6 @@ impl Account {
         Self {
             username: account.username,
             is_activated: account.is_verified,
-            is_admin: account.is_admin,
             is_suspended: account.is_suspended,
 
             display_name: account.display_name,

@@ -16,18 +16,18 @@ use nvisy_postgres::types::{FileKind, Handle, RetentionScope, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, Result as PgResult};
 use uuid::Uuid;
 
-use crate::extract::{
-    Authorized, CreatePipelines, DeletePipelines, Json, Path, Query, SecurityContext,
-    UpdatePipelines, ValidateJson, ViewPipelines,
-};
+use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
     CreatePipeline, CursorPagination, PipelineFilter, PipelinePathParams, PipelineReferences,
     UpdatePipeline,
 };
-use crate::handler::response::{AccountRef, ErrorResponse, Page, Pipeline, PipelineSummary};
+use crate::handler::response::{AccountRef, Page, Pipeline, PipelineSummary};
 use crate::handler::utility::resolve_account_ref;
-use crate::handler::{Error, ErrorKind, Result};
-use crate::service::{EventEmitter, EventOrigin, PipelineRef, ServiceState, WorkspaceEvent};
+use crate::response::{Error, ErrorKind, ErrorResponse, Result};
+use crate::service::{
+    EventEmitter, EventOrigin, PipelineCreated, PipelineDeleted, PipelineUpdated, ServiceState,
+    WorkspaceEvent,
+};
 
 /// Tracing target for pipeline operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::pipelines";
@@ -45,7 +45,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::pipelines";
 )]
 async fn create_pipeline(
     State(pg_client): State<PgClient>,
-    authz: Authorized<CreatePipelines>,
+    authz: Authorized<markers::CreatePipelines>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreatePipeline>,
 ) -> Result<(StatusCode, Json<Pipeline>)> {
@@ -71,7 +71,7 @@ async fn create_pipeline(
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::PipelineCreated(PipelineRef {
+                WorkspaceEvent::PipelineCreated(PipelineCreated {
                     pipeline_id: pipeline.id,
                     pipeline_slug: pipeline.slug.clone(),
                 }),
@@ -120,7 +120,7 @@ fn create_pipeline_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn list_pipelines(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewPipelines>,
+    authz: Authorized<markers::ViewPipelines>,
     Query(pagination): Query<CursorPagination>,
     Query(filter): Query<PipelineFilter>,
 ) -> Result<(StatusCode, Json<Page<PipelineSummary>>)> {
@@ -170,7 +170,7 @@ fn list_pipelines_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn get_pipeline(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewPipelines>,
+    authz: Authorized<markers::ViewPipelines>,
     Path(path_params): Path<PipelinePathParams>,
 ) -> Result<(StatusCode, Json<Pipeline>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting pipeline");
@@ -214,7 +214,7 @@ fn get_pipeline_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_pipeline(
     State(pg_client): State<PgClient>,
-    authz: Authorized<UpdatePipelines>,
+    authz: Authorized<markers::UpdatePipelines>,
     Path(path_params): Path<PipelinePathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdatePipeline>,
@@ -291,7 +291,7 @@ async fn update_pipeline(
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::PipelineUpdated(PipelineRef {
+                WorkspaceEvent::PipelineUpdated(PipelineUpdated {
                     pipeline_id,
                     pipeline_slug: pipeline.slug.clone(),
                 }),
@@ -340,7 +340,7 @@ fn update_pipeline_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_pipeline(
     State(pg_client): State<PgClient>,
-    authz: Authorized<DeletePipelines>,
+    authz: Authorized<markers::DeletePipelines>,
     Path(path_params): Path<PipelinePathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
@@ -367,7 +367,7 @@ async fn delete_pipeline(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::PipelineDeleted(PipelineRef {
+            WorkspaceEvent::PipelineDeleted(PipelineDeleted {
                 pipeline_id,
                 pipeline_slug,
             }),

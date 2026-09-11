@@ -7,9 +7,9 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 /// The serialized shape of an HTTP error: the inert wire/OpenAPI-schema view
-/// that [`Error`](crate::handler::Error) renders to at the response boundary.
+/// that [`Error`](crate::response::Error) renders to at the response boundary.
 ///
-/// It carries no builder logic — [`Error`](crate::handler::Error) is the type
+/// It carries no builder logic — [`Error`](crate::response::Error) is the type
 /// handlers construct and thread through `Result`, and it builds an
 /// `ErrorResponse` directly in its `IntoResponse` impl. `context` and `status`
 /// are not part of the JSON body (`context` is logged, `status` sets the HTTP
@@ -39,7 +39,7 @@ impl<'a> ErrorResponse<'a> {
     /// status), with no per-occurrence resource or context.
     ///
     /// This is the building block for
-    /// [`ErrorKind::response`](crate::handler::ErrorKind::response), the single
+    /// [`ErrorKind::response`](crate::response::ErrorKind::response), the single
     /// source of truth for each kind's name, status, and message.
     #[inline]
     pub const fn new(name: &'a str, message: &'a str, status: StatusCode) -> Self {
@@ -56,7 +56,7 @@ impl<'a> ErrorResponse<'a> {
 impl Default for ErrorResponse<'_> {
     #[inline]
     fn default() -> Self {
-        crate::handler::ErrorKind::InternalServerError.response()
+        crate::response::ErrorKind::InternalServerError.response()
     }
 }
 
@@ -79,7 +79,7 @@ mod tests {
     use axum::http::StatusCode;
 
     use super::ErrorResponse;
-    use crate::handler::ErrorKind;
+    use crate::response::ErrorKind;
 
     #[test]
     fn a_kinds_response_carries_its_defaults() {

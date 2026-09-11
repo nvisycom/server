@@ -22,7 +22,7 @@ impl<'a> From<ObjectError> for HttpError<'a> {
             ObjectErrorKind::AlreadyExists => ErrorKind::Conflict
                 .with_message("Object already exists")
                 .with_context(message),
-            ObjectErrorKind::Connection => ErrorKind::BadRequest
+            ObjectErrorKind::Connection => ErrorKind::ServiceUnavailable
                 .with_message("Could not connect to the object store")
                 .with_context(message),
             _ => ErrorKind::InternalServerError

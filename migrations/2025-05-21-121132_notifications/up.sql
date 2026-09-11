@@ -3,17 +3,11 @@
 -- client renders copy from the event type and its typed params.
 
 -- Type of a notification event: what happened that the account is told about.
-CREATE TYPE NOTIFICATION_EVENT AS ENUM (
-    'member.invited',              -- User was invited to a workspace
-    'member.joined',               -- A new member joined a workspace
-
-    'connection.sync.completed',   -- A connection sync completed
-    'connection.sync.failed',      -- A connection sync failed
-
-    'pipeline.detection.completed', -- A detection finished analysis, ready to redact
-    'pipeline.redaction.created',   -- A redaction was created (redacted output produced)
-    'pipeline.detection.failed'     -- A detection failed
-);
+-- Created empty here (the account_notifications column below needs the type to
+-- exist); every value is added by the migration that introduces the object it
+-- describes — members in the workspaces migration, connections/detections/
+-- redactions/assignments in theirs — via ALTER TYPE ... ADD VALUE.
+CREATE TYPE NOTIFICATION_EVENT AS ENUM ();
 
 COMMENT ON TYPE NOTIFICATION_EVENT IS 'Type of a notification event delivered to an account.';
 

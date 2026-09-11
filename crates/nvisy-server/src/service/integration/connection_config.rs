@@ -14,7 +14,7 @@ use nvisy_postgres::types::ConnectionType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 
 /// A fully-typed transfer-connection configuration.
 ///

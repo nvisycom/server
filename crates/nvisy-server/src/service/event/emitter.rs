@@ -15,7 +15,7 @@ use nvisy_postgres::PgConn;
 use nvisy_postgres::model::NewEventOutbox;
 use nvisy_postgres::query::EventOutboxRepository;
 
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 use crate::service::event::{EventOrigin, WorkspaceEvent};
 
 /// Builds the outbox row for an event and its origin.

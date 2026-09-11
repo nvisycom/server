@@ -26,10 +26,10 @@ use super::export::Exporter;
 use super::file_source::SourceEntry;
 use super::import::Importer;
 use crate::extract::SecurityContext;
-use crate::handler::{ErrorKind, Result};
+use crate::response::{ErrorKind, Result};
 use crate::service::{
-    ConnectionConfig, ConnectionRef, EventEmitter, EventOrigin, ExternalObjectStore, Infra,
-    WorkspaceEvent,
+    ConnectionConfig, ConnectionSyncCompleted, ConnectionSyncFailed, ConnectionSyncStarted,
+    EventEmitter, EventOrigin, ExternalObjectStore, Infra, WorkspaceEvent,
 };
 
 /// Tracing target for connection sync operations.
@@ -140,7 +140,7 @@ impl ConnectionSyncService {
             account_id: new_run.account_id,
             security: &SecurityContext::default(),
         };
-        let started = WorkspaceEvent::ConnectionSyncStarted(ConnectionRef {
+        let started = WorkspaceEvent::ConnectionSyncStarted(ConnectionSyncStarted {
             connection_id: connection.id,
             connection_name: connection.display_name.clone(),
         });
@@ -148,7 +148,7 @@ impl ConnectionSyncService {
             .transaction(async |conn| {
                 let run = conn.create_workspace_connection_sync(new_run).await?;
                 conn.emit_event(origin, started).await?;
-                Ok::<_, crate::handler::Error>(run)
+                Ok::<_, crate::response::Error>(run)
             })
             .await?;
         Ok(run)
@@ -288,22 +288,24 @@ impl ConnectionSyncService {
         // Build the terminal event before `result` is consumed. `notify` targets
         // the account the run is attributed to (the origin's).
         let event = match &result {
-            Ok(records_synced) => WorkspaceEvent::ConnectionSyncCompleted {
-                connection_id,
-                connection_name: connection_name.to_owned(),
-                records_synced: Some(*records_synced as i64),
-                notify: Some(origin.account_id),
-            },
+            Ok(records_synced) => {
+                WorkspaceEvent::ConnectionSyncCompleted(ConnectionSyncCompleted {
+                    connection_id,
+                    connection_name: connection_name.to_owned(),
+                    records_synced: Some(*records_synced as i64),
+                    notify: Some(origin.account_id),
+                })
+            }
             Err(err) => {
                 // Log the full error (may include backend URLs/details) but record
                 // only the safe summary; the stored message is exposed to clients.
                 tracing::warn!(target: TRACING_TARGET, %run_id, error = %err, "Sync failed");
-                WorkspaceEvent::ConnectionSyncFailed {
+                WorkspaceEvent::ConnectionSyncFailed(ConnectionSyncFailed {
                     connection_id,
                     connection_name: connection_name.to_owned(),
                     error: Some(err.message.as_deref().unwrap_or("Sync failed").to_owned()),
                     notify: Some(origin.account_id),
-                }
+                })
             }
         };
 
@@ -327,8 +329,8 @@ impl ConnectionSyncService {
                         .is_some(),
                     Err(_) => {
                         let safe_message = match &event {
-                            WorkspaceEvent::ConnectionSyncFailed { error, .. } => {
-                                error.clone().unwrap_or_else(|| "Sync failed".to_owned())
+                            WorkspaceEvent::ConnectionSyncFailed(e) => {
+                                e.error.clone().unwrap_or_else(|| "Sync failed".to_owned())
                             }
                             _ => "Sync failed".to_owned(),
                         };
@@ -340,7 +342,7 @@ impl ConnectionSyncService {
                 if transitioned {
                     conn.emit_event(origin, event).await?;
                 }
-                Ok::<_, crate::handler::Error>(transitioned)
+                Ok::<_, crate::response::Error>(transitioned)
             })
             .await;
 

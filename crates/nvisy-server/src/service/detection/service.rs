@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use super::coordinator::DetectionCoordinator;
 use super::job::{DetectionJob, DetectionStatusEvent, DetectionStream, detection_subject};
-use crate::handler::Result;
+use crate::response::Result;
 use crate::service::Infra;
 
 /// Enqueues detection jobs and broadcasts detection-status changes.

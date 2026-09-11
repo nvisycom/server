@@ -12,7 +12,7 @@ use nvisy_core::health::HealthStatus;
 
 use super::response::Health;
 use crate::extract::{Json, OptionalAuth, Version};
-use crate::handler::Result;
+use crate::response::Result;
 use crate::service::{HealthCache, ServiceState};
 
 /// Tracing target for monitor operations.
@@ -37,7 +37,6 @@ const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
     skip_all,
     fields(
         authenticated = auth_state.is_some(),
-        is_admin = auth_state.as_ref().map(|a| a.is_admin).unwrap_or(false),
         account_id = auth_state.as_ref().map(|a| a.account_id.to_string()),
     )
 )]
@@ -47,14 +46,12 @@ async fn health_status(
     version: Version,
 ) -> Result<(StatusCode, Json<Health>)> {
     let is_authenticated = auth_state.is_some();
-    let is_admin = auth_state.as_ref().is_some_and(|auth| auth.is_admin);
     let account_id = auth_state.as_ref().map(|auth| auth.account_id);
 
     tracing::debug!(
         target: TRACING_TARGET,
         ?account_id,
         is_authenticated,
-        is_admin,
         version = %version,
         "Health status check requested"
     );

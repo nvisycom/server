@@ -254,3 +254,16 @@ COMMENT ON COLUMN workspace_detection_jobs.attempts IS 'Number of publish attemp
 COMMENT ON COLUMN workspace_detection_jobs.next_attempt_at IS 'Earliest time the row may next be claimed; advanced by a backoff after each failed attempt';
 COMMENT ON COLUMN workspace_detection_jobs.created_at IS 'Timestamp when the job was queued';
 COMMENT ON COLUMN workspace_detection_jobs.resolved_at IS 'When a terminal (processed or failed) row was resolved by an operator; NULL until then. A manual affordance for inspecting the outbox after the fact';
+
+-- Detection run events feed the activity log, webhooks, and (for terminal
+-- completion/failure) in-app notifications.
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.detection.started';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.detection.completed';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.detection.failed';
+
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.started';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.completed';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.failed';
+
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.completed';
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.failed';

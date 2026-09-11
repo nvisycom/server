@@ -17,15 +17,14 @@ use nvisy_postgres::types::WithAccountRef;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
-use crate::extract::{
-    Authorized, Json, ManagePolicies, Path, Query, SecurityContext, ValidateJson, ViewPolicies,
-};
+use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{CreatePolicy, CursorPagination, PolicyPathParams, UpdatePolicy};
-use crate::handler::response::{ErrorResponse, PoliciesPage, Policy, PolicySummary};
+use crate::handler::response::{PoliciesPage, Policy, PolicySummary};
 use crate::handler::utility::resolve_account_ref;
-use crate::handler::{Error, Result};
+use crate::response::{Error, ErrorResponse, Result};
 use crate::service::{
-    CryptoService, EventEmitter, EventOrigin, PolicyRef, ServiceState, WorkspaceEvent,
+    CryptoService, EventEmitter, EventOrigin, PolicyCreated, PolicyDeleted, PolicyUpdated,
+    ServiceState, WorkspaceEvent,
 };
 
 /// Tracing target for workspace policy operations.
@@ -46,7 +45,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::policies";
 async fn create_policy(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
-    authz: Authorized<ManagePolicies>,
+    authz: Authorized<markers::ManagePolicies>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreatePolicy>,
 ) -> Result<(StatusCode, Json<Policy>)> {
@@ -89,7 +88,7 @@ async fn create_policy(
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::PolicyCreated(PolicyRef {
+                WorkspaceEvent::PolicyCreated(PolicyCreated {
                     policy_id: policy.id,
                     policy_slug: policy.slug.clone(),
                 }),
@@ -128,7 +127,7 @@ fn create_policy_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn list_policies(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ViewPolicies>,
+    authz: Authorized<markers::ViewPolicies>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<PoliciesPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace policies");
@@ -175,7 +174,7 @@ fn list_policies_docs(op: TransformOperation) -> TransformOperation {
 async fn read_policy(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
-    authz: Authorized<ViewPolicies>,
+    authz: Authorized<markers::ViewPolicies>,
     Path(path_params): Path<PolicyPathParams>,
 ) -> Result<(StatusCode, Json<Policy>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace policy");
@@ -222,7 +221,7 @@ fn read_policy_docs(op: TransformOperation) -> TransformOperation {
 async fn update_policy(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
-    authz: Authorized<ManagePolicies>,
+    authz: Authorized<markers::ManagePolicies>,
     Path(path_params): Path<PolicyPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdatePolicy>,
@@ -271,7 +270,7 @@ async fn update_policy(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::PolicyUpdated(PolicyRef {
+            WorkspaceEvent::PolicyUpdated(PolicyUpdated {
                 policy_id,
                 policy_slug,
             }),
@@ -311,7 +310,7 @@ fn update_policy_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_policy(
     State(pg_client): State<PgClient>,
-    authz: Authorized<ManagePolicies>,
+    authz: Authorized<markers::ManagePolicies>,
     Path(path_params): Path<PolicyPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
@@ -338,7 +337,7 @@ async fn delete_policy(
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::PolicyDeleted(PolicyRef {
+            WorkspaceEvent::PolicyDeleted(PolicyDeleted {
                 policy_id,
                 policy_slug,
             }),
