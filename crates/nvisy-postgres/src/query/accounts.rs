@@ -1,0 +1,440 @@
+//! Account repository for managing user accounts.
+
+use std::future::Future;
+
+use diesel::prelude::*;
+use diesel_async::RunQueryDsl;
+use uuid::Uuid;
+
+use crate::model::{Account, NewAccount, UpdateAccount};
+use crate::types::Handle;
+use crate::{Error, PgConnection, Result, schema};
+
+/// Repository for account database operations.
+///
+/// Handles account lifecycle management including authentication, profile management,
+/// and security operations.
+pub trait AccountRepository {
+    /// Creates a new user account with complete profile information.
+    ///
+    /// Inserts a new account record into the database with the provided
+    /// details including email, password hash, and profile information.
+    fn create_account(
+        &mut self,
+        new_account: NewAccount,
+    ) -> impl Future<Output = Result<Account>> + Send;
+
+    /// Finds an account by its unique identifier.
+    ///
+    /// Retrieves a specific account using its UUID, automatically excluding
+    /// soft-deleted accounts.
+    fn find_account_by_id(
+        &mut self,
+        account_id: Uuid,
+    ) -> impl Future<Output = Result<Option<Account>>> + Send;
+
+    /// Finds an account by email address.
+    ///
+    /// Retrieves an account using its email for authentication and lookup.
+    /// Email comparison is case-insensitive.
+    fn find_account_by_email(
+        &mut self,
+        email: &str,
+    ) -> impl Future<Output = Result<Option<Account>>> + Send;
+
+    /// Finds an account by its public handle.
+    ///
+    /// Retrieves an account using its username, excluding soft-deleted
+    /// accounts. Comparison is case-insensitive.
+    fn find_account_by_username(
+        &mut self,
+        username: &Handle,
+    ) -> impl Future<Output = Result<Option<Account>>> + Send;
+
+    /// Finds an account by either email address or username.
+    ///
+    /// The identifier is treated as an email when it contains `@` (usernames
+    /// never do), and as a username otherwise. Used to authenticate with
+    /// either credential. Comparison is case-insensitive.
+    fn find_account_by_identifier(
+        &mut self,
+        identifier: &str,
+    ) -> impl Future<Output = Result<Option<Account>>> + Send;
+
+    /// Updates an account with new information.
+    ///
+    /// Applies partial updates to an existing account. Only fields set
+    /// to `Some(value)` will be modified.
+    fn update_account(
+        &mut self,
+        account_id: Uuid,
+        updates: UpdateAccount,
+    ) -> impl Future<Output = Result<Account>> + Send;
+
+    /// Soft deletes an account by setting the deletion timestamp.
+    ///
+    /// Marks an account as deleted without permanently removing it,
+    /// preserving data for audit purposes. Returns `None` if the account
+    /// was not found.
+    fn delete_account(
+        &mut self,
+        account_id: Uuid,
+    ) -> impl Future<Output = Result<Option<Account>>> + Send;
+
+    /// Checks if an email address is already registered in the system.
+    ///
+    /// Used during registration to prevent duplicate accounts.
+    fn email_exists(&mut self, email: &str) -> impl Future<Output = Result<bool>> + Send;
+
+    /// Checks if an email address is used by another account.
+    ///
+    /// Used during account updates to prevent duplicate emails.
+    fn email_exists_for_other(
+        &mut self,
+        email: &str,
+        exclude_account_id: Uuid,
+    ) -> impl Future<Output = Result<bool>> + Send;
+
+    /// Checks if a username is already registered in the system.
+    ///
+    /// Used during registration to prevent duplicate handles.
+    fn username_exists(&mut self, username: &Handle) -> impl Future<Output = Result<bool>> + Send;
+
+    /// Checks if a username is used by another account.
+    ///
+    /// Used during account updates to prevent duplicate handles.
+    fn username_exists_for_other(
+        &mut self,
+        username: &Handle,
+        exclude_account_id: Uuid,
+    ) -> impl Future<Output = Result<bool>> + Send;
+}
+
+impl AccountRepository for PgConnection {
+    async fn create_account(&mut self, mut new_account: NewAccount) -> Result<Account> {
+        use schema::accounts;
+
+        // Normalize fields: trim whitespace
+        if let Some(ref mut name) = new_account.display_name {
+            *name = name.trim().to_owned();
+        }
+        new_account.email_address = new_account.email_address.trim().to_lowercase();
+
+        diesel::insert_into(accounts::table)
+            .values(&new_account)
+            .returning(Account::as_returning())
+            .get_result(self)
+            .await
+            .map_err(Error::from)
+    }
+
+    async fn find_account_by_id(&mut self, account_id: Uuid) -> Result<Option<Account>> {
+        use schema::accounts::{self, dsl};
+
+        accounts::table
+            .filter(dsl::id.eq(account_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(Account::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)
+    }
+
+    async fn find_account_by_email(&mut self, email: &str) -> Result<Option<Account>> {
+        use schema::accounts::{self, dsl};
+
+        accounts::table
+            .filter(dsl::email_address.eq(email.trim().to_lowercase()))
+            .filter(dsl::deleted_at.is_null())
+            .select(Account::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)
+    }
+
+    async fn find_account_by_username(&mut self, username: &Handle) -> Result<Option<Account>> {
+        use schema::accounts::{self, dsl};
+
+        accounts::table
+            .filter(dsl::username.eq(username.as_str()))
+            .filter(dsl::deleted_at.is_null())
+            .select(Account::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)
+    }
+
+    async fn find_account_by_identifier(&mut self, identifier: &str) -> Result<Option<Account>> {
+        if identifier.contains('@') {
+            return self.find_account_by_email(identifier).await;
+        }
+
+        // An identifier that is not a well-formed username cannot match any
+        // account. Still issue a lookup (guaranteed to miss) so every branch
+        // performs one query and the login flow's timing stays uniform,
+        // regardless of whether the identifier was syntactically valid.
+        match Handle::parse(identifier.trim()) {
+            Ok(username) => self.find_account_by_username(&username).await,
+            Err(_) => self.find_account_by_email(identifier).await,
+        }
+    }
+
+    async fn update_account(
+        &mut self,
+        account_id: Uuid,
+        mut updates: UpdateAccount,
+    ) -> Result<Account> {
+        use schema::accounts::{self, dsl};
+
+        // An all-`None` changeset would make Diesel emit an empty `SET`, which
+        // Postgres rejects. Reject it up front so a caller with nothing to change
+        // gets a clear error rather than a raw SQL failure.
+        if updates.username.is_none()
+            && updates.display_name.is_none()
+            && updates.email_address.is_none()
+            && updates.avatar_url.is_none()
+            && updates.timezone.is_none()
+            && updates.locale.is_none()
+            && updates.is_verified.is_none()
+            && updates.is_suspended.is_none()
+            && updates.password_changed_at.is_none()
+        {
+            return Err(Error::unexpected(
+                "update_account called with no fields to update",
+            ));
+        }
+
+        // Normalize fields: trim whitespace
+        // Some(None) clears, Some(Some(value)) sets, None skips
+        if let Some(Some(name)) = updates.display_name.as_mut() {
+            *name = name.trim().to_owned();
+        }
+        if let Some(email) = updates.email_address.as_mut() {
+            *email = email.trim().to_lowercase();
+        }
+
+        diesel::update(accounts::table.filter(dsl::id.eq(account_id)))
+            .set(&updates)
+            .returning(Account::as_returning())
+            .get_result(self)
+            .await
+            .map_err(Error::from)
+    }
+
+    async fn delete_account(&mut self, account_id: Uuid) -> Result<Option<Account>> {
+        use diesel::dsl::now;
+
+        use crate::AsyncConnection;
+
+        // Soft-delete the account and hard-delete its identities together. The
+        // account is only tombstoned (its row is retained), so the FK's
+        // ON DELETE CASCADE never fires; removing the identities explicitly frees
+        // their credentials — a dead account should hold none — and releases the
+        // `(provider, issuer, subject)` uniqueness so the person can sign up again
+        // with the same provider.
+        self.transaction(async |conn| {
+            use schema::{account_identities, accounts};
+
+            let account = diesel::update(accounts::table.filter(accounts::id.eq(account_id)))
+                .set(accounts::deleted_at.eq(now))
+                .returning(Account::as_returning())
+                .get_result(conn)
+                .await
+                .optional()
+                .map_err(Error::from)?;
+
+            // Only clear identities when an account was actually tombstoned.
+            if account.is_some() {
+                diesel::delete(
+                    account_identities::table.filter(account_identities::account_id.eq(account_id)),
+                )
+                .execute(conn)
+                .await
+                .map_err(Error::from)?;
+            }
+
+            Ok::<_, Error>(account)
+        })
+        .await
+    }
+
+    async fn email_exists(&mut self, email: &str) -> Result<bool> {
+        use schema::accounts::{self, dsl};
+
+        let count: i64 = accounts::table
+            .filter(dsl::email_address.eq(email.trim().to_lowercase()))
+            .filter(dsl::deleted_at.is_null())
+            .count()
+            .get_result(self)
+            .await
+            .map_err(Error::from)?;
+
+        Ok(count > 0)
+    }
+
+    async fn email_exists_for_other(
+        &mut self,
+        email: &str,
+        exclude_account_id: Uuid,
+    ) -> Result<bool> {
+        use schema::accounts::{self, dsl};
+
+        let count: i64 = accounts::table
+            .filter(dsl::email_address.eq(email.trim().to_lowercase()))
+            .filter(dsl::id.ne(exclude_account_id))
+            .filter(dsl::deleted_at.is_null())
+            .count()
+            .get_result(self)
+            .await
+            .map_err(Error::from)?;
+
+        Ok(count > 0)
+    }
+
+    async fn username_exists(&mut self, username: &Handle) -> Result<bool> {
+        use schema::accounts::{self, dsl};
+
+        let count: i64 = accounts::table
+            .filter(dsl::username.eq(username.as_str()))
+            .filter(dsl::deleted_at.is_null())
+            .count()
+            .get_result(self)
+            .await
+            .map_err(Error::from)?;
+
+        Ok(count > 0)
+    }
+
+    async fn username_exists_for_other(
+        &mut self,
+        username: &Handle,
+        exclude_account_id: Uuid,
+    ) -> Result<bool> {
+        use schema::accounts::{self, dsl};
+
+        let count: i64 = accounts::table
+            .filter(dsl::username.eq(username.as_str()))
+            .filter(dsl::id.ne(exclude_account_id))
+            .filter(dsl::deleted_at.is_null())
+            .count()
+            .get_result(self)
+            .await
+            .map_err(Error::from)?;
+
+        Ok(count > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::Context;
+
+    use crate::model::NewAccount;
+    use crate::query::AccountRepository;
+    use crate::test_util::TestDatabase;
+    use crate::types::Handle;
+
+    #[tokio::test]
+    async fn create_normalizes_email_and_lookup_is_case_insensitive() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let created = conn
+            .create_account(NewAccount::new(
+                Handle::test(),
+                "  Mixed.Case@Example.COM  ",
+            ))
+            .await?;
+        // Stored trimmed and lowercased.
+        assert_eq!(created.email_address, "mixed.case@example.com");
+
+        // A differently-cased, padded lookup still resolves to the same account.
+        let found = conn
+            .find_account_by_email("MIXED.CASE@example.com")
+            .await?
+            .context("account found by email")?;
+        assert_eq!(found.id, created.id);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_by_identifier_routes_email_vs_username() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let handle = Handle::test();
+        let created = conn
+            .create_account(NewAccount::new(handle.clone(), "id-route@example.com"))
+            .await?;
+
+        // An identifier containing `@` goes down the email path.
+        let by_email = conn
+            .find_account_by_identifier("id-route@example.com")
+            .await?
+            .context("found by email identifier")?;
+        assert_eq!(by_email.id, created.id);
+
+        // A bare, valid handle goes down the username path.
+        let by_username = conn
+            .find_account_by_identifier(handle.as_str())
+            .await?
+            .context("found by username identifier")?;
+        assert_eq!(by_username.id, created.id);
+
+        // A syntactically-invalid identifier (not an email, not a valid handle)
+        // resolves to nothing rather than erroring.
+        assert!(
+            conn.find_account_by_identifier("Not A Handle!")
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn email_exists_for_other_excludes_the_named_account() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let account = conn
+            .create_account(NewAccount::new(Handle::test(), "owner@example.com"))
+            .await?;
+
+        // The email exists in general.
+        assert!(conn.email_exists("owner@example.com").await?);
+        // But not "for another account" once the owner is excluded.
+        assert!(
+            !conn
+                .email_exists_for_other("owner@example.com", account.id)
+                .await?
+        );
+        // A different account id still sees it as taken.
+        assert!(
+            conn.email_exists_for_other("owner@example.com", uuid::Uuid::now_v7())
+                .await?
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_excludes_soft_deleted_accounts() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let account = conn.create_account(NewAccount::test()).await?;
+        conn.delete_account(account.id).await?;
+
+        assert!(conn.find_account_by_id(account.id).await?.is_none());
+        assert!(
+            conn.find_account_by_email(&account.email_address)
+                .await?
+                .is_none()
+        );
+        // The email frees up for reuse once soft-deleted.
+        assert!(!conn.email_exists(&account.email_address).await?);
+        Ok(())
+    }
+}

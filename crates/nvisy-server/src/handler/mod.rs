@@ -4,37 +4,38 @@
 //! [`Handler`]: axum::handler::Handler
 
 mod accounts;
-mod activities;
 mod analytics;
-mod assignments;
 mod auth_oidc;
 mod authentication;
+mod workspace_activities;
+mod workspace_assignments;
 
 pub(crate) use auth_oidc::consume_reauth_proof;
+mod account_api_tokens;
+mod account_identities;
+mod account_notifications;
 mod avatars;
-mod catalog;
-mod comments;
+mod capabilities;
 mod connection_oauth;
-mod connection_syncs;
-mod connections;
 mod detection_audits;
-mod detections;
-mod files;
-mod identities;
-mod invites;
-mod members;
 mod monitors;
-mod notifications;
-mod pipelines;
-mod policies;
-mod providers;
-mod redactions;
 pub mod request;
 pub mod response;
-mod threads;
-mod tokens;
 mod utility;
-mod webhooks;
+mod workspace_connection_syncs;
+mod workspace_connections;
+mod workspace_detections;
+mod workspace_files;
+mod workspace_invites;
+mod workspace_members;
+mod workspace_pipelines;
+mod workspace_policies;
+mod workspace_providers;
+mod workspace_redactions;
+mod workspace_thread_anchors;
+mod workspace_thread_comments;
+mod workspace_threads;
+mod workspace_webhooks;
 mod workspaces;
 
 use aide::axum::ApiRouter;
@@ -42,8 +43,8 @@ use axum::extract::FromRef;
 use axum::http::{Method, Uri};
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
-pub use invites::{CreatedInvite, InviteOutcome, create_invite};
 pub use utility::CustomRoutes;
+pub use workspace_invites::{CreatedInvite, InviteOutcome, create_invite};
 
 use crate::middleware::{csrf_protect, require_authentication, slide_session};
 use crate::response::ErrorKind;
@@ -78,33 +79,36 @@ fn private_routes(service_state: ServiceState) -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .merge(accounts::routes(service_state.clone()))
         .merge(workspaces::routes())
-        .merge(activities::routes())
+        .merge(workspace_activities::routes())
         .merge(analytics::routes())
-        .merge(members::routes())
-        .merge(assignments::routes())
-        .merge(threads::routes())
-        .merge(comments::routes())
-        .merge(connections::routes())
-        .merge(providers::routes())
+        .merge(workspace_members::routes())
+        .merge(workspace_assignments::routes())
+        .merge(workspace_threads::routes())
+        .merge(workspace_thread_comments::routes())
+        .merge(workspace_thread_anchors::routes())
+        .merge(workspace_connections::routes())
+        .merge(workspace_providers::routes())
         .merge(connection_oauth::private_routes())
-        .merge(connection_syncs::routes())
-        .merge(files::routes(service_state.upload.max_file_body_bytes))
-        .merge(pipelines::routes())
-        .merge(detections::routes())
+        .merge(workspace_connection_syncs::routes())
+        .merge(workspace_files::routes(
+            service_state.upload.max_file_body_bytes,
+        ))
+        .merge(workspace_pipelines::routes())
+        .merge(workspace_detections::routes())
         .merge(detection_audits::routes())
-        .merge(redactions::routes())
-        .merge(policies::routes())
-        .merge(catalog::routes())
-        .merge(tokens::routes())
-        .merge(notifications::routes())
-        .merge(invites::routes())
-        .merge(webhooks::routes())
+        .merge(workspace_redactions::routes())
+        .merge(workspace_policies::routes())
+        .merge(capabilities::private_routes())
+        .merge(account_api_tokens::routes())
+        .merge(account_notifications::routes())
+        .merge(workspace_invites::routes())
+        .merge(workspace_webhooks::routes())
         // Account identity management and OIDC step-up re-auth.
-        .merge(identities::routes())
+        .merge(account_identities::routes())
         .merge(auth_oidc::private_routes())
         // Logout revokes the caller's session (a cookie-driven state change), so
         // it sits behind the authentication and CSRF layers.
-        .merge(authentication::authenticated_routes())
+        .merge(authentication::private_routes())
 }
 
 /// Returns an [`ApiRouter`] with all built-in public routes. Downstream routes
@@ -118,6 +122,8 @@ fn public_routes() -> ApiRouter<ServiceState> {
         // OIDC link route is there too.
         .merge(authentication::public_routes())
         .merge(auth_oidc::public_routes())
+        // The available sign-in methods a login screen reads before authenticating.
+        .merge(capabilities::public_routes())
         .merge(monitors::routes())
         // Avatar serving is public so images load directly in an `<img>` tag; it
         // is infrastructure shared by accounts and workspaces, always mounted.

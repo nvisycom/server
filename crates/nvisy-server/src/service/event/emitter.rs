@@ -12,7 +12,7 @@
 use std::future::Future;
 
 use nvisy_postgres::PgConn;
-use nvisy_postgres::model::NewEventOutbox;
+use nvisy_postgres::model::NewWorkspaceEventOutbox;
 use nvisy_postgres::query::EventOutboxRepository;
 
 use crate::response::{ErrorKind, Result};
@@ -24,13 +24,16 @@ use crate::service::event::{EventOrigin, WorkspaceEvent};
 /// inside a `PgError`-typed transaction (to preserve a rollback sentinel) can
 /// build the row up front with this and then insert it via
 /// [`EventOutboxRepository::insert_event_outbox`].
-pub fn event_outbox_row(origin: EventOrigin<'_>, event: &WorkspaceEvent) -> Result<NewEventOutbox> {
+pub fn event_outbox_row(
+    origin: EventOrigin<'_>,
+    event: &WorkspaceEvent,
+) -> Result<NewWorkspaceEventOutbox> {
     let event = serde_json::to_value(event).map_err(|err| {
         ErrorKind::InternalServerError
             .with_message("Failed to serialize workspace event")
             .with_context(err.to_string())
     })?;
-    Ok(NewEventOutbox {
+    Ok(NewWorkspaceEventOutbox {
         workspace_id: origin.workspace_id,
         account_id: origin.account_id,
         ip_address: origin.security.ip_address,

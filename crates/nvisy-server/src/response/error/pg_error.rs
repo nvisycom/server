@@ -86,6 +86,13 @@ impl From<PgError> for Error<'static> {
                 ErrorKind::InternalServerError.into_error()
             }
             PgError::Query(ref query_error) => {
+                // A query that expected a row but matched none (e.g. a `get_result`
+                // scoped to a live row that was concurrently tombstoned) is a
+                // not-found, not a server error.
+                if error.is_not_found() {
+                    return ErrorKind::NotFound.into_error();
+                }
+
                 // Try to extract constraint violation
                 if let Some(constraint_name) = error.constraint()
                     && let Some(constraint) = ConstraintViolation::new(constraint_name)

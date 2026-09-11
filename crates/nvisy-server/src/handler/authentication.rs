@@ -265,7 +265,7 @@ pub fn public_routes() -> ApiRouter<ServiceState> {
 /// Authenticated authentication routes: logout, which revokes the caller's
 /// session and so must sit behind the authentication and CSRF layers (it is a
 /// cookie-driven state change).
-pub fn authenticated_routes() -> ApiRouter<ServiceState> {
+pub fn private_routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()

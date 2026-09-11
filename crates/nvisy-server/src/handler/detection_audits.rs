@@ -18,7 +18,7 @@ use elide_pipeline::export::{ExportCsv, ExportJson};
 use elide_pipeline::{ArtifactSet, Audit};
 use nvisy_postgres::PgClient;
 
-use super::detections::find_detection;
+use super::workspace_detections::find_detection;
 use crate::extract::{Authorized, Json, Path, Query, markers};
 use crate::handler::request::{DetectionPathParams, ExportFormat, ExportQuery};
 use crate::handler::utility::DownloadDocs;

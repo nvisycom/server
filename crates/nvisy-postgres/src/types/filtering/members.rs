@@ -11,7 +11,4 @@ pub struct MemberFilter {
     /// Filter by workspace role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<WorkspaceRole>,
-    /// Filter by 2FA status (true = has 2FA enabled, false = no 2FA).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub has_2fa: Option<bool>,
 }

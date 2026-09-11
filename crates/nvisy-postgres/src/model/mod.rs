@@ -3,81 +3,81 @@
 //! This module contains Diesel model definitions for all database tables,
 //! including structs for querying, inserting, and updating records.
 
-mod account;
-mod account_api_token;
-mod account_identity;
-mod account_notification;
-mod event_outbox;
-mod pipeline_reference;
-mod workspace;
-mod workspace_activity;
-mod workspace_assignment;
-mod workspace_assistant_job;
-mod workspace_connection;
+mod account_api_tokens;
+mod account_identities;
+mod account_notifications;
+mod accounts;
+mod pipeline_references;
+mod workspace_activities;
+mod workspace_assignments;
+mod workspace_assistant_jobs;
 mod workspace_connection_schedule;
-mod workspace_connection_sync;
-mod workspace_detection;
-mod workspace_detection_job;
+mod workspace_connection_syncs;
+mod workspace_connections;
+mod workspace_detection_jobs;
 mod workspace_detection_usage;
-mod workspace_file;
+mod workspace_detections;
+mod workspace_event_outbox;
 mod workspace_file_exports;
 mod workspace_file_imports;
-mod workspace_invite;
-mod workspace_member;
-mod workspace_pipeline;
-mod workspace_policy;
-mod workspace_provider;
-mod workspace_redaction;
-mod workspace_thread;
-mod workspace_thread_anchor;
-mod workspace_thread_comment;
-mod workspace_thread_event;
-mod workspace_webhook;
+mod workspace_files;
+mod workspace_invites;
+mod workspace_members;
+mod workspace_pipelines;
+mod workspace_policies;
+mod workspace_providers;
+mod workspace_redactions;
+mod workspace_thread_anchors;
+mod workspace_thread_comments;
+mod workspace_thread_events;
+mod workspace_threads;
+mod workspace_webhooks;
+mod workspaces;
 
 // Account models
-pub use account::{Account, NewAccount, UpdateAccount};
-pub use account_api_token::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
-pub use account_identity::{AccountIdentity, NewAccountIdentity};
-pub use account_notification::{
+pub use account_api_tokens::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
+pub use account_identities::{AccountIdentity, NewAccountIdentity};
+pub use account_notifications::{
     AccountNotification, NewAccountNotification, UpdateAccountNotification,
 };
-pub use event_outbox::{EventOutbox, NewEventOutbox};
-pub use pipeline_reference::PipelinePolicy;
-// Workspace models
-pub use workspace::{NewWorkspace, UpdateWorkspace, Workspace};
-pub use workspace_activity::{NewWorkspaceActivity, WorkspaceActivity};
-pub use workspace_assignment::{
+pub use accounts::{Account, NewAccount, UpdateAccount};
+pub use pipeline_references::PipelinePolicy;
+pub use workspace_activities::{NewWorkspaceActivity, WorkspaceActivity};
+pub use workspace_assignments::{
     NewWorkspaceAssignment, UpdateWorkspaceAssignment, WorkspaceAssignment,
 };
-pub use workspace_assistant_job::{NewWorkspaceAssistantJob, WorkspaceAssistantJob};
-pub use workspace_connection::{
-    NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
-};
+pub use workspace_assistant_jobs::{NewWorkspaceAssistantJob, WorkspaceAssistantJob};
 pub use workspace_connection_schedule::{
     NewWorkspaceConnectionSchedule, WorkspaceConnectionSchedule,
 };
-pub use workspace_connection_sync::{
+pub use workspace_connection_syncs::{
     NewWorkspaceConnectionSync, UpdateWorkspaceConnectionSync, WorkspaceConnectionSync,
 };
+pub use workspace_connections::{
+    NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
+};
+pub use workspace_detection_jobs::{NewWorkspaceDetectionJob, WorkspaceDetectionJob};
+pub use workspace_detection_usage::{NewWorkspaceDetectionUsage, WorkspaceDetectionUsage};
 // Detection / pipeline models
-pub use workspace_detection::{
+pub use workspace_detections::{
     NewWorkspaceDetection, UpdateWorkspaceDetection, WorkspaceDetection,
 };
-pub use workspace_detection_job::{NewWorkspaceDetectionJob, WorkspaceDetectionJob};
-pub use workspace_detection_usage::{NewWorkspaceDetectionUsage, WorkspaceDetectionUsage};
-pub use workspace_file::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
+pub use workspace_event_outbox::{NewWorkspaceEventOutbox, WorkspaceEventOutbox};
 pub use workspace_file_exports::{NewWorkspaceFileExport, WorkspaceFileExport};
 pub use workspace_file_imports::{NewWorkspaceFileImport, WorkspaceFileImport};
-pub use workspace_invite::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
-pub use workspace_member::{NewWorkspaceMember, UpdateWorkspaceMember, WorkspaceMember};
-pub use workspace_pipeline::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
-pub use workspace_policy::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
-pub use workspace_provider::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};
-pub use workspace_redaction::{NewWorkspaceRedaction, WorkspaceRedaction};
-pub use workspace_thread::{NewWorkspaceThread, UpdateWorkspaceThread, WorkspaceThread};
-pub use workspace_thread_anchor::{NewWorkspaceThreadAnchor, WorkspaceThreadAnchor};
-pub use workspace_thread_comment::{
+pub use workspace_files::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
+pub use workspace_invites::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
+pub use workspace_members::{NewWorkspaceMember, UpdateWorkspaceMember, WorkspaceMember};
+pub use workspace_pipelines::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
+pub use workspace_policies::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
+pub use workspace_providers::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};
+pub use workspace_redactions::{NewWorkspaceRedaction, WorkspaceRedaction};
+pub use workspace_thread_anchors::{NewWorkspaceThreadAnchor, WorkspaceThreadAnchor};
+pub use workspace_thread_comments::{
     NewWorkspaceThreadComment, UpdateWorkspaceThreadComment, WorkspaceThreadComment,
 };
-pub use workspace_thread_event::{NewWorkspaceThreadEvent, WorkspaceThreadEvent};
-pub use workspace_webhook::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
+pub use workspace_thread_events::{NewWorkspaceThreadEvent, WorkspaceThreadEvent};
+pub use workspace_threads::{NewWorkspaceThread, UpdateWorkspaceThread, WorkspaceThread};
+pub use workspace_webhooks::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
+// Workspace models
+pub use workspaces::{NewWorkspace, UpdateWorkspace, Workspace};

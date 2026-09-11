@@ -158,25 +158,6 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-    use super::sql_types::OutboxStatus;
-
-    event_outbox (id) {
-        id -> Uuid,
-        workspace_id -> Uuid,
-        account_id -> Uuid,
-        event -> Jsonb,
-        ip_address -> Nullable<Inet>,
-        user_agent -> Nullable<Text>,
-        status -> OutboxStatus,
-        attempts -> Int4,
-        next_attempt_at -> Timestamptz,
-        created_at -> Timestamptz,
-        resolved_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
     use super::sql_types::ActivityType;
 
     workspace_activities (id) {
@@ -326,6 +307,25 @@ diesel::table! {
         claimed_at -> Nullable<Timestamptz>,
         started_at -> Timestamptz,
         completed_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::OutboxStatus;
+
+    workspace_event_outbox (id) {
+        id -> Uuid,
+        workspace_id -> Uuid,
+        account_id -> Uuid,
+        event -> Jsonb,
+        ip_address -> Nullable<Inet>,
+        user_agent -> Nullable<Text>,
+        status -> OutboxStatus,
+        attempts -> Int4,
+        next_attempt_at -> Timestamptz,
+        created_at -> Timestamptz,
+        resolved_at -> Nullable<Timestamptz>,
     }
 }
 
@@ -605,8 +605,6 @@ diesel::table! {
 diesel::joinable!(account_api_tokens -> accounts (account_id));
 diesel::joinable!(account_identities -> accounts (account_id));
 diesel::joinable!(account_notifications -> accounts (account_id));
-diesel::joinable!(event_outbox -> accounts (account_id));
-diesel::joinable!(event_outbox -> workspaces (workspace_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
 diesel::joinable!(workspace_assignments -> workspaces (workspace_id));
@@ -620,6 +618,8 @@ diesel::joinable!(workspace_detection_jobs -> workspace_detections (detection_id
 diesel::joinable!(workspace_detection_usage -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detections -> accounts (account_id));
 diesel::joinable!(workspace_detections -> workspace_pipelines (pipeline_id));
+diesel::joinable!(workspace_event_outbox -> accounts (account_id));
+diesel::joinable!(workspace_event_outbox -> workspaces (workspace_id));
 diesel::joinable!(workspace_file_exports -> workspace_connections (connection_id));
 diesel::joinable!(workspace_file_exports -> workspace_files (file_id));
 diesel::joinable!(workspace_file_imports -> workspace_connections (connection_id));
@@ -654,7 +654,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     account_identities,
     account_notifications,
     accounts,
-    event_outbox,
     workspace_activities,
     workspace_assignments,
     workspace_assistant_jobs,
@@ -664,6 +663,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_detection_jobs,
     workspace_detection_usage,
     workspace_detections,
+    workspace_event_outbox,
     workspace_file_exports,
     workspace_file_imports,
     workspace_files,
