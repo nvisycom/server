@@ -166,7 +166,6 @@ mod tests {
             .open_thread(
                 NewWorkspaceThread::test(seeded.workspace_id, seeded.file_id, seeded.account_id),
                 "@assistant help".to_owned(),
-                Vec::new(),
             )
             .await?;
         Ok(opening.id)

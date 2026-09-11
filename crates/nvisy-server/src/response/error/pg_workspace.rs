@@ -1,9 +1,9 @@
 //! Workspace-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    WorkspaceActivitiesConstraints, WorkspaceAssignmentConstraints, WorkspaceConstraints,
-    WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspaceThreadAnchorConstraints,
-    WorkspaceThreadCommentConstraints, WorkspaceThreadConstraints, WorkspaceWebhookConstraints,
+    WorkspaceActivitiesConstraints, WorkspaceConstraints, WorkspaceInviteConstraints,
+    WorkspaceMemberConstraints, WorkspaceThreadCommentConstraints, WorkspaceThreadConstraints,
+    WorkspaceWebhookConstraints,
 };
 
 use super::{Error, ErrorKind};
@@ -50,18 +50,6 @@ impl From<WorkspaceMemberConstraints> for Error<'static> {
     }
 }
 
-impl From<WorkspaceAssignmentConstraints> for Error<'static> {
-    fn from(c: WorkspaceAssignmentConstraints) -> Self {
-        let error = match c {
-            WorkspaceAssignmentConstraints::FileAssigneeUnique => {
-                ErrorKind::Conflict.with_message("This reviewer is already assigned to the file")
-            }
-        };
-
-        error.with_resource("workspace_assignment")
-    }
-}
-
 impl From<WorkspaceThreadConstraints> for Error<'static> {
     fn from(c: WorkspaceThreadConstraints) -> Self {
         let error = match c {
@@ -69,21 +57,11 @@ impl From<WorkspaceThreadConstraints> for Error<'static> {
                 .with_message("Thread title must be between 1 and 255 characters"),
             WorkspaceThreadConstraints::ClosedConsistent => ErrorKind::InternalServerError
                 .with_message("Thread open/closed state is inconsistent"),
+            WorkspaceThreadConstraints::ReviewStatusFile => ErrorKind::InternalServerError
+                .with_message("Thread file and review-status presence are inconsistent"),
         };
 
         error.with_resource("workspace_thread")
-    }
-}
-
-impl From<WorkspaceThreadAnchorConstraints> for Error<'static> {
-    fn from(c: WorkspaceThreadAnchorConstraints) -> Self {
-        let error = match c {
-            WorkspaceThreadAnchorConstraints::Size => {
-                ErrorKind::BadRequest.with_message("Thread anchor is too large")
-            }
-        };
-
-        error.with_resource("workspace_thread_anchor")
     }
 }
 

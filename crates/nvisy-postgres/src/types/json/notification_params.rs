@@ -97,28 +97,17 @@ pub struct DetectionFailedParams {
     pub error: Option<String>,
 }
 
-/// Params of a `file.assigned` notification, sent to the reviewer.
+/// Params of a `review.assigned` notification, sent to the reviewer a file's
+/// review was assigned to.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct FileAssignedParams {
-    /// Id of the assignment.
-    pub assignment_id: Uuid,
-    /// Id of the file the reviewer was assigned.
+pub struct ReviewAssignedParams {
+    /// Id of the file's review thread.
+    pub thread_id: Uuid,
+    /// Id of the file to review.
     pub file_id: Uuid,
-    /// Display name of the file the reviewer was assigned.
-    pub file_name: String,
-}
-
-/// Params of a `file.unassigned` notification, sent to the former reviewer.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct FileUnassignedParams {
-    /// Id of the file the reviewer was unassigned from.
-    pub file_id: Uuid,
-    /// Display name of the file the reviewer was unassigned from, when the file
-    /// still exists. `None` (and omitted) if it was removed (e.g. by retention).
+    /// Display name of the file to review, when it still exists.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_name: Option<String>,
 }
@@ -174,13 +163,9 @@ pub enum NotificationPayload {
     #[serde(rename = "pipeline.detection.failed")]
     DetectionFailed(DetectionFailedParams),
 
-    /// A file was assigned to the reviewer for review.
-    #[serde(rename = "file.assigned")]
-    FileAssigned(FileAssignedParams),
-
-    /// The reviewer was unassigned from a file.
-    #[serde(rename = "file.unassigned")]
-    FileUnassigned(FileUnassignedParams),
+    /// A file's review was assigned to the reviewer.
+    #[serde(rename = "review.assigned")]
+    ReviewAssigned(ReviewAssignedParams),
 
     /// The account was mentioned in a comment.
     #[serde(rename = "comment.mentioned")]
@@ -199,8 +184,7 @@ impl NotificationPayload {
             NotificationPayload::DetectionCompleted(_) => NotificationEvent::DetectionCompleted,
             NotificationPayload::RedactionCreated(_) => NotificationEvent::RedactionCreated,
             NotificationPayload::DetectionFailed(_) => NotificationEvent::DetectionFailed,
-            NotificationPayload::FileAssigned(_) => NotificationEvent::FileAssigned,
-            NotificationPayload::FileUnassigned(_) => NotificationEvent::FileUnassigned,
+            NotificationPayload::ReviewAssigned(_) => NotificationEvent::ReviewAssigned,
             NotificationPayload::CommentMentioned(_) => NotificationEvent::CommentMentioned,
         }
     }

@@ -58,12 +58,12 @@ db_enum! {
         FileUpdated = "file.updated",
         /// File was deleted.
         FileDeleted = "file.deleted",
-        /// File was assigned to a reviewer.
-        FileAssigned = "file.assigned",
-        /// A reviewer was unassigned from a file.
-        FileUnassigned = "file.unassigned",
-        /// A file assignment's review status changed.
-        AssignmentStatusChanged = "file.assignment.updated",
+        /// A file's review was verified.
+        ReviewVerified = "review.verified",
+        /// A file's review was assigned to a reviewer.
+        ReviewAssigned = "review.assigned",
+        /// A file's review assignee was cleared.
+        ReviewUnassigned = "review.unassigned",
         /// Pipeline was created.
         PipelineCreated = "pipeline.created",
         /// Pipeline was updated.
@@ -94,10 +94,6 @@ db_enum! {
         ThreadRenamed = "thread.renamed",
         /// A thread was deleted.
         ThreadDeleted = "thread.deleted",
-        /// An anchor was added to a thread.
-        ThreadAnchorAdded = "thread.anchor.added",
-        /// An anchor was removed from a thread.
-        ThreadAnchorRemoved = "thread.anchor.removed",
         /// A comment (message) was posted in a thread.
         ThreadCommentCreated = "thread.comment.created",
     }

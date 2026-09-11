@@ -52,19 +52,22 @@ pub enum Permission {
     /// Can run redactions (apply policies and produce a redacted file).
     RunRedactions,
 
-    // Assignment permissions
-    /// Can view file review assignments (who is reviewing what).
-    ViewAssignments,
-    /// Can assign files to reviewers and unassign them.
-    AssignTasks,
-
-    // Comment permissions
-    /// Can view comments on files.
-    ViewComments,
-    /// Can write comments and replies (and edit or delete one's own).
-    Comment,
-    /// Can close and reopen comment threads.
-    CloseComments,
+    // Review / collaboration permissions
+    //
+    // A file thread is the review of its file, so viewing and participating in a
+    // thread are the review permissions; a workspace thread is a free discussion
+    // that rides on the same two.
+    /// Can view threads: workspace discussions and file reviews (with their
+    /// assignee and status).
+    ViewReviews,
+    /// Can participate: open a workspace thread, post/edit/delete one's own
+    /// comments, and verify a file review.
+    Review,
+    /// Can close and reopen workspace discussion threads (file reviews derive
+    /// their status and are not closed this way).
+    ManageThreads,
+    /// Can assign a file's review to a reviewer and unassign it.
+    AssignReviews,
 
     // Reporting permissions
     /// Can view workspace analytics.
@@ -136,10 +139,8 @@ impl Permission {
             | Self::DownloadAudit
             | Self::ViewPipelines
             | Self::ViewDetections
-            | Self::ViewAssignments
-            | Self::ViewComments
-            | Self::Comment
-            | Self::CloseComments
+            | Self::ViewReviews
+            | Self::Review
             | Self::ViewAnalytics
             | Self::ViewActivity
             | Self::ViewMembers
@@ -158,7 +159,8 @@ impl Permission {
             | Self::DeletePipelines
             | Self::RunDetections
             | Self::RunRedactions
-            | Self::AssignTasks
+            | Self::ManageThreads
+            | Self::AssignReviews
             | Self::RunConnectionSyncs => WorkspaceRole::Editor,
 
             // Admin-level permissions (manage workspace resources)

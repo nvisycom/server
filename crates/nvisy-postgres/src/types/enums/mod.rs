@@ -33,14 +33,11 @@ pub mod detection_status;
 pub mod pipeline_status;
 pub mod pipeline_trigger_type;
 
-// Assignment-related enumerations
-pub mod assignment_status;
-
+pub mod review_status;
 pub mod thread_event_kind;
 
 pub use activity_type::ActivityType;
 pub use api_token_type::ApiTokenType;
-pub use assignment_status::AssignmentStatus;
 pub use connection_type::ConnectionType;
 pub use detection_status::DetectionStatus;
 pub use file_kind::FileKind;
@@ -51,6 +48,7 @@ pub use outbox_status::OutboxStatus;
 pub use pipeline_status::PipelineStatus;
 pub use pipeline_trigger_type::PipelineTriggerType;
 pub use provider_type::ProviderType;
+pub use review_status::ReviewStatus;
 pub use sync_deletion_policy::SyncDeletionPolicy;
 pub use sync_mode::SyncMode;
 pub use sync_status::SyncStatus;

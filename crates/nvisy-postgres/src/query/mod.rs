@@ -21,7 +21,6 @@ mod analytics;
 mod pipeline_references;
 mod search;
 mod workspace_activities;
-mod workspace_assignments;
 mod workspace_assistant_jobs;
 mod workspace_connection_schedule;
 mod workspace_connection_syncs;
@@ -36,7 +35,6 @@ mod workspace_pipelines;
 mod workspace_policies;
 mod workspace_providers;
 mod workspace_redactions;
-mod workspace_thread_anchors;
 mod workspace_thread_comments;
 mod workspace_thread_events;
 mod workspace_threads;
@@ -55,9 +53,6 @@ pub use analytics::{
 };
 pub use pipeline_references::PipelineReferenceRepository;
 pub use workspace_activities::{ActivityCursor, ActivityFilter, WorkspaceActivityRepository};
-pub use workspace_assignments::{
-    AssignmentCursor, AssignmentListRow, CreateAssignmentOutcome, WorkspaceAssignmentRepository,
-};
 pub use workspace_assistant_jobs::AssistantJobOutboxRepository;
 pub use workspace_connection_schedule::WorkspaceConnectionScheduleRepository;
 pub use workspace_connection_syncs::{ConnectionSyncCursor, WorkspaceConnectionSyncRepository};
@@ -78,9 +73,6 @@ pub use workspace_pipelines::{PipelineCursor, WorkspacePipelineRepository};
 pub use workspace_policies::{PolicyCursor, WorkspacePolicyRepository};
 pub use workspace_providers::{ProviderCursor, WorkspaceProviderRepository};
 pub use workspace_redactions::{RedactionCursor, WorkspaceRedactionRepository};
-pub use workspace_thread_anchors::{
-    AddAnchorOutcome, MAX_THREAD_ANCHORS, WorkspaceThreadAnchorRepository,
-};
 pub use workspace_thread_comments::WorkspaceThreadCommentRepository;
 pub use workspace_thread_events::{TimelineCursor, TimelineSource, WorkspaceThreadEventRepository};
 pub use workspace_threads::{ThreadCursor, WorkspaceThreadRepository};

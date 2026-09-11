@@ -19,7 +19,7 @@ use nvisy_postgres::model::{
 use nvisy_postgres::query::{
     DetectionFiles, DetectionJobOutboxRepository, PipelineReferenceRepository,
     WorkspaceDetectionRepository, WorkspaceFileRepository, WorkspacePipelineRepository,
-    WorkspaceRedactionRepository,
+    WorkspaceRedactionRepository, WorkspaceThreadRepository,
 };
 use nvisy_postgres::types::DetectionStatus;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
@@ -163,6 +163,16 @@ async fn create_detection(
                 }),
             )
             .await?;
+
+            // The file's review is its thread: ensure it exists (one live thread
+            // per file) so this detection has somewhere to be reviewed. On the
+            // file's first detection this creates the thread at `needs_review` and
+            // records a `review.detection_created` timeline event; a re-detection
+            // finds the existing thread and reopens it if it was resolved.
+            let thread = conn
+                .find_or_create_file_thread(workspace.id, file.id, authz.account_id)
+                .await?;
+            conn.reopen_review(thread.id, authz.account_id).await?;
             let job = DetectionJob {
                 workspace_id: workspace.id,
                 detection_id: detection_row.id,
@@ -714,6 +724,16 @@ async fn redact_detection(
                 }),
             )
             .await?;
+
+            // A redaction pass moves the file's review to `in_review` (unless it
+            // is already resolved), recording a `review.redaction_created`
+            // timeline event. The review thread already exists from detection;
+            // find-or-create keeps this robust if it somehow does not.
+            let thread = conn
+                .find_or_create_file_thread(workspace.id, file.id, authz.account_id)
+                .await?;
+            conn.mark_review_in_review(thread.id, authz.account_id)
+                .await?;
             Ok::<_, Error>(redaction)
         })
         .await;

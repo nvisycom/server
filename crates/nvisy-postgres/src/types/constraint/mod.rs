@@ -24,11 +24,7 @@ mod detections;
 mod pipeline_references;
 mod pipelines;
 
-// Assignment-related constraint modules
-mod assignments;
-
 // Thread-related constraint modules
-mod workspace_thread_anchors;
 mod workspace_thread_comments;
 mod workspace_threads;
 
@@ -40,7 +36,6 @@ pub use self::account_api_tokens::AccountApiTokenConstraints;
 pub use self::account_identities::AccountIdentityConstraints;
 pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
-pub use self::assignments::WorkspaceAssignmentConstraints;
 pub use self::detections::WorkspaceDetectionConstraints;
 pub use self::files::WorkspaceFileConstraints;
 pub use self::pipeline_references::WorkspacePipelineReferenceConstraints;
@@ -51,7 +46,6 @@ pub use self::workspace_connections::WorkspaceConnectionConstraints;
 pub use self::workspace_invites::WorkspaceInviteConstraints;
 pub use self::workspace_members::WorkspaceMemberConstraints;
 pub use self::workspace_policies::WorkspacePolicyConstraints;
-pub use self::workspace_thread_anchors::WorkspaceThreadAnchorConstraints;
 pub use self::workspace_thread_comments::WorkspaceThreadCommentConstraints;
 pub use self::workspace_threads::WorkspaceThreadConstraints;
 pub use self::workspace_webhooks::WorkspaceWebhookConstraints;
@@ -80,12 +74,8 @@ pub enum ConstraintViolation {
     // File-related constraints
     WorkspaceFile(WorkspaceFileConstraints),
 
-    // Assignment-related constraints
-    WorkspaceAssignment(WorkspaceAssignmentConstraints),
-
     // Comment-related constraints
     WorkspaceThread(WorkspaceThreadConstraints),
-    WorkspaceThreadAnchor(WorkspaceThreadAnchorConstraints),
     WorkspaceThreadComment(WorkspaceThreadCommentConstraints),
 
     // Detection / pipeline-related constraints
@@ -143,9 +133,7 @@ impl ConstraintViolation {
             WorkspaceActivityLog,
             WorkspaceWebhook,
             WorkspaceFile,
-            WorkspaceAssignment,
             WorkspaceThread,
-            WorkspaceThreadAnchor,
             WorkspaceThreadComment,
             WorkspacePipeline,
             WorkspaceDetection,

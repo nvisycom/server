@@ -9,7 +9,6 @@ mod account_notifications;
 mod accounts;
 mod pipeline_references;
 mod workspace_activities;
-mod workspace_assignments;
 mod workspace_assistant_jobs;
 mod workspace_connection_schedule;
 mod workspace_connection_syncs;
@@ -27,7 +26,6 @@ mod workspace_pipelines;
 mod workspace_policies;
 mod workspace_providers;
 mod workspace_redactions;
-mod workspace_thread_anchors;
 mod workspace_thread_comments;
 mod workspace_thread_events;
 mod workspace_threads;
@@ -43,9 +41,6 @@ pub use account_notifications::{
 pub use accounts::{Account, NewAccount, UpdateAccount};
 pub use pipeline_references::PipelinePolicy;
 pub use workspace_activities::{NewWorkspaceActivity, WorkspaceActivity};
-pub use workspace_assignments::{
-    NewWorkspaceAssignment, UpdateWorkspaceAssignment, WorkspaceAssignment,
-};
 pub use workspace_assistant_jobs::{NewWorkspaceAssistantJob, WorkspaceAssistantJob};
 pub use workspace_connection_schedule::{
     NewWorkspaceConnectionSchedule, WorkspaceConnectionSchedule,
@@ -72,7 +67,6 @@ pub use workspace_pipelines::{NewWorkspacePipeline, UpdateWorkspacePipeline, Wor
 pub use workspace_policies::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 pub use workspace_providers::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};
 pub use workspace_redactions::{NewWorkspaceRedaction, WorkspaceRedaction};
-pub use workspace_thread_anchors::{NewWorkspaceThreadAnchor, WorkspaceThreadAnchor};
 pub use workspace_thread_comments::{
     NewWorkspaceThreadComment, UpdateWorkspaceThreadComment, WorkspaceThreadComment,
 };

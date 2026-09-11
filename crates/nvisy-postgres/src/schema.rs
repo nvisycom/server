@@ -10,10 +10,6 @@ pub mod sql_types {
     pub struct ApiTokenType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "assignment_status"))]
-    pub struct AssignmentStatus;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "connection_type"))]
     pub struct ConnectionType;
 
@@ -52,6 +48,10 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "provider_type"))]
     pub struct ProviderType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "review_status"))]
+    pub struct ReviewStatus;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "sync_deletion_policy"))]
@@ -169,22 +169,6 @@ diesel::table! {
         ip_address -> Nullable<Inet>,
         user_agent -> Nullable<Text>,
         created_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use super::sql_types::AssignmentStatus;
-
-    workspace_assignments (id) {
-        id -> Uuid,
-        workspace_id -> Uuid,
-        file_id -> Uuid,
-        assignee_account_id -> Uuid,
-        assigned_account_id -> Nullable<Uuid>,
-        status -> AssignmentStatus,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
     }
 }
 
@@ -502,18 +486,6 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
 
-    workspace_thread_anchors (id) {
-        id -> Uuid,
-        thread_id -> Uuid,
-        anchor -> Jsonb,
-        created_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-
     workspace_thread_comments (id) {
         id -> Uuid,
         parent_id -> Nullable<Uuid>,
@@ -544,6 +516,7 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+    use super::sql_types::ReviewStatus;
 
     workspace_threads (id) {
         id -> Uuid,
@@ -551,6 +524,8 @@ diesel::table! {
         file_id -> Nullable<Uuid>,
         author_account_id -> Uuid,
         display_name -> Nullable<Text>,
+        assignee_account_id -> Nullable<Uuid>,
+        review_status -> Nullable<ReviewStatus>,
         closed_at -> Nullable<Timestamptz>,
         closed_by -> Nullable<Uuid>,
         created_at -> Timestamptz,
@@ -607,7 +582,6 @@ diesel::joinable!(account_identities -> accounts (account_id));
 diesel::joinable!(account_notifications -> accounts (account_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
-diesel::joinable!(workspace_assignments -> workspaces (workspace_id));
 diesel::joinable!(workspace_assistant_jobs -> workspace_thread_comments (comment_id));
 diesel::joinable!(workspace_connection_schedule -> workspace_connections (connection_id));
 diesel::joinable!(workspace_connection_syncs -> accounts (account_id));
@@ -637,7 +611,6 @@ diesel::joinable!(workspace_providers -> accounts (account_id));
 diesel::joinable!(workspace_providers -> workspaces (workspace_id));
 diesel::joinable!(workspace_redactions -> accounts (account_id));
 diesel::joinable!(workspace_redactions -> workspace_detections (detection_id));
-diesel::joinable!(workspace_thread_anchors -> workspace_threads (thread_id));
 diesel::joinable!(workspace_thread_comments -> accounts (author_account_id));
 diesel::joinable!(workspace_thread_comments -> workspace_threads (thread_id));
 diesel::joinable!(workspace_thread_comments -> workspaces (workspace_id));
@@ -655,7 +628,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     account_notifications,
     accounts,
     workspace_activities,
-    workspace_assignments,
     workspace_assistant_jobs,
     workspace_connection_schedule,
     workspace_connection_syncs,
@@ -674,7 +646,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_policies,
     workspace_providers,
     workspace_redactions,
-    workspace_thread_anchors,
     workspace_thread_comments,
     workspace_thread_events,
     workspace_threads,

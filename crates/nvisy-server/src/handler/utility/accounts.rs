@@ -55,6 +55,25 @@ pub async fn resolve_account_ref(conn: &mut PgConn, account_id: Uuid) -> Result<
         .ok_or_else(|| ErrorKind::InternalServerError.with_message("account not found"))
 }
 
+/// Resolves a public reference to an optional account (e.g. a file review's
+/// assignee, which may be unset).
+///
+/// `None` in yields `None` out; a set id that matches no live account also
+/// yields `None` (the referenced account was since removed) rather than an
+/// error.
+pub async fn resolve_account_ref_opt(
+    conn: &mut PgConn,
+    account_id: Option<Uuid>,
+) -> Result<Option<AccountRef>> {
+    let Some(account_id) = account_id else {
+        return Ok(None);
+    };
+    Ok(conn
+        .find_account_by_id(account_id)
+        .await?
+        .map(|account| AccountRef::new(account.username, account.display_name, account.avatar_url)))
+}
+
 /// Builds the list of user-specific inputs a password is checked against for
 /// strength, so a password cannot simply echo the account's own identifiers.
 pub fn build_password_user_inputs<'a>(

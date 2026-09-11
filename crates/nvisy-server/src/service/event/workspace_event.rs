@@ -12,15 +12,14 @@
 //! change.
 
 use nvisy_postgres::types::{
-    ActivityPayload, AssignmentActivityParams, AssignmentStatus, CommentMentionedParams,
-    ConnectionActivityParams, ConnectionId, ConnectionSyncCompletedParams,
-    ConnectionSyncFailedParams, DetectionActivityParams, DetectionCompletedParams,
-    DetectionFailedParams, DetectionId, FileActivityParams, FileAssignedParams,
-    FileUnassignedParams, Handle, InviteActivityParams, MemberActivityParams, MemberJoinedParams,
-    NotificationPayload, PipelineActivityParams, PolicyActivityParams, ProviderActivityParams,
-    ProviderId, RedactionActivityParams, RedactionCreatedParams, RedactionId, ThreadActivityParams,
-    ThreadAnchorActivityParams, ThreadCommentActivityParams, WebhookActivityParams, WebhookEvent,
-    WebhookId, WorkspaceActivityParams, WorkspaceRole,
+    ActivityPayload, CommentMentionedParams, ConnectionActivityParams, ConnectionId,
+    ConnectionSyncCompletedParams, ConnectionSyncFailedParams, DetectionActivityParams,
+    DetectionCompletedParams, DetectionFailedParams, DetectionId, FileActivityParams, Handle,
+    InviteActivityParams, MemberActivityParams, MemberJoinedParams, NotificationPayload,
+    PipelineActivityParams, PolicyActivityParams, ProviderActivityParams, ProviderId,
+    RedactionActivityParams, RedactionCreatedParams, RedactionId, ReviewActivityParams,
+    ReviewAssignedParams, ThreadActivityParams, ThreadCommentActivityParams, WebhookActivityParams,
+    WebhookEvent, WebhookId, WorkspaceActivityParams, WorkspaceRole,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -61,9 +60,9 @@ workspace_events! {
     FileUpdated             => "file.updated",
     FileDeleted             => "file.deleted",
 
-    FileAssigned            => "file.assigned",
-    FileUnassigned          => "file.unassigned",
-    AssignmentStatusChanged => "file.assignment.updated",
+    ReviewVerified          => "review.verified",
+    ReviewAssigned          => "review.assigned",
+    ReviewUnassigned        => "review.unassigned",
 
     PipelineCreated         => "pipeline.created",
     PipelineUpdated         => "pipeline.updated",
@@ -84,8 +83,6 @@ workspace_events! {
     ThreadReopened       => "thread.reopened",
     ThreadRenamed        => "thread.renamed",
     ThreadDeleted        => "thread.deleted",
-    ThreadAnchorAdded    => "thread.anchor.added",
-    ThreadAnchorRemoved  => "thread.anchor.removed",
     ThreadCommentCreated => "thread.comment.created",
 }
 
@@ -104,15 +101,14 @@ struct FileCreatedWebhookBody<'a> {
     file_size_bytes: i64,
 }
 
-/// The webhook body for an assignment event: the assignee and status, plus the
-/// file name when it is still known (omitted if the file was removed).
+/// The webhook body for a review event: the file name, plus the assignee when the
+/// review is assigned (omitted for verification or when clearing the assignee).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AssignmentWebhookBody<'a> {
+struct ReviewWebhookBody<'a> {
+    display_name: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    display_name: Option<&'a str>,
-    assignee: &'a Handle,
-    status: AssignmentStatus,
+    assignee: Option<&'a Handle>,
 }
 
 /// Serializes a webhook body to JSON, failing closed to `None` (no body) rather
@@ -466,41 +462,74 @@ fn file_activity(file_id: Uuid, file_name: &str) -> FileActivityParams {
     }
 }
 
-/// A file was assigned to a reviewer. A file always exists at assign time, so its
-/// name is present. Notifies the reviewer unless they assigned themselves.
+/// A file's review was verified (the review thread reached `resolved`). Raises no
+/// notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileAssigned {
-    pub assignment_id: Uuid,
+pub struct ReviewVerified {
+    pub thread_id: Uuid,
+    pub file_id: Uuid,
+    pub file_name: String,
+}
+
+impl EventKind for ReviewVerified {
+    const TAG: &'static str = "review.verified";
+
+    fn resource_id(&self) -> Uuid {
+        self.thread_id
+    }
+
+    fn activity(&self) -> ActivityPayload {
+        ActivityPayload::ReviewVerified(ReviewActivityParams {
+            thread_id: self.thread_id,
+            file_id: self.file_id,
+            assignee_username: None,
+        })
+    }
+
+    fn webhook(&self) -> Option<WebhookDelivery> {
+        Some(WebhookDelivery {
+            event: WebhookEvent::ReviewVerified,
+            body: webhook_body(&ReviewWebhookBody {
+                display_name: &self.file_name,
+                assignee: None,
+            }),
+        })
+    }
+}
+
+/// A file's review was assigned to a reviewer. A file always exists at assign
+/// time, so its name is present. Notifies the reviewer unless they assigned
+/// themselves.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewAssigned {
+    pub thread_id: Uuid,
     pub file_id: Uuid,
     pub file_name: String,
     pub assignee_username: Handle,
-    pub status: AssignmentStatus,
     pub notify: Option<Uuid>,
 }
 
-impl EventKind for FileAssigned {
-    const TAG: &'static str = "file.assigned";
+impl EventKind for ReviewAssigned {
+    const TAG: &'static str = "review.assigned";
 
     fn resource_id(&self) -> Uuid {
-        self.assignment_id
+        self.thread_id
     }
 
     fn activity(&self) -> ActivityPayload {
-        ActivityPayload::FileAssigned(AssignmentActivityParams {
-            assignment_id: self.assignment_id,
-            file_name: Some(self.file_name.clone()),
-            assignee_username: self.assignee_username.clone(),
-            status: self.status,
+        ActivityPayload::ReviewAssigned(ReviewActivityParams {
+            thread_id: self.thread_id,
+            file_id: self.file_id,
+            assignee_username: Some(self.assignee_username.clone()),
         })
     }
 
     fn webhook(&self) -> Option<WebhookDelivery> {
         Some(WebhookDelivery {
-            event: WebhookEvent::FileAssigned,
-            body: webhook_body(&AssignmentWebhookBody {
-                display_name: Some(&self.file_name),
-                assignee: &self.assignee_username,
-                status: self.status,
+            event: WebhookEvent::ReviewAssigned,
+            body: webhook_body(&ReviewWebhookBody {
+                display_name: &self.file_name,
+                assignee: Some(&self.assignee_username),
             }),
         })
     }
@@ -508,100 +537,45 @@ impl EventKind for FileAssigned {
     fn notification(self) -> Vec<Notification> {
         Notification::to_account(
             self.notify,
-            NotificationPayload::FileAssigned(FileAssignedParams {
-                assignment_id: self.assignment_id,
+            NotificationPayload::ReviewAssigned(ReviewAssignedParams {
+                thread_id: self.thread_id,
                 file_id: self.file_id,
-                file_name: self.file_name,
+                file_name: Some(self.file_name),
             }),
         )
     }
 }
 
-/// A reviewer was unassigned from a file. The assignment can outlive its file
-/// (removed by retention), so the name is optional. Notifies the former reviewer
-/// unless they unassigned themselves.
+/// A file's review assignee was cleared. The file may since have been removed, so
+/// its name is optional. Raises no notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileUnassigned {
-    pub assignment_id: Uuid,
+pub struct ReviewUnassigned {
+    pub thread_id: Uuid,
     pub file_id: Uuid,
     pub file_name: Option<String>,
-    pub assignee_username: Handle,
-    pub status: AssignmentStatus,
-    pub notify: Option<Uuid>,
 }
 
-impl EventKind for FileUnassigned {
-    const TAG: &'static str = "file.unassigned";
+impl EventKind for ReviewUnassigned {
+    const TAG: &'static str = "review.unassigned";
 
     fn resource_id(&self) -> Uuid {
-        self.assignment_id
+        self.thread_id
     }
 
     fn activity(&self) -> ActivityPayload {
-        ActivityPayload::FileUnassigned(AssignmentActivityParams {
-            assignment_id: self.assignment_id,
-            file_name: self.file_name.clone(),
-            assignee_username: self.assignee_username.clone(),
-            status: self.status,
+        ActivityPayload::ReviewUnassigned(ReviewActivityParams {
+            thread_id: self.thread_id,
+            file_id: self.file_id,
+            assignee_username: None,
         })
     }
 
     fn webhook(&self) -> Option<WebhookDelivery> {
         Some(WebhookDelivery {
-            event: WebhookEvent::FileUnassigned,
-            body: webhook_body(&AssignmentWebhookBody {
-                display_name: self.file_name.as_deref(),
-                assignee: &self.assignee_username,
-                status: self.status,
-            }),
-        })
-    }
-
-    fn notification(self) -> Vec<Notification> {
-        Notification::to_account(
-            self.notify,
-            NotificationPayload::FileUnassigned(FileUnassignedParams {
-                file_id: self.file_id,
-                file_name: self.file_name,
-            }),
-        )
-    }
-}
-
-/// A file assignment's review status changed. The file may since have been
-/// removed, so its name is optional. Raises no notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AssignmentStatusChanged {
-    pub assignment_id: Uuid,
-    pub file_id: Uuid,
-    pub file_name: Option<String>,
-    pub assignee_username: Handle,
-    pub status: AssignmentStatus,
-}
-
-impl EventKind for AssignmentStatusChanged {
-    const TAG: &'static str = "file.assignment.updated";
-
-    fn resource_id(&self) -> Uuid {
-        self.assignment_id
-    }
-
-    fn activity(&self) -> ActivityPayload {
-        ActivityPayload::AssignmentStatusChanged(AssignmentActivityParams {
-            assignment_id: self.assignment_id,
-            file_name: self.file_name.clone(),
-            assignee_username: self.assignee_username.clone(),
-            status: self.status,
-        })
-    }
-
-    fn webhook(&self) -> Option<WebhookDelivery> {
-        Some(WebhookDelivery {
-            event: WebhookEvent::AssignmentStatusChanged,
-            body: webhook_body(&AssignmentWebhookBody {
-                display_name: self.file_name.as_deref(),
-                assignee: &self.assignee_username,
-                status: self.status,
+            event: WebhookEvent::ReviewUnassigned,
+            body: webhook_body(&ReviewWebhookBody {
+                display_name: self.file_name.as_deref().unwrap_or_default(),
+                assignee: None,
             }),
         })
     }
@@ -876,24 +850,6 @@ crud_events! {
 
     /// A thread was deleted.
     ThreadDeleted => "thread.deleted",
-}
-
-// Thread anchor add / remove: activity + webhook, keyed on the anchor. No
-// notification.
-crud_events! {
-    fields { thread_id: Uuid, anchor_id: Uuid, file_id: Option<Uuid> }
-    id = anchor_id;
-    activity(this) = ThreadAnchorActivityParams {
-        thread_id: this.thread_id,
-        anchor_id: this.anchor_id,
-        file_id: this.file_id,
-    };
-    webhook = yes;
-
-    /// An anchor was added to a thread.
-    ThreadAnchorAdded => "thread.anchor.added",
-    /// An anchor was removed from a thread.
-    ThreadAnchorRemoved => "thread.anchor.removed",
 }
 
 /// A comment (message) was posted in a thread. Notifies each mentioned account

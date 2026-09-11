@@ -38,12 +38,12 @@ db_enum! {
         ProviderUpdated = "provider.updated",
         /// A provider was deleted.
         ProviderDeleted = "provider.deleted",
-        /// A file was assigned to a reviewer.
-        FileAssigned = "file.assigned",
-        /// A reviewer was unassigned from a file.
-        FileUnassigned = "file.unassigned",
-        /// A file assignment's review status changed.
-        AssignmentStatusChanged = "file.assignment.updated",
+        /// A file's review was verified.
+        ReviewVerified = "review.verified",
+        /// A file's review was assigned to a reviewer.
+        ReviewAssigned = "review.assigned",
+        /// A file's review assignee was cleared.
+        ReviewUnassigned = "review.unassigned",
         /// A pipeline was created.
         PipelineCreated = "pipeline.created",
         /// A pipeline was updated.
@@ -72,10 +72,6 @@ db_enum! {
         ThreadReopened = "thread.reopened",
         /// A thread's title was changed.
         ThreadRenamed = "thread.renamed",
-        /// An anchor was added to a thread.
-        ThreadAnchorAdded = "thread.anchor.added",
-        /// An anchor was removed from a thread.
-        ThreadAnchorRemoved = "thread.anchor.removed",
     }
 }
 
@@ -83,12 +79,12 @@ impl WebhookEvent {
     /// Returns the event category as a string.
     pub fn category(&self) -> &'static str {
         match self {
-            WebhookEvent::FileCreated
-            | WebhookEvent::FileUpdated
-            | WebhookEvent::FileDeleted
-            | WebhookEvent::FileAssigned
-            | WebhookEvent::FileUnassigned
-            | WebhookEvent::AssignmentStatusChanged => "file",
+            WebhookEvent::FileCreated | WebhookEvent::FileUpdated | WebhookEvent::FileDeleted => {
+                "file"
+            }
+            WebhookEvent::ReviewVerified
+            | WebhookEvent::ReviewAssigned
+            | WebhookEvent::ReviewUnassigned => "review",
             WebhookEvent::MemberAdded
             | WebhookEvent::MemberDeleted
             | WebhookEvent::MemberUpdated => "member",
@@ -114,9 +110,7 @@ impl WebhookEvent {
             WebhookEvent::ThreadOpened
             | WebhookEvent::ThreadClosed
             | WebhookEvent::ThreadReopened
-            | WebhookEvent::ThreadRenamed
-            | WebhookEvent::ThreadAnchorAdded
-            | WebhookEvent::ThreadAnchorRemoved => "thread",
+            | WebhookEvent::ThreadRenamed => "thread",
         }
     }
 

@@ -1,32 +1,51 @@
--- Threads: threaded discussion on a file under review, modeled after GitHub
--- issues. A thread is the closable, optionally file-anchored unit; its stream
--- interleaves comments (messages) and events (opened/closed/reopened, anchor
--- added or removed). A thread carries zero or more anchors — pins to locations
--- within its file — added and removed over its lifetime. Opening, closing,
--- reopening, and anchor changes are recorded both as in-thread timeline events
--- and as workspace events (activity log + webhooks).
+-- Threads: threaded discussion modeled after GitHub issues. Two kinds share the
+-- table. A workspace thread is a free discussion with an open/closed lifecycle.
+-- A file thread IS the review of its file (exactly one per file): it carries an
+-- assignee and a derived review_status, and its stream interleaves comments with
+-- review events (detection/redaction created, verified, reopened, assigned).
+-- Transitions are recorded both as in-thread timeline events and as workspace
+-- events (activity log + webhooks).
 
 -- Kind of a thread timeline event (a non-message entry in a thread's stream).
+-- A file thread is the review of its file: alongside the discussion lifecycle
+-- (opened/closed/reopened/renamed) it records the review's own transitions —
+-- a detection ran, a redaction was made, the review was verified — and the
+-- assignee changing. Workspace threads use only the discussion lifecycle.
 CREATE TYPE THREAD_EVENT_KIND AS ENUM (
-    'thread.opened',        -- The thread was opened
-    'thread.closed',        -- The thread was closed
-    'thread.reopened',      -- The thread was reopened
-    'thread.renamed',       -- The thread's display name was changed
-    'thread.anchor.added',  -- An anchor (location pin) was added to the thread
-    'thread.anchor.removed' -- An anchor was removed from the thread
+    'thread.opened',            -- The thread was opened
+    'thread.closed',            -- The thread was closed (workspace threads)
+    'thread.reopened',          -- The thread was reopened (workspace threads)
+    'thread.renamed',           -- The thread's display name was changed
+    'review.detection_created', -- A detection ran on the file (review needed)
+    'review.redaction_created', -- A redaction (review pass) was made
+    'review.verified',          -- The review was approved
+    'review.reopened',          -- A new detection reopened a verified review
+    'review.assigned',          -- The review was assigned to a reviewer
+    'review.unassigned'         -- The review's assignee was cleared
 );
 
-COMMENT ON TYPE THREAD_EVENT_KIND IS 'The kind of a non-message entry in a thread timeline: opened, closed, reopened, renamed, or an anchor added/removed.';
+COMMENT ON TYPE THREAD_EVENT_KIND IS 'The kind of a non-message entry in a thread timeline: the discussion lifecycle (opened/closed/reopened/renamed) and, for a file thread, its review transitions (detection/redaction created, verified, reopened, assigned/unassigned).';
 
--- Threads: the closable, optionally file-anchored unit of discussion.
+-- The review state of a file thread. NULL for a workspace thread (no review).
+-- Derived from review events, never set by hand: a detection makes it
+-- `needs_review`, a redaction `in_review`, verification `resolved`; a later
+-- detection reopens it to `needs_review`.
+CREATE TYPE REVIEW_STATUS AS ENUM (
+    'needs_review', -- A detection exists; no redaction has been reviewed yet
+    'in_review',    -- A redaction (review pass) exists but is not verified
+    'resolved'      -- The review has been verified
+);
+
+COMMENT ON TYPE REVIEW_STATUS IS 'The review state of a file thread, derived from review events: needs_review, in_review, or resolved.';
+
+-- Threads: a workspace discussion or a file review, both closable/soft-deletable.
 CREATE TABLE workspace_threads (
     -- Primary identifier
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References. A thread belongs to a workspace and is optionally about one of
-    -- its files: `file_id` NULL is a workspace-level discussion, a set `file_id`
-    -- pins it to that file. Anchors (locations within the file) live in
-    -- workspace_thread_anchors, since a thread may carry several.
+    -- its files: `file_id` NULL is a workspace-level discussion; a set `file_id`
+    -- makes it that file's review thread (exactly one per file).
     workspace_id        UUID        NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     file_id             UUID        DEFAULT NULL,
 
@@ -38,9 +57,24 @@ CREATE TABLE workspace_threads (
     display_name        TEXT        DEFAULT NULL,
     CONSTRAINT workspace_threads_display_name_length CHECK (display_name IS NULL OR length(trim(display_name)) BETWEEN 1 AND 255),
 
-    -- Lifecycle state (open/closed). `closed_at IS NULL` means open; a timestamp
-    -- means closed, and `closed_by` records who closed it (kept for the audit
-    -- trail; SET NULL if that account is removed). This is the current state; the
+    -- Review facets (a file thread is the review of its file). The reviewer who
+    -- owns the review; NULL when unassigned (a review can be in progress with no
+    -- assignee). SET NULL if that account is removed.
+    assignee_account_id UUID        DEFAULT NULL REFERENCES accounts (id) ON DELETE SET NULL,
+
+    -- The review state, present only for a file thread and NULL for a
+    -- workspace-level one. Derived from review events (detection/redaction/verify),
+    -- never set by a user. The `(file_id IS NULL) = (review_status IS NULL)` check
+    -- keeps the two consistent: exactly the file threads carry a review status.
+    review_status       REVIEW_STATUS DEFAULT NULL,
+    CONSTRAINT workspace_threads_review_status_file CHECK (
+        (file_id IS NULL) = (review_status IS NULL)
+    ),
+
+    -- Lifecycle state for a workspace thread (open/closed). `closed_at IS NULL`
+    -- means open; a timestamp means closed, and `closed_by` records who closed it
+    -- (SET NULL if that account is removed). A file thread uses `review_status`
+    -- instead and is never closed this way. This is the current state; the
     -- per-transition history lives in workspace_thread_events.
     closed_at           TIMESTAMPTZ DEFAULT NULL,
     closed_by           UUID        DEFAULT NULL REFERENCES accounts (id) ON DELETE SET NULL,
@@ -64,27 +98,6 @@ CREATE TABLE workspace_threads (
     -- (no file) is allowed.
     CONSTRAINT workspace_threads_file_fkey FOREIGN KEY (workspace_id, file_id)
         REFERENCES workspace_files (workspace_id, id) ON DELETE CASCADE
-);
-
--- Thread anchors: locations within a thread's file the thread is pinned to. A
--- thread may have several, added and removed over its lifetime; removal is a soft
--- delete so the timeline's anchor.removed event keeps its referent.
-CREATE TABLE workspace_thread_anchors (
-    -- Primary identifier
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- References. The thread this anchor pins; deleting the thread removes it.
-    thread_id           UUID        NOT NULL REFERENCES workspace_threads (id) ON DELETE CASCADE,
-
-    -- The location, as a modality-tagged anchor (page region, time range, text
-    -- span, or table cell). Stored as the anchor's typed JSON.
-    anchor              JSONB       NOT NULL,
-    CONSTRAINT workspace_thread_anchors_size CHECK (length(anchor::TEXT) <= 8192),
-
-    -- Lifecycle timestamps. Removal is a soft delete (`deleted_at` set).
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    deleted_at          TIMESTAMPTZ DEFAULT NULL,
-    CONSTRAINT workspace_thread_anchors_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
 );
 
 -- Thread comments: one message within a thread.
@@ -119,9 +132,10 @@ CREATE TABLE workspace_thread_comments (
     CONSTRAINT workspace_thread_comments_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
 );
 
--- Thread timeline events: the non-message entries in a thread's stream (opened,
--- closed, reopened, anchor added/removed). Immutable — an event is a fact that
--- happened, so there is no update or soft-delete; deleting the thread removes them.
+-- Thread timeline events: the non-message entries in a thread's stream (the
+-- discussion lifecycle and, for a file thread, its review transitions). Immutable
+-- — an event is a fact that happened, so there is no update or soft-delete;
+-- deleting the thread removes them.
 CREATE TABLE workspace_thread_events (
     -- Primary identifier
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -138,9 +152,8 @@ CREATE TABLE workspace_thread_events (
     -- (the transition still happened).
     actor_account_id    UUID        DEFAULT NULL REFERENCES accounts (id) ON DELETE SET NULL,
 
-    -- Event-specific detail, when any: for an anchor event, a snapshot of the
-    -- anchor (its id and the anchor JSON), so the timeline renders it without the
-    -- anchor row (which may since have been removed). NULL for open/close/reopen.
+    -- Event-specific detail, when any: the new name for a rename, the assignee for
+    -- an assign, or the detection/redaction id for a review event. NULL otherwise.
     target              JSONB       DEFAULT NULL,
     CONSTRAINT workspace_thread_events_target_size CHECK (target IS NULL OR length(target::TEXT) <= 8192),
 
@@ -148,20 +161,16 @@ CREATE TABLE workspace_thread_events (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
 );
 
--- A file's threads, newest first (the thread list on a document); only
--- file-pinned threads, so workspace-level threads do not bloat the index.
-CREATE INDEX workspace_threads_file_idx
-    ON workspace_threads (file_id, created_at DESC)
+-- A file has exactly one live review thread: the file thread IS the review of
+-- that file. This partial-unique index enforces the one-per-file rule and backs
+-- the find-or-create lookup; workspace-level threads (NULL file_id) are exempt.
+CREATE UNIQUE INDEX workspace_threads_file_idx
+    ON workspace_threads (file_id)
     WHERE file_id IS NOT NULL AND deleted_at IS NULL;
 
 -- Workspace-scoped thread listing, newest first, filterable by open/closed.
 CREATE INDEX workspace_threads_workspace_idx
     ON workspace_threads (workspace_id, created_at DESC)
-    WHERE deleted_at IS NULL;
-
--- A thread's live anchors, oldest first.
-CREATE INDEX workspace_thread_anchors_thread_idx
-    ON workspace_thread_anchors (thread_id, created_at)
     WHERE deleted_at IS NULL;
 
 -- A thread's messages, oldest first (a discussion reads top to bottom).
@@ -184,7 +193,7 @@ CREATE INDEX workspace_thread_events_thread_idx
 SELECT setup_updated_at('workspace_threads');
 SELECT setup_updated_at('workspace_thread_comments');
 
-COMMENT ON TABLE workspace_threads IS 'A closable, optionally file-anchored discussion thread on a file.';
+COMMENT ON TABLE workspace_threads IS 'A discussion thread: a workspace thread (free discussion) or a file thread (the review of its file, carrying an assignee and derived review_status).';
 COMMENT ON COLUMN workspace_threads.id IS 'Unique thread identifier';
 COMMENT ON COLUMN workspace_threads.workspace_id IS 'Denormalized workspace scope for fast per-workspace thread queries';
 COMMENT ON COLUMN workspace_threads.file_id IS 'File the thread is pinned to; NULL for a workspace-level thread';
@@ -195,13 +204,6 @@ COMMENT ON COLUMN workspace_threads.closed_by IS 'Account that closed the thread
 COMMENT ON COLUMN workspace_threads.created_at IS 'Timestamp when the thread was opened';
 COMMENT ON COLUMN workspace_threads.updated_at IS 'Timestamp of the last update';
 COMMENT ON COLUMN workspace_threads.deleted_at IS 'Soft-deletion timestamp; NULL means live';
-
-COMMENT ON TABLE workspace_thread_anchors IS 'A location within a thread''s file the thread is pinned to; a thread may have several.';
-COMMENT ON COLUMN workspace_thread_anchors.id IS 'Unique anchor identifier';
-COMMENT ON COLUMN workspace_thread_anchors.thread_id IS 'Thread this anchor pins';
-COMMENT ON COLUMN workspace_thread_anchors.anchor IS 'Modality-tagged location (page region, time range, text span, table cell), as typed JSON';
-COMMENT ON COLUMN workspace_thread_anchors.created_at IS 'Timestamp when the anchor was added';
-COMMENT ON COLUMN workspace_thread_anchors.deleted_at IS 'Soft-removal timestamp; NULL means live';
 
 COMMENT ON TABLE workspace_thread_comments IS 'One message within a thread.';
 COMMENT ON COLUMN workspace_thread_comments.id IS 'Unique comment identifier';
@@ -214,13 +216,13 @@ COMMENT ON COLUMN workspace_thread_comments.created_at IS 'Timestamp when the co
 COMMENT ON COLUMN workspace_thread_comments.updated_at IS 'Timestamp of the last edit';
 COMMENT ON COLUMN workspace_thread_comments.deleted_at IS 'Soft-deletion timestamp; NULL means live';
 
-COMMENT ON TABLE workspace_thread_events IS 'An immutable non-message entry in a thread timeline: opened, closed, reopened, renamed, or anchor added/removed.';
+COMMENT ON TABLE workspace_thread_events IS 'An immutable non-message entry in a thread timeline: the discussion lifecycle (opened/closed/reopened/renamed) and a file thread''s review transitions (detection/redaction created, verified, reopened, assigned/unassigned).';
 COMMENT ON COLUMN workspace_thread_events.id IS 'Unique event identifier';
 COMMENT ON COLUMN workspace_thread_events.workspace_id IS 'Denormalized workspace scope';
 COMMENT ON COLUMN workspace_thread_events.thread_id IS 'Thread this event belongs to';
-COMMENT ON COLUMN workspace_thread_events.kind IS 'What happened (thread.opened, thread.closed, thread.reopened, thread.renamed, thread.anchor.added, thread.anchor.removed)';
+COMMENT ON COLUMN workspace_thread_events.kind IS 'What happened (thread.opened/closed/reopened/renamed; review.detection_created/redaction_created/verified/reopened/assigned/unassigned)';
 COMMENT ON COLUMN workspace_thread_events.actor_account_id IS 'Account that performed the action; null if that account was removed';
-COMMENT ON COLUMN workspace_thread_events.target IS 'Event-specific detail (an anchor snapshot for anchor events, the new name for a rename); NULL for open/close/reopen';
+COMMENT ON COLUMN workspace_thread_events.target IS 'Event-specific detail (the new name for a rename, the assignee for assign, the detection/redaction id for a review event); NULL when none';
 COMMENT ON COLUMN workspace_thread_events.created_at IS 'Timestamp when the event happened';
 
 -- Thread lifecycle events feed the event sinks; each value is added by this
@@ -233,17 +235,25 @@ ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'thread.closed';
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'thread.reopened';
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'thread.renamed';
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'thread.deleted';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'thread.anchor.added';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'thread.anchor.removed';
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'thread.comment.created';
+-- A file thread's review lifecycle. Detection/redaction creation is already
+-- logged by the detection subsystem, so the activity log adds only the review's
+-- own gestures: verification and (re)assignment.
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.verified';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.assigned';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.unassigned';
 
--- Webhooks carry the thread lifecycle (message-level noise is left off).
+-- Webhooks carry the thread lifecycle (message-level noise is left off) plus the
+-- review's verification and assignment gestures.
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'thread.opened';
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'thread.closed';
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'thread.reopened';
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'thread.renamed';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'thread.anchor.added';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'thread.anchor.removed';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'review.verified';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'review.assigned';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'review.unassigned';
 
--- In-app notifications go to each mentioned account.
+-- In-app notifications go to each mentioned account, and to a reviewer when a
+-- review is assigned to them.
 ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'comment.mentioned';
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'review.assigned';

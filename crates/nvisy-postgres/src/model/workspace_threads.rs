@@ -1,16 +1,19 @@
-//! Workspace thread model: the closable, optionally file-anchored unit of
-//! discussion. Its messages are
-//! [`WorkspaceThreadComment`](super::WorkspaceThreadComment)s, its pins
-//! [`WorkspaceThreadAnchor`](super::WorkspaceThreadAnchor)s, and its lifecycle
-//! history [`WorkspaceThreadEvent`](super::WorkspaceThreadEvent)s.
+//! Workspace thread model: a discussion thread, either a workspace-level
+//! discussion or a file's review. Its messages are
+//! [`WorkspaceThreadComment`](super::WorkspaceThreadComment)s and its lifecycle
+//! history [`WorkspaceThreadEvent`](super::WorkspaceThreadEvent)s. A file thread
+//! also carries an assignee and a derived [`ReviewStatus`].
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_threads;
+use crate::types::ReviewStatus;
 
-/// A discussion thread: the closable, optionally file-anchored unit.
+/// A discussion thread: a workspace discussion (`file_id` is `None`, open/closed
+/// lifecycle) or a file's review (`file_id` is set, carrying an assignee and a
+/// derived [`ReviewStatus`]).
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_threads)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -19,13 +22,19 @@ pub struct WorkspaceThread {
     pub id: Uuid,
     /// Workspace this thread belongs to (denormalized).
     pub workspace_id: Uuid,
-    /// File the thread is pinned to; `None` for a workspace-level thread.
+    /// File the thread reviews; `None` for a workspace-level thread.
     pub file_id: Option<Uuid>,
     /// Account that opened the thread.
     pub author_account_id: Uuid,
     /// Optional human-readable title; `None` for an untitled thread.
     pub display_name: Option<String>,
-    /// When the thread was closed; `None` while open.
+    /// Reviewer the file's review is assigned to; `None` when unassigned or on a
+    /// workspace thread.
+    pub assignee_account_id: Option<Uuid>,
+    /// Review state of a file thread, derived from review events; `None` on a
+    /// workspace thread.
+    pub review_status: Option<ReviewStatus>,
+    /// When the thread was closed; `None` while open (workspace threads only).
     pub closed_at: Option<Timestamp>,
     /// Account that closed the thread; `None` if open (or that account was
     /// removed).
@@ -46,16 +55,19 @@ pub struct WorkspaceThread {
 pub struct NewWorkspaceThread {
     /// Workspace ID (required).
     pub workspace_id: Uuid,
-    /// File the thread is pinned to; `None` for a workspace-level thread.
+    /// File the thread reviews; `None` for a workspace-level thread.
     pub file_id: Option<Uuid>,
     /// Opening author account ID (required).
     pub author_account_id: Uuid,
     /// Optional title.
     pub display_name: Option<String>,
+    /// Initial review status; must be set for a file thread and `None` for a
+    /// workspace thread (the `(file_id IS NULL) = (review_status IS NULL)` check).
+    pub review_status: Option<ReviewStatus>,
 }
 
 impl NewWorkspaceThread {
-    /// A minimal file-pinned thread opened by `author`, for tests.
+    /// A minimal file review thread opened by `author`, for tests.
     #[cfg(any(feature = "test_util", test))]
     pub fn test(workspace_id: Uuid, file_id: Uuid, author_account_id: Uuid) -> Self {
         Self {
@@ -63,11 +75,12 @@ impl NewWorkspaceThread {
             file_id: Some(file_id),
             author_account_id,
             display_name: None,
+            review_status: Some(ReviewStatus::NeedsReview),
         }
     }
 }
 
-/// Data for updating a thread's title.
+/// Data for updating a thread's mutable fields.
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = workspace_threads)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -76,4 +89,9 @@ pub struct UpdateWorkspaceThread {
     /// The new title. `Some(None)` clears it, `Some(Some(name))` sets it, `None`
     /// leaves it unchanged.
     pub display_name: Option<Option<String>>,
+    /// The new assignee. `Some(None)` clears it, `Some(Some(id))` sets it, `None`
+    /// leaves it unchanged.
+    pub assignee_account_id: Option<Option<Uuid>>,
+    /// The new review status; `None` leaves it unchanged.
+    pub review_status: Option<ReviewStatus>,
 }

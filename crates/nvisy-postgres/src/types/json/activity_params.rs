@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::types::{
-    ActivityType, AssignmentStatus, ConnectionId, DetectionId, Handle, ProviderId, RedactionId,
-    WebhookEvent, WebhookId,
+    ActivityType, ConnectionId, DetectionId, Handle, ProviderId, RedactionId, WebhookEvent,
+    WebhookId,
 };
 
 /// Params of a workspace-scoped activity (`workspace.*`).
@@ -89,22 +89,20 @@ pub struct FileActivityParams {
     pub file_name: String,
 }
 
-/// Params of a file-assignment activity (`file.assigned`, `file.unassigned`,
-/// `file.assignment.updated`).
+/// Params of a file-review activity (`review.verified`, `review.assigned`,
+/// `review.unassigned`), where the review is the file's thread.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct AssignmentActivityParams {
-    /// Id of the assignment.
-    pub assignment_id: Uuid,
-    /// Display name of the file under review, when it still exists. `None` (and
-    /// omitted) if the file was removed (e.g. by retention).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub file_name: Option<String>,
-    /// Username of the reviewer the file is assigned to.
-    pub assignee_username: Handle,
-    /// The reviewer's review status at the time of the activity.
-    pub status: AssignmentStatus,
+pub struct ReviewActivityParams {
+    /// Id of the file's review thread.
+    pub thread_id: Uuid,
+    /// Id of the file under review.
+    pub file_id: Uuid,
+    /// Username of the reviewer the review is assigned to; omitted for
+    /// verification or when clearing the assignee.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub assignee_username: Option<Handle>,
 }
 
 /// Params of a pipeline activity (`pipeline.*`, non-run).
@@ -156,21 +154,6 @@ pub struct PolicyActivityParams {
 pub struct ThreadActivityParams {
     /// Id of the thread.
     pub thread_id: Uuid,
-    /// Id of the file the thread is pinned to; omitted for a workspace-level
-    /// thread.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub file_id: Option<Uuid>,
-}
-
-/// Params of a comment-thread anchor activity (`thread.anchor.*`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct ThreadAnchorActivityParams {
-    /// Id of the thread.
-    pub thread_id: Uuid,
-    /// Id of the anchor added or removed.
-    pub anchor_id: Uuid,
     /// Id of the file the thread is pinned to; omitted for a workspace-level
     /// thread.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -284,15 +267,16 @@ pub enum ActivityPayload {
     /// A file was deleted.
     #[serde(rename = "file.deleted")]
     FileDeleted(FileActivityParams),
-    /// A file was assigned to a reviewer.
-    #[serde(rename = "file.assigned")]
-    FileAssigned(AssignmentActivityParams),
-    /// A reviewer was unassigned from a file.
-    #[serde(rename = "file.unassigned")]
-    FileUnassigned(AssignmentActivityParams),
-    /// A file assignment's review status changed.
-    #[serde(rename = "file.assignment.updated")]
-    AssignmentStatusChanged(AssignmentActivityParams),
+
+    /// A file's review was verified.
+    #[serde(rename = "review.verified")]
+    ReviewVerified(ReviewActivityParams),
+    /// A file's review was assigned to a reviewer.
+    #[serde(rename = "review.assigned")]
+    ReviewAssigned(ReviewActivityParams),
+    /// A file's review assignee was cleared.
+    #[serde(rename = "review.unassigned")]
+    ReviewUnassigned(ReviewActivityParams),
 
     /// A pipeline was created.
     #[serde(rename = "pipeline.created")]
@@ -341,12 +325,6 @@ pub enum ActivityPayload {
     /// A thread was deleted.
     #[serde(rename = "thread.deleted")]
     ThreadDeleted(ThreadActivityParams),
-    /// An anchor was added to a thread.
-    #[serde(rename = "thread.anchor.added")]
-    ThreadAnchorAdded(ThreadAnchorActivityParams),
-    /// An anchor was removed from a thread.
-    #[serde(rename = "thread.anchor.removed")]
-    ThreadAnchorRemoved(ThreadAnchorActivityParams),
     /// A comment (message) was posted in a thread.
     #[serde(rename = "thread.comment.created")]
     ThreadCommentCreated(ThreadCommentActivityParams),
@@ -382,9 +360,9 @@ impl ActivityPayload {
             ActivityPayload::FileCreated(_) => ActivityType::FileCreated,
             ActivityPayload::FileUpdated(_) => ActivityType::FileUpdated,
             ActivityPayload::FileDeleted(_) => ActivityType::FileDeleted,
-            ActivityPayload::FileAssigned(_) => ActivityType::FileAssigned,
-            ActivityPayload::FileUnassigned(_) => ActivityType::FileUnassigned,
-            ActivityPayload::AssignmentStatusChanged(_) => ActivityType::AssignmentStatusChanged,
+            ActivityPayload::ReviewVerified(_) => ActivityType::ReviewVerified,
+            ActivityPayload::ReviewAssigned(_) => ActivityType::ReviewAssigned,
+            ActivityPayload::ReviewUnassigned(_) => ActivityType::ReviewUnassigned,
             ActivityPayload::PipelineCreated(_) => ActivityType::PipelineCreated,
             ActivityPayload::PipelineUpdated(_) => ActivityType::PipelineUpdated,
             ActivityPayload::PipelineDeleted(_) => ActivityType::PipelineDeleted,
@@ -400,8 +378,6 @@ impl ActivityPayload {
             ActivityPayload::ThreadReopened(_) => ActivityType::ThreadReopened,
             ActivityPayload::ThreadRenamed(_) => ActivityType::ThreadRenamed,
             ActivityPayload::ThreadDeleted(_) => ActivityType::ThreadDeleted,
-            ActivityPayload::ThreadAnchorAdded(_) => ActivityType::ThreadAnchorAdded,
-            ActivityPayload::ThreadAnchorRemoved(_) => ActivityType::ThreadAnchorRemoved,
             ActivityPayload::ThreadCommentCreated(_) => ActivityType::ThreadCommentCreated,
         }
     }
@@ -440,9 +416,9 @@ impl ActivityPayload {
             ActivityPayload::FileCreated(_) => W::FileCreated,
             ActivityPayload::FileUpdated(_) => W::FileUpdated,
             ActivityPayload::FileDeleted(_) => W::FileDeleted,
-            ActivityPayload::FileAssigned(_) => W::FileAssigned,
-            ActivityPayload::FileUnassigned(_) => W::FileUnassigned,
-            ActivityPayload::AssignmentStatusChanged(_) => W::AssignmentStatusChanged,
+            ActivityPayload::ReviewVerified(_) => W::ReviewVerified,
+            ActivityPayload::ReviewAssigned(_) => W::ReviewAssigned,
+            ActivityPayload::ReviewUnassigned(_) => W::ReviewUnassigned,
             ActivityPayload::PipelineCreated(_) => W::PipelineCreated,
             ActivityPayload::PipelineUpdated(_) => W::PipelineUpdated,
             ActivityPayload::PipelineDeleted(_) => W::PipelineDeleted,
@@ -457,8 +433,6 @@ impl ActivityPayload {
             ActivityPayload::ThreadClosed(_) => W::ThreadClosed,
             ActivityPayload::ThreadReopened(_) => W::ThreadReopened,
             ActivityPayload::ThreadRenamed(_) => W::ThreadRenamed,
-            ActivityPayload::ThreadAnchorAdded(_) => W::ThreadAnchorAdded,
-            ActivityPayload::ThreadAnchorRemoved(_) => W::ThreadAnchorRemoved,
         })
     }
 
@@ -495,9 +469,9 @@ impl ActivityPayload {
             | ActivityPayload::FileUpdated(p)
             | ActivityPayload::FileDeleted(p) => Some(p.file_id.to_string()),
 
-            ActivityPayload::FileAssigned(p)
-            | ActivityPayload::FileUnassigned(p)
-            | ActivityPayload::AssignmentStatusChanged(p) => Some(p.assignment_id.to_string()),
+            ActivityPayload::ReviewVerified(p)
+            | ActivityPayload::ReviewAssigned(p)
+            | ActivityPayload::ReviewUnassigned(p) => Some(p.thread_id.to_string()),
 
             ActivityPayload::DetectionStarted(p)
             | ActivityPayload::DetectionCompleted(p)
@@ -514,10 +488,6 @@ impl ActivityPayload {
             | ActivityPayload::ThreadReopened(p)
             | ActivityPayload::ThreadRenamed(p)
             | ActivityPayload::ThreadDeleted(p) => Some(p.thread_id.to_string()),
-
-            ActivityPayload::ThreadAnchorAdded(p) | ActivityPayload::ThreadAnchorRemoved(p) => {
-                Some(p.anchor_id.to_string())
-            }
 
             ActivityPayload::ThreadCommentCreated(p) => Some(p.comment_id.to_string()),
 
@@ -555,9 +525,11 @@ impl ActivityPayload {
             | ActivityPayload::FileUpdated(p)
             | ActivityPayload::FileDeleted(p) => Some(p.file_name.clone()),
 
-            ActivityPayload::FileAssigned(p)
-            | ActivityPayload::FileUnassigned(p)
-            | ActivityPayload::AssignmentStatusChanged(p) => p.file_name.clone(),
+            ActivityPayload::ReviewVerified(p)
+            | ActivityPayload::ReviewAssigned(p)
+            | ActivityPayload::ReviewUnassigned(p) => {
+                p.assignee_username.as_ref().map(ToString::to_string)
+            }
 
             ActivityPayload::PipelineCreated(p)
             | ActivityPayload::PipelineUpdated(p)
@@ -588,15 +560,12 @@ impl ActivityPayload {
             | ActivityPayload::PolicyUpdated(p)
             | ActivityPayload::PolicyDeleted(p) => Some(p.policy_slug.to_string()),
 
-            // A thread/comment/anchor has no human-readable name; addressed by id
-            // only.
+            // A thread/comment has no human-readable name; addressed by id only.
             ActivityPayload::ThreadOpened(_)
             | ActivityPayload::ThreadClosed(_)
             | ActivityPayload::ThreadReopened(_)
             | ActivityPayload::ThreadRenamed(_)
             | ActivityPayload::ThreadDeleted(_)
-            | ActivityPayload::ThreadAnchorAdded(_)
-            | ActivityPayload::ThreadAnchorRemoved(_)
             | ActivityPayload::ThreadCommentCreated(_) => None,
         }
     }

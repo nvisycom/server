@@ -13,34 +13,30 @@ mod utilities;
 pub use constraint::{
     AccountApiTokenConstraints, AccountConstraints, AccountIdentityConstraints,
     AccountNotificationConstraints, ConstraintViolation, WorkspaceActivitiesConstraints,
-    WorkspaceAssignmentConstraints, WorkspaceConnectionConstraints,
-    WorkspaceConnectionSyncConstraints, WorkspaceConstraints, WorkspaceDetectionConstraints,
-    WorkspaceFileConstraints, WorkspaceInviteConstraints, WorkspaceMemberConstraints,
-    WorkspacePipelineConstraints, WorkspacePipelineReferenceConstraints,
-    WorkspacePolicyConstraints, WorkspaceThreadAnchorConstraints,
+    WorkspaceConnectionConstraints, WorkspaceConnectionSyncConstraints, WorkspaceConstraints,
+    WorkspaceDetectionConstraints, WorkspaceFileConstraints, WorkspaceInviteConstraints,
+    WorkspaceMemberConstraints, WorkspacePipelineConstraints,
+    WorkspacePipelineReferenceConstraints, WorkspacePolicyConstraints,
     WorkspaceThreadCommentConstraints, WorkspaceThreadConstraints, WorkspaceWebhookConstraints,
 };
 pub use enums::{
-    ActivityType, ApiTokenType, AssignmentStatus, ConnectionType, DetectionStatus, FileKind,
-    IdentityProvider, InviteStatus, NotificationEvent, OutboxStatus, PipelineStatus,
-    PipelineTriggerType, ProviderType, SyncDeletionPolicy, SyncMode, SyncStatus, SyncTriggerType,
+    ActivityType, ApiTokenType, ConnectionType, DetectionStatus, FileKind, IdentityProvider,
+    InviteStatus, NotificationEvent, OutboxStatus, PipelineStatus, PipelineTriggerType,
+    ProviderType, ReviewStatus, SyncDeletionPolicy, SyncMode, SyncStatus, SyncTriggerType,
     ThreadEventKind, WebhookEvent, WebhookStatus, WorkspaceRole,
 };
-pub use filtering::{
-    AssignmentFilter, DetectionFilter, FileFilter, InviteFilter, MemberFilter, ThreadFilter,
-};
+pub use filtering::{DetectionFilter, FileFilter, InviteFilter, MemberFilter, ThreadFilter};
 pub use handle::{HANDLE_MAX_LENGTH, HANDLE_MIN_LENGTH, Handle, HandleError};
 pub use json::{
-    ActivityPayload, AssignmentActivityParams, CommentMentionedParams, ConnectionActivityParams,
+    ActivityPayload, CommentMentionedParams, ConnectionActivityParams,
     ConnectionSyncCompletedParams, ConnectionSyncFailedParams, DetectionActivityParams,
     DetectionCompletedParams, DetectionFailedParams, DetectionMetadata, FileActivityParams,
-    FileAssignedParams, FileUnassignedParams, InvalidHeader, InviteActivityParams, Json,
-    MemberActivityParams, MemberJoinedParams, NotificationPayload, PipelineActivityParams,
-    PipelineMetadata, PolicyActivityParams, ProviderActivityParams, RasterPolicy,
-    RedactionActivityParams, RedactionCreatedParams, Retention, RetentionOverride, RetentionScope,
-    RetentionSettings, ThreadActivityParams, ThreadAnchorActivityParams,
-    ThreadCommentActivityParams, WebhookActivityParams, WebhookHeaders, WorkspaceActivityParams,
-    WorkspaceMetadata, WorkspaceSettings,
+    InvalidHeader, InviteActivityParams, Json, MemberActivityParams, MemberJoinedParams,
+    NotificationPayload, PipelineActivityParams, PipelineMetadata, PolicyActivityParams,
+    ProviderActivityParams, RasterPolicy, RedactionActivityParams, RedactionCreatedParams,
+    Retention, RetentionOverride, RetentionScope, RetentionSettings, ReviewActivityParams,
+    ReviewAssignedParams, ThreadActivityParams, ThreadCommentActivityParams, WebhookActivityParams,
+    WebhookHeaders, WorkspaceActivityParams, WorkspaceMetadata, WorkspaceSettings,
 };
 pub(crate) use pagination::keyset;
 pub use pagination::{
