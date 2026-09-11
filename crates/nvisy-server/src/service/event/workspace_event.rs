@@ -732,7 +732,9 @@ impl EventKind for RedactionCreated {
     const TAG: &'static str = "pipeline.redaction.created";
 
     fn resource_id(&self) -> Uuid {
-        self.detection_id
+        // The affected resource is the redaction produced, not the detection it
+        // came from, this matches the activity log's object id for the event.
+        self.redaction_id
     }
 
     fn activity(&self) -> ActivityPayload {
