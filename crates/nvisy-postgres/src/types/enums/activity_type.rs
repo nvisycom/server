@@ -84,6 +84,12 @@ db_enum! {
         PolicyUpdated = "policy.updated",
         /// Policy was deleted.
         PolicyDeleted = "policy.deleted",
+        /// A comment was created.
+        CommentCreated = "comment.created",
+        /// A comment thread was resolved.
+        CommentResolved = "comment.resolved",
+        /// A comment was deleted.
+        CommentDeleted = "comment.deleted",
     }
 }
 

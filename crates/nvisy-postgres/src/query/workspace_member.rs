@@ -10,8 +10,8 @@ use crate::model::{
     Account, NewWorkspaceMember, UpdateWorkspaceMember, Workspace, WorkspaceMember,
 };
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, MemberFilter, NotificationEvent, OffsetPagination,
-    WorkspaceRole,
+    AccountRefRow, CursorPage, CursorPagination, Handle, MemberFilter, NotificationEvent,
+    OffsetPagination, WorkspaceRole,
 };
 use crate::{Error, PgConnection, Result, schema};
 
@@ -32,6 +32,15 @@ pub trait WorkspaceMemberRepository {
         workspace_id: Uuid,
         member_account_id: Uuid,
     ) -> impl Future<Output = Result<Option<WorkspaceMember>>> + Send;
+
+    /// Resolves a set of usernames to the account ids of those that are members
+    /// of the workspace, in one query. Non-members and unknown usernames are
+    /// omitted; the result is deduplicated by account.
+    fn find_member_ids_by_usernames(
+        &mut self,
+        workspace_id: Uuid,
+        usernames: &[Handle],
+    ) -> impl Future<Output = Result<Vec<Uuid>>> + Send;
 
     /// Updates a workspace member with partial changes.
     fn update_workspace_member(
@@ -148,6 +157,33 @@ impl WorkspaceMemberRepository for PgConnection {
             .map_err(Error::from)?;
 
         Ok(member)
+    }
+
+    async fn find_member_ids_by_usernames(
+        &mut self,
+        workspace_id: Uuid,
+        usernames: &[Handle],
+    ) -> Result<Vec<Uuid>> {
+        use schema::workspace_members::dsl as members;
+        use schema::{accounts, workspace_members};
+
+        if usernames.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Join members to their account and keep those whose username is in the
+        // set — one round-trip instead of a lookup per handle.
+        let ids: Vec<Uuid> = workspace_members::table
+            .inner_join(accounts::table.on(members::account_id.eq(accounts::id)))
+            .filter(members::workspace_id.eq(workspace_id))
+            .filter(accounts::username.eq_any(usernames))
+            .filter(accounts::deleted_at.is_null())
+            .select(members::account_id)
+            .load(self)
+            .await
+            .map_err(Error::from)?;
+
+        Ok(ids)
     }
 
     async fn update_workspace_member(

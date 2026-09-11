@@ -14,6 +14,7 @@ pub(crate) use auth_oidc::consume_reauth_proof;
 mod avatars;
 mod catalog;
 mod chat;
+mod comments;
 mod connection_oauth;
 mod connection_syncs;
 mod connections;
@@ -81,6 +82,7 @@ fn private_routes(service_state: ServiceState) -> ApiRouter<ServiceState> {
         .merge(analytics::routes())
         .merge(members::routes())
         .merge(assignments::routes())
+        .merge(comments::routes())
         .merge(connections::routes())
         .merge(providers::routes())
         .merge(connection_oauth::private_routes())

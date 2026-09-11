@@ -15,16 +15,16 @@ mod workspace_metadata;
 mod workspace_settings;
 
 pub use activity_params::{
-    ActivityPayload, AssignmentActivityParams, ConnectionActivityParams, DetectionActivityParams,
-    FileActivityParams, InviteActivityParams, MemberActivityParams, PipelineActivityParams,
-    PolicyActivityParams, ProviderActivityParams, RedactionActivityParams, WebhookActivityParams,
-    WorkspaceActivityParams,
+    ActivityPayload, AssignmentActivityParams, CommentActivityParams, ConnectionActivityParams,
+    DetectionActivityParams, FileActivityParams, InviteActivityParams, MemberActivityParams,
+    PipelineActivityParams, PolicyActivityParams, ProviderActivityParams, RedactionActivityParams,
+    WebhookActivityParams, WorkspaceActivityParams,
 };
 pub use detection_metadata::DetectionMetadata;
 pub use notification_params::{
-    ConnectionSyncCompletedParams, ConnectionSyncFailedParams, DetectionCompletedParams,
-    DetectionFailedParams, FileAssignedParams, FileUnassignedParams, MemberJoinedParams,
-    NotificationPayload, RedactionCreatedParams,
+    CommentMentionedParams, ConnectionSyncCompletedParams, ConnectionSyncFailedParams,
+    DetectionCompletedParams, DetectionFailedParams, FileAssignedParams, FileUnassignedParams,
+    MemberJoinedParams, NotificationPayload, RedactionCreatedParams,
 };
 pub use pipeline_metadata::{PipelineMetadata, RetentionOverride};
 pub use retention::{Retention, RetentionScope, RetentionSettings};

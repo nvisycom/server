@@ -149,6 +149,17 @@ pub struct PolicyActivityParams {
     pub policy_slug: Handle,
 }
 
+/// Params of a comment activity (`comment.*`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct CommentActivityParams {
+    /// Id of the comment.
+    pub comment_id: Uuid,
+    /// Id of the file the comment is on.
+    pub file_id: Uuid,
+}
+
 /// The typed payload of an audit-log activity, tagged by `type` with its params
 /// under `data` (the same `{type, data}` envelope the notification payload and
 /// outbox event use).
@@ -282,6 +293,16 @@ pub enum ActivityPayload {
     /// A policy was deleted.
     #[serde(rename = "policy.deleted")]
     PolicyDeleted(PolicyActivityParams),
+
+    /// A comment was created.
+    #[serde(rename = "comment.created")]
+    CommentCreated(CommentActivityParams),
+    /// A comment thread was resolved.
+    #[serde(rename = "comment.resolved")]
+    CommentResolved(CommentActivityParams),
+    /// A comment was deleted.
+    #[serde(rename = "comment.deleted")]
+    CommentDeleted(CommentActivityParams),
 }
 
 impl ActivityPayload {
@@ -327,6 +348,9 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(_) => ActivityType::PolicyCreated,
             ActivityPayload::PolicyUpdated(_) => ActivityType::PolicyUpdated,
             ActivityPayload::PolicyDeleted(_) => ActivityType::PolicyDeleted,
+            ActivityPayload::CommentCreated(_) => ActivityType::CommentCreated,
+            ActivityPayload::CommentResolved(_) => ActivityType::CommentResolved,
+            ActivityPayload::CommentDeleted(_) => ActivityType::CommentDeleted,
         }
     }
 
@@ -345,7 +369,8 @@ impl ActivityPayload {
             | ActivityPayload::InviteCanceled(_)
             | ActivityPayload::WebhookCreated(_)
             | ActivityPayload::WebhookUpdated(_)
-            | ActivityPayload::WebhookDeleted(_) => return None,
+            | ActivityPayload::WebhookDeleted(_)
+            | ActivityPayload::CommentDeleted(_) => return None,
 
             ActivityPayload::MemberAdded(_) => W::MemberAdded,
             ActivityPayload::MemberUpdated(_) => W::MemberUpdated,
@@ -375,6 +400,8 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(_) => W::PolicyCreated,
             ActivityPayload::PolicyUpdated(_) => W::PolicyUpdated,
             ActivityPayload::PolicyDeleted(_) => W::PolicyDeleted,
+            ActivityPayload::CommentCreated(_) => W::CommentCreated,
+            ActivityPayload::CommentResolved(_) => W::CommentResolved,
         })
     }
 
@@ -424,6 +451,10 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(p)
             | ActivityPayload::PolicyUpdated(p)
             | ActivityPayload::PolicyDeleted(p) => Some(p.policy_id.to_string()),
+
+            ActivityPayload::CommentCreated(p)
+            | ActivityPayload::CommentResolved(p)
+            | ActivityPayload::CommentDeleted(p) => Some(p.comment_id.to_string()),
 
             ActivityPayload::WorkspaceCreated(_)
             | ActivityPayload::WorkspaceUpdated(_)
@@ -491,6 +522,11 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(p)
             | ActivityPayload::PolicyUpdated(p)
             | ActivityPayload::PolicyDeleted(p) => Some(p.policy_slug.to_string()),
+
+            // A comment has no human-readable name; it is addressed by id only.
+            ActivityPayload::CommentCreated(_)
+            | ActivityPayload::CommentResolved(_)
+            | ActivityPayload::CommentDeleted(_) => None,
         }
     }
 }

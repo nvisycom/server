@@ -26,6 +26,7 @@ mod search;
 mod workspace;
 mod workspace_activity;
 mod workspace_assignment;
+mod workspace_comment;
 mod workspace_connection;
 mod workspace_connection_schedule;
 mod workspace_connection_sync;
@@ -57,6 +58,7 @@ pub use workspace_activity::{ActivityFilter, WorkspaceActivityRepository};
 pub use workspace_assignment::{
     AssignmentListRow, CreateAssignmentOutcome, WorkspaceAssignmentRepository,
 };
+pub use workspace_comment::{ReplyParentError, WorkspaceCommentRepository};
 pub use workspace_connection::{ScheduledConnection, WorkspaceConnectionRepository};
 pub use workspace_connection_schedule::WorkspaceConnectionScheduleRepository;
 pub use workspace_connection_sync::WorkspaceConnectionSyncRepository;

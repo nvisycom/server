@@ -64,6 +64,10 @@ db_enum! {
         PolicyUpdated = "policy.updated",
         /// A policy was deleted.
         PolicyDeleted = "policy.deleted",
+        /// A comment was created.
+        CommentCreated = "comment.created",
+        /// A comment thread was resolved.
+        CommentResolved = "comment.resolved",
     }
 }
 
@@ -99,6 +103,7 @@ impl WebhookEvent {
             WebhookEvent::PolicyCreated
             | WebhookEvent::PolicyUpdated
             | WebhookEvent::PolicyDeleted => "policy",
+            WebhookEvent::CommentCreated | WebhookEvent::CommentResolved => "comment",
         }
     }
 

@@ -14,6 +14,7 @@ mod pipeline_reference;
 mod workspace;
 mod workspace_activity;
 mod workspace_assignment;
+mod workspace_comment;
 mod workspace_connection;
 mod workspace_connection_schedule;
 mod workspace_connection_sync;
@@ -49,6 +50,7 @@ pub use workspace_activity::{NewWorkspaceActivity, WorkspaceActivity};
 pub use workspace_assignment::{
     NewWorkspaceAssignment, UpdateWorkspaceAssignment, WorkspaceAssignment,
 };
+pub use workspace_comment::{NewWorkspaceComment, UpdateWorkspaceComment, WorkspaceComment};
 pub use workspace_connection::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };

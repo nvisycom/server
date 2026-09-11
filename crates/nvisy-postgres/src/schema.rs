@@ -238,6 +238,25 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+
+    workspace_comments (id) {
+        id -> Uuid,
+        workspace_id -> Uuid,
+        file_id -> Uuid,
+        author_account_id -> Uuid,
+        parent_id -> Nullable<Uuid>,
+        body -> Text,
+        anchor -> Nullable<Jsonb>,
+        resolved_at -> Nullable<Timestamptz>,
+        resolved_by -> Nullable<Uuid>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
     use super::sql_types::SyncMode;
     use super::sql_types::SyncDeletionPolicy;
 
@@ -565,6 +584,7 @@ diesel::joinable!(event_outbox -> workspaces (workspace_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
 diesel::joinable!(workspace_assignments -> workspaces (workspace_id));
+diesel::joinable!(workspace_comments -> workspaces (workspace_id));
 diesel::joinable!(workspace_connection_schedule -> workspace_connections (connection_id));
 diesel::joinable!(workspace_connection_syncs -> accounts (account_id));
 diesel::joinable!(workspace_connection_syncs -> workspace_connections (connection_id));
@@ -605,6 +625,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     event_outbox,
     workspace_activities,
     workspace_assignments,
+    workspace_comments,
     workspace_connection_schedule,
     workspace_connection_syncs,
     workspace_connections,

@@ -1,8 +1,9 @@
 //! Workspace-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
-    WorkspaceActivitiesConstraints, WorkspaceAssignmentConstraints, WorkspaceConstraints,
-    WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspaceWebhookConstraints,
+    WorkspaceActivitiesConstraints, WorkspaceAssignmentConstraints, WorkspaceCommentConstraints,
+    WorkspaceConstraints, WorkspaceInviteConstraints, WorkspaceMemberConstraints,
+    WorkspaceWebhookConstraints,
 };
 
 use super::{Error, ErrorKind};
@@ -58,6 +59,20 @@ impl From<WorkspaceAssignmentConstraints> for Error<'static> {
         };
 
         error.with_resource("workspace_assignment")
+    }
+}
+
+impl From<WorkspaceCommentConstraints> for Error<'static> {
+    fn from(c: WorkspaceCommentConstraints) -> Self {
+        let error = match c {
+            WorkspaceCommentConstraints::BodyLength => ErrorKind::BadRequest
+                .with_message("Comment body must be between 1 and 10000 characters"),
+            WorkspaceCommentConstraints::AnchorSize => {
+                ErrorKind::BadRequest.with_message("Comment anchor is too large")
+            }
+        };
+
+        error.with_resource("workspace_comment")
     }
 }
 

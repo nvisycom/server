@@ -12,14 +12,14 @@
 //! change.
 
 use nvisy_postgres::types::{
-    ActivityPayload, AssignmentActivityParams, AssignmentStatus, ConnectionActivityParams,
-    ConnectionId, ConnectionSyncCompletedParams, ConnectionSyncFailedParams,
-    DetectionActivityParams, DetectionCompletedParams, DetectionFailedParams, DetectionId,
-    FileActivityParams, FileAssignedParams, FileUnassignedParams, Handle, InviteActivityParams,
-    MemberActivityParams, MemberJoinedParams, NotificationPayload, PipelineActivityParams,
-    PolicyActivityParams, ProviderActivityParams, ProviderId, RedactionActivityParams,
-    RedactionCreatedParams, RedactionId, WebhookActivityParams, WebhookEvent, WebhookId,
-    WorkspaceActivityParams, WorkspaceRole,
+    ActivityPayload, AssignmentActivityParams, AssignmentStatus, CommentActivityParams,
+    CommentMentionedParams, ConnectionActivityParams, ConnectionId, ConnectionSyncCompletedParams,
+    ConnectionSyncFailedParams, DetectionActivityParams, DetectionCompletedParams,
+    DetectionFailedParams, DetectionId, FileActivityParams, FileAssignedParams,
+    FileUnassignedParams, Handle, InviteActivityParams, MemberActivityParams, MemberJoinedParams,
+    NotificationPayload, PipelineActivityParams, PolicyActivityParams, ProviderActivityParams,
+    ProviderId, RedactionActivityParams, RedactionCreatedParams, RedactionId,
+    WebhookActivityParams, WebhookEvent, WebhookId, WorkspaceActivityParams, WorkspaceRole,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -77,6 +77,10 @@ workspace_events! {
     PolicyCreated           => "policy.created",
     PolicyUpdated           => "policy.updated",
     PolicyDeleted           => "policy.deleted",
+
+    CommentCreated          => "comment.created",
+    CommentResolved         => "comment.resolved",
+    CommentDeleted          => "comment.deleted",
 }
 
 /// The webhook body for a file event: just the file's display name.
@@ -784,5 +788,105 @@ fn policy_activity(policy_id: Uuid, policy_slug: &Handle) -> PolicyActivityParam
     PolicyActivityParams {
         policy_id,
         policy_slug: policy_slug.clone(),
+    }
+}
+
+/// A comment was created on a file. Notifies each mentioned account (never the
+/// author, even if they @-mention themselves).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommentCreated {
+    pub comment_id: Uuid,
+    pub file_id: Uuid,
+    /// Username of the comment's author, shown in the mention notification.
+    pub author_username: Handle,
+    /// Accounts mentioned in the comment body, to notify. Empty when none.
+    pub mentioned: Vec<Uuid>,
+}
+
+impl EventKind for CommentCreated {
+    const TAG: &'static str = "comment.created";
+
+    fn resource_id(&self) -> Uuid {
+        self.comment_id
+    }
+
+    fn activity(&self) -> ActivityPayload {
+        ActivityPayload::CommentCreated(CommentActivityParams {
+            comment_id: self.comment_id,
+            file_id: self.file_id,
+        })
+    }
+
+    fn webhook(&self) -> Option<WebhookDelivery> {
+        Some(WebhookDelivery {
+            event: WebhookEvent::CommentCreated,
+            body: None,
+        })
+    }
+
+    fn notification(self) -> Vec<Notification> {
+        // One "you were mentioned" notification per mentioned account.
+        self.mentioned
+            .into_iter()
+            .map(|recipient| Notification {
+                target: NotifyTarget::Account(recipient),
+                payload: NotificationPayload::CommentMentioned(CommentMentionedParams {
+                    comment_id: self.comment_id,
+                    file_id: self.file_id,
+                    author_username: self.author_username.clone(),
+                }),
+            })
+            .collect()
+    }
+}
+
+/// A comment thread was resolved.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommentResolved {
+    pub comment_id: Uuid,
+    pub file_id: Uuid,
+}
+
+impl EventKind for CommentResolved {
+    const TAG: &'static str = "comment.resolved";
+
+    fn resource_id(&self) -> Uuid {
+        self.comment_id
+    }
+
+    fn activity(&self) -> ActivityPayload {
+        ActivityPayload::CommentResolved(CommentActivityParams {
+            comment_id: self.comment_id,
+            file_id: self.file_id,
+        })
+    }
+
+    fn webhook(&self) -> Option<WebhookDelivery> {
+        Some(WebhookDelivery {
+            event: WebhookEvent::CommentResolved,
+            body: None,
+        })
+    }
+}
+
+/// A comment was deleted. Recorded in the activity log only (no webhook).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommentDeleted {
+    pub comment_id: Uuid,
+    pub file_id: Uuid,
+}
+
+impl EventKind for CommentDeleted {
+    const TAG: &'static str = "comment.deleted";
+
+    fn resource_id(&self) -> Uuid {
+        self.comment_id
+    }
+
+    fn activity(&self) -> ActivityPayload {
+        ActivityPayload::CommentDeleted(CommentActivityParams {
+            comment_id: self.comment_id,
+            file_id: self.file_id,
+        })
     }
 }

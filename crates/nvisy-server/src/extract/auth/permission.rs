@@ -58,6 +58,14 @@ pub enum Permission {
     /// Can assign files to reviewers and unassign them.
     AssignTasks,
 
+    // Comment permissions
+    /// Can view comments on files.
+    ViewComments,
+    /// Can write comments and replies (and edit or delete one's own).
+    Comment,
+    /// Can resolve and reopen comment threads.
+    ResolveComments,
+
     // Reporting permissions
     /// Can view workspace analytics.
     ViewAnalytics,
@@ -133,6 +141,9 @@ impl Permission {
             | Self::ViewPipelines
             | Self::ViewDetections
             | Self::ViewAssignments
+            | Self::ViewComments
+            | Self::Comment
+            | Self::ResolveComments
             | Self::ViewAnalytics
             | Self::ViewActivity
             | Self::ViewMembers
