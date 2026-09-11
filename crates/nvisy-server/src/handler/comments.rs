@@ -8,7 +8,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::model::{NewWorkspaceThreadComment, UpdateWorkspaceThreadComment};
-use nvisy_postgres::query::WorkspaceThreadCommentRepository;
+use nvisy_postgres::query::{WorkspaceThreadCommentRepository, WorkspaceThreadRepository};
 use nvisy_postgres::{AsyncConnection, PgClient};
 
 use crate::extract::{Authorized, Json, Path, SecurityContext, ValidateJson, markers};
@@ -50,13 +50,6 @@ async fn create_comment(
     // The thread must exist in the workspace (and be live).
     let thread = find_thread(&mut conn, workspace.id, path_params.thread_id).await?;
 
-    // A closed thread is a finished discussion: reject new comments with a 409
-    // rather than appending to it. Reopen the thread to continue.
-    if thread.closed_at.is_some() {
-        return Err(ErrorKind::Conflict
-            .with_message("This thread is closed; reopen it before posting a comment"));
-    }
-
     let MentionOutcome {
         recipients,
         addressed_assistant,
@@ -70,6 +63,19 @@ async fn create_comment(
     // queue the reply job, all in one transaction so they commit together.
     let (comment, queued_assistant) = conn
         .transaction(async |conn| {
+            // Lock the thread and re-check its closed state inside the transaction:
+            // a closed thread is a finished discussion, and the row lock serializes
+            // against a concurrent close so a comment (and its ThreadCommentCreated
+            // event) can never land after ThreadClosed. Reopen to continue.
+            let locked = conn
+                .lock_thread_in_workspace(workspace.id, thread.id)
+                .await?
+                .ok_or_else(|| Error::not_found("workspace_thread"))?;
+            if locked.closed_at.is_some() {
+                return Err(ErrorKind::Conflict
+                    .with_message("This thread is closed; reopen it before posting a comment"));
+            }
+
             let comment = conn
                 .create_comment(NewWorkspaceThreadComment {
                     workspace_id: workspace.id,

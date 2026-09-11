@@ -53,6 +53,19 @@ pub trait WorkspaceThreadRepository {
         thread_id: Uuid,
     ) -> impl Future<Output = Result<Option<WorkspaceThread>>> + Send;
 
+    /// Finds a live thread by id within a workspace, taking a row lock (`FOR
+    /// UPDATE`) so a concurrent close/reopen/delete serializes behind this read.
+    ///
+    /// Call inside a transaction that then acts on the thread's state (e.g.
+    /// posting a comment only while it is open): the lock makes the check and the
+    /// write atomic, closing the read-then-write race the unlocked
+    /// [`find_thread_in_workspace`](Self::find_thread_in_workspace) leaves open.
+    fn lock_thread_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        thread_id: Uuid,
+    ) -> impl Future<Output = Result<Option<WorkspaceThread>>> + Send;
+
     /// Lists a workspace's live threads with cursor pagination, each paired with
     /// the opening author's account reference.
     fn cursor_list_threads(
@@ -171,6 +184,25 @@ impl WorkspaceThreadRepository for PgConnection {
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceThread::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)
+    }
+
+    async fn lock_thread_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        thread_id: Uuid,
+    ) -> Result<Option<WorkspaceThread>> {
+        use schema::workspace_threads::{self, dsl};
+
+        workspace_threads::table
+            .filter(dsl::id.eq(thread_id))
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspaceThread::as_select())
+            .for_update()
             .first(self)
             .await
             .optional()

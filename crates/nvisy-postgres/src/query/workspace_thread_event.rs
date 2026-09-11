@@ -19,16 +19,22 @@ use crate::types::{AccountRefRow, ThreadEventKind};
 use crate::{Error, PgConnection, Result, schema};
 
 /// Which of the two timeline streams an entry came from. Its order is the
-/// tiebreak between a comment and an event that share a `created_at`: a comment
-/// sorts before an event at the same instant.
+/// tiebreak between an event and a comment that share a `created_at`: an event
+/// sorts before a comment at the same instant. This is what makes a thread's
+/// opening render in the natural order — the `Opened` event and the opening
+/// comment are written in the same transaction (and can share an instant), and
+/// the event is the one that logically comes first.
+///
+/// The variant order is significant: it is the derived `Ord` the timeline sorts
+/// by, so `Event` must be declared before `Comment`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TimelineSource {
-    /// A comment (message).
-    Comment,
     /// A lifecycle event.
     Event,
+    /// A comment (message).
+    Comment,
 }
 
 /// Keyset for the merged thread timeline: comments and events ordered together by
@@ -50,7 +56,7 @@ impl TimelineCursor {
     /// A stream's own [`TimelineSource`] decides how the cursor instant is
     /// treated:
     /// - source > cursor.source: every row at the cursor instant comes after it,
-    ///   so include all of them (`same_instant_all = true`).
+    ///   so include the whole instant.
     /// - source == cursor.source: only rows at the instant with a larger id.
     /// - source < cursor.source: no row at the instant qualifies; page strictly
     ///   after the instant.
