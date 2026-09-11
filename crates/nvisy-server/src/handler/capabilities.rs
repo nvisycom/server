@@ -171,8 +171,9 @@ fn list_auth_docs(op: TransformOperation) -> TransformOperation {
         .response::<200, Json<AuthCapabilities>>()
 }
 
-/// Returns routes for the deployment capabilities.
-pub fn routes() -> ApiRouter<ServiceState> {
+/// Authenticated capability routes: the deployment reference data a signed-in
+/// client reads (labels, recognizers, connectors).
+pub fn private_routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
 
     ApiRouter::new()
@@ -188,6 +189,15 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/capabilities/connectors/",
             get_with(list_connectors, list_connectors_docs),
         )
+        .with_path_items(|item| item.tag("Capabilities"))
+}
+
+/// Public capability routes: the sign-in methods a login screen reads before
+/// anyone is authenticated, so this route carries no auth requirement.
+pub fn public_routes() -> ApiRouter<ServiceState> {
+    use aide::axum::routing::*;
+
+    ApiRouter::new()
         .api_route("/capabilities/auth/", get_with(list_auth, list_auth_docs))
         .with_path_items(|item| item.tag("Capabilities"))
 }

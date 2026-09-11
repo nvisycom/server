@@ -166,16 +166,19 @@ pub trait WorkspaceMemberRepository {
         account_id_b: Uuid,
     ) -> impl Future<Output = Result<bool>> + Send;
 
-    /// Counts a workspace's owners while holding a row lock (`FOR UPDATE`) on each
-    /// owner membership, so concurrent owner removals serialize.
+    /// Returns a workspace's owner account ids while holding a row lock
+    /// (`FOR UPDATE`) on each owner membership, so concurrent owner removals
+    /// serialize.
     ///
-    /// Call inside the removal transaction: the lock makes the last-owner check
-    /// and the removal atomic, so two owners leaving at once cannot both pass the
-    /// check and leave the workspace ownerless.
-    fn count_owners_for_update(
+    /// Call inside the removal transaction: the lock makes reading who the owners
+    /// are and removing one atomic, so two owners leaving at once cannot both pass
+    /// the last-owner check and leave the workspace ownerless. The caller reads
+    /// both the current owner set (is *this* account an owner?) and its size (is
+    /// it the last?) from the locked result.
+    fn lock_owner_ids(
         &mut self,
         workspace_id: Uuid,
-    ) -> impl Future<Output = Result<i64>> + Send;
+    ) -> impl Future<Output = Result<Vec<Uuid>>> + Send;
 }
 
 impl WorkspaceMemberRepository for PgConnection {
@@ -582,22 +585,20 @@ impl WorkspaceMemberRepository for PgConnection {
         Ok(shares)
     }
 
-    async fn count_owners_for_update(&mut self, workspace_id: Uuid) -> Result<i64> {
+    async fn lock_owner_ids(&mut self, workspace_id: Uuid) -> Result<Vec<Uuid>> {
         use schema::workspace_members::{self, dsl};
 
-        // Lock the owner rows (`FOR UPDATE`) and count them. `count()` cannot be
-        // combined with a row lock, so select-and-lock the owner ids, then count
-        // in memory; the set is tiny (a workspace's owners).
-        let owner_ids: Vec<Uuid> = workspace_members::table
+        // Lock the owner rows (`FOR UPDATE`) and return their account ids; the set
+        // is tiny (a workspace's owners). The caller derives both membership and
+        // count from it under the lock.
+        workspace_members::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::member_role.eq(WorkspaceRole::Owner))
             .select(dsl::account_id)
             .for_update()
             .load(self)
             .await
-            .map_err(Error::from)?;
-
-        Ok(owner_ids.len() as i64)
+            .map_err(Error::from)
     }
 }
 

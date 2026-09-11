@@ -347,9 +347,9 @@ async fn leave_workspace(
 
     let mut conn = pg_client.get_connection().await?;
 
-    // Read the member back with its account, both to confirm membership and to
-    // name the departing member in the event.
-    let Some((member, account)) = conn
+    // Read the member's account to confirm membership and to name the departing
+    // member in the event. The role is re-read under lock inside the transaction.
+    let Some((_member, account)) = conn
         .find_workspace_member_with_account(workspace.id, auth_state.account_id)
         .await?
     else {
@@ -358,16 +358,17 @@ async fn leave_workspace(
             .with_message("You are not a member of this workspace"));
     };
 
-    let is_owner = member.member_role.is_owner();
-
     // Remove the member and record the departure atomically. A self-initiated
     // leave is the same domain fact as an admin removal, so it records
     // `MemberDeleted` with the leaving account as both actor and subject.
     conn.transaction(async |conn| {
         // The sole owner cannot leave and orphan the workspace: transfer ownership
-        // first. The owner count is taken under a row lock inside this
-        // transaction, so two owners leaving at once cannot both pass the check.
-        if is_owner && conn.count_owners_for_update(workspace.id).await? <= 1 {
+        // first. Read the owner set under a row lock inside this transaction — so
+        // the role is current (not the stale pre-transaction read) and two owners
+        // leaving at once cannot both pass — then check if this account is the
+        // last owner.
+        let owner_ids = conn.lock_owner_ids(workspace.id).await?;
+        if owner_ids.contains(&auth_state.account_id) && owner_ids.len() <= 1 {
             return Err(ErrorKind::Conflict
                 .with_message("You are the only owner; transfer ownership before leaving")
                 .with_resource("workspace_member"));

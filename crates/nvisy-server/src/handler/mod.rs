@@ -98,7 +98,7 @@ fn private_routes(service_state: ServiceState) -> ApiRouter<ServiceState> {
         .merge(detection_audits::routes())
         .merge(workspace_redactions::routes())
         .merge(workspace_policies::routes())
-        .merge(capabilities::routes())
+        .merge(capabilities::private_routes())
         .merge(account_api_tokens::routes())
         .merge(account_notifications::routes())
         .merge(workspace_invites::routes())
@@ -108,7 +108,7 @@ fn private_routes(service_state: ServiceState) -> ApiRouter<ServiceState> {
         .merge(auth_oidc::private_routes())
         // Logout revokes the caller's session (a cookie-driven state change), so
         // it sits behind the authentication and CSRF layers.
-        .merge(authentication::authenticated_routes())
+        .merge(authentication::private_routes())
 }
 
 /// Returns an [`ApiRouter`] with all built-in public routes. Downstream routes
@@ -122,6 +122,8 @@ fn public_routes() -> ApiRouter<ServiceState> {
         // OIDC link route is there too.
         .merge(authentication::public_routes())
         .merge(auth_oidc::public_routes())
+        // The available sign-in methods a login screen reads before authenticating.
+        .merge(capabilities::public_routes())
         .merge(monitors::routes())
         // Avatar serving is public so images load directly in an `<img>` tag; it
         // is infrastructure shared by accounts and workspaces, always mounted.
