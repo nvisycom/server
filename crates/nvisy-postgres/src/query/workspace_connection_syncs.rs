@@ -230,17 +230,21 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
         use schema::workspace_connection_syncs::dsl;
         use schema::{accounts, workspace_connection_syncs};
 
-        let mut base_query = workspace_connection_syncs::table
-            .filter(dsl::connection_id.eq(connection_id))
-            .into_boxed();
-
-        if let Some(status) = status_filter {
-            base_query = base_query.filter(dsl::status.eq(status));
-        }
+        // The scoped builder (filters shared by the count and the page).
+        let scoped = || {
+            let mut query = workspace_connection_syncs::table
+                .inner_join(accounts::table)
+                .filter(dsl::connection_id.eq(connection_id))
+                .into_boxed();
+            if let Some(status) = status_filter {
+                query = query.filter(dsl::status.eq(status));
+            }
+            query
+        };
 
         let total = if pagination.include_count {
             Some(
-                base_query
+                scoped()
                     .count()
                     .get_result::<i64>(self)
                     .await
@@ -250,32 +254,28 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
             None
         };
 
-        let mut query = workspace_connection_syncs::table
-            .inner_join(accounts::table)
-            .filter(dsl::connection_id.eq(connection_id))
-            .into_boxed();
-
-        if let Some(status) = status_filter {
-            query = query.filter(dsl::status.eq(status));
-        }
-
         let after = pagination
             .after_key()
             .map(|k| (jiff_diesel::Timestamp::from(k.started_at), k.id));
-        let rows: Vec<(WorkspaceConnectionSync, AccountRefRow)> =
-            keyset!(query, dsl::started_at, dsl::id, pagination.direction, after)
-                .select((
-                    WorkspaceConnectionSync::as_select(),
-                    (
-                        accounts::username,
-                        accounts::display_name,
-                        accounts::avatar_url,
-                    ),
-                ))
-                .limit(pagination.fetch_limit())
-                .load(self)
-                .await
-                .map_err(Error::from)?;
+        let rows: Vec<(WorkspaceConnectionSync, AccountRefRow)> = keyset!(
+            scoped(),
+            dsl::started_at,
+            dsl::id,
+            pagination.direction,
+            after
+        )
+        .select((
+            WorkspaceConnectionSync::as_select(),
+            (
+                accounts::username,
+                accounts::display_name,
+                accounts::avatar_url,
+            ),
+        ))
+        .limit(pagination.fetch_limit())
+        .load(self)
+        .await
+        .map_err(Error::from)?;
 
         let items: Vec<WithAccountRef<WorkspaceConnectionSync>> = rows
             .into_iter()
@@ -384,7 +384,9 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
 
         let sync = workspace_connection_syncs::table
             .filter(dsl::connection_id.eq(connection_id))
-            .order(dsl::started_at.desc())
+            // `id` breaks a `started_at` tie so the newest row is deterministic,
+            // matching the batched `find_latest_workspace_connection_syncs`.
+            .order((dsl::started_at.desc(), dsl::id.desc()))
             .select(WorkspaceConnectionSync::as_select())
             .first(self)
             .await

@@ -65,11 +65,11 @@ impl WorkspaceRepository for PgConnection {
     }
 
     async fn find_workspace_by_id(&mut self, workspace_id: Uuid) -> Result<Option<Workspace>> {
-        use schema::workspaces::dsl::*;
+        use schema::workspaces::{self, dsl};
 
-        let workspace = workspaces
-            .filter(id.eq(workspace_id))
-            .filter(deleted_at.is_null())
+        let workspace = workspaces::table
+            .filter(dsl::id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
             .select(Workspace::as_select())
             .first(self)
             .await
@@ -111,11 +111,11 @@ impl WorkspaceRepository for PgConnection {
         workspace_id: Uuid,
         changes: UpdateWorkspace,
     ) -> Result<Workspace> {
-        use schema::workspaces::dsl::*;
+        use schema::workspaces::{self, dsl};
 
-        let workspace = diesel::update(workspaces)
-            .filter(id.eq(workspace_id))
-            .filter(deleted_at.is_null())
+        let workspace = diesel::update(workspaces::table)
+            .filter(dsl::id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
             .set(&changes)
             .returning(Workspace::as_returning())
             .get_result(self)

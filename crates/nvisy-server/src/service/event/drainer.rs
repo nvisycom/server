@@ -1,6 +1,6 @@
 //! The event-outbox drainer: projects pending events onto their sinks.
 //!
-//! A background worker claims batches of due [`EventOutbox`] rows, decodes each
+//! A background worker claims batches of due [`WorkspaceEventOutbox`] rows, decodes each
 //! into a [`WorkspaceEvent`], and projects it onto the three sinks — the activity
 //! log, the webhook stream, and notifications. This is the one place the event →
 //! sink projection lives, off the request path.
@@ -17,7 +17,7 @@
 
 use std::time::Duration;
 
-use nvisy_postgres::model::{EventOutbox, NewWorkspaceActivity};
+use nvisy_postgres::model::{NewWorkspaceActivity, WorkspaceEventOutbox};
 use nvisy_postgres::query::{EventOutboxRepository, WorkspaceActivityRepository};
 use nvisy_postgres::types::Json;
 use nvisy_postgres::{AsyncConnection, PgConn};
@@ -215,7 +215,7 @@ impl EventOutboxDrainer {
     async fn record_activity(
         &self,
         conn: &mut PgConn,
-        row: &EventOutbox,
+        row: &WorkspaceEventOutbox,
     ) -> std::result::Result<WorkspaceEvent, ()> {
         let event = serde_json::from_value::<WorkspaceEvent>(row.event.clone()).map_err(|err| {
             tracing::error!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to decode outbox event");
@@ -243,7 +243,7 @@ impl EventOutboxDrainer {
     /// stream and in-app notifications. Runs after the batch transaction commits,
     /// so these never hold a database transaction open across their network work;
     /// each is at-most-once (webhook delivery has its own retry pipeline).
-    async fn dispatch_side_effects(&self, row: &EventOutbox, event: &WorkspaceEvent) {
+    async fn dispatch_side_effects(&self, row: &WorkspaceEventOutbox, event: &WorkspaceEvent) {
         let workspace_id = row.workspace_id;
         let actor = row.account_id;
 

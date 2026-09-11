@@ -180,12 +180,12 @@ impl WorkspaceInviteRepository for PgConnection {
     async fn accept_workspace_invite(
         &mut self,
         invite_id: Uuid,
-        _acceptor_id: Uuid,
+        acceptor_id: Uuid,
     ) -> Result<WorkspaceInvite> {
         let changes = UpdateWorkspaceInvite {
             invite_status: Some(InviteStatus::Accepted),
             responded_at: Some(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
-            ..Default::default()
+            updated_by: Some(acceptor_id),
         };
 
         self.update_workspace_invite(invite_id, changes).await

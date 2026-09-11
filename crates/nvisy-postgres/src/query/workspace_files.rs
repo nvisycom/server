@@ -155,28 +155,6 @@ pub trait WorkspaceFileRepository {
     /// when currently NULL.
     fn mark_file_purged(&mut self, file_id: Uuid) -> impl Future<Output = Result<()>> + Send;
 
-    /// Recomputes `expires_at` for live files of `kind` in `workspace_id`,
-    /// returning the number updated. Used to backfill when retention settings
-    /// change. `None` clears the expiry (retention became `Persistent`).
-    fn backfill_files_expiry(
-        &mut self,
-        workspace_id: Uuid,
-        kind: FileKind,
-        expires_at: Option<jiff::Timestamp>,
-    ) -> impl Future<Output = Result<usize>> + Send;
-
-    /// Recomputes `expires_at` for live files of `kind` produced by a specific
-    /// pipeline's detections and redactions (detection audits, redaction outputs,
-    /// and review audits), returning the number updated. Used to backfill when a
-    /// pipeline's own retention override changes, without touching other
-    /// pipelines' files. `None` clears the expiry.
-    fn backfill_pipeline_files_expiry(
-        &mut self,
-        pipeline_id: Uuid,
-        kind: FileKind,
-        expires_at: Option<jiff::Timestamp>,
-    ) -> impl Future<Output = Result<usize>> + Send;
-
     /// Updates a workspace file with new metadata or settings.
     fn update_workspace_file(
         &mut self,
@@ -466,87 +444,6 @@ impl WorkspaceFileRepository for PgConnection {
         Ok(())
     }
 
-    async fn backfill_files_expiry(
-        &mut self,
-        workspace_id: Uuid,
-        kind: FileKind,
-        expires_at: Option<jiff::Timestamp>,
-    ) -> Result<usize> {
-        use schema::workspace_files::{self, dsl};
-
-        let expires_at = expires_at.map(jiff_diesel::Timestamp::from);
-
-        let count = diesel::update(workspace_files::table)
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::file_kind.eq(kind))
-            .filter(dsl::deleted_at.is_null())
-            .set(dsl::expires_at.eq(expires_at))
-            .execute(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(count)
-    }
-
-    async fn backfill_pipeline_files_expiry(
-        &mut self,
-        pipeline_id: Uuid,
-        kind: FileKind,
-        expires_at: Option<jiff::Timestamp>,
-    ) -> Result<usize> {
-        use schema::workspace_detections::dsl as detections;
-        use schema::workspace_redactions::dsl as redactions;
-        use schema::{workspace_detections, workspace_files, workspace_redactions};
-
-        let expires_at = expires_at.map(jiff_diesel::Timestamp::from);
-
-        // Collect the ids of files this pipeline produced for `kind`. Audit blobs
-        // belong to the pipeline's detections; redacted outputs and review blobs
-        // belong to the redactions of those detections (joined back to the
-        // pipeline through the detection). Any other kind is not pipeline-produced,
-        // so there is nothing to do.
-        let file_ids: Vec<Uuid> = match kind {
-            FileKind::Audit => workspace_detections::table
-                .filter(detections::pipeline_id.eq(pipeline_id))
-                .filter(detections::audit_file_id.is_not_null())
-                .select(detections::audit_file_id.assume_not_null())
-                .load(self)
-                .await
-                .map_err(Error::from)?,
-            FileKind::Redacted => workspace_redactions::table
-                .inner_join(workspace_detections::table)
-                .filter(detections::pipeline_id.eq(pipeline_id))
-                .filter(redactions::output_file_id.is_not_null())
-                .select(redactions::output_file_id.assume_not_null())
-                .load(self)
-                .await
-                .map_err(Error::from)?,
-            FileKind::Review => workspace_redactions::table
-                .inner_join(workspace_detections::table)
-                .filter(detections::pipeline_id.eq(pipeline_id))
-                .filter(redactions::review_file_id.is_not_null())
-                .select(redactions::review_file_id.assume_not_null())
-                .load(self)
-                .await
-                .map_err(Error::from)?,
-            _ => return Ok(0),
-        };
-
-        if file_ids.is_empty() {
-            return Ok(0);
-        }
-
-        let count = diesel::update(workspace_files::table)
-            .filter(workspace_files::deleted_at.is_null())
-            .filter(workspace_files::id.eq_any(file_ids))
-            .set(workspace_files::expires_at.eq(expires_at))
-            .execute(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(count)
-    }
-
     async fn find_file_in_workspace_with_creator(
         &mut self,
         workspace_id: Uuid,
@@ -642,37 +539,44 @@ impl WorkspaceFileRepository for PgConnection {
         let extensions = filter.extensions.clone();
         let hash = filter.hash.clone();
 
-        // Build base query with filters
-        let mut base_query = workspace_files::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .filter(dsl::file_kind.eq_any(FileKind::DOCUMENTS))
-            .into_boxed();
+        // The scoped builder (filters shared by the count and the page). The
+        // document-kind filter is what keeps audit/artifact rows out of the list,
+        // so it must apply to both or the count and items disagree.
+        let scoped = || {
+            let mut query = workspace_files::table
+                .inner_join(accounts::table)
+                .filter(dsl::workspace_id.eq(workspace_id))
+                .filter(dsl::deleted_at.is_null())
+                .filter(dsl::file_kind.eq_any(FileKind::DOCUMENTS))
+                .into_boxed();
 
-        // Hybrid name search: ILIKE substring (works for short queries) OR
-        // trigram similarity (typo tolerance); both served by the trgm index.
-        if let Some(ref term) = search_term {
-            base_query = base_query.filter(
-                dsl::display_name
-                    .ilike(ilike_contains(term))
-                    .or(dsl::display_name.trgm_similar_to(term)),
-            );
-        }
+            // Hybrid name search: ILIKE substring (works for short queries) OR
+            // trigram similarity (typo tolerance); both served by the trgm index.
+            if let Some(ref term) = search_term {
+                query = query.filter(
+                    dsl::display_name
+                        .ilike(ilike_contains(term))
+                        .or(dsl::display_name.trgm_similar_to(term)),
+                );
+            }
 
-        // Apply the extension constraint. A present-but-empty set matches
-        // nothing (an active facet with no members), so apply whenever `Some`.
-        if let Some(ref extensions) = extensions {
-            base_query = base_query.filter(dsl::file_extension.eq_any(extensions));
-        }
+            // Apply the extension constraint. A present-but-empty set matches
+            // nothing (an active facet with no members), so apply whenever `Some`.
+            if let Some(ref extensions) = extensions {
+                query = query.filter(dsl::file_extension.eq_any(extensions));
+            }
 
-        // Apply the exact content-hash constraint (dedup lookup).
-        if let Some(ref hash) = hash {
-            base_query = base_query.filter(dsl::file_hash_sha256.eq(hash));
-        }
+            // Apply the exact content-hash constraint (dedup lookup).
+            if let Some(ref hash) = hash {
+                query = query.filter(dsl::file_hash_sha256.eq(hash));
+            }
+
+            query
+        };
 
         let total = if pagination.include_count {
             Some(
-                base_query
+                scoped()
                     .count()
                     .get_result::<i64>(self)
                     .await
@@ -682,54 +586,28 @@ impl WorkspaceFileRepository for PgConnection {
             None
         };
 
-        // Rebuild query for fetching items (can't reuse boxed query after count).
-        // The document-kind filter must be reapplied here too: it is what keeps
-        // audit/artifact rows out of the list, and omitting it leaks them into
-        // the results even though the count above excludes them.
-        let mut query = workspace_files::table
-            .inner_join(accounts::table)
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .filter(dsl::file_kind.eq_any(FileKind::DOCUMENTS))
-            .into_boxed();
-
-        // Hybrid name search: ILIKE substring OR trigram similarity (see above).
-        if let Some(ref term) = search_term {
-            query = query.filter(
-                dsl::display_name
-                    .ilike(ilike_contains(term))
-                    .or(dsl::display_name.trgm_similar_to(term)),
-            );
-        }
-
-        // Apply the extension constraint. A present-but-empty set matches
-        // nothing (an active facet with no members), so apply whenever `Some`.
-        if let Some(ref extensions) = extensions {
-            query = query.filter(dsl::file_extension.eq_any(extensions));
-        }
-
-        // Apply the exact content-hash constraint (dedup lookup).
-        if let Some(ref hash) = hash {
-            query = query.filter(dsl::file_hash_sha256.eq(hash));
-        }
-
         let after = pagination
             .after_key()
             .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
-        let rows: Vec<(WorkspaceFile, AccountRefRow)> =
-            keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
-                .select((
-                    WorkspaceFile::as_select(),
-                    (
-                        accounts::username,
-                        accounts::display_name,
-                        accounts::avatar_url,
-                    ),
-                ))
-                .limit(pagination.fetch_limit())
-                .load(self)
-                .await
-                .map_err(Error::from)?;
+        let rows: Vec<(WorkspaceFile, AccountRefRow)> = keyset!(
+            scoped(),
+            dsl::created_at,
+            dsl::id,
+            pagination.direction,
+            after
+        )
+        .select((
+            WorkspaceFile::as_select(),
+            (
+                accounts::username,
+                accounts::display_name,
+                accounts::avatar_url,
+            ),
+        ))
+        .limit(pagination.fetch_limit())
+        .load(self)
+        .await
+        .map_err(Error::from)?;
 
         let items: Vec<WithAccountRef<WorkspaceFile>> = rows
             .into_iter()

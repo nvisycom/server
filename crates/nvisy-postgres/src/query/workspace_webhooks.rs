@@ -233,8 +233,11 @@ impl WorkspaceWebhookRepository for PgConnection {
     ) -> Result<WorkspaceWebhook> {
         use schema::workspace_webhooks::dsl::*;
 
+        // Scope to a live row: a concurrently tombstoned webhook yields
+        // `NotFound` instead of reviving the dead row.
         let webhook = diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
+            .filter(deleted_at.is_null())
             .set(&changes)
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
@@ -248,8 +251,10 @@ impl WorkspaceWebhookRepository for PgConnection {
         use diesel::dsl::now;
         use schema::workspace_webhooks::dsl::*;
 
+        // Scope to a live row so re-deleting keeps the original tombstone.
         diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
+            .filter(deleted_at.is_null())
             .set(deleted_at.eq(now))
             .execute(self)
             .await

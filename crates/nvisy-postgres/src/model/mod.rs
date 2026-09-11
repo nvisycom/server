@@ -7,7 +7,6 @@ mod account_api_tokens;
 mod account_identities;
 mod account_notifications;
 mod accounts;
-mod event_outbox;
 mod pipeline_references;
 mod workspace_activities;
 mod workspace_assignments;
@@ -18,6 +17,7 @@ mod workspace_connections;
 mod workspace_detection_jobs;
 mod workspace_detection_usage;
 mod workspace_detections;
+mod workspace_event_outbox;
 mod workspace_file_exports;
 mod workspace_file_imports;
 mod workspace_files;
@@ -27,6 +27,7 @@ mod workspace_pipelines;
 mod workspace_policies;
 mod workspace_providers;
 mod workspace_redactions;
+mod workspace_retention_jobs;
 mod workspace_thread_anchors;
 mod workspace_thread_comments;
 mod workspace_thread_events;
@@ -41,7 +42,6 @@ pub use account_notifications::{
     AccountNotification, NewAccountNotification, UpdateAccountNotification,
 };
 pub use accounts::{Account, NewAccount, UpdateAccount};
-pub use event_outbox::{EventOutbox, NewEventOutbox};
 pub use pipeline_references::PipelinePolicy;
 pub use workspace_activities::{NewWorkspaceActivity, WorkspaceActivity};
 pub use workspace_assignments::{
@@ -63,6 +63,7 @@ pub use workspace_detection_usage::{NewWorkspaceDetectionUsage, WorkspaceDetecti
 pub use workspace_detections::{
     NewWorkspaceDetection, UpdateWorkspaceDetection, WorkspaceDetection,
 };
+pub use workspace_event_outbox::{NewWorkspaceEventOutbox, WorkspaceEventOutbox};
 pub use workspace_file_exports::{NewWorkspaceFileExport, WorkspaceFileExport};
 pub use workspace_file_imports::{NewWorkspaceFileImport, WorkspaceFileImport};
 pub use workspace_files::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
@@ -72,6 +73,7 @@ pub use workspace_pipelines::{NewWorkspacePipeline, UpdateWorkspacePipeline, Wor
 pub use workspace_policies::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 pub use workspace_providers::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};
 pub use workspace_redactions::{NewWorkspaceRedaction, WorkspaceRedaction};
+pub use workspace_retention_jobs::{NewWorkspaceRetentionJob, WorkspaceRetentionJob};
 pub use workspace_thread_anchors::{NewWorkspaceThreadAnchor, WorkspaceThreadAnchor};
 pub use workspace_thread_comments::{
     NewWorkspaceThreadComment, UpdateWorkspaceThreadComment, WorkspaceThreadComment,

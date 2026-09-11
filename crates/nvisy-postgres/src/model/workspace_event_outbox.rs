@@ -5,7 +5,7 @@ use ipnet::IpNet;
 use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
-use crate::schema::event_outbox;
+use crate::schema::workspace_event_outbox;
 use crate::types::OutboxStatus;
 
 /// A pending or processed outbox row: a serialized workspace event awaiting (or
@@ -15,9 +15,9 @@ use crate::types::OutboxStatus;
 /// server-side `WorkspaceEvent` — so the ORM stays free of the event vocabulary;
 /// the drainer decodes it.
 #[derive(Debug, Clone, Queryable, Selectable)]
-#[diesel(table_name = event_outbox)]
+#[diesel(table_name = workspace_event_outbox)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct EventOutbox {
+pub struct WorkspaceEventOutbox {
     /// Unique outbox row identifier.
     pub id: Uuid,
     /// Workspace the event was raised in.
@@ -46,10 +46,10 @@ pub struct EventOutbox {
 
 /// A new outbox row, inserted in the same transaction as the action it records.
 #[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = event_outbox)]
+#[diesel(table_name = workspace_event_outbox)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[must_use]
-pub struct NewEventOutbox {
+pub struct NewWorkspaceEventOutbox {
     /// Workspace the event was raised in.
     pub workspace_id: Uuid,
     /// Account that performed the action.
@@ -62,7 +62,7 @@ pub struct NewEventOutbox {
     pub event: serde_json::Value,
 }
 
-impl NewEventOutbox {
+impl NewWorkspaceEventOutbox {
     /// A minimal pending outbox row for `workspace_id` by `account_id`, with a
     /// placeholder event payload, for tests.
     #[cfg(any(feature = "test_util", test))]

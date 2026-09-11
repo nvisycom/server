@@ -701,10 +701,19 @@ async fn delete_file(
     // The soft-delete already committed above; `purge_file` re-runs it
     // idempotently, then removes the object. Runs keep their reference to the file
     // as history; a reader resolves it to "gone". The purge outcome is not
-    // surfaced to the caller: a pending object purge is the reaper's to retry.
-    let _ = blob
+    // surfaced to the caller: the delete is already committed, so a failed object
+    // purge is logged and left for the reaper to retry, matching the bulk path.
+    if let Err(err) = blob
         .purge_file(&mut conn, file.id, &file.storage_path, &file.storage_bucket)
-        .await?;
+        .await
+    {
+        tracing::error!(
+            target: TRACING_TARGET,
+            file_id = %file.id,
+            error = %err,
+            "Failed to purge a deleted file's object; left for the reaper to retry",
+        );
+    }
 
     tracing::info!(target: TRACING_TARGET, "File deleted");
     Ok(StatusCode::NO_CONTENT)

@@ -190,6 +190,7 @@ fn update_api_token_docs(op: TransformOperation) -> TransformOperation {
         .response::<200, Json<ApiToken>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
 

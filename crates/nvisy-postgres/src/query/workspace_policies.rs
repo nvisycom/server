@@ -199,12 +199,18 @@ impl WorkspacePolicyRepository for PgConnection {
     ) -> Result<WorkspacePolicy> {
         use schema::workspace_policies::{self, dsl};
 
-        let policy = diesel::update(workspace_policies::table.filter(dsl::id.eq(policy_id)))
-            .set(&updates)
-            .returning(WorkspacePolicy::as_returning())
-            .get_result(self)
-            .await
-            .map_err(Error::from)?;
+        // Scope to a live row so a concurrently soft-deleted policy is not
+        // revived by the update.
+        let policy = diesel::update(
+            workspace_policies::table
+                .filter(dsl::id.eq(policy_id))
+                .filter(dsl::deleted_at.is_null()),
+        )
+        .set(&updates)
+        .returning(WorkspacePolicy::as_returning())
+        .get_result(self)
+        .await
+        .map_err(Error::from)?;
 
         Ok(policy)
     }

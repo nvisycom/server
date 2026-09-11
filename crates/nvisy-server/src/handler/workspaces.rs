@@ -8,13 +8,13 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
-use nvisy_postgres::model::{NewWorkspaceMember, Workspace as WorkspaceModel, WorkspaceMember};
-use nvisy_postgres::query::{
-    WorkspaceFileRepository, WorkspaceMemberRepository, WorkspaceRepository,
+use nvisy_postgres::model::{
+    NewWorkspaceMember, NewWorkspaceRetentionJob, Workspace as WorkspaceModel, WorkspaceMember,
 };
-use nvisy_postgres::types::{FileKind, RetentionScope, RetentionSettings};
+use nvisy_postgres::query::{
+    RetentionJobOutboxRepository, WorkspaceMemberRepository, WorkspaceRepository,
+};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
-use uuid::Uuid;
 
 use crate::extract::{
     AuthState, Authorized, AvatarUpload, Json, Query, SecurityContext, ValidateJson,
@@ -28,39 +28,13 @@ use crate::handler::utility::resolve_account_ref;
 use crate::middleware::UploadConfig;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
-    AvatarService, EventEmitter, EventOrigin, MAX_AVATAR_UPLOAD_BYTES, ServiceState,
-    WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
+    AvatarService, EventEmitter, EventOrigin, MAX_AVATAR_UPLOAD_BYTES,
+    RetentionBackfillCoordinator, ServiceState, WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent,
+    WorkspaceUpdated,
 };
 
 /// Tracing target for workspace operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspaces";
-
-/// Recomputes each document scope's `expires_at` on a workspace's existing live
-/// files after its retention settings change, so a change takes effect on data
-/// already stored (not just future writes). This applies the workspace baseline
-/// across all files of each kind; a pipeline's own override backfill is handled
-/// separately when that pipeline is updated (see `update_pipeline`).
-async fn backfill_retention(
-    conn: &mut PgConn,
-    workspace_id: Uuid,
-    retention: &RetentionSettings,
-) -> Result<()> {
-    let now = jiff::Timestamp::now();
-    for (scope, kind) in [
-        (RetentionScope::OriginalDocuments, FileKind::Original),
-        (RetentionScope::RedactedDocuments, FileKind::Redacted),
-        (RetentionScope::AuditLogs, FileKind::Audit),
-        // Review audits share the audit-logs scope with detection audits; a
-        // redaction stages them under `AuditLogs`, so they backfill under it too.
-        (RetentionScope::AuditLogs, FileKind::Review),
-        (RetentionScope::Intermediates, FileKind::Intermediate),
-    ] {
-        let expires_at = retention.get(scope).expires_at(now);
-        conn.backfill_files_expiry(workspace_id, kind, expires_at)
-            .await?;
-    }
-    Ok(())
-}
 
 /// Creates a new workspace with the authenticated user as owner.
 ///
@@ -225,6 +199,7 @@ fn read_workspace_docs(op: TransformOperation) -> TransformOperation {
 async fn update_workspace(
     State(pg_client): State<PgClient>,
     State(upload): State<UploadConfig>,
+    State(retention_backfill): State<RetentionBackfillCoordinator>,
     authz: Authorized<markers::UpdateWorkspace>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWorkspace>,
@@ -236,22 +211,23 @@ async fn update_workspace(
     let member = authz.member;
     let mut conn = pg_client.get_connection().await?;
 
-    // Capture the new retention so, if settings changed, we can backfill the
-    // precomputed `expires_at` on existing files for this workspace.
-    let new_retention = request.settings.map(|settings| settings.retention);
+    // If the settings changed, the existing files' precomputed `expires_at` must
+    // be reprojected. That is unbounded, so enqueue a backfill job (committed with
+    // the settings write) for the drainer to apply off the request path.
+    let settings_changed = request.settings.is_some();
 
     let update_data = request.into_model()?;
 
-    // The settings write, the retention backfill, and the update event must be
-    // atomic: otherwise a mid-operation failure could persist the new settings
-    // while existing files keep stale `expires_at`, update only some file kinds,
-    // or record the event out of step with the update.
+    // The settings write, the backfill enqueue, and the update event commit
+    // together, so the event is never lost and the backfill is never queued for a
+    // settings change that rolled back.
     let workspace_id = workspace.id;
     let updated = conn
         .transaction(async |conn| {
             let updated = conn.update_workspace(workspace_id, update_data).await?;
-            if let Some(retention) = new_retention {
-                backfill_retention(conn, workspace_id, &retention).await?;
+            if settings_changed {
+                conn.enqueue_retention_job(NewWorkspaceRetentionJob::workspace(workspace_id))
+                    .await?;
             }
             conn.emit_event(
                 EventOrigin {
@@ -268,6 +244,11 @@ async fn update_workspace(
             Ok::<_, Error>(updated)
         })
         .await?;
+
+    // Wake the drainer so the just-committed backfill applies promptly.
+    if settings_changed {
+        retention_backfill.wake();
+    }
 
     let creator = find_workspace_creator(&mut conn, updated.slug.as_str()).await?;
 

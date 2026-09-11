@@ -229,20 +229,22 @@ impl WorkspaceConnectionRepository for PgConnection {
         use schema::workspace_connections::dsl;
         use schema::{accounts, workspace_connections};
 
-        // Build base query with filters
-        let mut base_query = workspace_connections::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .into_boxed();
-
-        // Apply provider filter (any-of)
-        if !providers.is_empty() {
-            base_query = base_query.filter(dsl::provider.eq_any(providers.to_vec()));
-        }
+        // The scoped builder (filters shared by the count and the page).
+        let scoped = || {
+            let mut query = workspace_connections::table
+                .inner_join(accounts::table)
+                .filter(dsl::workspace_id.eq(workspace_id))
+                .filter(dsl::deleted_at.is_null())
+                .into_boxed();
+            if !providers.is_empty() {
+                query = query.filter(dsl::provider.eq_any(providers.to_vec()));
+            }
+            query
+        };
 
         let total = if pagination.include_count {
             Some(
-                base_query
+                scoped()
                     .count()
                     .get_result::<i64>(self)
                     .await
@@ -252,34 +254,28 @@ impl WorkspaceConnectionRepository for PgConnection {
             None
         };
 
-        // Rebuild query for fetching items
-        let mut query = workspace_connections::table
-            .inner_join(accounts::table)
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .into_boxed();
-
-        if !providers.is_empty() {
-            query = query.filter(dsl::provider.eq_any(providers.to_vec()));
-        }
-
         let after = pagination
             .after_key()
             .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
-        let rows: Vec<(WorkspaceConnection, AccountRefRow)> =
-            keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
-                .select((
-                    WorkspaceConnection::as_select(),
-                    (
-                        accounts::username,
-                        accounts::display_name,
-                        accounts::avatar_url,
-                    ),
-                ))
-                .limit(pagination.fetch_limit())
-                .load(self)
-                .await
-                .map_err(Error::from)?;
+        let rows: Vec<(WorkspaceConnection, AccountRefRow)> = keyset!(
+            scoped(),
+            dsl::created_at,
+            dsl::id,
+            pagination.direction,
+            after
+        )
+        .select((
+            WorkspaceConnection::as_select(),
+            (
+                accounts::username,
+                accounts::display_name,
+                accounts::avatar_url,
+            ),
+        ))
+        .limit(pagination.fetch_limit())
+        .load(self)
+        .await
+        .map_err(Error::from)?;
 
         let items: Vec<WithAccountRef<WorkspaceConnection>> = rows
             .into_iter()

@@ -25,11 +25,17 @@ pub struct CreateInvite {
 }
 
 impl CreateInvite {
-    /// Converts to database model.
+    /// The invitee email, normalized (trimmed and lowercased) so lookups and the
+    /// stored value are consistent regardless of how the caller cased it.
+    pub fn normalized_email(&self) -> String {
+        self.invitee_email.trim().to_lowercase()
+    }
+
+    /// Converts to database model, storing the normalized invitee email.
     pub fn to_model(&self, workspace_id: Uuid, created_by: Uuid) -> NewWorkspaceInvite {
         NewWorkspaceInvite {
             workspace_id,
-            invitee_email: Some(self.invitee_email.clone()),
+            invitee_email: Some(self.normalized_email()),
             invited_role: Some(self.invited_role),
             expires_at: self.expires_in.to_expiry_timestamp().map(Into::into),
             created_by,

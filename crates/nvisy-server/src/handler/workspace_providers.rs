@@ -6,6 +6,8 @@
 //! (credentials plus provider-specific settings) is encrypted with
 //! workspace-derived keys and never exposed through the API.
 
+use std::time::Duration;
+
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
@@ -31,6 +33,10 @@ use crate::service::{
 
 /// Tracing target for workspace provider operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::providers";
+
+/// Upper bound on a provider reachability check, so a hung provider cannot pin
+/// the request task indefinitely. A timeout is reported as unreachable.
+const VERIFY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Creates a new workspace inference provider.
 ///
@@ -433,16 +439,20 @@ async fn verify_provider(
 
     let config: ProviderConfig = crypto.decrypt_json(workspace.id, &provider.encrypted_data)?;
 
-    let verification = match config.validate().await {
-        Ok(()) => {
+    let verification = match tokio::time::timeout(VERIFY_TIMEOUT, config.validate()).await {
+        Ok(Ok(())) => {
             tracing::info!(target: TRACING_TARGET, "Provider verified");
             ConnectionVerification::reachable()
         }
-        Err(err) => {
+        Ok(Err(err)) => {
             // Log the full error, but return only a safe reason so provider
             // endpoints/keys are not echoed to the client.
             tracing::warn!(target: TRACING_TARGET, error = %err, "Provider verification failed");
             ConnectionVerification::unreachable("credentials rejected or provider unreachable")
+        }
+        Err(_elapsed) => {
+            tracing::warn!(target: TRACING_TARGET, "Provider verification timed out");
+            ConnectionVerification::unreachable("provider did not respond in time")
         }
     };
 

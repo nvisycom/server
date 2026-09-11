@@ -14,7 +14,7 @@ use diesel::sql_types::{BigInt, Timestamptz};
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use crate::model::{EventOutbox, NewEventOutbox};
+use crate::model::{NewWorkspaceEventOutbox, WorkspaceEventOutbox};
 use crate::types::OutboxStatus;
 use crate::{Error, PgConnection, Result, schema};
 
@@ -24,8 +24,8 @@ pub trait EventOutboxRepository {
     /// records, so the two commit atomically.
     fn insert_event_outbox(
         &mut self,
-        row: NewEventOutbox,
-    ) -> impl Future<Output = Result<EventOutbox>> + Send;
+        row: NewWorkspaceEventOutbox,
+    ) -> impl Future<Output = Result<WorkspaceEventOutbox>> + Send;
 
     /// Claims up to `limit` due pending rows for processing, oldest first.
     ///
@@ -37,7 +37,7 @@ pub trait EventOutboxRepository {
     fn claim_outbox_batch(
         &mut self,
         limit: i64,
-    ) -> impl Future<Output = Result<Vec<EventOutbox>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WorkspaceEventOutbox>>> + Send;
 
     /// Marks a row processed (its event durably projected), taking it out of the
     /// pending set. Runs in the drainer's batch transaction.
@@ -61,26 +61,29 @@ pub trait EventOutboxRepository {
 }
 
 impl EventOutboxRepository for PgConnection {
-    async fn insert_event_outbox(&mut self, row: NewEventOutbox) -> Result<EventOutbox> {
-        use schema::event_outbox;
+    async fn insert_event_outbox(
+        &mut self,
+        row: NewWorkspaceEventOutbox,
+    ) -> Result<WorkspaceEventOutbox> {
+        use schema::workspace_event_outbox;
 
-        diesel::insert_into(event_outbox::table)
+        diesel::insert_into(workspace_event_outbox::table)
             .values(&row)
-            .returning(EventOutbox::as_returning())
+            .returning(WorkspaceEventOutbox::as_returning())
             .get_result(self)
             .await
             .map_err(Error::from)
     }
 
-    async fn claim_outbox_batch(&mut self, limit: i64) -> Result<Vec<EventOutbox>> {
-        use schema::event_outbox::{self, dsl};
+    async fn claim_outbox_batch(&mut self, limit: i64) -> Result<Vec<WorkspaceEventOutbox>> {
+        use schema::workspace_event_outbox::{self, dsl};
 
-        event_outbox::table
+        workspace_event_outbox::table
             .filter(dsl::status.eq(OutboxStatus::Pending))
             .filter(dsl::next_attempt_at.le(diesel::dsl::now))
             .order((dsl::next_attempt_at.asc(), dsl::created_at.asc()))
             .limit(limit)
-            .select(EventOutbox::as_select())
+            .select(WorkspaceEventOutbox::as_select())
             .for_update()
             .skip_locked()
             .load(self)
@@ -89,9 +92,9 @@ impl EventOutboxRepository for PgConnection {
     }
 
     async fn mark_outbox_processed(&mut self, id: Uuid) -> Result<()> {
-        use schema::event_outbox::{self, dsl};
+        use schema::workspace_event_outbox::{self, dsl};
 
-        diesel::update(event_outbox::table.filter(dsl::id.eq(id)))
+        diesel::update(workspace_event_outbox::table.filter(dsl::id.eq(id)))
             .set((
                 dsl::status.eq(OutboxStatus::Processed),
                 dsl::attempts.eq(dsl::attempts + 1),
@@ -103,7 +106,7 @@ impl EventOutboxRepository for PgConnection {
     }
 
     async fn defer_outbox_attempt(&mut self, id: Uuid, backoff_secs: i64) -> Result<()> {
-        use schema::event_outbox::{self, dsl};
+        use schema::workspace_event_outbox::{self, dsl};
 
         // The row stays `Pending`; only its attempt count and next-due time move.
         // `now() + (backoff_secs * interval '1 second')` schedules the next attempt
@@ -111,7 +114,7 @@ impl EventOutboxRepository for PgConnection {
         let next_attempt_at = diesel::dsl::sql::<Timestamptz>("now() + (")
             .bind::<BigInt, _>(backoff_secs)
             .sql(" * interval '1 second')");
-        diesel::update(event_outbox::table.filter(dsl::id.eq(id)))
+        diesel::update(workspace_event_outbox::table.filter(dsl::id.eq(id)))
             .set((
                 dsl::attempts.eq(dsl::attempts + 1),
                 dsl::next_attempt_at.eq(next_attempt_at),
@@ -123,9 +126,9 @@ impl EventOutboxRepository for PgConnection {
     }
 
     async fn mark_outbox_failed(&mut self, id: Uuid) -> Result<()> {
-        use schema::event_outbox::{self, dsl};
+        use schema::workspace_event_outbox::{self, dsl};
 
-        diesel::update(event_outbox::table.filter(dsl::id.eq(id)))
+        diesel::update(workspace_event_outbox::table.filter(dsl::id.eq(id)))
             .set((
                 dsl::status.eq(OutboxStatus::Failed),
                 dsl::attempts.eq(dsl::attempts + 1),
@@ -144,18 +147,18 @@ mod tests {
     use uuid::Uuid;
 
     use super::{EventOutboxRepository, OutboxStatus, schema};
-    use crate::model::{EventOutbox, NewEventOutbox};
+    use crate::model::{NewWorkspaceEventOutbox, WorkspaceEventOutbox};
     use crate::test_util::TestDatabase;
     use crate::{AsyncConnection, PgConn, Result};
 
     /// Re-reads an outbox row by id, bypassing the repository (which has no
     /// single-row getter) so tests can assert on its post-transition state.
-    async fn reread(conn: &mut PgConn, id: Uuid) -> anyhow::Result<Option<EventOutbox>> {
-        use schema::event_outbox::dsl;
+    async fn reread(conn: &mut PgConn, id: Uuid) -> anyhow::Result<Option<WorkspaceEventOutbox>> {
+        use schema::workspace_event_outbox::dsl;
 
-        let row = dsl::event_outbox
+        let row = dsl::workspace_event_outbox
             .filter(dsl::id.eq(id))
-            .select(EventOutbox::as_select())
+            .select(WorkspaceEventOutbox::as_select())
             .first(conn)
             .await
             .optional()?;
@@ -169,7 +172,10 @@ mod tests {
         let mut conn = db.client.get_connection().await?;
 
         let row = conn
-            .insert_event_outbox(NewEventOutbox::test(seeded.workspace_id, seeded.account_id))
+            .insert_event_outbox(NewWorkspaceEventOutbox::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
 
         // The drainer claims and processes in one transaction.
@@ -199,7 +205,10 @@ mod tests {
         let mut conn = db.client.get_connection().await?;
 
         let row = conn
-            .insert_event_outbox(NewEventOutbox::test(seeded.workspace_id, seeded.account_id))
+            .insert_event_outbox(NewWorkspaceEventOutbox::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
 
         // Claim, then defer the attempt an hour into the future.
@@ -230,7 +239,10 @@ mod tests {
         let mut conn = db.client.get_connection().await?;
 
         let row = conn
-            .insert_event_outbox(NewEventOutbox::test(seeded.workspace_id, seeded.account_id))
+            .insert_event_outbox(NewWorkspaceEventOutbox::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
 
         conn.transaction(async |conn| -> Result<()> {

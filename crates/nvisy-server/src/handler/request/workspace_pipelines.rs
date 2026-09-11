@@ -199,6 +199,7 @@ impl UpdatePipeline {
     /// its retention changed.
     pub fn into_parts(
         self,
+        current_metadata: PipelineMetadata,
     ) -> serde_json::Result<(
         UpdatePipelineModel,
         Option<PipelineReferences>,
@@ -211,10 +212,12 @@ impl UpdatePipeline {
             }
             None => (None, None),
         };
+        // Merge the retention override into the current metadata so other fields
+        // (tags) are preserved when only retention changes.
         let metadata = self.retention.map(|retention| {
             Json::encode(&PipelineMetadata {
                 retention: Some(retention),
-                ..Default::default()
+                tags: current_metadata.tags,
             })
         });
         let model = UpdatePipelineModel {

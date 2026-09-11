@@ -8,11 +8,11 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::WorkspacePipeline;
+use nvisy_postgres::model::{NewWorkspaceRetentionJob, WorkspacePipeline};
 use nvisy_postgres::query::{
-    PipelineReferenceRepository, WorkspaceFileRepository, WorkspacePipelineRepository,
+    PipelineReferenceRepository, RetentionJobOutboxRepository, WorkspacePipelineRepository,
 };
-use nvisy_postgres::types::{FileKind, Handle, RetentionScope, WithAccountRef};
+use nvisy_postgres::types::{Handle, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, Result as PgResult};
 use uuid::Uuid;
 
@@ -25,8 +25,8 @@ use crate::handler::response::{AccountRef, Page, Pipeline, PipelineSummary};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
-    EventEmitter, EventOrigin, PipelineCreated, PipelineDeleted, PipelineUpdated, ServiceState,
-    WorkspaceEvent,
+    EventEmitter, EventOrigin, PipelineCreated, PipelineDeleted, PipelineUpdated,
+    RetentionBackfillCoordinator, ServiceState, WorkspaceEvent,
 };
 
 /// Tracing target for pipeline operations.
@@ -214,6 +214,7 @@ fn get_pipeline_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_pipeline(
     State(pg_client): State<PgClient>,
+    State(retention_backfill): State<RetentionBackfillCoordinator>,
     authz: Authorized<markers::UpdatePipelines>,
     Path(path_params): Path<PipelinePathParams>,
     security: SecurityContext,
@@ -230,8 +231,9 @@ async fn update_pipeline(
     let existing = found.item;
     let creator: AccountRef = found.account.into();
 
-    let (update_data, references, retention_override) =
-        request.into_parts().map_err(serialize_error)?;
+    let (update_data, references, retention_override) = request
+        .into_parts(existing.metadata.or_default())
+        .map_err(serialize_error)?;
     let pipeline_id = existing.id;
 
     // When a definition is supplied, resolve its slugs to ids up front so an
@@ -241,33 +243,11 @@ async fn update_pipeline(
         None => None,
     };
 
-    // If the request changed the retention override, recompute `expires_at` on
-    // the files this pipeline already produced, so the change applies to stored
-    // data too. Resolved against the workspace baseline (override wins per scope).
-    let backfill = retention_override.map(|over| {
-        let workspace_retention = workspace.settings.or_default().retention;
-        let now = jiff::Timestamp::now();
-        let audit_logs_expiry = workspace_retention
-            .resolve(RetentionScope::AuditLogs, Some(&over))
-            .expires_at(now);
-        [
-            (
-                FileKind::Redacted,
-                workspace_retention
-                    .resolve(RetentionScope::RedactedDocuments, Some(&over))
-                    .expires_at(now),
-            ),
-            (FileKind::Audit, audit_logs_expiry),
-            // Review audits share the audit-logs scope with detection audits.
-            (FileKind::Review, audit_logs_expiry),
-            (
-                FileKind::Intermediate,
-                workspace_retention
-                    .resolve(RetentionScope::Intermediates, Some(&over))
-                    .expires_at(now),
-            ),
-        ]
-    });
+    // If the request changed the retention override, the files this pipeline
+    // already produced must be reprojected to the new policy. That is unbounded,
+    // so enqueue a backfill job (committed with the update) for the drainer to
+    // apply off the request path rather than looping the updates here.
+    let backfill_changed = retention_override.is_some();
 
     let pipeline = conn
         .transaction(async |conn| {
@@ -278,12 +258,12 @@ async fn update_pipeline(
             if let Some(policy_ids) = &resolved {
                 replace_references(conn, &pipeline, policy_ids).await?;
             }
-            // Backfill produced files' expiry when the override changed.
-            if let Some(pairs) = &backfill {
-                for (kind, expires_at) in pairs {
-                    conn.backfill_pipeline_files_expiry(pipeline_id, *kind, *expires_at)
-                        .await?;
-                }
+            if backfill_changed {
+                conn.enqueue_retention_job(NewWorkspaceRetentionJob::pipeline(
+                    workspace.id,
+                    pipeline_id,
+                ))
+                .await?;
             }
             conn.emit_event(
                 EventOrigin {
@@ -300,6 +280,11 @@ async fn update_pipeline(
             Ok::<WorkspacePipeline, Error>(pipeline)
         })
         .await?;
+
+    // Wake the drainer so the just-committed backfill applies promptly.
+    if backfill_changed {
+        retention_backfill.wake();
+    }
 
     let response = match references {
         // A definition was supplied: the references we just wrote are current.

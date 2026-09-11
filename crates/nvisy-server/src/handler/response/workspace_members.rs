@@ -25,15 +25,12 @@ pub struct Member {
     pub avatar_url: Option<String>,
     /// Role of the member in the workspace.
     pub member_role: WorkspaceRole,
-    /// Whether the member has two-factor authentication enabled.
-    pub has_2fa: bool,
     /// Timestamp when the member joined the workspace.
     pub created_at: Timestamp,
 }
 
 impl Member {
     /// Creates a Member response from database models.
-    // TODO: Fetch actual 2FA status from account settings
     pub fn from_model(member: WorkspaceMember, account: Account) -> Self {
         Self {
             username: account.username,
@@ -41,7 +38,6 @@ impl Member {
             display_name: account.display_name,
             avatar_url: account.avatar_url,
             member_role: member.member_role,
-            has_2fa: false,
             created_at: member.created_at.into(),
         }
     }

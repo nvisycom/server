@@ -189,6 +189,24 @@ impl AccountRepository for PgConnection {
     ) -> Result<Account> {
         use schema::accounts::{self, dsl};
 
+        // An all-`None` changeset would make Diesel emit an empty `SET`, which
+        // Postgres rejects. Reject it up front so a caller with nothing to change
+        // gets a clear error rather than a raw SQL failure.
+        if updates.username.is_none()
+            && updates.display_name.is_none()
+            && updates.email_address.is_none()
+            && updates.avatar_url.is_none()
+            && updates.timezone.is_none()
+            && updates.locale.is_none()
+            && updates.is_verified.is_none()
+            && updates.is_suspended.is_none()
+            && updates.password_changed_at.is_none()
+        {
+            return Err(Error::unexpected(
+                "update_account called with no fields to update",
+            ));
+        }
+
         // Normalize fields: trim whitespace
         // Some(None) clears, Some(Some(value)) sets, None skips
         if let Some(Some(name)) = updates.display_name.as_mut() {

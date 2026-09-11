@@ -25,9 +25,6 @@ pub struct Invite {
     /// Email address of the invitee (omitted for open invite codes).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invitee_email: Option<String>,
-    /// Invite token (only included for open invitations without invitee_email).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub invite_token: Option<String>,
     /// Role the invitee will have if they accept.
     pub invited_role: WorkspaceRole,
     /// Current status of the invitation.
@@ -41,19 +38,14 @@ pub struct Invite {
 }
 
 impl Invite {
+    /// Builds the invite summary. The invite token is deliberately absent: it is
+    /// delivered only by the dedicated generate-invite-code endpoint, never in a
+    /// list or detail response.
     pub fn from_model(invite: WorkspaceInvite, workspace_slug: Handle) -> Self {
-        // Only include invite_token for open invitations (no invitee_email)
-        let invite_token = if invite.invitee_email.is_none() {
-            Some(invite.invite_token.clone())
-        } else {
-            None
-        };
-
         Self {
             invite_id: invite.id,
             workspace_slug,
             invitee_email: invite.invitee_email,
-            invite_token,
             invited_role: invite.invited_role,
             invite_status: invite.invite_status,
             expires_at: invite.expires_at.into(),

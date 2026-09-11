@@ -18,7 +18,6 @@ mod account_identities;
 mod account_notifications;
 mod accounts;
 mod analytics;
-mod event_outbox;
 mod pipeline_references;
 mod search;
 mod workspace_activities;
@@ -29,6 +28,7 @@ mod workspace_connection_syncs;
 mod workspace_connections;
 mod workspace_detection_jobs;
 mod workspace_detections;
+mod workspace_event_outbox;
 mod workspace_files;
 mod workspace_invites;
 mod workspace_members;
@@ -36,6 +36,7 @@ mod workspace_pipelines;
 mod workspace_policies;
 mod workspace_providers;
 mod workspace_redactions;
+mod workspace_retention_jobs;
 mod workspace_thread_anchors;
 mod workspace_thread_comments;
 mod workspace_thread_events;
@@ -53,7 +54,6 @@ pub use analytics::{
     AnalyticsSnapshot, DetectionDayPoint, DetectionDurations, DetectionStatusCount, StorageByKind,
     UsageByModel, WorkspaceAnalyticsRepository,
 };
-pub use event_outbox::EventOutboxRepository;
 pub use pipeline_references::PipelineReferenceRepository;
 pub use workspace_activities::{ActivityCursor, ActivityFilter, WorkspaceActivityRepository};
 pub use workspace_assignments::{
@@ -69,6 +69,7 @@ pub use workspace_detection_jobs::DetectionJobOutboxRepository;
 pub use workspace_detections::{
     DetectionCursor, DetectionFiles, DetectionListRow, WorkspaceDetectionRepository,
 };
+pub use workspace_event_outbox::EventOutboxRepository;
 pub use workspace_files::{ExpiredFileRef, FileCursor, ImportedFileRef, WorkspaceFileRepository};
 pub use workspace_invites::{InviteCursor, WorkspaceInviteRepository};
 pub use workspace_members::{
@@ -78,6 +79,7 @@ pub use workspace_pipelines::{PipelineCursor, WorkspacePipelineRepository};
 pub use workspace_policies::{PolicyCursor, WorkspacePolicyRepository};
 pub use workspace_providers::{ProviderCursor, WorkspaceProviderRepository};
 pub use workspace_redactions::{RedactionCursor, WorkspaceRedactionRepository};
+pub use workspace_retention_jobs::{REPROJECT_PAGE, RetentionJobOutboxRepository};
 pub use workspace_thread_anchors::{
     AddAnchorOutcome, MAX_THREAD_ANCHORS, WorkspaceThreadAnchorRepository,
 };

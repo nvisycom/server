@@ -23,9 +23,20 @@ pub struct ThreadAnchor {
 impl ThreadAnchor {
     /// Creates an anchor response, decoding its stored JSON into the typed
     /// anchor. Returns `None` for an anchor whose JSON no longer decodes (treated
-    /// as absent rather than failing the read).
+    /// as absent rather than failing the read), logging the decode error so a
+    /// stored-shape drift is diagnosable rather than silently invisible.
     pub fn from_model(anchor: AnchorModel) -> Option<Self> {
-        let decoded = serde_json::from_value(anchor.anchor).ok()?;
+        let decoded = match serde_json::from_value(anchor.anchor) {
+            Ok(decoded) => decoded,
+            Err(error) => {
+                tracing::warn!(
+                    anchor_id = %anchor.id,
+                    %error,
+                    "dropping thread anchor whose stored JSON no longer decodes",
+                );
+                return None;
+            }
+        };
         Some(Self {
             id: anchor.id,
             anchor: decoded,

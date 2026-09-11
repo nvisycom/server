@@ -12,8 +12,8 @@ use crate::model::{
     Account, NewWorkspaceMember, UpdateWorkspaceMember, Workspace, WorkspaceMember,
 };
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, Handle, MemberFilter, NotificationEvent,
-    OffsetPagination, WorkspaceRole, keyset,
+    AccountRefRow, CursorPage, CursorPagination, Handle, MemberFilter, MemberSortBy,
+    MemberSortField, NotificationEvent, OffsetPagination, WorkspaceRole, keyset,
 };
 use crate::{Error, PgConnection, Result, schema};
 
@@ -28,14 +28,27 @@ pub struct AccountWorkspaceCursor {
     pub workspace_id: uuid::Uuid,
 }
 
-/// Keyset for paginating a workspace's members: newest membership first by
-/// `created_at`, with the account id as the tiebreaker.
+/// Keyset for paginating a workspace's members. Members can be sorted by join
+/// date or by display name, so the cursor carries whichever field the sort uses
+/// — the keyset comparison must run on the same column it orders by, or paging
+/// drifts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkspaceMemberCursor {
-    /// When the membership was created.
-    pub created_at: Timestamp,
-    /// Account id (tiebreaker).
-    pub account_id: uuid::Uuid,
+#[serde(tag = "by", rename_all = "camelCase")]
+pub enum WorkspaceMemberCursor {
+    /// Sorted by membership creation time.
+    Date {
+        /// When the membership was created.
+        created_at: Timestamp,
+        /// Account id (tiebreaker).
+        account_id: uuid::Uuid,
+    },
+    /// Sorted by the member's display name (a null name sorts as empty).
+    Name {
+        /// The member's display name, empty when unset.
+        display_name: String,
+        /// Account id (tiebreaker).
+        account_id: uuid::Uuid,
+    },
 }
 
 /// Repository for workspace member database operations.
@@ -116,6 +129,7 @@ pub trait WorkspaceMemberRepository {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination<WorkspaceMemberCursor>,
+        sort_by: MemberSortBy,
         filter: MemberFilter,
     ) -> impl Future<Output = Result<CursorPage<(WorkspaceMember, Account)>>> + Send;
 
@@ -144,6 +158,14 @@ pub trait WorkspaceMemberRepository {
         account_id_a: Uuid,
         account_id_b: Uuid,
     ) -> impl Future<Output = Result<bool>> + Send;
+
+    /// Counts a workspace's members holding the given role. Backs the last-owner
+    /// guard, so a workspace cannot be left without an owner.
+    fn count_workspace_members_by_role(
+        &mut self,
+        workspace_id: Uuid,
+        role: WorkspaceRole,
+    ) -> impl Future<Output = Result<i64>> + Send;
 }
 
 impl WorkspaceMemberRepository for PgConnection {
@@ -373,29 +395,38 @@ impl WorkspaceMemberRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination<WorkspaceMemberCursor>,
+        sort_by: MemberSortBy,
         filter: MemberFilter,
     ) -> Result<CursorPage<(WorkspaceMember, Account)>> {
         use diesel::dsl::count_star;
         use schema::{accounts, workspace_members};
 
-        // Build base filter
-        let base_filter = workspace_members::workspace_id
-            .eq(workspace_id)
-            .and(accounts::deleted_at.is_null());
+        let sort_by_name = matches!(sort_by.field, MemberSortField::Name);
+        // The member sort order is the keyset direction, so the order-by and the
+        // after-comparison always agree.
+        let direction = sort_by.order;
 
-        // Get total count only if requested
-        let total = if pagination.include_count {
-            let mut count_query = workspace_members::table
+        // The scoped builder (filters shared by the count and the page). When
+        // sorting by name, members with a null display name are excluded so the
+        // sort column is total (mirrors the invite email sort).
+        let scoped = || {
+            let mut query = workspace_members::table
                 .inner_join(accounts::table.on(accounts::id.eq(workspace_members::account_id)))
-                .filter(base_filter)
+                .filter(workspace_members::workspace_id.eq(workspace_id))
+                .filter(accounts::deleted_at.is_null())
                 .into_boxed();
-
             if let Some(role) = filter.role {
-                count_query = count_query.filter(workspace_members::member_role.eq(role));
+                query = query.filter(workspace_members::member_role.eq(role));
             }
+            if sort_by_name {
+                query = query.filter(accounts::display_name.is_not_null());
+            }
+            query
+        };
 
+        let total = if pagination.include_count {
             Some(
-                count_query
+                scoped()
                     .select(count_star())
                     .get_result(self)
                     .await
@@ -405,38 +436,67 @@ impl WorkspaceMemberRepository for PgConnection {
             None
         };
 
-        // Build query with optional role filter
-        let mut query = workspace_members::table
-            .inner_join(accounts::table.on(accounts::id.eq(workspace_members::account_id)))
-            .filter(base_filter)
-            .into_boxed();
-
-        if let Some(role) = filter.role {
-            query = query.filter(workspace_members::member_role.eq(role));
+        // The keyset runs on whichever column the sort uses; the cursor carries the
+        // matching value, so a stray Name cursor on a Date sort (or vice-versa)
+        // simply starts a fresh page rather than drifting.
+        let items = match sort_by.field {
+            MemberSortField::Name => {
+                let after = match pagination.after_key() {
+                    Some(WorkspaceMemberCursor::Name {
+                        display_name,
+                        account_id,
+                    }) => Some((display_name.clone(), *account_id)),
+                    _ => None,
+                };
+                keyset!(
+                    scoped(),
+                    accounts::display_name,
+                    workspace_members::account_id,
+                    direction,
+                    after
+                )
+            }
+            MemberSortField::Date => {
+                let after = match pagination.after_key() {
+                    Some(WorkspaceMemberCursor::Date {
+                        created_at,
+                        account_id,
+                    }) => Some((jiff_diesel::Timestamp::from(*created_at), *account_id)),
+                    _ => None,
+                };
+                keyset!(
+                    scoped(),
+                    workspace_members::created_at,
+                    workspace_members::account_id,
+                    direction,
+                    after
+                )
+            }
         }
-
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.account_id));
-        let items = keyset!(
-            query,
-            workspace_members::created_at,
-            workspace_members::account_id,
-            pagination.direction,
-            after
-        )
         .limit(pagination.fetch_limit())
         .select((WorkspaceMember::as_select(), Account::as_select()))
         .load(self)
         .await
         .map_err(Error::from)?;
 
-        Ok(CursorPage::new(items, total, pagination.limit, |(m, _)| {
-            WorkspaceMemberCursor {
-                created_at: m.created_at.into(),
-                account_id: m.account_id,
-            }
-        }))
+        Ok(CursorPage::new(
+            items,
+            total,
+            pagination.limit,
+            move |(m, a)| {
+                if sort_by_name {
+                    WorkspaceMemberCursor::Name {
+                        display_name: a.display_name.clone().unwrap_or_default(),
+                        account_id: m.account_id,
+                    }
+                } else {
+                    WorkspaceMemberCursor::Date {
+                        created_at: m.created_at.into(),
+                        account_id: m.account_id,
+                    }
+                }
+            },
+        ))
     }
 
     async fn find_workspace_member_with_account(
@@ -513,6 +573,22 @@ impl WorkspaceMemberRepository for PgConnection {
         .map_err(Error::from)?;
 
         Ok(shares)
+    }
+
+    async fn count_workspace_members_by_role(
+        &mut self,
+        workspace_id: Uuid,
+        role: WorkspaceRole,
+    ) -> Result<i64> {
+        use schema::workspace_members::{self, dsl};
+
+        workspace_members::table
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::member_role.eq(role))
+            .count()
+            .get_result(self)
+            .await
+            .map_err(Error::from)
     }
 }
 

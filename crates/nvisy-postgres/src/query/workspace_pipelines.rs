@@ -47,6 +47,14 @@ pub trait WorkspacePipelineRepository {
         slug: &str,
     ) -> impl Future<Output = Result<Option<WithAccountRef<WorkspacePipeline>>>> + Send;
 
+    /// Finds a live pipeline by id, or `None` if it does not exist or was
+    /// soft-deleted. Used where only the id is known (e.g. the retention-backfill
+    /// worker resolving a pipeline's current override).
+    fn find_pipeline_by_id(
+        &mut self,
+        pipeline_id: Uuid,
+    ) -> impl Future<Output = Result<Option<WorkspacePipeline>>> + Send;
+
     /// Lists all pipelines in a workspace with cursor pagination, each paired
     /// with the handle and avatar of the account that created it.
     fn cursor_list_workspace_pipelines(
@@ -117,6 +125,22 @@ impl WorkspacePipelineRepository for PgConnection {
         Ok(row.map(|(item, account)| WithAccountRef { item, account }))
     }
 
+    async fn find_pipeline_by_id(
+        &mut self,
+        pipeline_id: Uuid,
+    ) -> Result<Option<WorkspacePipeline>> {
+        use schema::workspace_pipelines::{self, dsl};
+
+        workspace_pipelines::table
+            .filter(dsl::id.eq(pipeline_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspacePipeline::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)
+    }
+
     async fn cursor_list_workspace_pipelines(
         &mut self,
         workspace_id: Uuid,
@@ -127,30 +151,31 @@ impl WorkspacePipelineRepository for PgConnection {
         use schema::workspace_pipelines::dsl;
         use schema::{accounts, workspace_pipelines};
 
-        // Build base query with filters
-        let mut base_query = workspace_pipelines::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .into_boxed();
-
-        // Apply status filter
-        if let Some(status) = status_filter {
-            base_query = base_query.filter(dsl::status.eq(status));
-        }
-
-        // Hybrid name search: ILIKE substring (works for short queries) OR
-        // trigram similarity (typo tolerance); both served by the trgm index.
-        if let Some(term) = search_term {
-            base_query = base_query.filter(
-                dsl::display_name
-                    .ilike(ilike_contains(term))
-                    .or(dsl::display_name.trgm_similar_to(term)),
-            );
-        }
+        // The scoped builder (filters shared by the count and the page).
+        let scoped = || {
+            let mut query = workspace_pipelines::table
+                .inner_join(accounts::table)
+                .filter(dsl::workspace_id.eq(workspace_id))
+                .filter(dsl::deleted_at.is_null())
+                .into_boxed();
+            if let Some(status) = status_filter {
+                query = query.filter(dsl::status.eq(status));
+            }
+            // Hybrid name search: ILIKE substring (works for short queries) OR
+            // trigram similarity (typo tolerance); both served by the trgm index.
+            if let Some(term) = search_term {
+                query = query.filter(
+                    dsl::display_name
+                        .ilike(ilike_contains(term))
+                        .or(dsl::display_name.trgm_similar_to(term)),
+                );
+            }
+            query
+        };
 
         let total = if pagination.include_count {
             Some(
-                base_query
+                scoped()
                     .count()
                     .get_result::<i64>(self)
                     .await
@@ -160,43 +185,28 @@ impl WorkspacePipelineRepository for PgConnection {
             None
         };
 
-        // Rebuild query for fetching items
-        let mut query = workspace_pipelines::table
-            .inner_join(accounts::table)
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .into_boxed();
-
-        if let Some(status) = status_filter {
-            query = query.filter(dsl::status.eq(status));
-        }
-
-        // Hybrid name search: ILIKE substring OR trigram similarity (see above).
-        if let Some(term) = search_term {
-            query = query.filter(
-                dsl::display_name
-                    .ilike(ilike_contains(term))
-                    .or(dsl::display_name.trgm_similar_to(term)),
-            );
-        }
-
         let after = pagination
             .after_key()
             .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
-        let rows: Vec<(WorkspacePipeline, AccountRefRow)> =
-            keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
-                .select((
-                    WorkspacePipeline::as_select(),
-                    (
-                        accounts::username,
-                        accounts::display_name,
-                        accounts::avatar_url,
-                    ),
-                ))
-                .limit(pagination.fetch_limit())
-                .load(self)
-                .await
-                .map_err(Error::from)?;
+        let rows: Vec<(WorkspacePipeline, AccountRefRow)> = keyset!(
+            scoped(),
+            dsl::created_at,
+            dsl::id,
+            pagination.direction,
+            after
+        )
+        .select((
+            WorkspacePipeline::as_select(),
+            (
+                accounts::username,
+                accounts::display_name,
+                accounts::avatar_url,
+            ),
+        ))
+        .limit(pagination.fetch_limit())
+        .load(self)
+        .await
+        .map_err(Error::from)?;
 
         let items: Vec<WithAccountRef<WorkspacePipeline>> = rows
             .into_iter()
@@ -232,11 +242,16 @@ impl WorkspacePipelineRepository for PgConnection {
         use diesel::dsl::now;
         use schema::workspace_pipelines::{self, dsl};
 
-        diesel::update(workspace_pipelines::table.filter(dsl::id.eq(pipeline_id)))
-            .set(dsl::deleted_at.eq(now))
-            .execute(self)
-            .await
-            .map_err(Error::from)?;
+        // Scope to a live row so re-deleting keeps the original tombstone.
+        diesel::update(
+            workspace_pipelines::table
+                .filter(dsl::id.eq(pipeline_id))
+                .filter(dsl::deleted_at.is_null()),
+        )
+        .set(dsl::deleted_at.eq(now))
+        .execute(self)
+        .await
+        .map_err(Error::from)?;
 
         Ok(())
     }

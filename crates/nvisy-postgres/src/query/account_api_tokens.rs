@@ -290,11 +290,17 @@ impl AccountApiTokenRepository for PgConnection {
         use diesel::dsl::now;
         use schema::account_api_tokens::{self, dsl};
 
-        let rows_affected = diesel::update(account_api_tokens::table.filter(dsl::id.eq(token_id)))
-            .set(dsl::deleted_at.eq(now))
-            .execute(self)
-            .await
-            .map_err(Error::from)?;
+        // Scope to a live row so re-deleting an already-revoked token is a no-op
+        // (`false`) rather than overwriting its original tombstone timestamp.
+        let rows_affected = diesel::update(
+            account_api_tokens::table
+                .filter(dsl::id.eq(token_id))
+                .filter(dsl::deleted_at.is_null()),
+        )
+        .set(dsl::deleted_at.eq(now))
+        .execute(self)
+        .await
+        .map_err(Error::from)?;
 
         Ok(rows_affected > 0)
     }

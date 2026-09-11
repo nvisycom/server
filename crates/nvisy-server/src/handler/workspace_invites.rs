@@ -83,8 +83,12 @@ pub async fn create_invite(
     security: &SecurityContext,
     request: &CreateInvite,
 ) -> Result<InviteOutcome> {
+    // Normalize the email once so the member/account/pending lookups and the
+    // stored invite all compare and persist the same canonical form.
+    let invitee_email = request.normalized_email();
+
     if conn
-        .find_workspace_member_by_email(workspace_id, &request.invitee_email)
+        .find_workspace_member_by_email(workspace_id, &invitee_email)
         .await?
         .is_some()
     {
@@ -93,12 +97,12 @@ pub async fn create_invite(
             .with_resource("workspace_member"));
     }
 
-    let Some(account) = conn.find_account_by_email(&request.invitee_email).await? else {
+    let Some(account) = conn.find_account_by_email(&invitee_email).await? else {
         return Ok(InviteOutcome::UnknownEmail);
     };
 
     if conn
-        .find_pending_workspace_invite_by_email(workspace_id, &request.invitee_email)
+        .find_pending_workspace_invite_by_email(workspace_id, &invitee_email)
         .await?
         .is_some()
     {
@@ -399,8 +403,8 @@ fn reply_to_invite_docs(op: TransformOperation) -> TransformOperation {
 /// Generates a shareable invite code for a workspace.
 ///
 /// Creates an invite code that can be shared with anyone to join the workspace.
-/// The code can be used multiple times until it expires.
-/// Requires `InviteMembers` permission.
+/// The code is single-use: it is consumed by the first account that accepts it,
+/// and expires if unused. Requires `InviteMembers` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -439,7 +443,8 @@ async fn generate_invite_code(
 fn generate_invite_code_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Generate invite code")
         .description(
-            "Creates a shareable invite code that can be used by anyone to join the workspace.",
+            "Creates a shareable, single-use invite code that lets one person join the \
+             workspace. The code is consumed on first acceptance and expires if unused.",
         )
         .response::<201, Json<InviteCode>>()
         .response::<400, Json<ErrorResponse>>()
@@ -513,9 +518,9 @@ async fn reply_to_invite_code(
     auth_state: AuthState,
     security: SecurityContext,
     Path(path_params): Path<InviteCodePathParams>,
-    Json(request): Json<Option<ReplyInvite>>,
+    request: Option<Json<ReplyInvite>>,
 ) -> Result<(StatusCode, Json<Option<Member>>)> {
-    let accept = request.map(|r| r.accept_invite).unwrap_or(true);
+    let accept = request.map(|Json(r)| r.accept_invite).unwrap_or(true);
 
     tracing::info!(target: TRACING_TARGET, accept, "Responding to invite code");
 
@@ -610,6 +615,21 @@ async fn accept_invite_as_member(
     account_id: Uuid,
     security: &SecurityContext,
 ) -> Result<(WorkspaceMember, Account)> {
+    // An email-bound invitation may only be accepted by the account that owns
+    // that email; otherwise any authenticated account could claim it. An open
+    // invite (no `invitee_email`) is claimable by anyone who holds the code.
+    if let Some(ref invitee_email) = invite.invitee_email {
+        let account = conn
+            .find_account_by_id(account_id)
+            .await?
+            .ok_or_else(|| Error::not_found("account"))?;
+        if !account.email_address.eq_ignore_ascii_case(invitee_email) {
+            return Err(ErrorKind::Forbidden
+                .with_message("This invitation was sent to a different email address")
+                .with_resource("workspace_invite"));
+        }
+    }
+
     if conn
         .find_workspace_member(invite.workspace_id, account_id)
         .await?

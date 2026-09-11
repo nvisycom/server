@@ -382,11 +382,15 @@ async fn test_webhook(
 
     let workspace = authz.workspace;
     let account_id = authz.account_id;
-    let mut conn = pg_client.get_connection().await?;
 
-    let webhook = find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid())
-        .await?
-        .item;
+    // Release the pooled connection before the external delivery below, so it is
+    // not held for the duration of that I/O.
+    let webhook = {
+        let mut conn = pg_client.get_connection().await?;
+        find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid())
+            .await?
+            .item
+    };
 
     // Parse the webhook URL
     let url: Url = webhook.url.parse().map_err(|_| {

@@ -10,7 +10,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::query::{AccountRepository, WorkspaceMemberRepository};
-use nvisy_postgres::types::Handle;
+use nvisy_postgres::types::{Handle, WorkspaceRole};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
@@ -54,6 +54,7 @@ async fn list_members(
         .cursor_list_workspace_members_with_accounts(
             workspace.id,
             pagination.into_cursor(),
+            query.to_sort(),
             query.to_filter(),
         )
         .await?;
@@ -348,7 +349,7 @@ async fn leave_workspace(
 
     // Read the member back with its account, both to confirm membership and to
     // name the departing member in the event.
-    let Some((_member, account)) = conn
+    let Some((member, account)) = conn
         .find_workspace_member_with_account(workspace.id, auth_state.account_id)
         .await?
     else {
@@ -356,6 +357,19 @@ async fn leave_workspace(
             .with_resource("workspace_member")
             .with_message("You are not a member of this workspace"));
     };
+
+    // The sole owner cannot leave and orphan the workspace: transfer ownership
+    // first. A non-owner, or an owner with co-owners, may leave freely.
+    if member.member_role.is_owner()
+        && conn
+            .count_workspace_members_by_role(workspace.id, WorkspaceRole::Owner)
+            .await?
+            <= 1
+    {
+        return Err(ErrorKind::Conflict
+            .with_message("You are the only owner; transfer ownership before leaving")
+            .with_resource("workspace_member"));
+    }
 
     // Remove the member and record the departure atomically. A self-initiated
     // leave is the same domain fact as an admin removal, so it records
@@ -391,6 +405,7 @@ fn leave_workspace_docs(op: TransformOperation) -> TransformOperation {
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
 }
 
 /// Resolves a member's public handle to its account id, recording the id on the

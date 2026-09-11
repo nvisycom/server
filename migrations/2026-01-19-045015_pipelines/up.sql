@@ -137,3 +137,72 @@ ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.deleted';
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.created';
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.updated';
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.deleted';
+
+-- Retention-jobs outbox: when a workspace's retention settings or a pipeline's
+-- retention override changes, the precomputed `expires_at` on the files already
+-- stored under that scope must be recomputed. That reprojection is unbounded (it
+-- touches every file the scope ever produced), so it is deferred to a background
+-- worker rather than run inside the request transaction. The handler inserts a
+-- scope-only job row in the same transaction as the settings/override update; the
+-- retention drainer reprojects the affected files in bounded batches, reading the
+-- *current* policy at drain time.
+CREATE TABLE workspace_retention_jobs (
+    -- Primary identifier
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Scope. Every job names its workspace; a NULL `pipeline_id` is a
+    -- workspace-wide backfill (a settings change), and a non-NULL `pipeline_id`
+    -- is that pipeline's own override backfill. Both cascade so a deleted scope
+    -- drops its pending jobs.
+    workspace_id    UUID          NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+    pipeline_id     UUID          REFERENCES workspace_pipelines (id) ON DELETE CASCADE,
+
+    -- Drainer bookkeeping: processing state, attempts, and the earliest time the
+    -- row may next be claimed (advanced by a backoff on each failed attempt so a
+    -- failing row does not spin at the head of the queue).
+    status          OUTBOX_STATUS NOT NULL DEFAULT 'pending',
+    attempts        INTEGER       NOT NULL DEFAULT 0,
+    CONSTRAINT workspace_retention_jobs_attempts_non_negative CHECK (attempts >= 0),
+    next_attempt_at TIMESTAMPTZ   NOT NULL DEFAULT current_timestamp,
+
+    -- Lifecycle timestamps
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT current_timestamp,
+    resolved_at     TIMESTAMPTZ   DEFAULT NULL,
+    CONSTRAINT workspace_retention_jobs_resolved_only_when_terminal
+        CHECK (resolved_at IS NULL OR status IN ('processed', 'failed')),
+    CONSTRAINT workspace_retention_jobs_resolved_after_created
+        CHECK (resolved_at IS NULL OR resolved_at >= created_at)
+);
+
+-- The drainer's claim queue: pending rows ordered by due time then age. Partial
+-- so it stays small as processed and failed rows accumulate.
+CREATE INDEX workspace_retention_jobs_pending_idx
+    ON workspace_retention_jobs (next_attempt_at, created_at)
+    WHERE status = 'pending';
+
+-- At most one pending job per scope: repeated policy changes coalesce onto the
+-- one outstanding job (the drainer reprojects from current truth, so a single
+-- pending job already covers every change made before it drains). The COALESCE
+-- collapses the workspace-wide scope (NULL pipeline) to a fixed sentinel so it
+-- participates in the same unique constraint.
+CREATE UNIQUE INDEX workspace_retention_jobs_pending_scope_idx
+    ON workspace_retention_jobs (
+        workspace_id,
+        COALESCE(pipeline_id, '00000000-0000-0000-0000-000000000000')
+    )
+    WHERE status = 'pending';
+
+-- Back the pipeline foreign key so a pipeline delete cascades without scanning
+-- the whole outbox (Postgres does not index a referencing column automatically).
+CREATE INDEX workspace_retention_jobs_pipeline_idx
+    ON workspace_retention_jobs (pipeline_id);
+
+COMMENT ON TABLE workspace_retention_jobs IS 'Transactional outbox of retention-expiry backfill jobs, drained to a background worker that reprojects files'' expires_at.';
+COMMENT ON COLUMN workspace_retention_jobs.id IS 'Unique outbox row identifier';
+COMMENT ON COLUMN workspace_retention_jobs.workspace_id IS 'Workspace whose files are reprojected';
+COMMENT ON COLUMN workspace_retention_jobs.pipeline_id IS 'Pipeline whose produced files are reprojected; NULL for a workspace-wide backfill';
+COMMENT ON COLUMN workspace_retention_jobs.status IS 'Processing state: pending, processed, or failed (dead-lettered)';
+COMMENT ON COLUMN workspace_retention_jobs.attempts IS 'Number of drain attempts made';
+COMMENT ON COLUMN workspace_retention_jobs.next_attempt_at IS 'Earliest time the row may next be claimed; advanced by a backoff after each failed attempt';
+COMMENT ON COLUMN workspace_retention_jobs.created_at IS 'Timestamp when the job was queued';
+COMMENT ON COLUMN workspace_retention_jobs.resolved_at IS 'When a terminal (processed or failed) row was resolved by an operator; NULL until then';
