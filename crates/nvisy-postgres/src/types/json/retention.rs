@@ -14,20 +14,20 @@ use super::RetentionOverride;
 
 /// How long a class of data is retained.
 ///
-/// Wire shape is internally tagged on `mode`: `{ "mode": "forever" }`,
-/// `{ "mode": "zeroDays" }`, `{ "mode": "days", "days": 30 }`.
+/// Wire shape is internally tagged on `mode`: `{ "mode": "persistent" }`,
+/// `{ "mode": "ephemeral" }`, `{ "mode": "fixed", "days": 30 }`.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "camelCase")]
 pub enum Retention {
-    /// Keep data indefinitely (the default).
+    /// Keep data indefinitely.
+    Persistent,
+    /// Delete data as soon as it has been processed (the default).
     #[default]
-    Forever,
-    /// Delete data as soon as it has been processed.
-    ZeroDays,
+    Ephemeral,
     /// Keep data for a fixed number of days, then delete it.
-    Days {
+    Fixed {
         /// Number of days to retain data.
         days: u32,
     },
@@ -35,19 +35,19 @@ pub enum Retention {
 
 impl Retention {
     /// When data written at `now` expires under this policy, or `None` when it
-    /// never expires ([`Retention::Forever`]). Stored as a file's `expires_at`;
+    /// never expires ([`Retention::Persistent`]). Stored as a file's `expires_at`;
     /// the retention sweep deletes rows whose `expires_at` is in the past.
     ///
-    /// [`Retention::ZeroDays`] expires immediately (`now`), so the data is
+    /// [`Retention::Ephemeral`] expires immediately (`now`), so the data is
     /// eligible for deletion as soon as it has been written.
     #[must_use]
     pub fn expires_at(self, now: Timestamp) -> Option<Timestamp> {
         match self {
-            Self::Forever => None,
-            Self::ZeroDays => Some(now),
+            Self::Persistent => None,
+            Self::Ephemeral => Some(now),
             // `Timestamp` arithmetic only accepts uniform units (hours or
             // smaller), not calendar days, so express the window in hours.
-            Self::Days { days } => Some(now + Span::new().hours(i64::from(days) * 24)),
+            Self::Fixed { days } => Some(now + Span::new().hours(i64::from(days) * 24)),
         }
     }
 }
@@ -66,8 +66,9 @@ pub enum RetentionScope {
     Intermediates,
 }
 
-/// Retention for every scope. Missing fields default to [`Retention::Forever`],
-/// so an empty settings blob keeps everything.
+/// Retention for every scope. Missing fields default to [`Retention::Ephemeral`],
+/// so an empty settings blob deletes each class of data as soon as it has been
+/// processed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize)]
@@ -95,10 +96,17 @@ impl RetentionSettings {
         }
     }
 
-    /// Whether every scope is [`Retention::Forever`] (nothing to enforce).
+    /// Whether every scope is [`Retention::Persistent`] (nothing to enforce). Kept
+    /// distinct from the type's `Default`, which now deletes by default.
     #[must_use]
     pub fn is_noop(&self) -> bool {
-        *self == Self::default()
+        let keep_everything = RetentionSettings {
+            original_documents: Retention::Persistent,
+            redacted_documents: Retention::Persistent,
+            audit_logs: Retention::Persistent,
+            intermediates: Retention::Persistent,
+        };
+        *self == keep_everything
     }
 
     /// The effective retention for `scope`: a pipeline override wins over this
@@ -124,12 +132,12 @@ mod tests {
     #[test]
     fn expires_at_is_none_for_forever_and_future_for_days() {
         let now = Timestamp::UNIX_EPOCH + Span::new().hours(100 * 24);
-        // Forever never expires; ZeroDays expires immediately; Days expires in
-        // the future (now + window), never in the past.
-        assert_eq!(Retention::Forever.expires_at(now), None);
-        assert_eq!(Retention::ZeroDays.expires_at(now), Some(now));
+        // Persistent never expires; Ephemeral expires immediately; Fixed expires
+        // in the future (now + window), never in the past.
+        assert_eq!(Retention::Persistent.expires_at(now), None);
+        assert_eq!(Retention::Ephemeral.expires_at(now), Some(now));
         assert_eq!(
-            Retention::Days { days: 10 }.expires_at(now),
+            Retention::Fixed { days: 10 }.expires_at(now),
             Some(now + Span::new().hours(10 * 24)),
         );
     }
@@ -137,34 +145,35 @@ mod tests {
     #[test]
     fn resolve_prefers_pipeline_override() {
         let workspace = RetentionSettings {
-            redacted_documents: Retention::Days { days: 30 },
+            redacted_documents: Retention::Fixed { days: 30 },
             ..Default::default()
         };
         let over = RetentionOverride {
-            redacted_documents: Some(Retention::ZeroDays),
+            redacted_documents: Some(Retention::Ephemeral),
             ..Default::default()
         };
         // Override wins when set.
         assert_eq!(
             workspace.resolve(RetentionScope::RedactedDocuments, Some(&over)),
-            Retention::ZeroDays,
+            Retention::Ephemeral,
         );
         // Workspace baseline applies when there is no override.
         assert_eq!(
             workspace.resolve(RetentionScope::RedactedDocuments, None),
-            Retention::Days { days: 30 },
+            Retention::Fixed { days: 30 },
         );
-        // A scope the override leaves unset inherits the workspace value.
+        // A scope the override leaves unset inherits the workspace value (here the
+        // default, which is Ephemeral).
         assert_eq!(
             workspace.resolve(RetentionScope::AuditLogs, Some(&over)),
-            Retention::Forever,
+            Retention::Ephemeral,
         );
     }
 
     #[test]
     fn original_documents_ignore_pipeline_override() {
         let workspace = RetentionSettings {
-            original_documents: Retention::Days { days: 30 },
+            original_documents: Retention::Fixed { days: 30 },
             ..Default::default()
         };
         // Original documents are ingested, not produced by a pipeline, so an
@@ -174,7 +183,7 @@ mod tests {
                 RetentionScope::OriginalDocuments,
                 Some(&RetentionOverride::default())
             ),
-            Retention::Days { days: 30 },
+            Retention::Fixed { days: 30 },
         );
     }
 }

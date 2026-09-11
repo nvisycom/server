@@ -205,7 +205,7 @@ async fn list_connections(
     let mut conn = pg_client.get_connection().await?;
 
     let page = conn
-        .cursor_list_workspace_connections(workspace.id, pagination.into(), &query.provider)
+        .cursor_list_workspace_connections(workspace.id, pagination.into_cursor(), &query.provider)
         .await?;
 
     // One grouped query resolves last-synced for the whole page (not per row).

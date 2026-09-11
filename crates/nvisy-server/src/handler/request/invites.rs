@@ -3,7 +3,7 @@
 use garde::Validate;
 use nvisy_postgres::model::NewWorkspaceInvite;
 use nvisy_postgres::types::{
-    InviteFilter, InviteSortBy, InviteSortField, SortOrder, WorkspaceRole,
+    Direction, InviteFilter, InviteSortBy, InviteSortField, WorkspaceRole,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -123,7 +123,7 @@ pub struct ListInvites {
     pub sort_by: Option<InviteSortField>,
     /// Sort order (asc or desc).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub order: Option<SortOrder>,
+    pub order: Option<Direction>,
 }
 
 impl ListInvites {

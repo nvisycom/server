@@ -4,11 +4,23 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection};
-use crate::types::{AccountRefRow, CursorPage, CursorPagination, WithAccountRef};
+use crate::types::{AccountRefRow, CursorPage, CursorPagination, WithAccountRef, keyset};
 use crate::{Error, PgConnection, Result, schema};
+
+/// Keyset for paginating a workspace's connections: newest first by `created_at`,
+/// `id` as the tiebreaker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionCursor {
+    /// When the connection was created.
+    pub created_at: Timestamp,
+    /// Connection id (tiebreaker).
+    pub id: uuid::Uuid,
+}
 
 /// A sync-scheduled connection paired with its cron expression, as returned by
 /// [`WorkspaceConnectionRepository::list_scheduled_connections`]. The cron is
@@ -80,7 +92,7 @@ pub trait WorkspaceConnectionRepository {
     fn cursor_list_workspace_connections(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<ConnectionCursor>,
         providers: &[String],
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceConnection>>>> + Send;
 
@@ -211,7 +223,7 @@ impl WorkspaceConnectionRepository for PgConnection {
     async fn cursor_list_workspace_connections(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<ConnectionCursor>,
         providers: &[String],
     ) -> Result<CursorPage<WithAccountRef<WorkspaceConnection>>> {
         use schema::workspace_connections::dsl;
@@ -251,47 +263,23 @@ impl WorkspaceConnectionRepository for PgConnection {
             query = query.filter(dsl::provider.eq_any(providers.to_vec()));
         }
 
-        let limit = pagination.fetch_limit();
-
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
         let rows: Vec<(WorkspaceConnection, AccountRefRow)> =
-            if let Some(cursor) = &pagination.after {
-                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
-
-                query
-                    .filter(
-                        dsl::created_at
-                            .lt(&cursor_time)
-                            .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                    )
-                    .select((
-                        WorkspaceConnection::as_select(),
-                        (
-                            accounts::username,
-                            accounts::display_name,
-                            accounts::avatar_url,
-                        ),
-                    ))
-                    .order((dsl::created_at.desc(), dsl::id.desc()))
-                    .limit(limit)
-                    .load(self)
-                    .await
-                    .map_err(Error::from)?
-            } else {
-                query
-                    .select((
-                        WorkspaceConnection::as_select(),
-                        (
-                            accounts::username,
-                            accounts::display_name,
-                            accounts::avatar_url,
-                        ),
-                    ))
-                    .order((dsl::created_at.desc(), dsl::id.desc()))
-                    .limit(limit)
-                    .load(self)
-                    .await
-                    .map_err(Error::from)?
-            };
+            keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
+                .select((
+                    WorkspaceConnection::as_select(),
+                    (
+                        accounts::username,
+                        accounts::display_name,
+                        accounts::avatar_url,
+                    ),
+                ))
+                .limit(pagination.fetch_limit())
+                .load(self)
+                .await
+                .map_err(Error::from)?;
 
         let items: Vec<WithAccountRef<WorkspaceConnection>> = rows
             .into_iter()
@@ -299,7 +287,10 @@ impl WorkspaceConnectionRepository for PgConnection {
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
-            (wc.item.created_at.into(), wc.item.id)
+            ConnectionCursor {
+                created_at: wc.item.created_at.into(),
+                id: wc.item.id,
+            }
         }))
     }
 
@@ -362,16 +353,19 @@ mod tests {
     #[tokio::test]
     async fn create_and_scoped_lookups_round_trip() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let connection = conn
-            .create_workspace_connection(NewWorkspaceConnection::test(workspace_id, account_id))
+            .create_workspace_connection(NewWorkspaceConnection::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
 
         // Found within its own workspace.
         assert!(
-            conn.find_connection_in_workspace(workspace_id, connection.id)
+            conn.find_connection_in_workspace(seeded.workspace_id, connection.id)
                 .await?
                 .is_some()
         );
@@ -384,7 +378,7 @@ mod tests {
 
         // The creator join returns the connection with its creator's handle.
         let with_creator = conn
-            .find_connection_in_workspace_with_creator(workspace_id, connection.id)
+            .find_connection_in_workspace_with_creator(seeded.workspace_id, connection.id)
             .await?
             .expect("connection should be present");
         assert_eq!(with_creator.item.id, connection.id);
@@ -403,11 +397,14 @@ mod tests {
     #[tokio::test]
     async fn soft_delete_hides_the_row_from_reads_and_updates() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let connection = conn
-            .create_workspace_connection(NewWorkspaceConnection::test(workspace_id, account_id))
+            .create_workspace_connection(NewWorkspaceConnection::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
 
         // An update applies to a live row.
@@ -426,12 +423,12 @@ mod tests {
 
         // Every scoped read now excludes it.
         assert!(
-            conn.find_connection_in_workspace(workspace_id, connection.id)
+            conn.find_connection_in_workspace(seeded.workspace_id, connection.id)
                 .await?
                 .is_none()
         );
         assert!(
-            conn.find_connection_in_workspace_with_creator(workspace_id, connection.id)
+            conn.find_connection_in_workspace_with_creator(seeded.workspace_id, connection.id)
                 .await?
                 .is_none()
         );
@@ -463,24 +460,30 @@ mod tests {
     #[tokio::test]
     async fn cursor_list_filters_by_provider_and_excludes_deleted() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         // An s3 connection, an azure connection, and a deleted s3 connection.
         let s3 = conn
-            .create_workspace_connection(NewWorkspaceConnection::test(workspace_id, account_id))
+            .create_workspace_connection(NewWorkspaceConnection::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
-        let mut azure = NewWorkspaceConnection::test(workspace_id, account_id);
+        let mut azure = NewWorkspaceConnection::test(seeded.workspace_id, seeded.account_id);
         azure.provider = "azure".to_owned();
         let azure = conn.create_workspace_connection(azure).await?;
         let deleted = conn
-            .create_workspace_connection(NewWorkspaceConnection::test(workspace_id, account_id))
+            .create_workspace_connection(NewWorkspaceConnection::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
         conn.delete_workspace_connection(deleted.id).await?;
 
         // No provider filter: both live connections, deleted excluded.
         let all = conn
-            .cursor_list_workspace_connections(workspace_id, CursorPagination::new(50), &[])
+            .cursor_list_workspace_connections(seeded.workspace_id, CursorPagination::new(50), &[])
             .await?;
         let ids: Vec<_> = all.items.iter().map(|c| c.item.id).collect();
         assert_eq!(ids.len(), 2);
@@ -490,7 +493,7 @@ mod tests {
         // Filtered to azure only.
         let azure_only = conn
             .cursor_list_workspace_connections(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 &["azure".to_owned()],
             )
@@ -510,12 +513,15 @@ mod tests {
     async fn list_scheduled_connections_requires_active_cron_and_not_deleted() -> anyhow::Result<()>
     {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         // A scheduled, active connection: it should be listed with its cron.
         let scheduled = conn
-            .create_workspace_connection(NewWorkspaceConnection::test(workspace_id, account_id))
+            .create_workspace_connection(NewWorkspaceConnection::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
         let mut schedule = NewWorkspaceConnectionSchedule::test(scheduled.id);
         schedule.schedule_cron = Some("0 * * * *".to_owned());
@@ -523,14 +529,17 @@ mod tests {
 
         // A connection whose schedule has no cron (manual-only): excluded.
         let manual = conn
-            .create_workspace_connection(NewWorkspaceConnection::test(workspace_id, account_id))
+            .create_workspace_connection(NewWorkspaceConnection::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
         let _ = conn
             .create_connection_schedule(NewWorkspaceConnectionSchedule::test(manual.id))
             .await?;
 
         // An inactive connection with a cron schedule: excluded.
-        let mut inactive = NewWorkspaceConnection::test(workspace_id, account_id);
+        let mut inactive = NewWorkspaceConnection::test(seeded.workspace_id, seeded.account_id);
         inactive.is_active = Some(false);
         let inactive = conn.create_workspace_connection(inactive).await?;
         let mut inactive_schedule = NewWorkspaceConnectionSchedule::test(inactive.id);

@@ -86,7 +86,7 @@ async fn list_api_tokens(
     let mut conn = pg_client.get_connection().await?;
 
     let page = conn
-        .cursor_list_account_api_tokens(auth_state.account_id, pagination.into())
+        .cursor_list_account_api_tokens(auth_state.account_id, pagination.into_cursor())
         .await?;
 
     tracing::debug!(

@@ -9,6 +9,7 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
+use super::workspace_thread_event::{StreamBound, TimelineCursor, TimelineSource};
 use crate::model::{
     NewWorkspaceThreadComment, UpdateWorkspaceThreadComment, WorkspaceThreadComment,
 };
@@ -49,6 +50,17 @@ pub trait WorkspaceThreadCommentRepository {
         &mut self,
         workspace_id: Uuid,
         thread_id: Uuid,
+    ) -> impl Future<Output = Result<Vec<WithAccountRef<WorkspaceThreadComment>>>> + Send;
+
+    /// Lists up to `limit` of a thread's live comments at or after a cursor
+    /// position, oldest first, each with the author's account reference. Backs the
+    /// merged, paginated timeline; the caller interleaves these with the events.
+    fn list_thread_comments_after(
+        &mut self,
+        workspace_id: Uuid,
+        thread_id: Uuid,
+        after: Option<&TimelineCursor>,
+        limit: i64,
     ) -> impl Future<Output = Result<Vec<WithAccountRef<WorkspaceThreadComment>>>> + Send;
 
     /// Updates a comment's body.
@@ -140,6 +152,66 @@ impl WorkspaceThreadCommentRepository for PgConnection {
             ))
             // Oldest first: a discussion reads top to bottom.
             .order((dsl::created_at.asc(), dsl::id.asc()))
+            .load(self)
+            .await
+            .map_err(Error::from)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(item, account)| WithAccountRef { item, account })
+            .collect())
+    }
+
+    async fn list_thread_comments_after(
+        &mut self,
+        workspace_id: Uuid,
+        thread_id: Uuid,
+        after: Option<&TimelineCursor>,
+        limit: i64,
+    ) -> Result<Vec<WithAccountRef<WorkspaceThreadComment>>> {
+        use schema::workspace_thread_comments::dsl;
+        use schema::{accounts, workspace_thread_comments};
+
+        let mut query = workspace_thread_comments::table
+            .inner_join(accounts::table.on(dsl::author_account_id.eq(accounts::id)))
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::thread_id.eq(thread_id))
+            .filter(dsl::deleted_at.is_null())
+            .into_boxed();
+
+        // Apply the per-stream keyset lower bound for this (comment) stream.
+        if let Some(cursor) = after {
+            match cursor.stream_bound(TimelineSource::Comment) {
+                StreamBound::AfterInstant { created_at } => {
+                    query =
+                        query.filter(dsl::created_at.gt(jiff_diesel::Timestamp::from(created_at)));
+                }
+                StreamBound::AfterId { created_at, id } => {
+                    let at = jiff_diesel::Timestamp::from(created_at);
+                    query = query.filter(
+                        dsl::created_at
+                            .gt(at)
+                            .or(dsl::created_at.eq(at).and(dsl::id.gt(id))),
+                    );
+                }
+                StreamBound::FromInstant { created_at } => {
+                    query =
+                        query.filter(dsl::created_at.ge(jiff_diesel::Timestamp::from(created_at)));
+                }
+            }
+        }
+
+        let rows: Vec<(WorkspaceThreadComment, AccountRefRow)> = query
+            .select((
+                WorkspaceThreadComment::as_select(),
+                (
+                    accounts::username,
+                    accounts::display_name,
+                    accounts::avatar_url,
+                ),
+            ))
+            .order((dsl::created_at.asc(), dsl::id.asc()))
+            .limit(limit)
             .load(self)
             .await
             .map_err(Error::from)?;

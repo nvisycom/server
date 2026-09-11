@@ -88,7 +88,7 @@ async fn list_files(
     })?;
 
     let page = conn
-        .cursor_list_workspace_files(workspace.id, cursor_pagination.into(), filter)
+        .cursor_list_workspace_files(workspace.id, cursor_pagination.into_cursor(), filter)
         .await?;
 
     let response = FilesPage::from_cursor_page(page, |wc| {

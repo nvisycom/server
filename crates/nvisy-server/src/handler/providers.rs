@@ -150,7 +150,7 @@ async fn list_providers(
     let mut conn = pg_client.get_connection().await?;
 
     let page = conn
-        .cursor_list_workspace_providers(workspace.id, pagination.into(), &query.provider)
+        .cursor_list_workspace_providers(workspace.id, pagination.into_cursor(), &query.provider)
         .await?;
 
     tracing::debug!(

@@ -13,12 +13,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
-pub enum SortOrder {
+pub enum Direction {
     /// Ascending order (A-Z, oldest first, smallest first).
-    Asc,
+    Ascending,
     /// Descending order (Z-A, newest first, largest first).
     #[default]
-    Desc,
+    Descending,
 }
 
 /// Generic sort specification with field and order.
@@ -30,14 +30,14 @@ pub struct SortBy<F> {
     pub field: F,
     /// The sort order direction.
     #[serde(default)]
-    pub order: SortOrder,
+    pub order: Direction,
 }
 
 impl<F: Default> Default for SortBy<F> {
     fn default() -> Self {
         Self {
             field: F::default(),
-            order: SortOrder::default(),
+            order: Direction::default(),
         }
     }
 }
@@ -45,7 +45,7 @@ impl<F: Default> Default for SortBy<F> {
 impl<F> SortBy<F> {
     /// Creates a new sort specification with the given field and order.
     #[inline]
-    pub fn new(field: F, order: SortOrder) -> Self {
+    pub fn new(field: F, order: Direction) -> Self {
         Self { field, order }
     }
 
@@ -54,7 +54,7 @@ impl<F> SortBy<F> {
     pub fn asc(field: F) -> Self {
         Self {
             field,
-            order: SortOrder::Asc,
+            order: Direction::Ascending,
         }
     }
 
@@ -63,19 +63,19 @@ impl<F> SortBy<F> {
     pub fn desc(field: F) -> Self {
         Self {
             field,
-            order: SortOrder::Desc,
+            order: Direction::Descending,
         }
     }
 
     /// Returns whether the sort order is ascending.
     #[inline]
     pub fn is_asc(&self) -> bool {
-        matches!(self.order, SortOrder::Asc)
+        matches!(self.order, Direction::Ascending)
     }
 
     /// Returns whether the sort order is descending.
     #[inline]
     pub fn is_desc(&self) -> bool {
-        matches!(self.order, SortOrder::Desc)
+        matches!(self.order, Direction::Descending)
     }
 }

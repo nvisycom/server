@@ -160,11 +160,11 @@ mod tests {
     /// Seeds a thread with its opening comment and returns that comment's id — the
     /// FK parent an outbox row needs.
     async fn seed_comment(db: &TestDatabase) -> anyhow::Result<Uuid> {
-        let (author, workspace_id, _pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
         let (_thread, opening) = conn
             .open_thread(
-                NewWorkspaceThread::test(workspace_id, file_id, author),
+                NewWorkspaceThread::test(seeded.workspace_id, seeded.file_id, seeded.account_id),
                 "@assistant help".to_owned(),
                 Vec::new(),
             )

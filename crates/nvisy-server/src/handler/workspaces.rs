@@ -143,7 +143,10 @@ async fn list_workspaces(
 ) -> Result<(StatusCode, Json<WorkspacesPage>)> {
     let mut conn = pg_client.get_connection().await?;
     let page = conn
-        .cursor_list_account_workspaces_with_details(auth_state.account_id, pagination.into())
+        .cursor_list_account_workspaces_with_details(
+            auth_state.account_id,
+            pagination.into_cursor(),
+        )
         .await?;
 
     let hard_max_upload_bytes = upload.max_file_bytes();

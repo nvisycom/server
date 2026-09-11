@@ -8,6 +8,8 @@ use std::future::Future;
 use diesel::dsl::now;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -18,8 +20,19 @@ use crate::model::{
 };
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, ThreadEventKind, ThreadFilter, WithAccountRef,
+    keyset,
 };
 use crate::{AsyncConnection, Error, PgConnection, Result, schema};
+
+/// Keyset for paginating a workspace's threads: newest first by `created_at`,
+/// `id` as the tiebreaker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadCursor {
+    /// When the thread was opened.
+    pub created_at: Timestamp,
+    /// Thread id (tiebreaker).
+    pub id: uuid::Uuid,
+}
 
 /// Read and write operations on threads.
 pub trait WorkspaceThreadRepository {
@@ -45,7 +58,7 @@ pub trait WorkspaceThreadRepository {
     fn cursor_list_threads(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<ThreadCursor>,
         filter: &ThreadFilter,
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceThread>>>> + Send;
 
@@ -167,7 +180,7 @@ impl WorkspaceThreadRepository for PgConnection {
     async fn cursor_list_threads(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<ThreadCursor>,
         filter: &ThreadFilter,
     ) -> Result<CursorPage<WithAccountRef<WorkspaceThread>>> {
         use schema::workspace_threads::dsl;
@@ -209,8 +222,6 @@ impl WorkspaceThreadRepository for PgConnection {
             None
         };
 
-        let query = scoped();
-        let limit = pagination.fetch_limit();
         let selection = (
             WorkspaceThread::as_select(),
             (
@@ -220,29 +231,21 @@ impl WorkspaceThreadRepository for PgConnection {
             ),
         );
 
-        let rows: Vec<(WorkspaceThread, AccountRefRow)> = if let Some(cursor) = &pagination.after {
-            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
-            query
-                .filter(
-                    dsl::created_at
-                        .lt(&cursor_time)
-                        .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                )
-                .select(selection)
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(Error::from)?
-        } else {
-            query
-                .select(selection)
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(Error::from)?
-        };
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let rows: Vec<(WorkspaceThread, AccountRefRow)> = keyset!(
+            scoped(),
+            dsl::created_at,
+            dsl::id,
+            pagination.direction,
+            after
+        )
+        .select(selection)
+        .limit(pagination.fetch_limit())
+        .load(self)
+        .await
+        .map_err(Error::from)?;
 
         let items: Vec<WithAccountRef<WorkspaceThread>> = rows
             .into_iter()
@@ -250,7 +253,10 @@ impl WorkspaceThreadRepository for PgConnection {
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
-            (row.item.created_at.into(), row.item.id)
+            ThreadCursor {
+                created_at: row.item.created_at.into(),
+                id: row.item.id,
+            }
         }))
     }
 
@@ -368,8 +374,9 @@ mod tests {
         UpdateWorkspaceThreadComment,
     };
     use crate::query::{
-        AccountRepository, WorkspaceThreadAnchorRepository, WorkspaceThreadCommentRepository,
-        WorkspaceThreadEventRepository, WorkspaceThreadRepository,
+        AccountRepository, TimelineCursor, TimelineSource, WorkspaceThreadAnchorRepository,
+        WorkspaceThreadCommentRepository, WorkspaceThreadEventRepository,
+        WorkspaceThreadRepository,
     };
     use crate::test_util::TestDatabase;
     use crate::types::{CursorPagination, ThreadEventKind, ThreadFilter};
@@ -377,17 +384,17 @@ mod tests {
     #[tokio::test]
     async fn open_thread_creates_thread_and_opening_comment() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (author, workspace_id, _pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
         let (thread, opening) = conn
             .open_thread(
-                NewWorkspaceThread::test(workspace_id, file_id, author),
+                NewWorkspaceThread::test(seeded.workspace_id, seeded.file_id, seeded.account_id),
                 "Opening message.".to_owned(),
                 Vec::new(),
             )
             .await?;
-        assert_eq!(thread.file_id, Some(file_id));
+        assert_eq!(thread.file_id, Some(seeded.file_id));
         assert!(thread.closed_at.is_none());
         assert_eq!(opening.thread_id, thread.id);
         assert_eq!(opening.body, "Opening message.");
@@ -395,12 +402,14 @@ mod tests {
         // A reply message lists after the opening one, oldest first.
         let _reply = conn
             .create_comment(NewWorkspaceThreadComment::test(
-                workspace_id,
+                seeded.workspace_id,
                 thread.id,
-                author,
+                seeded.account_id,
             ))
             .await?;
-        let msgs = conn.list_thread_comments(workspace_id, thread.id).await?;
+        let msgs = conn
+            .list_thread_comments(seeded.workspace_id, thread.id)
+            .await?;
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0].item.id, opening.id);
         Ok(())
@@ -409,15 +418,15 @@ mod tests {
     #[tokio::test]
     async fn workspace_level_thread_has_no_file() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (author, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let (thread, _opening) = conn
             .open_thread(
                 NewWorkspaceThread {
-                    workspace_id,
+                    workspace_id: seeded.workspace_id,
                     file_id: None,
-                    author_account_id: author,
+                    author_account_id: seeded.account_id,
                     display_name: None,
                 },
                 "A general workspace discussion.".to_owned(),
@@ -431,22 +440,22 @@ mod tests {
     #[tokio::test]
     async fn close_reopen_records_timeline_events() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (author, workspace_id, _pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
         let (thread, _opening) = conn
             .open_thread(
-                NewWorkspaceThread::test(workspace_id, file_id, author),
+                NewWorkspaceThread::test(seeded.workspace_id, seeded.file_id, seeded.account_id),
                 "Opening.".to_owned(),
                 Vec::new(),
             )
             .await?;
 
-        let closed = conn.close_thread(thread.id, author).await?;
+        let closed = conn.close_thread(thread.id, seeded.account_id).await?;
         assert!(closed.closed_at.is_some());
-        assert_eq!(closed.closed_by, Some(author));
+        assert_eq!(closed.closed_by, Some(seeded.account_id));
 
-        let reopened = conn.reopen_thread(thread.id, author).await?;
+        let reopened = conn.reopen_thread(thread.id, seeded.account_id).await?;
         assert!(reopened.closed_at.is_none());
 
         // The timeline records the open, then both transitions, oldest first.
@@ -466,12 +475,12 @@ mod tests {
         // Deleting the thread hides it and its messages.
         conn.delete_thread(thread.id).await?;
         assert!(
-            conn.find_thread_in_workspace(workspace_id, thread.id)
+            conn.find_thread_in_workspace(seeded.workspace_id, thread.id)
                 .await?
                 .is_none()
         );
         assert!(
-            conn.list_thread_comments(workspace_id, thread.id)
+            conn.list_thread_comments(seeded.workspace_id, thread.id)
                 .await?
                 .is_empty()
         );
@@ -481,14 +490,14 @@ mod tests {
     #[tokio::test]
     async fn anchors_add_remove_and_record_events() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (author, workspace_id, _pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
         // Open with one initial anchor (the initial anchor gets no event of its
         // own; opening the thread records the single `thread.opened` event).
         let (thread, _opening) = conn
             .open_thread(
-                NewWorkspaceThread::test(workspace_id, file_id, author),
+                NewWorkspaceThread::test(seeded.workspace_id, seeded.file_id, seeded.account_id),
                 "Opening.".to_owned(),
                 vec![serde_json::json!({ "modality": "text", "span": [0, 5] })],
             )
@@ -505,18 +514,18 @@ mod tests {
         // Add a second anchor -> one anchor.added event.
         let added = conn
             .add_thread_anchor(
-                workspace_id,
+                seeded.workspace_id,
                 NewWorkspaceThreadAnchor {
                     thread_id: thread.id,
                     anchor: serde_json::json!({ "modality": "text", "span": [10, 20] }),
                 },
-                author,
+                seeded.account_id,
             )
             .await?;
         assert_eq!(conn.list_thread_anchors(thread.id).await?.len(), 2);
 
         // Remove it -> anchor.removed event; live anchors back to one.
-        conn.remove_thread_anchor(workspace_id, added.id, author)
+        conn.remove_thread_anchor(seeded.workspace_id, added.id, seeded.account_id)
             .await?;
         assert_eq!(conn.list_thread_anchors(thread.id).await?.len(), 1);
         assert!(
@@ -545,7 +554,7 @@ mod tests {
     #[tokio::test]
     async fn cursor_list_threads_filters_by_author_and_closed() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (alice, workspace_id, _pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let bob = {
             let mut conn = db.client.get_connection().await?;
             conn.create_account(NewAccount::test()).await?.id
@@ -554,23 +563,23 @@ mod tests {
 
         let (a, _) = conn
             .open_thread(
-                NewWorkspaceThread::test(workspace_id, file_id, alice),
+                NewWorkspaceThread::test(seeded.workspace_id, seeded.file_id, seeded.account_id),
                 "a".to_owned(),
                 Vec::new(),
             )
             .await?;
         let _ = conn
             .open_thread(
-                NewWorkspaceThread::test(workspace_id, file_id, bob),
+                NewWorkspaceThread::test(seeded.workspace_id, seeded.file_id, bob),
                 "b".to_owned(),
                 Vec::new(),
             )
             .await?;
-        conn.close_thread(a.id, alice).await?;
+        conn.close_thread(a.id, seeded.account_id).await?;
 
         let all = conn
             .cursor_list_threads(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 &ThreadFilter::default(),
             )
@@ -579,7 +588,7 @@ mod tests {
 
         let closed_only = conn
             .cursor_list_threads(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 &ThreadFilter {
                     closed: Some(true),
@@ -592,7 +601,7 @@ mod tests {
 
         let just_bob = conn
             .cursor_list_threads(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 &ThreadFilter {
                     author_account_id: Some(bob),
@@ -607,12 +616,12 @@ mod tests {
     #[tokio::test]
     async fn comment_edit_and_delete() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (author, workspace_id, _pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
         let (thread, opening) = conn
             .open_thread(
-                NewWorkspaceThread::test(workspace_id, file_id, author),
+                NewWorkspaceThread::test(seeded.workspace_id, seeded.file_id, seeded.account_id),
                 "Opening.".to_owned(),
                 Vec::new(),
             )
@@ -630,13 +639,13 @@ mod tests {
 
         conn.delete_comment(opening.id).await?;
         assert!(
-            conn.find_comment_in_workspace(workspace_id, opening.id)
+            conn.find_comment_in_workspace(seeded.workspace_id, opening.id)
                 .await?
                 .is_none()
         );
         // The thread still exists after deleting a message.
         assert!(
-            conn.find_thread_in_workspace(workspace_id, thread.id)
+            conn.find_thread_in_workspace(seeded.workspace_id, thread.id)
                 .await?
                 .is_some()
         );
@@ -646,21 +655,21 @@ mod tests {
     #[tokio::test]
     async fn create_reply_is_unique_per_triggering_comment() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (author, workspace_id, _pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
         let (thread, trigger) = conn
             .open_thread(
-                NewWorkspaceThread::test(workspace_id, file_id, author),
+                NewWorkspaceThread::test(seeded.workspace_id, seeded.file_id, seeded.account_id),
                 "@assistant help".to_owned(),
                 Vec::new(),
             )
             .await?;
 
         let reply = |body: &str| NewWorkspaceThreadComment {
-            workspace_id,
+            workspace_id: seeded.workspace_id,
             thread_id: thread.id,
-            author_account_id: author,
+            author_account_id: seeded.account_id,
             parent_id: Some(trigger.id),
             body: body.to_owned(),
         };
@@ -675,7 +684,9 @@ mod tests {
         assert!(second.is_none());
 
         // Only the first reply is live.
-        let replies = conn.list_thread_comments(workspace_id, thread.id).await?;
+        let replies = conn
+            .list_thread_comments(seeded.workspace_id, thread.id)
+            .await?;
         let bodies: Vec<_> = replies.iter().map(|r| r.item.body.as_str()).collect();
         assert!(bodies.contains(&"first"));
         assert!(!bodies.contains(&"second"));
@@ -685,6 +696,110 @@ mod tests {
         conn.delete_comment(first.unwrap().id).await?;
         let third = conn.create_reply(reply("third")).await?;
         assert!(third.is_some());
+        Ok(())
+    }
+
+    /// A merged-timeline page: one entry with its sort key, mirroring how the
+    /// handler interleaves the two streams. `(created_at, source, id)`.
+    type Entry = (jiff::Timestamp, TimelineSource, uuid::Uuid);
+
+    /// Fetches one page of the merged timeline (comments + events) after `cursor`,
+    /// mirroring the handler: pull `limit + 1` from each stream, merge by
+    /// `(created_at, source, id)`, keep `limit`, and return the next cursor.
+    async fn timeline_page(
+        conn: &mut crate::PgConn,
+        workspace_id: uuid::Uuid,
+        thread_id: uuid::Uuid,
+        after: Option<&TimelineCursor>,
+        limit: i64,
+    ) -> anyhow::Result<(Vec<Entry>, Option<TimelineCursor>)> {
+        let fetch = limit + 1;
+        let comments = conn
+            .list_thread_comments_after(workspace_id, thread_id, after, fetch)
+            .await?;
+        let events = conn
+            .list_thread_events_after(thread_id, after, fetch)
+            .await?;
+
+        let mut merged: Vec<Entry> = Vec::new();
+        merged.extend(
+            comments
+                .iter()
+                .map(|c| (c.item.created_at.into(), TimelineSource::Comment, c.item.id)),
+        );
+        merged.extend(
+            events
+                .iter()
+                .map(|(e, _)| (e.created_at.into(), TimelineSource::Event, e.id)),
+        );
+        merged.sort();
+
+        let next = if merged.len() as i64 > limit {
+            merged.truncate(limit as usize);
+            merged
+                .last()
+                .map(|&(created_at, source, id)| TimelineCursor {
+                    created_at,
+                    source,
+                    id,
+                })
+        } else {
+            None
+        };
+        Ok((merged, next))
+    }
+
+    #[tokio::test]
+    async fn timeline_pages_comments_and_events_in_one_order() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_pipeline_and_file().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // Build a thread with a known set of timeline entries: opening (1 event +
+        // 1 comment), a reply comment, then close + reopen (2 events) = 5 entries.
+        let (thread, _opening) = conn
+            .open_thread(
+                NewWorkspaceThread::test(seeded.workspace_id, seeded.file_id, seeded.account_id),
+                "Opening.".to_owned(),
+                Vec::new(),
+            )
+            .await?;
+        conn.create_comment(NewWorkspaceThreadComment::test(
+            seeded.workspace_id,
+            thread.id,
+            seeded.account_id,
+        ))
+        .await?;
+        conn.close_thread(thread.id, seeded.account_id).await?;
+        conn.reopen_thread(thread.id, seeded.account_id).await?;
+
+        // The full merged timeline (a big first page) is every entry in order.
+        let (all, _) = timeline_page(&mut conn, seeded.workspace_id, thread.id, None, 50).await?;
+        assert_eq!(all.len(), 5);
+        // It is sorted ascending by (created_at, source, id).
+        let mut sorted = all.clone();
+        sorted.sort();
+        assert_eq!(all, sorted);
+
+        // Paging in windows of 2 walks the same order with no gaps or repeats.
+        let mut paged: Vec<Entry> = Vec::new();
+        let mut cursor: Option<TimelineCursor> = None;
+        loop {
+            let (page, next) = timeline_page(
+                &mut conn,
+                seeded.workspace_id,
+                thread.id,
+                cursor.as_ref(),
+                2,
+            )
+            .await?;
+            paged.extend(page);
+            match next {
+                Some(c) => cursor = Some(c),
+                None => break,
+            }
+        }
+        assert_eq!(paged, all);
         Ok(())
     }
 }

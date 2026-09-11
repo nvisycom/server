@@ -4,6 +4,8 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{
@@ -11,9 +13,30 @@ use crate::model::{
 };
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, Handle, MemberFilter, NotificationEvent,
-    OffsetPagination, WorkspaceRole,
+    OffsetPagination, WorkspaceRole, keyset,
 };
 use crate::{Error, PgConnection, Result, schema};
+
+/// Keyset for paginating an account's workspaces: newest membership first by
+/// `created_at`, with the workspace id as the tiebreaker (a member row has a
+/// composite key, so there is no single `id` column).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountWorkspaceCursor {
+    /// When the membership was created.
+    pub created_at: Timestamp,
+    /// Workspace id (tiebreaker).
+    pub workspace_id: uuid::Uuid,
+}
+
+/// Keyset for paginating a workspace's members: newest membership first by
+/// `created_at`, with the account id as the tiebreaker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceMemberCursor {
+    /// When the membership was created.
+    pub created_at: Timestamp,
+    /// Account id (tiebreaker).
+    pub account_id: uuid::Uuid,
+}
 
 /// Repository for workspace member database operations.
 ///
@@ -70,7 +93,7 @@ pub trait WorkspaceMemberRepository {
     fn cursor_list_account_workspaces_with_details(
         &mut self,
         account_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<AccountWorkspaceCursor>,
     ) -> impl Future<Output = Result<CursorPage<(Workspace, WorkspaceMember, AccountRefRow)>>> + Send;
 
     /// Returns the account ids of members holding any of `roles` who accept
@@ -92,7 +115,7 @@ pub trait WorkspaceMemberRepository {
     fn cursor_list_workspace_members_with_accounts(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<WorkspaceMemberCursor>,
         filter: MemberFilter,
     ) -> impl Future<Output = Result<CursorPage<(WorkspaceMember, Account)>>> + Send;
 
@@ -248,7 +271,7 @@ impl WorkspaceMemberRepository for PgConnection {
     async fn cursor_list_account_workspaces_with_details(
         &mut self,
         account_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<AccountWorkspaceCursor>,
     ) -> Result<CursorPage<(Workspace, WorkspaceMember, AccountRefRow)>> {
         use diesel::dsl::count_star;
         use schema::{accounts, workspace_members, workspaces};
@@ -275,50 +298,43 @@ impl WorkspaceMemberRepository for PgConnection {
             None
         };
 
-        // Build query
-        let mut query = workspace_members::table
+        let query = workspace_members::table
             .inner_join(workspaces::table.on(workspaces::id.eq(workspace_members::workspace_id)))
             .inner_join(accounts::table.on(accounts::id.eq(workspaces::created_by)))
             .filter(base_filter)
             .into_boxed();
 
-        // Apply cursor filter if present
-        if let Some(cursor) = &pagination.after {
-            let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
-            query = query.filter(
-                workspace_members::created_at
-                    .lt(cursor_ts)
-                    .or(workspace_members::created_at
-                        .eq(cursor_ts)
-                        .and(workspace_members::workspace_id.lt(cursor.id))),
-            );
-        }
-
-        let items = query
-            .order((
-                workspace_members::created_at.desc(),
-                workspace_members::workspace_id.desc(),
-            ))
-            .limit(pagination.fetch_limit())
-            .select((
-                Workspace::as_select(),
-                WorkspaceMember::as_select(),
-                (
-                    accounts::username,
-                    accounts::display_name,
-                    accounts::avatar_url,
-                ),
-            ))
-            .load(self)
-            .await
-            .map_err(Error::from)?;
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.workspace_id));
+        let items = keyset!(
+            query,
+            workspace_members::created_at,
+            workspace_members::workspace_id,
+            pagination.direction,
+            after
+        )
+        .limit(pagination.fetch_limit())
+        .select((
+            Workspace::as_select(),
+            WorkspaceMember::as_select(),
+            (
+                accounts::username,
+                accounts::display_name,
+                accounts::avatar_url,
+            ),
+        ))
+        .load(self)
+        .await
+        .map_err(Error::from)?;
 
         Ok(CursorPage::new(
             items,
             total,
             pagination.limit,
-            |(_, m, _): &(Workspace, WorkspaceMember, AccountRefRow)| {
-                (m.created_at.into(), m.workspace_id)
+            |(_, m, _): &(Workspace, WorkspaceMember, AccountRefRow)| AccountWorkspaceCursor {
+                created_at: m.created_at.into(),
+                workspace_id: m.workspace_id,
             },
         ))
     }
@@ -356,7 +372,7 @@ impl WorkspaceMemberRepository for PgConnection {
     async fn cursor_list_workspace_members_with_accounts(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<WorkspaceMemberCursor>,
         filter: MemberFilter,
     ) -> Result<CursorPage<(WorkspaceMember, Account)>> {
         use diesel::dsl::count_star;
@@ -399,41 +415,27 @@ impl WorkspaceMemberRepository for PgConnection {
             query = query.filter(workspace_members::member_role.eq(role));
         }
 
-        // Apply cursor filter if present
-        let items = if let Some(cursor) = &pagination.after {
-            let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
-            query
-                .filter(
-                    workspace_members::created_at
-                        .lt(cursor_ts)
-                        .or(workspace_members::created_at
-                            .eq(cursor_ts)
-                            .and(workspace_members::account_id.lt(cursor.id))),
-                )
-                .order((
-                    workspace_members::created_at.desc(),
-                    workspace_members::account_id.desc(),
-                ))
-                .limit(pagination.fetch_limit())
-                .select((WorkspaceMember::as_select(), Account::as_select()))
-                .load(self)
-                .await
-                .map_err(Error::from)?
-        } else {
-            query
-                .order((
-                    workspace_members::created_at.desc(),
-                    workspace_members::account_id.desc(),
-                ))
-                .limit(pagination.fetch_limit())
-                .select((WorkspaceMember::as_select(), Account::as_select()))
-                .load(self)
-                .await
-                .map_err(Error::from)?
-        };
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.account_id));
+        let items = keyset!(
+            query,
+            workspace_members::created_at,
+            workspace_members::account_id,
+            pagination.direction,
+            after
+        )
+        .limit(pagination.fetch_limit())
+        .select((WorkspaceMember::as_select(), Account::as_select()))
+        .load(self)
+        .await
+        .map_err(Error::from)?;
 
         Ok(CursorPage::new(items, total, pagination.limit, |(m, _)| {
-            (m.created_at.into(), m.account_id)
+            WorkspaceMemberCursor {
+                created_at: m.created_at.into(),
+                account_id: m.account_id,
+            }
         }))
     }
 
@@ -524,28 +526,28 @@ mod tests {
     #[tokio::test]
     async fn add_find_update_remove_round_trip() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (owner_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let member = conn
             .add_workspace_member(NewWorkspaceMember::new(
-                workspace_id,
-                owner_id,
+                seeded.workspace_id,
+                seeded.account_id,
                 WorkspaceRole::Owner,
             ))
             .await?;
         assert_eq!(member.member_role, WorkspaceRole::Owner);
 
         let found = conn
-            .find_workspace_member(workspace_id, owner_id)
+            .find_workspace_member(seeded.workspace_id, seeded.account_id)
             .await?
             .expect("member should exist");
-        assert_eq!(found.account_id, owner_id);
+        assert_eq!(found.account_id, seeded.account_id);
 
         let updated = conn
             .update_workspace_member(
-                workspace_id,
-                owner_id,
+                seeded.workspace_id,
+                seeded.account_id,
                 UpdateWorkspaceMember {
                     member_role: Some(WorkspaceRole::Admin),
                     ..Default::default()
@@ -554,9 +556,10 @@ mod tests {
             .await?;
         assert_eq!(updated.member_role, WorkspaceRole::Admin);
 
-        conn.remove_workspace_member(workspace_id, owner_id).await?;
+        conn.remove_workspace_member(seeded.workspace_id, seeded.account_id)
+            .await?;
         assert!(
-            conn.find_workspace_member(workspace_id, owner_id)
+            conn.find_workspace_member(seeded.workspace_id, seeded.account_id)
                 .await?
                 .is_none()
         );
@@ -566,63 +569,64 @@ mod tests {
     #[tokio::test]
     async fn notification_recipients_respect_role_and_event_prefs() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (owner_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         // An owner with default (empty) prefs accepts every event.
         let _ = conn
             .add_workspace_member(NewWorkspaceMember::new(
-                workspace_id,
-                owner_id,
+                seeded.workspace_id,
+                seeded.account_id,
                 WorkspaceRole::Owner,
             ))
             .await?;
 
         // A viewer who opted in to ONLY `member.joined`.
         let viewer_id = conn.create_account(NewAccount::test()).await?.id;
-        let mut viewer = NewWorkspaceMember::new(workspace_id, viewer_id, WorkspaceRole::Reviewer);
+        let mut viewer =
+            NewWorkspaceMember::new(seeded.workspace_id, viewer_id, WorkspaceRole::Reviewer);
         viewer.notification_events_app = vec![Some(NotificationEvent::MemberJoined)];
         let _ = conn.add_workspace_member(viewer).await?;
 
         // For `member.joined`, restricted to owners: only the owner matches.
         let owners_only = conn
             .notification_recipients_by_roles(
-                workspace_id,
+                seeded.workspace_id,
                 &[WorkspaceRole::Owner],
                 NotificationEvent::MemberJoined,
             )
             .await?;
-        assert_eq!(owners_only, vec![owner_id]);
+        assert_eq!(owners_only, vec![seeded.account_id]);
 
         // For `member.joined` across owner+viewer: both accept it.
         let mut both = conn
             .notification_recipients_by_roles(
-                workspace_id,
+                seeded.workspace_id,
                 &[WorkspaceRole::Owner, WorkspaceRole::Reviewer],
                 NotificationEvent::MemberJoined,
             )
             .await?;
         both.sort();
-        let mut expected = vec![owner_id, viewer_id];
+        let mut expected = vec![seeded.account_id, viewer_id];
         expected.sort();
         assert_eq!(both, expected);
 
         // For an event the viewer did NOT opt into: only the all-events owner.
         let detection = conn
             .notification_recipients_by_roles(
-                workspace_id,
+                seeded.workspace_id,
                 &[WorkspaceRole::Owner, WorkspaceRole::Reviewer],
                 NotificationEvent::DetectionCompleted,
             )
             .await?;
-        assert_eq!(detection, vec![owner_id]);
+        assert_eq!(detection, vec![seeded.account_id]);
         Ok(())
     }
 
     #[tokio::test]
     async fn accounts_share_workspace_detects_common_membership() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (owner_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let member_id = conn.create_account(NewAccount::test()).await?.id;
@@ -630,23 +634,30 @@ mod tests {
 
         let _ = conn
             .add_workspace_member(NewWorkspaceMember::new(
-                workspace_id,
-                owner_id,
+                seeded.workspace_id,
+                seeded.account_id,
                 WorkspaceRole::Owner,
             ))
             .await?;
         let _ = conn
             .add_workspace_member(NewWorkspaceMember::new(
-                workspace_id,
+                seeded.workspace_id,
                 member_id,
                 WorkspaceRole::Editor,
             ))
             .await?;
 
         // Two members of the same workspace share it.
-        assert!(conn.accounts_share_workspace(owner_id, member_id).await?);
+        assert!(
+            conn.accounts_share_workspace(seeded.account_id, member_id)
+                .await?
+        );
         // The stranger is in no shared workspace.
-        assert!(!conn.accounts_share_workspace(owner_id, stranger_id).await?);
+        assert!(
+            !conn
+                .accounts_share_workspace(seeded.account_id, stranger_id)
+                .await?
+        );
         // An account always shares with itself, even with no memberships.
         assert!(
             conn.accounts_share_workspace(stranger_id, stranger_id)

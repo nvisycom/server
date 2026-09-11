@@ -44,9 +44,9 @@ mod workspace_thread_event;
 mod workspace_webhook;
 
 pub use account::AccountRepository;
-pub use account_api_token::AccountApiTokenRepository;
+pub use account_api_token::{AccountApiTokenRepository, ApiTokenCursor};
 pub use account_identity::{AccountIdentityRepository, DeleteIdentityOutcome, LinkIdentityOutcome};
-pub use account_notification::AccountNotificationRepository;
+pub use account_notification::{AccountNotificationRepository, NotificationCursor};
 pub use analytics::{
     AnalyticsSnapshot, DetectionDayPoint, DetectionDurations, DetectionStatusCount, StorageByKind,
     UsageByModel, WorkspaceAnalyticsRepository,
@@ -54,25 +54,31 @@ pub use analytics::{
 pub use event_outbox::EventOutboxRepository;
 pub use pipeline_reference::PipelineReferenceRepository;
 pub use workspace::WorkspaceRepository;
-pub use workspace_activity::{ActivityFilter, WorkspaceActivityRepository};
+pub use workspace_activity::{ActivityCursor, ActivityFilter, WorkspaceActivityRepository};
 pub use workspace_assignment::{
-    AssignmentListRow, CreateAssignmentOutcome, WorkspaceAssignmentRepository,
+    AssignmentCursor, AssignmentListRow, CreateAssignmentOutcome, WorkspaceAssignmentRepository,
 };
 pub use workspace_assistant_job::AssistantJobOutboxRepository;
-pub use workspace_connection::{ScheduledConnection, WorkspaceConnectionRepository};
+pub use workspace_connection::{
+    ConnectionCursor, ScheduledConnection, WorkspaceConnectionRepository,
+};
 pub use workspace_connection_schedule::WorkspaceConnectionScheduleRepository;
-pub use workspace_connection_sync::WorkspaceConnectionSyncRepository;
-pub use workspace_detection::{DetectionFiles, DetectionListRow, WorkspaceDetectionRepository};
+pub use workspace_connection_sync::{ConnectionSyncCursor, WorkspaceConnectionSyncRepository};
+pub use workspace_detection::{
+    DetectionCursor, DetectionFiles, DetectionListRow, WorkspaceDetectionRepository,
+};
 pub use workspace_detection_job::DetectionJobOutboxRepository;
-pub use workspace_file::{ExpiredFileRef, ImportedFileRef, WorkspaceFileRepository};
-pub use workspace_invite::WorkspaceInviteRepository;
-pub use workspace_member::WorkspaceMemberRepository;
-pub use workspace_pipeline::WorkspacePipelineRepository;
-pub use workspace_policy::WorkspacePolicyRepository;
-pub use workspace_provider::WorkspaceProviderRepository;
-pub use workspace_redaction::WorkspaceRedactionRepository;
-pub use workspace_thread::WorkspaceThreadRepository;
+pub use workspace_file::{ExpiredFileRef, FileCursor, ImportedFileRef, WorkspaceFileRepository};
+pub use workspace_invite::{InviteCursor, WorkspaceInviteRepository};
+pub use workspace_member::{
+    AccountWorkspaceCursor, WorkspaceMemberCursor, WorkspaceMemberRepository,
+};
+pub use workspace_pipeline::{PipelineCursor, WorkspacePipelineRepository};
+pub use workspace_policy::{PolicyCursor, WorkspacePolicyRepository};
+pub use workspace_provider::{ProviderCursor, WorkspaceProviderRepository};
+pub use workspace_redaction::{RedactionCursor, WorkspaceRedactionRepository};
+pub use workspace_thread::{ThreadCursor, WorkspaceThreadRepository};
 pub use workspace_thread_anchor::WorkspaceThreadAnchorRepository;
 pub use workspace_thread_comment::WorkspaceThreadCommentRepository;
-pub use workspace_thread_event::WorkspaceThreadEventRepository;
-pub use workspace_webhook::WorkspaceWebhookRepository;
+pub use workspace_thread_event::{TimelineCursor, TimelineSource, WorkspaceThreadEventRepository};
+pub use workspace_webhook::{WebhookCursor, WorkspaceWebhookRepository};

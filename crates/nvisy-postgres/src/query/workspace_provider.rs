@@ -4,11 +4,25 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};
-use crate::types::{AccountRefRow, CursorPage, CursorPagination, ProviderType, WithAccountRef};
+use crate::types::{
+    AccountRefRow, CursorPage, CursorPagination, ProviderType, WithAccountRef, keyset,
+};
 use crate::{Error, PgConnection, Result, schema};
+
+/// Keyset for paginating a workspace's providers: newest first by `created_at`,
+/// `id` as the tiebreaker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderCursor {
+    /// When the provider was created.
+    pub created_at: Timestamp,
+    /// Provider id (tiebreaker).
+    pub id: uuid::Uuid,
+}
 
 /// Repository for workspace inference-provider database operations.
 ///
@@ -56,7 +70,7 @@ pub trait WorkspaceProviderRepository {
     fn cursor_list_workspace_providers(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<ProviderCursor>,
         providers: &[String],
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceProvider>>>> + Send;
 
@@ -165,7 +179,7 @@ impl WorkspaceProviderRepository for PgConnection {
     async fn cursor_list_workspace_providers(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<ProviderCursor>,
         providers: &[String],
     ) -> Result<CursorPage<WithAccountRef<WorkspaceProvider>>> {
         use schema::workspace_providers::dsl;
@@ -202,18 +216,11 @@ impl WorkspaceProviderRepository for PgConnection {
             query = query.filter(dsl::provider.eq_any(providers.to_vec()));
         }
 
-        let limit = pagination.fetch_limit();
-
-        let rows: Vec<(WorkspaceProvider, AccountRefRow)> = if let Some(cursor) = &pagination.after
-        {
-            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
-
-            query
-                .filter(
-                    dsl::created_at
-                        .lt(&cursor_time)
-                        .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                )
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let rows: Vec<(WorkspaceProvider, AccountRefRow)> =
+            keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
                 .select((
                     WorkspaceProvider::as_select(),
                     (
@@ -222,27 +229,10 @@ impl WorkspaceProviderRepository for PgConnection {
                         accounts::avatar_url,
                     ),
                 ))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
+                .limit(pagination.fetch_limit())
                 .load(self)
                 .await
-                .map_err(Error::from)?
-        } else {
-            query
-                .select((
-                    WorkspaceProvider::as_select(),
-                    (
-                        accounts::username,
-                        accounts::display_name,
-                        accounts::avatar_url,
-                    ),
-                ))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(Error::from)?
-        };
+                .map_err(Error::from)?;
 
         let items: Vec<WithAccountRef<WorkspaceProvider>> = rows
             .into_iter()
@@ -250,7 +240,10 @@ impl WorkspaceProviderRepository for PgConnection {
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wp| {
-            (wp.item.created_at.into(), wp.item.id)
+            ProviderCursor {
+                created_at: wp.item.created_at.into(),
+                id: wp.item.id,
+            }
         }))
     }
 
@@ -308,7 +301,7 @@ mod tests {
     #[tokio::test]
     async fn find_by_type_returns_the_most_recent_active_provider() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         // Two active LLM providers. `newer` is then updated, bumping its
@@ -316,15 +309,15 @@ mod tests {
         // return `newer` — this is what exercises recency, not just presence.
         let _older = conn
             .create_workspace_provider(NewWorkspaceProvider::test(
-                workspace_id,
-                account_id,
+                seeded.workspace_id,
+                seeded.account_id,
                 ProviderType::Llm,
             ))
             .await?;
         let newer = conn
             .create_workspace_provider(NewWorkspaceProvider::test(
-                workspace_id,
-                account_id,
+                seeded.workspace_id,
+                seeded.account_id,
                 ProviderType::Llm,
             ))
             .await?;
@@ -341,18 +334,18 @@ mod tests {
         // A disabled provider must never be returned, even if it is newest.
         let disabled = NewWorkspaceProvider {
             is_active: Some(false),
-            ..NewWorkspaceProvider::test(workspace_id, account_id, ProviderType::Llm)
+            ..NewWorkspaceProvider::test(seeded.workspace_id, seeded.account_id, ProviderType::Llm)
         };
         let _ = conn.create_workspace_provider(disabled).await?;
 
         let found = conn
-            .find_provider_by_type(workspace_id, ProviderType::Llm)
+            .find_provider_by_type(seeded.workspace_id, ProviderType::Llm)
             .await?;
         assert_eq!(found.map(|p| p.id), Some(newer.id));
 
         // A different kind in the same workspace is not matched.
         assert!(
-            conn.find_provider_by_type(workspace_id, ProviderType::Ner)
+            conn.find_provider_by_type(seeded.workspace_id, ProviderType::Ner)
                 .await?
                 .is_none()
         );
@@ -362,13 +355,13 @@ mod tests {
     #[tokio::test]
     async fn update_and_delete_are_scoped_to_live_rows() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let provider = conn
             .create_workspace_provider(NewWorkspaceProvider::test(
-                workspace_id,
-                account_id,
+                seeded.workspace_id,
+                seeded.account_id,
                 ProviderType::Llm,
             ))
             .await?;
@@ -376,7 +369,7 @@ mod tests {
         // Soft-delete it, then a second delete and an update both find no live row.
         conn.delete_workspace_provider(provider.id).await?;
         assert!(
-            conn.find_provider_in_workspace(workspace_id, provider.id)
+            conn.find_provider_in_workspace(seeded.workspace_id, provider.id)
                 .await?
                 .is_none()
         );
@@ -397,28 +390,28 @@ mod tests {
     #[tokio::test]
     async fn cursor_list_filters_by_provider_and_paginates() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         for _ in 0..3 {
             let _ = conn
                 .create_workspace_provider(NewWorkspaceProvider::test(
-                    workspace_id,
-                    account_id,
+                    seeded.workspace_id,
+                    seeded.account_id,
                     ProviderType::Llm,
                 ))
                 .await?;
         }
 
         let page = conn
-            .cursor_list_workspace_providers(workspace_id, CursorPagination::new(50), &[])
+            .cursor_list_workspace_providers(seeded.workspace_id, CursorPagination::new(50), &[])
             .await?;
         assert_eq!(page.items.len(), 3);
 
         // A provider filter that matches nothing returns an empty page.
         let none = conn
             .cursor_list_workspace_providers(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 &["anthropic".to_owned()],
             )

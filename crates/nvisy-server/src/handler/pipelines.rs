@@ -132,7 +132,7 @@ async fn list_pipelines(
     let page = conn
         .cursor_list_workspace_pipelines(
             workspace.id,
-            pagination.into(),
+            pagination.into_cursor(),
             filter.status,
             filter.search.as_deref(),
         )

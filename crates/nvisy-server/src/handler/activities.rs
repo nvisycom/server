@@ -137,7 +137,7 @@ async fn list_activities(
     }
 
     let page = conn
-        .cursor_list_workspace_activity(workspace.id, filter, pagination.into())
+        .cursor_list_workspace_activity(workspace.id, filter, pagination.into_cursor())
         .await?;
 
     let response = ActivitiesPage::from_cursor_page(page, |wc| {

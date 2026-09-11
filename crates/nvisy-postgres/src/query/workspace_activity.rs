@@ -5,11 +5,24 @@ use std::future::Future;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceActivity, WorkspaceActivity};
-use crate::types::{AccountRefRow, ActivityType, CursorPage, CursorPagination, WithAccountRef};
+use crate::types::{
+    AccountRefRow, ActivityType, CursorPage, CursorPagination, WithAccountRef, keyset,
+};
 use crate::{Error, PgConnection, Result, schema};
+
+/// Keyset for paginating a workspace's activity log: newest first by `created_at`,
+/// `id` as the tiebreaker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityCursor {
+    /// When the activity was recorded.
+    pub created_at: Timestamp,
+    /// Activity id (tiebreaker).
+    pub id: uuid::Uuid,
+}
 
 /// Predicates that narrow an activity listing, all optional (an empty filter
 /// matches every activity in the workspace). Shared by the paginated feed and the
@@ -46,7 +59,7 @@ pub trait WorkspaceActivityRepository {
         &mut self,
         workspace_id: Uuid,
         filter: ActivityFilter,
-        pagination: CursorPagination,
+        pagination: CursorPagination<ActivityCursor>,
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceActivity>>>> + Send;
 
     /// Lists a workspace's filtered activities oldest first (the natural order for
@@ -80,7 +93,7 @@ impl WorkspaceActivityRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         filter: ActivityFilter,
-        pagination: CursorPagination,
+        pagination: CursorPagination<ActivityCursor>,
     ) -> Result<CursorPage<WithAccountRef<WorkspaceActivity>>> {
         use diesel::dsl::count_star;
         use schema::workspace_activities::dsl;
@@ -102,37 +115,31 @@ impl WorkspaceActivityRepository for PgConnection {
             None
         };
 
-        let mut query = apply_activity_filter(
+        let query = apply_activity_filter(
             workspace_activities::table
                 .filter(dsl::workspace_id.eq(workspace_id))
                 .into_boxed(),
             &filter,
-        );
+        )
+        .inner_join(accounts::table);
 
-        if let Some(cursor) = &pagination.after {
-            let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
-            query = query.filter(
-                dsl::created_at
-                    .lt(cursor_ts)
-                    .or(dsl::created_at.eq(cursor_ts).and(dsl::id.lt(cursor.id))),
-            );
-        }
-
-        let rows: Vec<(WorkspaceActivity, AccountRefRow)> = query
-            .inner_join(accounts::table)
-            .select((
-                WorkspaceActivity::as_select(),
-                (
-                    accounts::username,
-                    accounts::display_name,
-                    accounts::avatar_url,
-                ),
-            ))
-            .order((dsl::created_at.desc(), dsl::id.desc()))
-            .limit(pagination.fetch_limit())
-            .load(self)
-            .await
-            .map_err(Error::from)?;
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let rows: Vec<(WorkspaceActivity, AccountRefRow)> =
+            keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
+                .select((
+                    WorkspaceActivity::as_select(),
+                    (
+                        accounts::username,
+                        accounts::display_name,
+                        accounts::avatar_url,
+                    ),
+                ))
+                .limit(pagination.fetch_limit())
+                .load(self)
+                .await
+                .map_err(Error::from)?;
 
         let items: Vec<WithAccountRef<WorkspaceActivity>> = rows
             .into_iter()
@@ -140,7 +147,10 @@ impl WorkspaceActivityRepository for PgConnection {
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
-            (wc.item.created_at.into(), wc.item.id)
+            ActivityCursor {
+                created_at: wc.item.created_at.into(),
+                id: wc.item.id,
+            }
         }))
     }
 
@@ -240,23 +250,23 @@ mod tests {
     #[tokio::test]
     async fn feed_lists_newest_first_and_export_lists_oldest_first() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         // `first` is an hour old so the newest-first / oldest-first orders are
         // deterministic against `second`.
         let first = log(
             &mut conn,
-            workspace_id,
-            account_id,
+            seeded.workspace_id,
+            seeded.account_id,
             ActivityType::WorkspaceCreated,
             Some(Span::new().hours(1)),
         )
         .await?;
         let second = log(
             &mut conn,
-            workspace_id,
-            account_id,
+            seeded.workspace_id,
+            seeded.account_id,
             ActivityType::WorkspaceUpdated,
             None,
         )
@@ -265,7 +275,7 @@ mod tests {
         // The paginated feed is newest first.
         let feed = conn
             .cursor_list_workspace_activity(
-                workspace_id,
+                seeded.workspace_id,
                 ActivityFilter::default(),
                 CursorPagination::new(50),
             )
@@ -277,7 +287,7 @@ mod tests {
 
         // The export is oldest first.
         let export = conn
-            .list_workspace_activity_for_export(workspace_id, ActivityFilter::default(), 50)
+            .list_workspace_activity_for_export(seeded.workspace_id, ActivityFilter::default(), 50)
             .await?;
         assert_eq!(
             export.iter().map(|a| a.item.id).collect::<Vec<_>>(),
@@ -289,7 +299,7 @@ mod tests {
     #[tokio::test]
     async fn filter_by_type_and_actor() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (owner_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         // A second actor in the same workspace.
@@ -297,23 +307,23 @@ mod tests {
 
         let created = log(
             &mut conn,
-            workspace_id,
-            owner_id,
+            seeded.workspace_id,
+            seeded.account_id,
             ActivityType::WorkspaceCreated,
             None,
         )
         .await?;
         let _updated = log(
             &mut conn,
-            workspace_id,
-            owner_id,
+            seeded.workspace_id,
+            seeded.account_id,
             ActivityType::WorkspaceUpdated,
             None,
         )
         .await?;
         let by_other = log(
             &mut conn,
-            workspace_id,
+            seeded.workspace_id,
             other_id,
             ActivityType::WorkspaceCreated,
             None,
@@ -323,7 +333,7 @@ mod tests {
         // Type filter keeps only WorkspaceCreated (from either actor).
         let created_only = conn
             .cursor_list_workspace_activity(
-                workspace_id,
+                seeded.workspace_id,
                 ActivityFilter {
                     types: vec![ActivityType::WorkspaceCreated],
                     ..Default::default()
@@ -340,7 +350,7 @@ mod tests {
         // Actor filter keeps only the other actor's activity.
         let others = conn
             .cursor_list_workspace_activity(
-                workspace_id,
+                seeded.workspace_id,
                 ActivityFilter {
                     actor: Some(other_id),
                     ..Default::default()

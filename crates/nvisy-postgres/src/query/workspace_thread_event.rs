@@ -7,6 +7,8 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -16,6 +18,69 @@ use crate::model::{
 use crate::types::{AccountRefRow, ThreadEventKind};
 use crate::{Error, PgConnection, Result, schema};
 
+/// Which of the two timeline streams an entry came from. Its order is the
+/// tiebreak between a comment and an event that share a `created_at`: a comment
+/// sorts before an event at the same instant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TimelineSource {
+    /// A comment (message).
+    Comment,
+    /// A lifecycle event.
+    Event,
+}
+
+/// Keyset for the merged thread timeline: comments and events ordered together by
+/// `(created_at, source, id)` ascending. `source` breaks a `created_at` tie
+/// between the two streams; `id` breaks a tie within one stream.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimelineCursor {
+    /// When the entry was created.
+    pub created_at: Timestamp,
+    /// Which stream the entry came from.
+    pub source: TimelineSource,
+    /// Entry id (tiebreaker within a stream).
+    pub id: Uuid,
+}
+
+impl TimelineCursor {
+    /// The lower bound for one stream's keyset query, given this cursor position.
+    ///
+    /// A stream's own [`TimelineSource`] decides how the cursor instant is
+    /// treated:
+    /// - source > cursor.source: every row at the cursor instant comes after it,
+    ///   so include all of them (`same_instant_all = true`).
+    /// - source == cursor.source: only rows at the instant with a larger id.
+    /// - source < cursor.source: no row at the instant qualifies; page strictly
+    ///   after the instant.
+    pub(crate) fn stream_bound(&self, source: TimelineSource) -> StreamBound {
+        use std::cmp::Ordering::{Equal, Greater, Less};
+        match source.cmp(&self.source) {
+            Greater => StreamBound::FromInstant {
+                created_at: self.created_at,
+            },
+            Equal => StreamBound::AfterId {
+                created_at: self.created_at,
+                id: self.id,
+            },
+            Less => StreamBound::AfterInstant {
+                created_at: self.created_at,
+            },
+        }
+    }
+}
+
+/// A single stream's keyset lower bound, derived from a [`TimelineCursor`].
+pub(crate) enum StreamBound {
+    /// Include rows strictly after `created_at`.
+    AfterInstant { created_at: Timestamp },
+    /// Include rows after `created_at`, plus rows at it with `id > id`.
+    AfterId { created_at: Timestamp, id: Uuid },
+    /// Include rows at or after `created_at` (the whole instant qualifies).
+    FromInstant { created_at: Timestamp },
+}
+
 /// Read operations on a thread's timeline events.
 pub trait WorkspaceThreadEventRepository {
     /// Lists a thread's timeline events, oldest first, each paired with the
@@ -23,6 +88,16 @@ pub trait WorkspaceThreadEventRepository {
     fn list_thread_events(
         &mut self,
         thread_id: Uuid,
+    ) -> impl Future<Output = Result<Vec<(WorkspaceThreadEvent, Option<AccountRefRow>)>>> + Send;
+
+    /// Lists up to `limit` of a thread's timeline events at or after a cursor
+    /// position, oldest first, each with its actor's account reference. Backs the
+    /// merged, paginated timeline; the caller interleaves these with the comments.
+    fn list_thread_events_after(
+        &mut self,
+        thread_id: Uuid,
+        after: Option<&TimelineCursor>,
+        limit: i64,
     ) -> impl Future<Output = Result<Vec<(WorkspaceThreadEvent, Option<AccountRefRow>)>>> + Send;
 }
 
@@ -49,6 +124,59 @@ impl WorkspaceThreadEventRepository for PgConnection {
                     .nullable(),
             ))
             .order((dsl::created_at.asc(), dsl::id.asc()))
+            .load(self)
+            .await
+            .map_err(Error::from)
+    }
+
+    async fn list_thread_events_after(
+        &mut self,
+        thread_id: Uuid,
+        after: Option<&TimelineCursor>,
+        limit: i64,
+    ) -> Result<Vec<(WorkspaceThreadEvent, Option<AccountRefRow>)>> {
+        use schema::accounts;
+        use schema::workspace_thread_events::{self, dsl};
+
+        let mut query = workspace_thread_events::table
+            .left_join(accounts::table.on(dsl::actor_account_id.eq(accounts::id.nullable())))
+            .filter(dsl::thread_id.eq(thread_id))
+            .into_boxed();
+
+        // Apply the per-stream keyset lower bound for this (event) stream.
+        if let Some(cursor) = after {
+            match cursor.stream_bound(TimelineSource::Event) {
+                StreamBound::AfterInstant { created_at } => {
+                    query =
+                        query.filter(dsl::created_at.gt(jiff_diesel::Timestamp::from(created_at)));
+                }
+                StreamBound::AfterId { created_at, id } => {
+                    let at = jiff_diesel::Timestamp::from(created_at);
+                    query = query.filter(
+                        dsl::created_at
+                            .gt(at)
+                            .or(dsl::created_at.eq(at).and(dsl::id.gt(id))),
+                    );
+                }
+                StreamBound::FromInstant { created_at } => {
+                    query =
+                        query.filter(dsl::created_at.ge(jiff_diesel::Timestamp::from(created_at)));
+                }
+            }
+        }
+
+        query
+            .select((
+                WorkspaceThreadEvent::as_select(),
+                (
+                    accounts::username,
+                    accounts::display_name,
+                    accounts::avatar_url,
+                )
+                    .nullable(),
+            ))
+            .order((dsl::created_at.asc(), dsl::id.asc()))
+            .limit(limit)
             .load(self)
             .await
             .map_err(Error::from)

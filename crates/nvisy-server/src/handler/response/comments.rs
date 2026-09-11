@@ -5,6 +5,7 @@ use nvisy_postgres::model::{
     WorkspaceThread as ThreadModel, WorkspaceThreadAnchor as AnchorModel,
     WorkspaceThreadComment as CommentModel, WorkspaceThreadEvent as EventModel,
 };
+use nvisy_postgres::query::{TimelineCursor, TimelineSource};
 use nvisy_postgres::types::ThreadEventKind;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -108,17 +109,36 @@ pub enum ThreadEntry {
 }
 
 impl ThreadEntry {
-    /// The entry's timestamp, used to order the merged timeline.
-    pub fn timestamp(&self) -> Timestamp {
+    /// The entry's position in the merged timeline: `(created_at, source, id)`.
+    /// Comments sort before events at the same instant; `id` breaks a tie within
+    /// one stream. This is the total order the timeline is paginated by.
+    pub fn cursor(&self) -> TimelineCursor {
         match self {
-            ThreadEntry::Comment(c) => c.created_at,
-            ThreadEntry::Event(e) => e.created_at,
+            ThreadEntry::Comment(c) => TimelineCursor {
+                created_at: c.created_at,
+                source: TimelineSource::Comment,
+                id: c.id,
+            },
+            ThreadEntry::Event(e) => TimelineCursor {
+                created_at: e.created_at,
+                source: TimelineSource::Event,
+                id: e.id,
+            },
         }
+    }
+
+    /// The sort tuple for merging the two streams, derived from [`Self::cursor`].
+    pub fn sort_key(&self) -> (Timestamp, TimelineSource, uuid::Uuid) {
+        let c = self.cursor();
+        (c.created_at, c.source, c.id)
     }
 }
 
 /// Paginated response for threads.
 pub type ThreadsPage = Page<Thread>;
+
+/// Paginated response for a thread's timeline.
+pub type TimelinePage = Page<ThreadEntry>;
 
 impl Thread {
     /// Creates a thread response from the database model, its live anchors, and

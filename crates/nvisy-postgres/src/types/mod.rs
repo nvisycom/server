@@ -42,12 +42,15 @@ pub use json::{
     ThreadCommentActivityParams, WebhookActivityParams, WebhookHeaders, WorkspaceActivityParams,
     WorkspaceMetadata, WorkspaceSettings,
 };
-pub use pagination::{Cursor, CursorPage, CursorPagination, OffsetPage, OffsetPagination};
+pub(crate) use pagination::keyset;
+pub use pagination::{
+    Cursor, CursorKey, CursorPage, CursorPagination, OffsetPage, OffsetPagination,
+};
 pub use prefixed_id::{
     ConnectionId, DetectionId, PrefixedIdError, ProviderId, RedactionId, WebhookId,
 };
 pub use sorting::{
-    FileSortBy, FileSortField, InviteSortBy, InviteSortField, MemberSortBy, MemberSortField,
-    SortBy, SortOrder,
+    Direction, FileSortBy, FileSortField, InviteSortBy, InviteSortField, MemberSortBy,
+    MemberSortField, SortBy,
 };
 pub use utilities::{AccountRefRow, WithAccountRef, session};

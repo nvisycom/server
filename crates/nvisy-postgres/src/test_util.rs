@@ -123,13 +123,13 @@ impl TestDatabase {
             .id
     }
 
-    /// Seeds an account and a workspace it owns, returning `(account_id,
-    /// workspace_id)` — the FK parents most workspace-scoped rows require.
+    /// Seeds an account and a workspace it owns — the FK parents most
+    /// workspace-scoped rows require.
     ///
     /// # Panics
     ///
     /// Panics if either insert fails.
-    pub async fn seed_account_and_workspace(&self) -> (Uuid, Uuid) {
+    pub async fn seed_account_and_workspace(&self) -> SeededWorkspace {
         let account_id = self.seed_account().await;
         let mut conn = self
             .client
@@ -141,18 +141,23 @@ impl TestDatabase {
             .await
             .expect("failed to seed workspace");
 
-        (account_id, workspace.id)
+        SeededWorkspace {
+            account_id,
+            workspace_id: workspace.id,
+        }
     }
 
-    /// Seeds an account, a workspace, a pipeline, and an input file, returning
-    /// `(account_id, workspace_id, pipeline_id, file_id)` — the FK parents a
-    /// detection (and, through it, a redaction) requires.
+    /// Seeds an account, a workspace, a pipeline, and an input file — the FK
+    /// parents a detection (and, through it, a redaction) requires.
     ///
     /// # Panics
     ///
     /// Panics if any insert fails.
-    pub async fn seed_pipeline_and_file(&self) -> (Uuid, Uuid, Uuid, Uuid) {
-        let (account_id, workspace_id) = self.seed_account_and_workspace().await;
+    pub async fn seed_pipeline_and_file(&self) -> SeededPipeline {
+        let SeededWorkspace {
+            account_id,
+            workspace_id,
+        } = self.seed_account_and_workspace().await;
         let mut conn = self
             .client
             .get_connection()
@@ -167,8 +172,36 @@ impl TestDatabase {
             .await
             .expect("failed to seed file");
 
-        (account_id, workspace_id, pipeline.id, file.id)
+        SeededPipeline {
+            account_id,
+            workspace_id,
+            pipeline_id: pipeline.id,
+            file_id: file.id,
+        }
     }
+}
+
+/// An account and a workspace it owns, seeded for a test.
+#[derive(Debug, Clone, Copy)]
+pub struct SeededWorkspace {
+    /// The account that owns the workspace.
+    pub account_id: Uuid,
+    /// The workspace.
+    pub workspace_id: Uuid,
+}
+
+/// An account, workspace, pipeline, and input file, seeded for a test — the FK
+/// parents a detection and redaction need.
+#[derive(Debug, Clone, Copy)]
+pub struct SeededPipeline {
+    /// The account that owns everything.
+    pub account_id: Uuid,
+    /// The workspace.
+    pub workspace_id: Uuid,
+    /// The pipeline.
+    pub pipeline_id: Uuid,
+    /// The input file.
+    pub file_id: Uuid,
 }
 
 /// Test-only helpers that backdate a single row's timestamp column(s).

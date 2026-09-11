@@ -4,11 +4,23 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
-use crate::types::{AccountRefRow, CursorPage, CursorPagination, WithAccountRef};
+use crate::types::{AccountRefRow, CursorPage, CursorPagination, WithAccountRef, keyset};
 use crate::{Error, PgConnection, Result, schema};
+
+/// Keyset for paginating a workspace's policies: newest first by `created_at`,
+/// `id` as the tiebreaker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PolicyCursor {
+    /// When the policy was created.
+    pub created_at: Timestamp,
+    /// Policy id (tiebreaker).
+    pub id: uuid::Uuid,
+}
 
 /// Repository for workspace policy database operations.
 pub trait WorkspacePolicyRepository {
@@ -38,7 +50,7 @@ pub trait WorkspacePolicyRepository {
     fn cursor_list_workspace_policies(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<PolicyCursor>,
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspacePolicy>>>> + Send;
 
     /// Updates a policy with new data.
@@ -124,7 +136,7 @@ impl WorkspacePolicyRepository for PgConnection {
     async fn cursor_list_workspace_policies(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<PolicyCursor>,
     ) -> Result<CursorPage<WithAccountRef<WorkspacePolicy>>> {
         use schema::workspace_policies::dsl;
         use schema::{accounts, workspace_policies};
@@ -149,17 +161,11 @@ impl WorkspacePolicyRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .into_boxed();
 
-        let limit = pagination.fetch_limit();
-
-        let rows: Vec<(WorkspacePolicy, AccountRefRow)> = if let Some(cursor) = &pagination.after {
-            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
-
-            query
-                .filter(
-                    dsl::created_at
-                        .lt(&cursor_time)
-                        .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                )
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let rows: Vec<(WorkspacePolicy, AccountRefRow)> =
+            keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
                 .select((
                     WorkspacePolicy::as_select(),
                     (
@@ -168,27 +174,10 @@ impl WorkspacePolicyRepository for PgConnection {
                         accounts::avatar_url,
                     ),
                 ))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
+                .limit(pagination.fetch_limit())
                 .load(self)
                 .await
-                .map_err(Error::from)?
-        } else {
-            query
-                .select((
-                    WorkspacePolicy::as_select(),
-                    (
-                        accounts::username,
-                        accounts::display_name,
-                        accounts::avatar_url,
-                    ),
-                ))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(Error::from)?
-        };
+                .map_err(Error::from)?;
 
         let items: Vec<WithAccountRef<WorkspacePolicy>> = rows
             .into_iter()
@@ -196,7 +185,10 @@ impl WorkspacePolicyRepository for PgConnection {
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
-            (wc.item.created_at.into(), wc.item.id)
+            PolicyCursor {
+                created_at: wc.item.created_at.into(),
+                id: wc.item.id,
+            }
         }))
     }
 
@@ -244,22 +236,25 @@ mod tests {
     #[tokio::test]
     async fn create_find_update_and_soft_delete() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let policy = conn
-            .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+            .create_workspace_policy(NewWorkspacePolicy::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
         let slug = policy.slug.as_str().to_owned();
 
         // Found by id and by slug within the workspace.
         assert!(
-            conn.find_policy_in_workspace(workspace_id, policy.id)
+            conn.find_policy_in_workspace(seeded.workspace_id, policy.id)
                 .await?
                 .is_some()
         );
         let by_slug = conn
-            .find_policy_in_workspace_by_slug(workspace_id, &slug)
+            .find_policy_in_workspace_by_slug(seeded.workspace_id, &slug)
             .await?;
         assert_eq!(by_slug.map(|p| p.item.id), Some(policy.id));
 
@@ -285,12 +280,12 @@ mod tests {
         // Soft delete hides it from both lookups.
         conn.delete_workspace_policy(policy.id).await?;
         assert!(
-            conn.find_policy_in_workspace(workspace_id, policy.id)
+            conn.find_policy_in_workspace(seeded.workspace_id, policy.id)
                 .await?
                 .is_none()
         );
         assert!(
-            conn.find_policy_in_workspace_by_slug(workspace_id, &slug)
+            conn.find_policy_in_workspace_by_slug(seeded.workspace_id, &slug)
                 .await?
                 .is_none()
         );
@@ -300,27 +295,36 @@ mod tests {
     #[tokio::test]
     async fn cursor_list_returns_live_policies_newest_first() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         // Backdate `first` an hour so it is unambiguously older than `second`;
         // without a distinct `created_at` the two could tie and the newest-first
         // order would not be well-defined.
         let first = conn
-            .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+            .create_workspace_policy(NewWorkspacePolicy::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
         backdate::policy_created_at(&mut conn, first.id, Timestamp::now() - Span::new().hours(1))
             .await?;
         let second = conn
-            .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+            .create_workspace_policy(NewWorkspacePolicy::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
         let deleted = conn
-            .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+            .create_workspace_policy(NewWorkspacePolicy::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
         conn.delete_workspace_policy(deleted.id).await?;
 
         let page = conn
-            .cursor_list_workspace_policies(workspace_id, CursorPagination::new(50))
+            .cursor_list_workspace_policies(seeded.workspace_id, CursorPagination::new(50))
             .await?;
         assert_eq!(
             page.items.iter().map(|p| p.item.id).collect::<Vec<_>>(),

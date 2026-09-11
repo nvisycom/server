@@ -4,11 +4,23 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceRedaction, WorkspaceRedaction};
-use crate::types::{CursorPage, CursorPagination};
+use crate::types::{CursorPage, CursorPagination, keyset};
 use crate::{Error, PgConnection, Result, schema};
+
+/// Keyset for paginating a detection's redactions: newest first by `created_at`,
+/// `id` as the tiebreaker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedactionCursor {
+    /// When the redaction was created.
+    pub created_at: Timestamp,
+    /// Redaction id (tiebreaker).
+    pub id: uuid::Uuid,
+}
 
 /// Repository for workspace redaction database operations.
 ///
@@ -37,7 +49,7 @@ pub trait WorkspaceRedactionRepository {
     fn cursor_list_detection_redactions(
         &mut self,
         detection_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<RedactionCursor>,
     ) -> impl Future<Output = Result<CursorPage<WorkspaceRedaction>>> + Send;
 }
 
@@ -86,7 +98,7 @@ impl WorkspaceRedactionRepository for PgConnection {
     async fn cursor_list_detection_redactions(
         &mut self,
         detection_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<RedactionCursor>,
     ) -> Result<CursorPage<WorkspaceRedaction>> {
         use schema::workspace_redactions::{self, dsl};
 
@@ -104,37 +116,31 @@ impl WorkspaceRedactionRepository for PgConnection {
             None
         };
 
-        let limit = pagination.fetch_limit();
+        let scoped = workspace_redactions::table
+            .filter(dsl::detection_id.eq(detection_id))
+            .into_boxed();
 
-        let items: Vec<WorkspaceRedaction> = if let Some(cursor) = &pagination.after {
-            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
-
-            workspace_redactions::table
-                .filter(dsl::detection_id.eq(detection_id))
-                .filter(
-                    dsl::created_at
-                        .lt(&cursor_time)
-                        .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                )
-                .select(WorkspaceRedaction::as_select())
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(Error::from)?
-        } else {
-            workspace_redactions::table
-                .filter(dsl::detection_id.eq(detection_id))
-                .select(WorkspaceRedaction::as_select())
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(Error::from)?
-        };
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let items: Vec<WorkspaceRedaction> = keyset!(
+            scoped,
+            dsl::created_at,
+            dsl::id,
+            pagination.direction,
+            after
+        )
+        .select(WorkspaceRedaction::as_select())
+        .limit(pagination.fetch_limit())
+        .load(self)
+        .await
+        .map_err(Error::from)?;
 
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
-            (row.created_at.into(), row.id)
+            RedactionCursor {
+                created_at: row.created_at.into(),
+                id: row.id,
+            }
         }))
     }
 }
@@ -154,16 +160,21 @@ mod tests {
     /// Seeds a detection and returns `(account_id, workspace_id, pipeline_id,
     /// detection_id)` — a redaction's FK parent plus the context tests scope on.
     async fn seed_detection(db: &TestDatabase) -> anyhow::Result<(Uuid, Uuid, Uuid, Uuid)> {
-        let (account_id, workspace_id, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
-                pipeline_id,
-                account_id,
-                file_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.file_id,
             ))
             .await?;
-        Ok((account_id, workspace_id, pipeline_id, detection.id))
+        Ok((
+            seeded.account_id,
+            seeded.workspace_id,
+            seeded.pipeline_id,
+            detection.id,
+        ))
     }
 
     #[tokio::test]

@@ -22,11 +22,11 @@ use nvisy_postgres::model::{
     WorkspaceThreadComment,
 };
 use nvisy_postgres::query::{
-    AssistantJobOutboxRepository, WorkspaceFileRepository, WorkspaceMemberRepository,
-    WorkspaceThreadAnchorRepository, WorkspaceThreadCommentRepository,
+    AssistantJobOutboxRepository, TimelineCursor, WorkspaceFileRepository,
+    WorkspaceMemberRepository, WorkspaceThreadAnchorRepository, WorkspaceThreadCommentRepository,
     WorkspaceThreadEventRepository, WorkspaceThreadRepository,
 };
-use nvisy_postgres::types::Handle;
+use nvisy_postgres::types::{CursorPage, Direction, Handle};
 use nvisy_postgres::{ASSISTANT_ACCOUNT_ID, ASSISTANT_HANDLE, AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
@@ -36,7 +36,7 @@ use crate::handler::request::{
     ThreadAnchorPathParams, ThreadPathParams, WorkspaceFilePathParams, WorkspaceThreadsQuery,
 };
 use crate::handler::response::{
-    Comment, Thread, ThreadAnchor, ThreadEntry, ThreadEvent, ThreadsPage,
+    Comment, Thread, ThreadAnchor, ThreadEntry, ThreadEvent, ThreadsPage, TimelinePage,
 };
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
@@ -259,7 +259,7 @@ async fn list_threads(
     let mut conn = pg_client.get_connection().await?;
 
     let page = conn
-        .cursor_list_threads(workspace.id, pagination.into(), &query.into())
+        .cursor_list_threads(workspace.id, pagination.into_cursor(), &query.into())
         .await?;
 
     // Fetch the whole page's live anchors in one query, then group them by thread
@@ -686,7 +686,8 @@ async fn list_thread_timeline(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewComments>,
     Path(path_params): Path<ThreadPathParams>,
-) -> Result<(StatusCode, Json<Vec<ThreadEntry>>)> {
+    Query(pagination): Query<CursorPagination>,
+) -> Result<(StatusCode, Json<TimelinePage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing thread timeline");
 
     let workspace = authz.workspace;
@@ -694,13 +695,24 @@ async fn list_thread_timeline(
 
     find_thread(&mut conn, workspace.id, path_params.thread_id).await?;
 
-    let comments = conn
-        .list_thread_comments(workspace.id, path_params.thread_id)
-        .await?;
-    let events = conn.list_thread_events(path_params.thread_id).await?;
+    // The timeline reads oldest first, so it walks ascending.
+    let pagination = pagination
+        .into_cursor::<TimelineCursor>()
+        .with_direction(Direction::Ascending);
+    let after = pagination.after_key();
+    let fetch = pagination.fetch_limit();
 
-    // Merge the two ordered streams into one timeline, oldest first. Both are
-    // already `created_at`-ordered, so a single sort by timestamp suffices.
+    // Fetch a bounded window from each stream (fetch = limit + 1, so a full window
+    // from either stream can still signal that more rows exist after the merge).
+    let comments = conn
+        .list_thread_comments_after(workspace.id, path_params.thread_id, after, fetch)
+        .await?;
+    let events = conn
+        .list_thread_events_after(path_params.thread_id, after, fetch)
+        .await?;
+
+    // Merge the two already-ordered windows into one ascending timeline by
+    // (created_at, source, id) — the same total order the cursor encodes.
     let mut entries: Vec<ThreadEntry> = Vec::with_capacity(comments.len() + events.len());
     entries.extend(
         comments
@@ -710,18 +722,26 @@ async fn list_thread_timeline(
     entries.extend(events.into_iter().map(|(event, actor)| {
         ThreadEntry::Event(ThreadEvent::from_model(event, actor.map(Into::into)))
     }));
-    entries.sort_by_key(ThreadEntry::timestamp);
+    entries.sort_by_key(ThreadEntry::sort_key);
 
-    Ok((StatusCode::OK, Json(entries)))
+    // The merged window holds up to 2 * fetch rows; a page is the first `limit`,
+    // with a next cursor when a further entry exists beyond them.
+    let response = TimelinePage::from_cursor_page(
+        CursorPage::new(entries, None, pagination.limit, ThreadEntry::cursor),
+        |entry| entry,
+    );
+
+    Ok((StatusCode::OK, Json(response)))
 }
 
 fn list_thread_timeline_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List a thread's timeline")
         .description(
-            "Returns the thread's timeline — comments and lifecycle events (closed, \
-             reopened, anchor added/removed) interleaved, oldest first.",
+            "Returns the thread's timeline — comments and lifecycle events (opened, \
+             closed, reopened, renamed, anchor added/removed) interleaved, oldest \
+             first, with cursor pagination.",
         )
-        .response::<200, Json<Vec<ThreadEntry>>>()
+        .response::<200, Json<TimelinePage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
