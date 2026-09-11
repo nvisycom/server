@@ -9,7 +9,7 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use super::workspace_thread_event::anchor_snapshot;
+use super::workspace_thread_events::anchor_snapshot;
 use crate::model::{NewWorkspaceThreadAnchor, NewWorkspaceThreadEvent, WorkspaceThreadAnchor};
 use crate::types::ThreadEventKind;
 use crate::{AsyncConnection, Error, PgConnection, Result, schema};

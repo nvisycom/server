@@ -13,74 +13,76 @@
 //! [`CursorPagination`]: crate::types::CursorPagination
 //! [`OffsetPagination`]: crate::types::OffsetPagination
 
-mod account;
-mod account_api_token;
-mod account_identity;
-mod account_notification;
+mod account_api_tokens;
+mod account_identities;
+mod account_notifications;
+mod accounts;
 mod analytics;
 mod event_outbox;
-mod pipeline_reference;
+mod pipeline_references;
 mod search;
-mod workspace;
-mod workspace_activity;
-mod workspace_assignment;
-mod workspace_assistant_job;
-mod workspace_connection;
+mod workspace_activities;
+mod workspace_assignments;
+mod workspace_assistant_jobs;
 mod workspace_connection_schedule;
-mod workspace_connection_sync;
-mod workspace_detection;
-mod workspace_detection_job;
-mod workspace_file;
-mod workspace_invite;
-mod workspace_member;
-mod workspace_pipeline;
-mod workspace_policy;
-mod workspace_provider;
-mod workspace_redaction;
-mod workspace_thread;
-mod workspace_thread_anchor;
-mod workspace_thread_comment;
-mod workspace_thread_event;
-mod workspace_webhook;
+mod workspace_connection_syncs;
+mod workspace_connections;
+mod workspace_detection_jobs;
+mod workspace_detections;
+mod workspace_files;
+mod workspace_invites;
+mod workspace_members;
+mod workspace_pipelines;
+mod workspace_policies;
+mod workspace_providers;
+mod workspace_redactions;
+mod workspace_thread_anchors;
+mod workspace_thread_comments;
+mod workspace_thread_events;
+mod workspace_threads;
+mod workspace_webhooks;
+mod workspaces;
 
-pub use account::AccountRepository;
-pub use account_api_token::{AccountApiTokenRepository, ApiTokenCursor};
-pub use account_identity::{AccountIdentityRepository, DeleteIdentityOutcome, LinkIdentityOutcome};
-pub use account_notification::{AccountNotificationRepository, NotificationCursor};
+pub use account_api_tokens::{AccountApiTokenRepository, ApiTokenCursor};
+pub use account_identities::{
+    AccountIdentityRepository, DeleteIdentityOutcome, LinkIdentityOutcome,
+};
+pub use account_notifications::{AccountNotificationRepository, NotificationCursor};
+pub use accounts::AccountRepository;
 pub use analytics::{
     AnalyticsSnapshot, DetectionDayPoint, DetectionDurations, DetectionStatusCount, StorageByKind,
     UsageByModel, WorkspaceAnalyticsRepository,
 };
 pub use event_outbox::EventOutboxRepository;
-pub use pipeline_reference::PipelineReferenceRepository;
-pub use workspace::WorkspaceRepository;
-pub use workspace_activity::{ActivityCursor, ActivityFilter, WorkspaceActivityRepository};
-pub use workspace_assignment::{
+pub use pipeline_references::PipelineReferenceRepository;
+pub use workspace_activities::{ActivityCursor, ActivityFilter, WorkspaceActivityRepository};
+pub use workspace_assignments::{
     AssignmentCursor, AssignmentListRow, CreateAssignmentOutcome, WorkspaceAssignmentRepository,
 };
-pub use workspace_assistant_job::AssistantJobOutboxRepository;
-pub use workspace_connection::{
+pub use workspace_assistant_jobs::AssistantJobOutboxRepository;
+pub use workspace_connection_schedule::WorkspaceConnectionScheduleRepository;
+pub use workspace_connection_syncs::{ConnectionSyncCursor, WorkspaceConnectionSyncRepository};
+pub use workspace_connections::{
     ConnectionCursor, ScheduledConnection, WorkspaceConnectionRepository,
 };
-pub use workspace_connection_schedule::WorkspaceConnectionScheduleRepository;
-pub use workspace_connection_sync::{ConnectionSyncCursor, WorkspaceConnectionSyncRepository};
-pub use workspace_detection::{
+pub use workspace_detection_jobs::DetectionJobOutboxRepository;
+pub use workspace_detections::{
     DetectionCursor, DetectionFiles, DetectionListRow, WorkspaceDetectionRepository,
 };
-pub use workspace_detection_job::DetectionJobOutboxRepository;
-pub use workspace_file::{ExpiredFileRef, FileCursor, ImportedFileRef, WorkspaceFileRepository};
-pub use workspace_invite::{InviteCursor, WorkspaceInviteRepository};
-pub use workspace_member::{
+pub use workspace_files::{ExpiredFileRef, FileCursor, ImportedFileRef, WorkspaceFileRepository};
+pub use workspace_invites::{InviteCursor, WorkspaceInviteRepository};
+pub use workspace_members::{
     AccountWorkspaceCursor, WorkspaceMemberCursor, WorkspaceMemberRepository,
 };
-pub use workspace_pipeline::{PipelineCursor, WorkspacePipelineRepository};
-pub use workspace_policy::{PolicyCursor, WorkspacePolicyRepository};
-pub use workspace_provider::{ProviderCursor, WorkspaceProviderRepository};
-pub use workspace_redaction::{RedactionCursor, WorkspaceRedactionRepository};
-pub use workspace_thread::{ThreadCursor, WorkspaceThreadRepository};
-pub use workspace_thread_anchor::{
+pub use workspace_pipelines::{PipelineCursor, WorkspacePipelineRepository};
+pub use workspace_policies::{PolicyCursor, WorkspacePolicyRepository};
+pub use workspace_providers::{ProviderCursor, WorkspaceProviderRepository};
+pub use workspace_redactions::{RedactionCursor, WorkspaceRedactionRepository};
+pub use workspace_thread_anchors::{
     AddAnchorOutcome, MAX_THREAD_ANCHORS, WorkspaceThreadAnchorRepository,
 };
-pub use workspace_thread_comment::WorkspaceThreadCommentRepository;
-pub use workspace_thread_event::{TimelineCursor, TimelineSource, WorkspaceThreadEventRepository};
-pub use workspace_webhook::{WebhookCursor, WorkspaceWebhookRepository};
+pub use workspace_thread_comments::WorkspaceThreadCommentRepository;
+pub use workspace_thread_events::{TimelineCursor, TimelineSource, WorkspaceThreadEventRepository};
+pub use workspace_threads::{ThreadCursor, WorkspaceThreadRepository};
+pub use workspace_webhooks::{WebhookCursor, WorkspaceWebhookRepository};
+pub use workspaces::WorkspaceRepository;

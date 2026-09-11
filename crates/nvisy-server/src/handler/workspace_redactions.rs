@@ -14,7 +14,7 @@ use nvisy_postgres::query::WorkspaceRedactionRepository;
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
-use super::detections::find_detection;
+use super::workspace_detections::find_detection;
 use crate::extract::{Authorized, Json, Path, Query, markers};
 use crate::handler::ServiceState;
 use crate::handler::request::{CursorPagination, DetectionPathParams, RedactionPathParams};

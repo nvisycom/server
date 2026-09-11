@@ -9,7 +9,7 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use super::workspace_thread_event::{StreamBound, TimelineCursor, TimelineSource};
+use super::workspace_thread_events::{StreamBound, TimelineCursor, TimelineSource};
 use crate::model::{
     NewWorkspaceThreadComment, UpdateWorkspaceThreadComment, WorkspaceThreadComment,
 };

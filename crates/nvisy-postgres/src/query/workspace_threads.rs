@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::workspace_thread_event::record_event;
+use super::workspace_thread_events::record_event;
 use crate::model::{
     NewWorkspaceThread, NewWorkspaceThreadAnchor, NewWorkspaceThreadComment, WorkspaceThread,
     WorkspaceThreadComment,
