@@ -6,5 +6,6 @@
 mod cursor;
 mod offset;
 
-pub use cursor::{Cursor, CursorPage, CursorPagination};
+pub(crate) use cursor::keyset;
+pub use cursor::{Cursor, CursorKey, CursorPage, CursorPagination};
 pub use offset::{OffsetPage, OffsetPagination};

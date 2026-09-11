@@ -10,6 +10,18 @@
 pub(crate) const MIGRATIONS: diesel_migrations::EmbeddedMigrations =
     diesel_migrations::embed_migrations!("../../migrations");
 
+/// The fixed id of the reserved AI assistant account.
+///
+/// Seeded by the `assistant_account` migration, this account authors the
+/// assistant's replies in comment threads. It has no login identity (it cannot
+/// authenticate) and is not a workspace member; mention resolution recognizes
+/// its reserved handle directly. The constant lets code reference the account
+/// without a lookup; it must match the id inserted by the migration.
+pub const ASSISTANT_ACCOUNT_ID: uuid::Uuid = uuid::Uuid::from_u128(0x0a11);
+
+/// The reserved handle of the AI assistant account (see [`ASSISTANT_ACCOUNT_ID`]).
+pub const ASSISTANT_HANDLE: &str = "assistant";
+
 /// Tracing target for database query operations.
 ///
 /// Use this target for logging query execution, results, and query-related errors.

@@ -4,13 +4,27 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use jiff::Timestamp;
 use pgtrgm::expression_methods::TrgmExpressionMethods;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
 use crate::query::search::ilike_contains;
-use crate::types::{AccountRefRow, CursorPage, CursorPagination, PipelineStatus, WithAccountRef};
+use crate::types::{
+    AccountRefRow, CursorPage, CursorPagination, PipelineStatus, WithAccountRef, keyset,
+};
 use crate::{Error, PgConnection, Result, schema};
+
+/// Keyset for paginating a workspace's pipelines: newest first by `created_at`,
+/// `id` as the tiebreaker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineCursor {
+    /// When the pipeline was created.
+    pub created_at: Timestamp,
+    /// Pipeline id (tiebreaker).
+    pub id: uuid::Uuid,
+}
 
 /// Repository for pipeline database operations.
 ///
@@ -38,7 +52,7 @@ pub trait WorkspacePipelineRepository {
     fn cursor_list_workspace_pipelines(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<PipelineCursor>,
         status_filter: Option<PipelineStatus>,
         search_term: Option<&str>,
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspacePipeline>>>> + Send;
@@ -106,7 +120,7 @@ impl WorkspacePipelineRepository for PgConnection {
     async fn cursor_list_workspace_pipelines(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<PipelineCursor>,
         status_filter: Option<PipelineStatus>,
         search_term: Option<&str>,
     ) -> Result<CursorPage<WithAccountRef<WorkspacePipeline>>> {
@@ -166,18 +180,11 @@ impl WorkspacePipelineRepository for PgConnection {
             );
         }
 
-        let limit = pagination.fetch_limit();
-
-        let rows: Vec<(WorkspacePipeline, AccountRefRow)> = if let Some(cursor) = &pagination.after
-        {
-            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
-
-            query
-                .filter(
-                    dsl::created_at
-                        .lt(&cursor_time)
-                        .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                )
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let rows: Vec<(WorkspacePipeline, AccountRefRow)> =
+            keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
                 .select((
                     WorkspacePipeline::as_select(),
                     (
@@ -186,27 +193,10 @@ impl WorkspacePipelineRepository for PgConnection {
                         accounts::avatar_url,
                     ),
                 ))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
+                .limit(pagination.fetch_limit())
                 .load(self)
                 .await
-                .map_err(Error::from)?
-        } else {
-            query
-                .select((
-                    WorkspacePipeline::as_select(),
-                    (
-                        accounts::username,
-                        accounts::display_name,
-                        accounts::avatar_url,
-                    ),
-                ))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(Error::from)?
-        };
+                .map_err(Error::from)?;
 
         let items: Vec<WithAccountRef<WorkspacePipeline>> = rows
             .into_iter()
@@ -214,7 +204,10 @@ impl WorkspacePipelineRepository for PgConnection {
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
-            (wc.item.created_at.into(), wc.item.id)
+            PipelineCursor {
+                created_at: wc.item.created_at.into(),
+                id: wc.item.id,
+            }
         }))
     }
 
@@ -261,17 +254,20 @@ mod tests {
     #[tokio::test]
     async fn create_find_update_and_soft_delete() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let pipeline = conn
-            .create_workspace_pipeline(NewWorkspacePipeline::test(workspace_id, account_id))
+            .create_workspace_pipeline(NewWorkspacePipeline::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
         let slug = pipeline.slug.as_str().to_owned();
 
         // Found by slug within its workspace, with the creator handle.
         let found = conn
-            .find_pipeline_in_workspace_by_slug(workspace_id, &slug)
+            .find_pipeline_in_workspace_by_slug(seeded.workspace_id, &slug)
             .await?;
         assert_eq!(found.map(|p| p.item.id), Some(pipeline.id));
 
@@ -297,7 +293,7 @@ mod tests {
         // Soft delete hides it from the by-slug lookup.
         conn.delete_workspace_pipeline(pipeline.id).await?;
         assert!(
-            conn.find_pipeline_in_workspace_by_slug(workspace_id, &slug)
+            conn.find_pipeline_in_workspace_by_slug(seeded.workspace_id, &slug)
                 .await?
                 .is_none()
         );
@@ -307,24 +303,35 @@ mod tests {
     #[tokio::test]
     async fn cursor_list_filters_by_status_and_excludes_deleted() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         // A draft, an enabled, and a deleted pipeline.
         let draft = conn
-            .create_workspace_pipeline(NewWorkspacePipeline::test(workspace_id, account_id))
+            .create_workspace_pipeline(NewWorkspacePipeline::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
-        let mut enabled = NewWorkspacePipeline::test(workspace_id, account_id);
+        let mut enabled = NewWorkspacePipeline::test(seeded.workspace_id, seeded.account_id);
         enabled.status = Some(PipelineStatus::Enabled);
         let enabled = conn.create_workspace_pipeline(enabled).await?;
         let deleted = conn
-            .create_workspace_pipeline(NewWorkspacePipeline::test(workspace_id, account_id))
+            .create_workspace_pipeline(NewWorkspacePipeline::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
         conn.delete_workspace_pipeline(deleted.id).await?;
 
         // No filter: both live pipelines, deleted excluded.
         let all = conn
-            .cursor_list_workspace_pipelines(workspace_id, CursorPagination::new(50), None, None)
+            .cursor_list_workspace_pipelines(
+                seeded.workspace_id,
+                CursorPagination::new(50),
+                None,
+                None,
+            )
             .await?;
         let ids: Vec<_> = all.items.iter().map(|p| p.item.id).collect();
         assert_eq!(ids.len(), 2);
@@ -333,7 +340,7 @@ mod tests {
         // Filtered to Enabled.
         let enabled_only = conn
             .cursor_list_workspace_pipelines(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 Some(PipelineStatus::Enabled),
                 None,
@@ -353,20 +360,20 @@ mod tests {
     #[tokio::test]
     async fn cursor_list_search_matches_display_name() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
-        let mut invoices = NewWorkspacePipeline::test(workspace_id, account_id);
+        let mut invoices = NewWorkspacePipeline::test(seeded.workspace_id, seeded.account_id);
         invoices.display_name = "Invoice Redaction".to_owned();
         let invoices = conn.create_workspace_pipeline(invoices).await?;
-        let mut contracts = NewWorkspacePipeline::test(workspace_id, account_id);
+        let mut contracts = NewWorkspacePipeline::test(seeded.workspace_id, seeded.account_id);
         contracts.display_name = "Contract Review".to_owned();
         let _ = conn.create_workspace_pipeline(contracts).await?;
 
         // A substring search finds only the matching pipeline.
         let page = conn
             .cursor_list_workspace_pipelines(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 None,
                 Some("invoice"),

@@ -52,7 +52,7 @@ async fn list_detection_redactions(
         find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
 
     let page = conn
-        .cursor_list_detection_redactions(detection.id, pagination.into())
+        .cursor_list_detection_redactions(detection.id, pagination.into_cursor())
         .await?;
 
     // Resolve the requesting account per row. A detection's redactions are few

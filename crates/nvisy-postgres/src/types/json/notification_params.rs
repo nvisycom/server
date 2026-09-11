@@ -123,6 +123,23 @@ pub struct FileUnassignedParams {
     pub file_name: Option<String>,
 }
 
+/// Params of a `comment.mentioned` notification, sent to a mentioned account.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct CommentMentionedParams {
+    /// Id of the comment the account was mentioned in.
+    pub comment_id: Uuid,
+    /// Id of the thread the comment is in.
+    pub thread_id: Uuid,
+    /// Id of the file the thread is on, when it is file-pinned; `None` for a
+    /// workspace-level thread.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_id: Option<Uuid>,
+    /// Username of the account that wrote the comment (the mentioner).
+    pub author_username: Handle,
+}
+
 /// The typed payload of a notification, tagged by `type` with its params under
 /// `data` (the same `{type, data}` envelope the activity log and outbox event use).
 ///
@@ -164,6 +181,10 @@ pub enum NotificationPayload {
     /// The reviewer was unassigned from a file.
     #[serde(rename = "file.unassigned")]
     FileUnassigned(FileUnassignedParams),
+
+    /// The account was mentioned in a comment.
+    #[serde(rename = "comment.mentioned")]
+    CommentMentioned(CommentMentionedParams),
 }
 
 impl NotificationPayload {
@@ -180,6 +201,7 @@ impl NotificationPayload {
             NotificationPayload::DetectionFailed(_) => NotificationEvent::DetectionFailed,
             NotificationPayload::FileAssigned(_) => NotificationEvent::FileAssigned,
             NotificationPayload::FileUnassigned(_) => NotificationEvent::FileUnassigned,
+            NotificationPayload::CommentMentioned(_) => NotificationEvent::CommentMentioned,
         }
     }
 

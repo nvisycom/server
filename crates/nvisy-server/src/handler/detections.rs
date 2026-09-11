@@ -260,7 +260,7 @@ async fn list_pipeline_detections(
     let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
 
     let page = conn
-        .cursor_list_pipeline_detections(pipeline.id, pagination.into(), &query.into())
+        .cursor_list_pipeline_detections(pipeline.id, pagination.into_cursor(), &query.into())
         .await?;
 
     tracing::debug!(
@@ -319,7 +319,7 @@ async fn list_workspace_detections(
     let mut conn = pg_client.get_connection().await?;
 
     let page = conn
-        .cursor_list_workspace_detections(workspace.id, pagination.into(), &query.into())
+        .cursor_list_workspace_detections(workspace.id, pagination.into_cursor(), &query.into())
         .await?;
 
     tracing::debug!(

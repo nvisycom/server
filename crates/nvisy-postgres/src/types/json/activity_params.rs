@@ -149,6 +149,49 @@ pub struct PolicyActivityParams {
     pub policy_slug: Handle,
 }
 
+/// Params of a comment-thread activity (`thread.*`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadActivityParams {
+    /// Id of the thread.
+    pub thread_id: Uuid,
+    /// Id of the file the thread is pinned to; omitted for a workspace-level
+    /// thread.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub file_id: Option<Uuid>,
+}
+
+/// Params of a comment-thread anchor activity (`thread.anchor.*`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadAnchorActivityParams {
+    /// Id of the thread.
+    pub thread_id: Uuid,
+    /// Id of the anchor added or removed.
+    pub anchor_id: Uuid,
+    /// Id of the file the thread is pinned to; omitted for a workspace-level
+    /// thread.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub file_id: Option<Uuid>,
+}
+
+/// Params of a thread-comment activity (`thread.comment.created`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadCommentActivityParams {
+    /// Id of the comment.
+    pub comment_id: Uuid,
+    /// Id of the thread the comment is in.
+    pub thread_id: Uuid,
+    /// Id of the file the thread is pinned to; omitted for a workspace-level
+    /// thread.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub file_id: Option<Uuid>,
+}
+
 /// The typed payload of an audit-log activity, tagged by `type` with its params
 /// under `data` (the same `{type, data}` envelope the notification payload and
 /// outbox event use).
@@ -282,6 +325,31 @@ pub enum ActivityPayload {
     /// A policy was deleted.
     #[serde(rename = "policy.deleted")]
     PolicyDeleted(PolicyActivityParams),
+
+    /// A thread was opened.
+    #[serde(rename = "thread.opened")]
+    ThreadOpened(ThreadActivityParams),
+    /// A thread was closed.
+    #[serde(rename = "thread.closed")]
+    ThreadClosed(ThreadActivityParams),
+    /// A thread was reopened.
+    #[serde(rename = "thread.reopened")]
+    ThreadReopened(ThreadActivityParams),
+    /// A thread's title was changed.
+    #[serde(rename = "thread.renamed")]
+    ThreadRenamed(ThreadActivityParams),
+    /// A thread was deleted.
+    #[serde(rename = "thread.deleted")]
+    ThreadDeleted(ThreadActivityParams),
+    /// An anchor was added to a thread.
+    #[serde(rename = "thread.anchor.added")]
+    ThreadAnchorAdded(ThreadAnchorActivityParams),
+    /// An anchor was removed from a thread.
+    #[serde(rename = "thread.anchor.removed")]
+    ThreadAnchorRemoved(ThreadAnchorActivityParams),
+    /// A comment (message) was posted in a thread.
+    #[serde(rename = "thread.comment.created")]
+    ThreadCommentCreated(ThreadCommentActivityParams),
 }
 
 impl ActivityPayload {
@@ -327,6 +395,14 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(_) => ActivityType::PolicyCreated,
             ActivityPayload::PolicyUpdated(_) => ActivityType::PolicyUpdated,
             ActivityPayload::PolicyDeleted(_) => ActivityType::PolicyDeleted,
+            ActivityPayload::ThreadOpened(_) => ActivityType::ThreadOpened,
+            ActivityPayload::ThreadClosed(_) => ActivityType::ThreadClosed,
+            ActivityPayload::ThreadReopened(_) => ActivityType::ThreadReopened,
+            ActivityPayload::ThreadRenamed(_) => ActivityType::ThreadRenamed,
+            ActivityPayload::ThreadDeleted(_) => ActivityType::ThreadDeleted,
+            ActivityPayload::ThreadAnchorAdded(_) => ActivityType::ThreadAnchorAdded,
+            ActivityPayload::ThreadAnchorRemoved(_) => ActivityType::ThreadAnchorRemoved,
+            ActivityPayload::ThreadCommentCreated(_) => ActivityType::ThreadCommentCreated,
         }
     }
 
@@ -345,7 +421,9 @@ impl ActivityPayload {
             | ActivityPayload::InviteCanceled(_)
             | ActivityPayload::WebhookCreated(_)
             | ActivityPayload::WebhookUpdated(_)
-            | ActivityPayload::WebhookDeleted(_) => return None,
+            | ActivityPayload::WebhookDeleted(_)
+            | ActivityPayload::ThreadDeleted(_)
+            | ActivityPayload::ThreadCommentCreated(_) => return None,
 
             ActivityPayload::MemberAdded(_) => W::MemberAdded,
             ActivityPayload::MemberUpdated(_) => W::MemberUpdated,
@@ -375,6 +453,12 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(_) => W::PolicyCreated,
             ActivityPayload::PolicyUpdated(_) => W::PolicyUpdated,
             ActivityPayload::PolicyDeleted(_) => W::PolicyDeleted,
+            ActivityPayload::ThreadOpened(_) => W::ThreadOpened,
+            ActivityPayload::ThreadClosed(_) => W::ThreadClosed,
+            ActivityPayload::ThreadReopened(_) => W::ThreadReopened,
+            ActivityPayload::ThreadRenamed(_) => W::ThreadRenamed,
+            ActivityPayload::ThreadAnchorAdded(_) => W::ThreadAnchorAdded,
+            ActivityPayload::ThreadAnchorRemoved(_) => W::ThreadAnchorRemoved,
         })
     }
 
@@ -424,6 +508,18 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(p)
             | ActivityPayload::PolicyUpdated(p)
             | ActivityPayload::PolicyDeleted(p) => Some(p.policy_id.to_string()),
+
+            ActivityPayload::ThreadOpened(p)
+            | ActivityPayload::ThreadClosed(p)
+            | ActivityPayload::ThreadReopened(p)
+            | ActivityPayload::ThreadRenamed(p)
+            | ActivityPayload::ThreadDeleted(p) => Some(p.thread_id.to_string()),
+
+            ActivityPayload::ThreadAnchorAdded(p) | ActivityPayload::ThreadAnchorRemoved(p) => {
+                Some(p.anchor_id.to_string())
+            }
+
+            ActivityPayload::ThreadCommentCreated(p) => Some(p.comment_id.to_string()),
 
             ActivityPayload::WorkspaceCreated(_)
             | ActivityPayload::WorkspaceUpdated(_)
@@ -491,6 +587,17 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(p)
             | ActivityPayload::PolicyUpdated(p)
             | ActivityPayload::PolicyDeleted(p) => Some(p.policy_slug.to_string()),
+
+            // A thread/comment/anchor has no human-readable name; addressed by id
+            // only.
+            ActivityPayload::ThreadOpened(_)
+            | ActivityPayload::ThreadClosed(_)
+            | ActivityPayload::ThreadReopened(_)
+            | ActivityPayload::ThreadRenamed(_)
+            | ActivityPayload::ThreadDeleted(_)
+            | ActivityPayload::ThreadAnchorAdded(_)
+            | ActivityPayload::ThreadAnchorRemoved(_)
+            | ActivityPayload::ThreadCommentCreated(_) => None,
         }
     }
 }

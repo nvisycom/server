@@ -13,7 +13,7 @@ mod typed_sub;
 pub use core::EventStream;
 
 pub use broadcast_stream::BroadcastStream;
-pub use event_stream::{ConnectionSyncStream, DetectionStream, WebhookStream};
+pub use event_stream::{AssistantStream, ConnectionSyncStream, DetectionStream, WebhookStream};
 pub use typed_pub::EventPublisher;
 pub use typed_stream::{TypedMessage, TypedMessageStream};
 pub use typed_sub::EventSubscriber;

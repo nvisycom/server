@@ -5,14 +5,37 @@ use std::future::Future;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
 use crate::types::{
-    CursorPage, CursorPagination, InviteFilter, InviteSortBy, InviteSortField, InviteStatus,
-    SortOrder,
+    CursorPage, CursorPagination, InviteFilter, InviteSortBy, InviteSortField, InviteStatus, keyset,
 };
 use crate::{Error, PgConnection, Result, schema};
+
+/// Keyset for paginating workspace invites. Invites can be sorted by date or by
+/// email, so the cursor carries whichever field the sort uses — the keyset
+/// comparison must run on the same column it orders by, or paging drifts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "by", rename_all = "camelCase")]
+pub enum InviteCursor {
+    /// Sorted by creation time.
+    Date {
+        /// When the invite was created.
+        created_at: Timestamp,
+        /// Invite id (tiebreaker).
+        id: Uuid,
+    },
+    /// Sorted by invitee email.
+    Email {
+        /// The invitee email (invites with a null email are excluded from this
+        /// sort).
+        email: String,
+        /// Invite id (tiebreaker).
+        id: Uuid,
+    },
+}
 
 /// Repository for workspace invitation database operations.
 ///
@@ -70,7 +93,7 @@ pub trait WorkspaceInviteRepository {
     fn cursor_list_workspace_invites(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<InviteCursor>,
         sort_by: InviteSortBy,
         filter: InviteFilter,
     ) -> impl Future<Output = Result<CursorPage<WorkspaceInvite>>> + Send;
@@ -199,7 +222,7 @@ impl WorkspaceInviteRepository for PgConnection {
     async fn cursor_list_workspace_invites(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<InviteCursor>,
         sort_by: InviteSortBy,
         filter: InviteFilter,
     ) -> Result<CursorPage<WorkspaceInvite>> {
@@ -207,42 +230,32 @@ impl WorkspaceInviteRepository for PgConnection {
         use schema::workspace_invites::{self, dsl};
 
         let sort_by_email = matches!(sort_by.field, InviteSortField::Email);
+        // The invite sort order is the keyset direction, so the order-by and the
+        // after-comparison always agree.
+        let direction = sort_by.order;
 
         let base_filter = dsl::workspace_id
             .eq(workspace_id)
             .and(dsl::invite_status.ne(InviteStatus::Canceled));
 
-        // Build filtered query
-        let mut query = workspace_invites::table
-            .filter(base_filter.clone())
-            .into_boxed();
-
-        if let Some(role) = filter.role {
-            query = query.filter(dsl::invited_role.eq(role));
-        }
-        if sort_by_email {
-            query = query.filter(dsl::invitee_email.is_not_null());
-        }
-        if let Some(cursor) = &pagination.after {
-            let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
-            query = query.filter(
-                dsl::created_at
-                    .lt(cursor_ts)
-                    .or(dsl::created_at.eq(cursor_ts).and(dsl::id.lt(cursor.id))),
-            );
-        }
-
-        // Get total count
-        let total = if pagination.include_count {
-            let mut count_query = workspace_invites::table.filter(base_filter).into_boxed();
+        // The scoped builder (filters shared by the count and the page). When
+        // sorting by email, null emails are excluded so the sort column is total.
+        let scoped = || {
+            let mut query = workspace_invites::table
+                .filter(base_filter.clone())
+                .into_boxed();
             if let Some(role) = filter.role {
-                count_query = count_query.filter(dsl::invited_role.eq(role));
+                query = query.filter(dsl::invited_role.eq(role));
             }
             if sort_by_email {
-                count_query = count_query.filter(dsl::invitee_email.is_not_null());
+                query = query.filter(dsl::invitee_email.is_not_null());
             }
+            query
+        };
+
+        let total = if pagination.include_count {
             Some(
-                count_query
+                scoped()
                     .select(count_star())
                     .get_result(self)
                     .await
@@ -252,19 +265,25 @@ impl WorkspaceInviteRepository for PgConnection {
             None
         };
 
-        // Execute with sort
-        let items = match (sort_by.field, sort_by.order) {
-            (InviteSortField::Email, SortOrder::Asc) => {
-                query.order((dsl::invitee_email.asc(), dsl::id.asc()))
+        // The keyset runs on whichever column the sort uses; the cursor carries the
+        // matching value, so a stray Email cursor on a Date sort (or vice-versa)
+        // simply starts a fresh page rather than drifting.
+        let items = match sort_by.field {
+            InviteSortField::Email => {
+                let after = match pagination.after_key() {
+                    Some(InviteCursor::Email { email, id }) => Some((email.clone(), *id)),
+                    _ => None,
+                };
+                keyset!(scoped(), dsl::invitee_email, dsl::id, direction, after)
             }
-            (InviteSortField::Email, SortOrder::Desc) => {
-                query.order((dsl::invitee_email.desc(), dsl::id.desc()))
-            }
-            (InviteSortField::Date, SortOrder::Asc) => {
-                query.order((dsl::created_at.asc(), dsl::id.asc()))
-            }
-            (InviteSortField::Date, SortOrder::Desc) => {
-                query.order((dsl::created_at.desc(), dsl::id.desc()))
+            InviteSortField::Date => {
+                let after = match pagination.after_key() {
+                    Some(InviteCursor::Date { created_at, id }) => {
+                        Some((jiff_diesel::Timestamp::from(*created_at), *id))
+                    }
+                    _ => None,
+                };
+                keyset!(scoped(), dsl::created_at, dsl::id, direction, after)
             }
         }
         .select(WorkspaceInvite::as_select())
@@ -273,8 +292,19 @@ impl WorkspaceInviteRepository for PgConnection {
         .await
         .map_err(Error::from)?;
 
-        Ok(CursorPage::new(items, total, pagination.limit, |i| {
-            (i.created_at.into(), i.id)
+        Ok(CursorPage::new(items, total, pagination.limit, move |i| {
+            if sort_by_email {
+                InviteCursor::Email {
+                    // A null email cannot appear here — the sort filters them out.
+                    email: i.invitee_email.clone().unwrap_or_default(),
+                    id: i.id,
+                }
+            } else {
+                InviteCursor::Date {
+                    created_at: i.created_at.into(),
+                    id: i.id,
+                }
+            }
         }))
     }
 
@@ -310,7 +340,7 @@ mod tests {
     use crate::model::{NewWorkspaceInvite, WorkspaceInvite};
     use crate::query::{WorkspaceInviteRepository, WorkspaceRepository};
     use crate::test_util::TestDatabase;
-    use crate::types::{InviteSortBy, InviteSortField, SortOrder, WorkspaceRole};
+    use crate::types::{Direction, InviteSortBy, InviteSortField, WorkspaceRole};
 
     /// Creates an invite addressed to `email` (the `New*` test constructor leaves
     /// `invitee_email` NULL, an open invite code, so set it on the struct).
@@ -328,11 +358,14 @@ mod tests {
     #[tokio::test]
     async fn create_defaults_and_lookups_are_workspace_scoped() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (owner_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let invite = conn
-            .create_workspace_invite(NewWorkspaceInvite::test(workspace_id, owner_id))
+            .create_workspace_invite(NewWorkspaceInvite::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
         // Database defaults are applied.
         assert_eq!(invite.invite_status, InviteStatus::Pending);
@@ -348,12 +381,12 @@ mod tests {
 
         // Found in its own workspace, not in another.
         assert!(
-            conn.find_invite_in_workspace(workspace_id, invite.id)
+            conn.find_invite_in_workspace(seeded.workspace_id, invite.id)
                 .await?
                 .is_some()
         );
         let other_ws = conn
-            .create_workspace(crate::model::NewWorkspace::test(owner_id))
+            .create_workspace(crate::model::NewWorkspace::test(seeded.account_id))
             .await?
             .id;
         assert!(
@@ -367,30 +400,45 @@ mod tests {
     #[tokio::test]
     async fn accept_reject_cancel_set_status_and_audit_fields() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (owner_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         // Accept records a status and a response timestamp.
         let accepted = conn
-            .create_workspace_invite(NewWorkspaceInvite::test(workspace_id, owner_id))
+            .create_workspace_invite(NewWorkspaceInvite::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
-        let accepted = conn.accept_workspace_invite(accepted.id, owner_id).await?;
+        let accepted = conn
+            .accept_workspace_invite(accepted.id, seeded.account_id)
+            .await?;
         assert_eq!(accepted.invite_status, InviteStatus::Accepted);
         assert!(accepted.responded_at.is_some());
 
         // Reject records the declining actor as `updated_by`.
         let rejected = conn
-            .create_workspace_invite(NewWorkspaceInvite::test(workspace_id, owner_id))
+            .create_workspace_invite(NewWorkspaceInvite::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
-        let rejected = conn.reject_workspace_invite(rejected.id, owner_id).await?;
+        let rejected = conn
+            .reject_workspace_invite(rejected.id, seeded.account_id)
+            .await?;
         assert_eq!(rejected.invite_status, InviteStatus::Declined);
-        assert_eq!(rejected.updated_by, owner_id);
+        assert_eq!(rejected.updated_by, seeded.account_id);
 
         // Cancel moves to Canceled.
         let canceled = conn
-            .create_workspace_invite(NewWorkspaceInvite::test(workspace_id, owner_id))
+            .create_workspace_invite(NewWorkspaceInvite::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
-        let canceled = conn.cancel_workspace_invite(canceled.id, owner_id).await?;
+        let canceled = conn
+            .cancel_workspace_invite(canceled.id, seeded.account_id)
+            .await?;
         assert_eq!(canceled.invite_status, InviteStatus::Canceled);
         Ok(())
     }
@@ -399,25 +447,40 @@ mod tests {
     async fn find_pending_by_email_matches_only_pending_unexpired_in_workspace()
     -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (owner_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         // A pending invite with the target email matches.
-        let pending =
-            invite_with_email(&mut conn, workspace_id, owner_id, "invitee@example.com").await?;
+        let pending = invite_with_email(
+            &mut conn,
+            seeded.workspace_id,
+            seeded.account_id,
+            "invitee@example.com",
+        )
+        .await?;
         let found = conn
-            .find_pending_workspace_invite_by_email(workspace_id, "invitee@example.com")
+            .find_pending_workspace_invite_by_email(seeded.workspace_id, "invitee@example.com")
             .await?;
         assert_eq!(found.map(|i| i.id), Some(pending.id));
 
         // An accepted invite with the same email does NOT match.
-        let accepted =
-            invite_with_email(&mut conn, workspace_id, owner_id, "accepted@example.com").await?;
-        let _ = conn.accept_workspace_invite(accepted.id, owner_id).await?;
+        let accepted = invite_with_email(
+            &mut conn,
+            seeded.workspace_id,
+            seeded.account_id,
+            "accepted@example.com",
+        )
+        .await?;
+        let _ = conn
+            .accept_workspace_invite(accepted.id, seeded.account_id)
+            .await?;
         assert!(
-            conn.find_pending_workspace_invite_by_email(workspace_id, "accepted@example.com")
-                .await?
-                .is_none()
+            conn.find_pending_workspace_invite_by_email(
+                seeded.workspace_id,
+                "accepted@example.com"
+            )
+            .await?
+            .is_none()
         );
 
         // The right email in the wrong workspace does not match.
@@ -432,27 +495,35 @@ mod tests {
     #[tokio::test]
     async fn cursor_list_excludes_canceled_and_applies_role_filter() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (owner_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         // A pending reviewer invite, an editor invite, and a canceled one.
         let reviewer = conn
-            .create_workspace_invite(NewWorkspaceInvite::test(workspace_id, owner_id))
+            .create_workspace_invite(NewWorkspaceInvite::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
-        let mut editor = NewWorkspaceInvite::test(workspace_id, owner_id);
+        let mut editor = NewWorkspaceInvite::test(seeded.workspace_id, seeded.account_id);
         editor.invited_role = Some(WorkspaceRole::Editor);
         let editor = conn.create_workspace_invite(editor).await?;
         let canceled = conn
-            .create_workspace_invite(NewWorkspaceInvite::test(workspace_id, owner_id))
+            .create_workspace_invite(NewWorkspaceInvite::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
-        let _ = conn.cancel_workspace_invite(canceled.id, owner_id).await?;
+        let _ = conn
+            .cancel_workspace_invite(canceled.id, seeded.account_id)
+            .await?;
 
-        let sort = InviteSortBy::new(InviteSortField::Date, SortOrder::Desc);
+        let sort = InviteSortBy::new(InviteSortField::Date, Direction::Descending);
 
         // No role filter: both non-canceled invites, canceled excluded.
         let all = conn
             .cursor_list_workspace_invites(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 sort,
                 InviteFilter::default(),
@@ -466,7 +537,7 @@ mod tests {
         // Role filter narrows to the editor invite.
         let editors = conn
             .cursor_list_workspace_invites(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 sort,
                 InviteFilter {
@@ -484,24 +555,37 @@ mod tests {
     #[tokio::test]
     async fn cursor_list_sorted_by_email_excludes_null_emails() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (owner_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         // Two invites with emails, one open (null-email) code.
-        let bravo =
-            invite_with_email(&mut conn, workspace_id, owner_id, "bravo@example.com").await?;
-        let alpha =
-            invite_with_email(&mut conn, workspace_id, owner_id, "alpha@example.com").await?;
+        let bravo = invite_with_email(
+            &mut conn,
+            seeded.workspace_id,
+            seeded.account_id,
+            "bravo@example.com",
+        )
+        .await?;
+        let alpha = invite_with_email(
+            &mut conn,
+            seeded.workspace_id,
+            seeded.account_id,
+            "alpha@example.com",
+        )
+        .await?;
         let _open = conn
-            .create_workspace_invite(NewWorkspaceInvite::test(workspace_id, owner_id))
+            .create_workspace_invite(NewWorkspaceInvite::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
 
         // Sorting by email ascending drops the null-email invite and orders the rest.
         let page = conn
             .cursor_list_workspace_invites(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
-                InviteSortBy::new(InviteSortField::Email, SortOrder::Asc),
+                InviteSortBy::new(InviteSortField::Email, Direction::Ascending),
                 InviteFilter::default(),
             )
             .await?;

@@ -235,7 +235,7 @@ async fn list_workspace_assignments(
 
     let filter = query.into_filter(assignee_account_id);
     let page = conn
-        .cursor_list_workspace_assignments(workspace.id, pagination.into(), &filter)
+        .cursor_list_workspace_assignments(workspace.id, pagination.into_cursor(), &filter)
         .await?;
 
     let response = AssignmentsPage::from_cursor_page(page, |row| {

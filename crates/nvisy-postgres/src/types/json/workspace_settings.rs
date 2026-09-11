@@ -89,14 +89,14 @@ mod tests {
     fn empty_settings_blob_is_default() {
         let settings = column(json!({})).or_default();
         assert_eq!(settings.raster, RasterPolicy::Auto);
-        assert!(settings.retention.is_noop());
+        assert_eq!(settings.retention, RetentionSettings::default());
     }
 
     #[test]
     fn malformed_settings_blob_falls_back_to_default() {
         let settings = column(json!({ "retention": "nonsense" })).or_default();
         assert_eq!(settings.raster, RasterPolicy::Auto);
-        assert!(settings.retention.is_noop());
+        assert_eq!(settings.retention, RetentionSettings::default());
     }
 
     #[test]

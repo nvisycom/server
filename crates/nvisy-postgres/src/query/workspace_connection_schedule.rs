@@ -136,10 +136,13 @@ mod tests {
     /// Seeds a connection in the fixture's workspace and returns its id — the FK
     /// parent a schedule row requires.
     async fn seed_connection(db: &TestDatabase) -> anyhow::Result<Uuid> {
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
         let connection = conn
-            .create_workspace_connection(NewWorkspaceConnection::test(workspace_id, account_id))
+            .create_workspace_connection(NewWorkspaceConnection::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
         Ok(connection.id)
     }

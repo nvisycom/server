@@ -5,11 +5,22 @@ use std::future::Future;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{AccountNotification, NewAccountNotification, UpdateAccountNotification};
-use crate::types::{CursorPage, CursorPagination};
+use crate::types::{CursorPage, CursorPagination, keyset};
 use crate::{Error, PgConnection, Result, schema};
+
+/// Keyset for paginating an account's notifications: newest first by
+/// `created_at`, `id` as the tiebreaker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationCursor {
+    /// When the notification was created.
+    pub created_at: Timestamp,
+    /// Notification id (tiebreaker).
+    pub id: uuid::Uuid,
+}
 
 /// Repository for account notification database operations.
 ///
@@ -35,7 +46,7 @@ pub trait AccountNotificationRepository {
     fn cursor_list_account_notifications(
         &mut self,
         account_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<NotificationCursor>,
     ) -> impl Future<Output = Result<CursorPage<AccountNotification>>> + Send;
 
     /// Marks all unread account notifications as read.
@@ -100,7 +111,7 @@ impl AccountNotificationRepository for PgConnection {
     async fn cursor_list_account_notifications(
         &mut self,
         acct_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<NotificationCursor>,
     ) -> Result<CursorPage<AccountNotification>> {
         use diesel::dsl::{count_star, now};
         use schema::account_notifications::{self, dsl};
@@ -122,34 +133,25 @@ impl AccountNotificationRepository for PgConnection {
             None
         };
 
-        let items = if let Some(cursor) = &pagination.after {
-            let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
-            account_notifications::table
-                .filter(base_filter)
-                .filter(
-                    dsl::created_at
-                        .lt(cursor_ts)
-                        .or(dsl::created_at.eq(cursor_ts).and(dsl::id.lt(cursor.id))),
-                )
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(pagination.fetch_limit())
-                .select(AccountNotification::as_select())
-                .load(self)
-                .await
-                .map_err(Error::from)?
-        } else {
-            account_notifications::table
-                .filter(base_filter)
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(pagination.fetch_limit())
-                .select(AccountNotification::as_select())
-                .load(self)
-                .await
-                .map_err(Error::from)?
-        };
+        let query = account_notifications::table
+            .filter(base_filter)
+            .into_boxed();
+
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let items = keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
+            .limit(pagination.fetch_limit())
+            .select(AccountNotification::as_select())
+            .load(self)
+            .await
+            .map_err(Error::from)?;
 
         Ok(CursorPage::new(items, total, pagination.limit, |n| {
-            (n.created_at.into(), n.id)
+            NotificationCursor {
+                created_at: n.created_at.into(),
+                id: n.id,
+            }
         }))
     }
 

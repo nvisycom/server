@@ -570,32 +570,35 @@ mod tests {
     #[tokio::test]
     async fn snapshot_aggregates_storage_detections_and_usage_by_group() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id, pipeline_id, seed_file) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
         // Storage: the seeded original file plus a second original and a redacted.
-        let mut redacted = NewWorkspaceFile::test(workspace_id, account_id);
+        let mut redacted = NewWorkspaceFile::test(seeded.workspace_id, seeded.account_id);
         redacted.file_kind = Some(FileKind::Redacted);
         let _ = conn.create_workspace_file(redacted).await?;
         let _ = conn
-            .create_workspace_file(NewWorkspaceFile::test(workspace_id, account_id))
+            .create_workspace_file(NewWorkspaceFile::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
 
         // Detections: one Complete (with a duration) and one Pending.
         let complete = completed_detection(
             &mut conn,
-            pipeline_id,
-            account_id,
-            seed_file,
+            seeded.pipeline_id,
+            seeded.account_id,
+            seeded.file_id,
             Span::new().hours(2),
             Span::new().seconds(10),
         )
         .await?;
         let _pending = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
-                pipeline_id,
-                account_id,
-                seed_file,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.file_id,
             ))
             .await?;
 
@@ -606,7 +609,7 @@ mod tests {
         ])
         .await?;
 
-        let snapshot = conn.snapshot(workspace_id).await?;
+        let snapshot = conn.snapshot(seeded.workspace_id).await?;
 
         // Storage: 2 original files + 1 redacted, grouped by kind.
         let original = snapshot
@@ -654,60 +657,66 @@ mod tests {
     #[tokio::test]
     async fn snapshot_is_scoped_to_the_workspace() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (_a, other_workspace) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
 
         // A different workspace with a detection.
-        let (account_id, workspace_id, pipeline_id, seed_file) = db.seed_pipeline_and_file().await;
+        let other = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
         let _ = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
-                pipeline_id,
-                account_id,
-                seed_file,
+                other.pipeline_id,
+                other.account_id,
+                other.file_id,
             ))
             .await?;
 
         // The unrelated workspace sees none of it.
-        let snapshot = conn.snapshot(other_workspace).await?;
+        let snapshot = conn.snapshot(seeded.workspace_id).await?;
         assert!(snapshot.detections.is_empty());
         assert!(snapshot.storage.is_empty());
         assert!(snapshot.usage.is_empty());
 
         // The owning workspace does.
-        assert!(!conn.snapshot(workspace_id).await?.detections.is_empty());
+        assert!(
+            !conn
+                .snapshot(other.workspace_id)
+                .await?
+                .detections
+                .is_empty()
+        );
         Ok(())
     }
 
     #[tokio::test]
     async fn detections_by_day_buckets_within_the_window() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id, pipeline_id, seed_file) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
         // Two detections started ~1 day ago (same UTC day), one ~3 days ago.
         let recent = completed_detection(
             &mut conn,
-            pipeline_id,
-            account_id,
-            seed_file,
+            seeded.pipeline_id,
+            seeded.account_id,
+            seeded.file_id,
             Span::new().hours(25),
             Span::new().seconds(5),
         )
         .await?;
         let _recent2 = completed_detection(
             &mut conn,
-            pipeline_id,
-            account_id,
-            seed_file,
+            seeded.pipeline_id,
+            seeded.account_id,
+            seeded.file_id,
             Span::new().hours(26),
             Span::new().seconds(5),
         )
         .await?;
         let _old = completed_detection(
             &mut conn,
-            pipeline_id,
-            account_id,
-            seed_file,
+            seeded.pipeline_id,
+            seeded.account_id,
+            seeded.file_id,
             Span::new().hours(72),
             Span::new().seconds(5),
         )
@@ -718,7 +727,9 @@ mod tests {
         // A window covering only the last two days excludes the 3-day-old one.
         let from = Timestamp::now() - Span::new().hours(48);
         let to = Timestamp::now() + Span::new().hours(1);
-        let points = conn.detections_by_day(workspace_id, from, to).await?;
+        let points = conn
+            .detections_by_day(seeded.workspace_id, from, to)
+            .await?;
 
         // One bucket (the two recent detections share a UTC day), 2 detections.
         let total: i64 = points.iter().map(|p| p.detections).sum();

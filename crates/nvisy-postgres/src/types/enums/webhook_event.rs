@@ -64,6 +64,18 @@ db_enum! {
         PolicyUpdated = "policy.updated",
         /// A policy was deleted.
         PolicyDeleted = "policy.deleted",
+        /// A thread was opened.
+        ThreadOpened = "thread.opened",
+        /// A thread was closed.
+        ThreadClosed = "thread.closed",
+        /// A thread was reopened.
+        ThreadReopened = "thread.reopened",
+        /// A thread's title was changed.
+        ThreadRenamed = "thread.renamed",
+        /// An anchor was added to a thread.
+        ThreadAnchorAdded = "thread.anchor.added",
+        /// An anchor was removed from a thread.
+        ThreadAnchorRemoved = "thread.anchor.removed",
     }
 }
 
@@ -99,6 +111,12 @@ impl WebhookEvent {
             WebhookEvent::PolicyCreated
             | WebhookEvent::PolicyUpdated
             | WebhookEvent::PolicyDeleted => "policy",
+            WebhookEvent::ThreadOpened
+            | WebhookEvent::ThreadClosed
+            | WebhookEvent::ThreadReopened
+            | WebhookEvent::ThreadRenamed
+            | WebhookEvent::ThreadAnchorAdded
+            | WebhookEvent::ThreadAnchorRemoved => "thread",
         }
     }
 

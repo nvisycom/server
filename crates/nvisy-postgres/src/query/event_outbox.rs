@@ -165,11 +165,11 @@ mod tests {
     #[tokio::test]
     async fn claim_then_process_removes_the_row_from_the_pending_set() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let row = conn
-            .insert_event_outbox(NewEventOutbox::test(workspace_id, account_id))
+            .insert_event_outbox(NewEventOutbox::test(seeded.workspace_id, seeded.account_id))
             .await?;
 
         // The drainer claims and processes in one transaction.
@@ -195,11 +195,11 @@ mod tests {
     #[tokio::test]
     async fn defer_pushes_the_row_out_of_the_due_window() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let row = conn
-            .insert_event_outbox(NewEventOutbox::test(workspace_id, account_id))
+            .insert_event_outbox(NewEventOutbox::test(seeded.workspace_id, seeded.account_id))
             .await?;
 
         // Claim, then defer the attempt an hour into the future.
@@ -226,11 +226,11 @@ mod tests {
     #[tokio::test]
     async fn mark_failed_dead_letters_the_row() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let row = conn
-            .insert_event_outbox(NewEventOutbox::test(workspace_id, account_id))
+            .insert_event_outbox(NewEventOutbox::test(seeded.workspace_id, seeded.account_id))
             .await?;
 
         conn.transaction(async |conn| -> Result<()> {

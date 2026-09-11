@@ -12,14 +12,15 @@
 //! change.
 
 use nvisy_postgres::types::{
-    ActivityPayload, AssignmentActivityParams, AssignmentStatus, ConnectionActivityParams,
-    ConnectionId, ConnectionSyncCompletedParams, ConnectionSyncFailedParams,
-    DetectionActivityParams, DetectionCompletedParams, DetectionFailedParams, DetectionId,
-    FileActivityParams, FileAssignedParams, FileUnassignedParams, Handle, InviteActivityParams,
-    MemberActivityParams, MemberJoinedParams, NotificationPayload, PipelineActivityParams,
-    PolicyActivityParams, ProviderActivityParams, ProviderId, RedactionActivityParams,
-    RedactionCreatedParams, RedactionId, WebhookActivityParams, WebhookEvent, WebhookId,
-    WorkspaceActivityParams, WorkspaceRole,
+    ActivityPayload, AssignmentActivityParams, AssignmentStatus, CommentMentionedParams,
+    ConnectionActivityParams, ConnectionId, ConnectionSyncCompletedParams,
+    ConnectionSyncFailedParams, DetectionActivityParams, DetectionCompletedParams,
+    DetectionFailedParams, DetectionId, FileActivityParams, FileAssignedParams,
+    FileUnassignedParams, Handle, InviteActivityParams, MemberActivityParams, MemberJoinedParams,
+    NotificationPayload, PipelineActivityParams, PolicyActivityParams, ProviderActivityParams,
+    ProviderId, RedactionActivityParams, RedactionCreatedParams, RedactionId, ThreadActivityParams,
+    ThreadAnchorActivityParams, ThreadCommentActivityParams, WebhookActivityParams, WebhookEvent,
+    WebhookId, WorkspaceActivityParams, WorkspaceRole,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -77,6 +78,15 @@ workspace_events! {
     PolicyCreated           => "policy.created",
     PolicyUpdated           => "policy.updated",
     PolicyDeleted           => "policy.deleted",
+
+    ThreadOpened         => "thread.opened",
+    ThreadClosed         => "thread.closed",
+    ThreadReopened       => "thread.reopened",
+    ThreadRenamed        => "thread.renamed",
+    ThreadDeleted        => "thread.deleted",
+    ThreadAnchorAdded    => "thread.anchor.added",
+    ThreadAnchorRemoved  => "thread.anchor.removed",
+    ThreadCommentCreated => "thread.comment.created",
 }
 
 /// The webhook body for a file event: just the file's display name.
@@ -784,5 +794,150 @@ fn policy_activity(policy_id: Uuid, policy_slug: &Handle) -> PolicyActivityParam
     PolicyActivityParams {
         policy_id,
         policy_slug: policy_slug.clone(),
+    }
+}
+
+/// A thread was opened with its first message. Feeds activity + webhook,
+/// and notifies each account mentioned in the opening body (never the author,
+/// even if they @-mention themselves).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadOpened {
+    pub thread_id: Uuid,
+    /// Id of the thread's opening comment, referenced by mention notifications.
+    pub opening_comment_id: Uuid,
+    pub file_id: Option<Uuid>,
+    /// Username of the thread's opener, shown in the mention notification.
+    pub author_username: Handle,
+    /// Accounts mentioned in the opening body, to notify. Empty when none.
+    pub mentioned: Vec<Uuid>,
+}
+
+impl EventKind for ThreadOpened {
+    const TAG: &'static str = "thread.opened";
+
+    fn resource_id(&self) -> Uuid {
+        self.thread_id
+    }
+
+    fn activity(&self) -> ActivityPayload {
+        ActivityPayload::ThreadOpened(ThreadActivityParams {
+            thread_id: self.thread_id,
+            file_id: self.file_id,
+        })
+    }
+
+    fn webhook(&self) -> Option<WebhookDelivery> {
+        Some(WebhookDelivery {
+            event: WebhookEvent::ThreadOpened,
+            body: None,
+        })
+    }
+
+    fn notification(self) -> Vec<Notification> {
+        // One "you were mentioned" notification per mentioned account. The
+        // opening message is part of the thread; its mentions notify here.
+        self.mentioned
+            .into_iter()
+            .map(|recipient| Notification {
+                target: NotifyTarget::Account(recipient),
+                payload: NotificationPayload::CommentMentioned(CommentMentionedParams {
+                    comment_id: self.opening_comment_id,
+                    thread_id: self.thread_id,
+                    file_id: self.file_id,
+                    author_username: self.author_username.clone(),
+                }),
+            })
+            .collect()
+    }
+}
+
+// Thread close / reopen / rename: activity + webhook, no notification or extra
+// fields.
+crud_events! {
+    fields { thread_id: Uuid, file_id: Option<Uuid> }
+    id = thread_id;
+    activity(this) = ThreadActivityParams { thread_id: this.thread_id, file_id: this.file_id };
+    webhook = yes;
+
+    /// A thread was closed.
+    ThreadClosed => "thread.closed",
+    /// A thread was reopened.
+    ThreadReopened => "thread.reopened",
+    /// A thread's title was changed.
+    ThreadRenamed => "thread.renamed",
+}
+
+// Thread deletion: activity only, no webhook.
+crud_events! {
+    fields { thread_id: Uuid, file_id: Option<Uuid> }
+    id = thread_id;
+    activity(this) = ThreadActivityParams { thread_id: this.thread_id, file_id: this.file_id };
+    webhook = no;
+
+    /// A thread was deleted.
+    ThreadDeleted => "thread.deleted",
+}
+
+// Thread anchor add / remove: activity + webhook, keyed on the anchor. No
+// notification.
+crud_events! {
+    fields { thread_id: Uuid, anchor_id: Uuid, file_id: Option<Uuid> }
+    id = anchor_id;
+    activity(this) = ThreadAnchorActivityParams {
+        thread_id: this.thread_id,
+        anchor_id: this.anchor_id,
+        file_id: this.file_id,
+    };
+    webhook = yes;
+
+    /// An anchor was added to a thread.
+    ThreadAnchorAdded => "thread.anchor.added",
+    /// An anchor was removed from a thread.
+    ThreadAnchorRemoved => "thread.anchor.removed",
+}
+
+/// A comment (message) was posted in a thread. Notifies each mentioned account
+/// (never the author, even if they @-mention themselves); activity only, no
+/// webhook (thread lifecycle carries the webhook signal).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadCommentCreated {
+    pub comment_id: Uuid,
+    pub thread_id: Uuid,
+    pub file_id: Option<Uuid>,
+    /// Username of the comment's author, shown in the mention notification.
+    pub author_username: Handle,
+    /// Accounts mentioned in the comment body, to notify. Empty when none.
+    pub mentioned: Vec<Uuid>,
+}
+
+impl EventKind for ThreadCommentCreated {
+    const TAG: &'static str = "thread.comment.created";
+
+    fn resource_id(&self) -> Uuid {
+        self.comment_id
+    }
+
+    fn activity(&self) -> ActivityPayload {
+        ActivityPayload::ThreadCommentCreated(ThreadCommentActivityParams {
+            comment_id: self.comment_id,
+            thread_id: self.thread_id,
+            file_id: self.file_id,
+        })
+    }
+
+    fn notification(self) -> Vec<Notification> {
+        // One "you were mentioned" notification per mentioned account.
+        self.mentioned
+            .into_iter()
+            .map(|recipient| Notification {
+                target: NotifyTarget::Account(recipient),
+                payload: NotificationPayload::CommentMentioned(CommentMentionedParams {
+                    comment_id: self.comment_id,
+                    thread_id: self.thread_id,
+                    file_id: self.file_id,
+                    author_username: self.author_username.clone(),
+                }),
+            })
+            .collect()
     }
 }

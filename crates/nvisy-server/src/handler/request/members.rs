@@ -3,7 +3,7 @@
 use garde::Validate;
 use nvisy_postgres::model::UpdateWorkspaceMember;
 use nvisy_postgres::types::{
-    MemberFilter, MemberSortBy, MemberSortField, SortOrder, WorkspaceRole,
+    Direction, MemberFilter, MemberSortBy, MemberSortField, WorkspaceRole,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -43,7 +43,7 @@ pub struct ListMembers {
     pub sort_by: Option<MemberSortField>,
     /// Sort order (asc or desc).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub order: Option<SortOrder>,
+    pub order: Option<Direction>,
 }
 
 impl ListMembers {

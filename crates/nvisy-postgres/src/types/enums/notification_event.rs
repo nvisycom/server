@@ -26,5 +26,7 @@ db_enum! {
         FileAssigned = "file.assigned",
         /// The reviewer was unassigned from a file.
         FileUnassigned = "file.unassigned",
+        /// An account was mentioned in a comment.
+        CommentMentioned = "comment.mentioned",
     }
 }

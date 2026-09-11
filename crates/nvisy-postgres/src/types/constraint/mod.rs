@@ -9,10 +9,6 @@ mod account_identities;
 mod account_notifications;
 mod accounts;
 
-// Chat constraint modules
-mod chat_messages;
-mod chat_sessions;
-
 // Workspace-related constraint modules
 mod workspace_activities;
 mod workspace_invites;
@@ -31,6 +27,11 @@ mod pipelines;
 // Assignment-related constraint modules
 mod assignments;
 
+// Thread-related constraint modules
+mod workspace_thread_anchors;
+mod workspace_thread_comments;
+mod workspace_threads;
+
 mod workspace_connection_syncs;
 mod workspace_connections;
 mod workspace_policies;
@@ -40,8 +41,6 @@ pub use self::account_identities::AccountIdentityConstraints;
 pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
 pub use self::assignments::WorkspaceAssignmentConstraints;
-pub use self::chat_messages::ChatMessageConstraints;
-pub use self::chat_sessions::ChatSessionConstraints;
 pub use self::detections::WorkspaceDetectionConstraints;
 pub use self::files::WorkspaceFileConstraints;
 pub use self::pipeline_references::WorkspacePipelineReferenceConstraints;
@@ -52,6 +51,9 @@ pub use self::workspace_connections::WorkspaceConnectionConstraints;
 pub use self::workspace_invites::WorkspaceInviteConstraints;
 pub use self::workspace_members::WorkspaceMemberConstraints;
 pub use self::workspace_policies::WorkspacePolicyConstraints;
+pub use self::workspace_thread_anchors::WorkspaceThreadAnchorConstraints;
+pub use self::workspace_thread_comments::WorkspaceThreadCommentConstraints;
+pub use self::workspace_threads::WorkspaceThreadConstraints;
 pub use self::workspace_webhooks::WorkspaceWebhookConstraints;
 pub use self::workspaces::WorkspaceConstraints;
 
@@ -68,10 +70,6 @@ pub enum ConstraintViolation {
     AccountNotification(AccountNotificationConstraints),
     AccountApiToken(AccountApiTokenConstraints),
 
-    // Chat-related constraints
-    ChatSession(ChatSessionConstraints),
-    ChatMessage(ChatMessageConstraints),
-
     // Workspace-related constraints
     Workspace(WorkspaceConstraints),
     WorkspaceMember(WorkspaceMemberConstraints),
@@ -84,6 +82,11 @@ pub enum ConstraintViolation {
 
     // Assignment-related constraints
     WorkspaceAssignment(WorkspaceAssignmentConstraints),
+
+    // Comment-related constraints
+    WorkspaceThread(WorkspaceThreadConstraints),
+    WorkspaceThreadAnchor(WorkspaceThreadAnchorConstraints),
+    WorkspaceThreadComment(WorkspaceThreadCommentConstraints),
 
     // Detection / pipeline-related constraints
     WorkspacePipeline(WorkspacePipelineConstraints),
@@ -134,8 +137,6 @@ impl ConstraintViolation {
             AccountIdentity,
             AccountNotification,
             AccountApiToken,
-            ChatSession,
-            ChatMessage,
             Workspace,
             WorkspaceMember,
             WorkspaceInvite,
@@ -143,6 +144,9 @@ impl ConstraintViolation {
             WorkspaceWebhook,
             WorkspaceFile,
             WorkspaceAssignment,
+            WorkspaceThread,
+            WorkspaceThreadAnchor,
+            WorkspaceThreadComment,
             WorkspacePipeline,
             WorkspaceDetection,
             WorkspacePipelineReference,

@@ -368,7 +368,7 @@ async fn list_connection_syncs(
     let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
 
     let page = conn
-        .cursor_list_workspace_connection_syncs(connection.id, pagination.into(), None)
+        .cursor_list_workspace_connection_syncs(connection.id, pagination.into_cursor(), None)
         .await?;
 
     let page = Page::from_cursor_page(page, |wc| {
@@ -413,7 +413,7 @@ async fn list_workspace_syncs(
     let page = conn
         .cursor_list_workspace_connection_syncs_all(
             workspace.id,
-            pagination.into(),
+            pagination.into_cursor(),
             query.status,
             &query.provider,
         )

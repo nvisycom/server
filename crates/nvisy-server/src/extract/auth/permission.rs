@@ -58,15 +58,19 @@ pub enum Permission {
     /// Can assign files to reviewers and unassign them.
     AssignTasks,
 
+    // Comment permissions
+    /// Can view comments on files.
+    ViewComments,
+    /// Can write comments and replies (and edit or delete one's own).
+    Comment,
+    /// Can close and reopen comment threads.
+    CloseComments,
+
     // Reporting permissions
     /// Can view workspace analytics.
     ViewAnalytics,
     /// Can view the workspace activity log.
     ViewActivity,
-
-    // Chat permissions
-    /// Can use workspace chat sessions.
-    UseChat,
 
     // Member management permissions
     /// Can view workspace members and their roles.
@@ -133,6 +137,9 @@ impl Permission {
             | Self::ViewPipelines
             | Self::ViewDetections
             | Self::ViewAssignments
+            | Self::ViewComments
+            | Self::Comment
+            | Self::CloseComments
             | Self::ViewAnalytics
             | Self::ViewActivity
             | Self::ViewMembers
@@ -152,7 +159,6 @@ impl Permission {
             | Self::RunDetections
             | Self::RunRedactions
             | Self::AssignTasks
-            | Self::UseChat
             | Self::RunConnectionSyncs => WorkspaceRole::Editor,
 
             // Admin-level permissions (manage workspace resources)

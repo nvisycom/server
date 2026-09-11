@@ -136,7 +136,7 @@ async fn list_policies(
     let mut conn = pg_client.get_connection().await?;
 
     let page = conn
-        .cursor_list_workspace_policies(workspace.id, pagination.into())
+        .cursor_list_workspace_policies(workspace.id, pagination.into_cursor())
         .await?;
 
     tracing::debug!(

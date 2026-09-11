@@ -4,7 +4,9 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use jiff::Timestamp;
 use pgtrgm::expression_methods::TrgmExpressionMethods;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{
@@ -14,8 +16,18 @@ use crate::model::{
 use crate::query::search::ilike_contains;
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, DetectionStatus, FileFilter, FileKind,
-    WithAccountRef,
+    WithAccountRef, keyset,
 };
+
+/// Keyset for paginating a workspace's files: newest first by `created_at`, `id`
+/// as the tiebreaker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileCursor {
+    /// When the file was created.
+    pub created_at: Timestamp,
+    /// File id (tiebreaker).
+    pub id: uuid::Uuid,
+}
 use crate::{Error, PgConnection, Result, schema};
 
 /// A live file imported from a connection, for deletion reconciliation.
@@ -145,7 +157,7 @@ pub trait WorkspaceFileRepository {
 
     /// Recomputes `expires_at` for live files of `kind` in `workspace_id`,
     /// returning the number updated. Used to backfill when retention settings
-    /// change. `None` clears the expiry (retention became `Forever`).
+    /// change. `None` clears the expiry (retention became `Persistent`).
     fn backfill_files_expiry(
         &mut self,
         workspace_id: Uuid,
@@ -181,7 +193,7 @@ pub trait WorkspaceFileRepository {
     fn cursor_list_workspace_files(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<FileCursor>,
         filter: FileFilter,
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceFile>>>> + Send;
 
@@ -619,7 +631,7 @@ impl WorkspaceFileRepository for PgConnection {
     async fn cursor_list_workspace_files(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<FileCursor>,
         filter: FileFilter,
     ) -> Result<CursorPage<WithAccountRef<WorkspaceFile>>> {
         use schema::workspace_files::dsl;
@@ -701,18 +713,11 @@ impl WorkspaceFileRepository for PgConnection {
             query = query.filter(dsl::file_hash_sha256.eq(hash));
         }
 
-        let limit = pagination.fetch_limit();
-
-        // Apply cursor filter if present
-        let rows: Vec<(WorkspaceFile, AccountRefRow)> = if let Some(cursor) = &pagination.after {
-            let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
-
-            query
-                .filter(
-                    dsl::created_at
-                        .lt(&cursor_time)
-                        .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                )
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let rows: Vec<(WorkspaceFile, AccountRefRow)> =
+            keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
                 .select((
                     WorkspaceFile::as_select(),
                     (
@@ -721,27 +726,10 @@ impl WorkspaceFileRepository for PgConnection {
                         accounts::avatar_url,
                     ),
                 ))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
+                .limit(pagination.fetch_limit())
                 .load(self)
                 .await
-                .map_err(Error::from)?
-        } else {
-            query
-                .select((
-                    WorkspaceFile::as_select(),
-                    (
-                        accounts::username,
-                        accounts::display_name,
-                        accounts::avatar_url,
-                    ),
-                ))
-                .order((dsl::created_at.desc(), dsl::id.desc()))
-                .limit(limit)
-                .load(self)
-                .await
-                .map_err(Error::from)?
-        };
+                .map_err(Error::from)?;
 
         let items: Vec<WithAccountRef<WorkspaceFile>> = rows
             .into_iter()
@@ -749,7 +737,10 @@ impl WorkspaceFileRepository for PgConnection {
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
-            (wc.item.created_at.into(), wc.item.id)
+            FileCursor {
+                created_at: wc.item.created_at.into(),
+                id: wc.item.id,
+            }
         }))
     }
 
@@ -847,21 +838,24 @@ mod tests {
     #[tokio::test]
     async fn create_and_scoped_lookups_exclude_soft_deleted() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let file = conn
-            .create_workspace_file(NewWorkspaceFile::test(workspace_id, account_id))
+            .create_workspace_file(NewWorkspaceFile::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
 
         assert!(conn.find_workspace_file_by_id(file.id).await?.is_some());
         assert!(
-            conn.find_file_in_workspace(workspace_id, file.id)
+            conn.find_file_in_workspace(seeded.workspace_id, file.id)
                 .await?
                 .is_some()
         );
         assert!(
-            conn.find_file_in_workspace_with_creator(workspace_id, file.id)
+            conn.find_file_in_workspace_with_creator(seeded.workspace_id, file.id)
                 .await?
                 .is_some()
         );
@@ -876,7 +870,7 @@ mod tests {
         conn.delete_workspace_file(file.id).await?;
         assert!(conn.find_workspace_file_by_id(file.id).await?.is_none());
         assert!(
-            conn.find_file_in_workspace(workspace_id, file.id)
+            conn.find_file_in_workspace(seeded.workspace_id, file.id)
                 .await?
                 .is_none()
         );
@@ -886,25 +880,28 @@ mod tests {
     #[tokio::test]
     async fn cursor_list_only_documents_and_filters_by_extension_and_hash() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         // A pdf original document, a txt original, and an audit blob (not a document).
-        let mut pdf = NewWorkspaceFile::test(workspace_id, account_id);
+        let mut pdf = NewWorkspaceFile::test(seeded.workspace_id, seeded.account_id);
         pdf.file_extension = Some("pdf".to_owned());
         pdf.file_hash_sha256 = vec![7u8; 32];
         let pdf = conn.create_workspace_file(pdf).await?;
         let txt = conn
-            .create_workspace_file(NewWorkspaceFile::test(workspace_id, account_id))
+            .create_workspace_file(NewWorkspaceFile::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
-        let mut audit = NewWorkspaceFile::test(workspace_id, account_id);
+        let mut audit = NewWorkspaceFile::test(seeded.workspace_id, seeded.account_id);
         audit.file_kind = Some(FileKind::Audit);
         let audit = conn.create_workspace_file(audit).await?;
 
         // The document listing excludes the audit blob.
         let all = conn
             .cursor_list_workspace_files(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 FileFilter::default(),
             )
@@ -916,7 +913,7 @@ mod tests {
         // Extension filter narrows to the pdf.
         let pdfs = conn
             .cursor_list_workspace_files(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 FileFilter {
                     extensions: Some(vec!["pdf".to_owned()]),
@@ -932,7 +929,7 @@ mod tests {
         // Exact-hash filter (dedup lookup) finds the pdf by its content hash.
         let by_hash = conn
             .cursor_list_workspace_files(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 FileFilter {
                     hash: Some(vec![7u8; 32]),
@@ -948,7 +945,7 @@ mod tests {
         // A present-but-empty extension set matches nothing (an active facet).
         let none = conn
             .cursor_list_workspace_files(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 FileFilter {
                     extensions: Some(vec![]),
@@ -963,15 +960,18 @@ mod tests {
     #[tokio::test]
     async fn import_origin_round_trips_and_is_dropped_on_delete() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
         let connection = conn
-            .create_workspace_connection(NewWorkspaceConnection::test(workspace_id, account_id))
+            .create_workspace_connection(NewWorkspaceConnection::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
 
         let file = conn
             .record_imported_file(
-                NewWorkspaceFile::test(workspace_id, account_id),
+                NewWorkspaceFile::test(seeded.workspace_id, seeded.account_id),
                 connection.id,
                 "remote/key.pdf".to_owned(),
             )
@@ -1002,17 +1002,20 @@ mod tests {
     #[tokio::test]
     async fn redacted_files_not_exported_excludes_already_exported() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
         let connection = conn
-            .create_workspace_connection(NewWorkspaceConnection::test(workspace_id, account_id))
+            .create_workspace_connection(NewWorkspaceConnection::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
 
         // Two redacted files; one already exported to the connection.
-        let mut a = NewWorkspaceFile::test(workspace_id, account_id);
+        let mut a = NewWorkspaceFile::test(seeded.workspace_id, seeded.account_id);
         a.file_kind = Some(FileKind::Redacted);
         let a = conn.create_workspace_file(a).await?;
-        let mut b = NewWorkspaceFile::test(workspace_id, account_id);
+        let mut b = NewWorkspaceFile::test(seeded.workspace_id, seeded.account_id);
         b.file_kind = Some(FileKind::Redacted);
         let b = conn.create_workspace_file(b).await?;
         conn.record_exported_file(a.id, connection.id, "out/a.pdf".to_owned())
@@ -1020,7 +1023,7 @@ mod tests {
 
         // Only the not-yet-exported redacted file is returned.
         let pending = conn
-            .redacted_files_not_exported(workspace_id, connection.id)
+            .redacted_files_not_exported(seeded.workspace_id, connection.id)
             .await?;
         assert_eq!(pending.iter().map(|f| f.id).collect::<Vec<_>>(), vec![b.id]);
         Ok(())
@@ -1029,18 +1032,18 @@ mod tests {
     #[tokio::test]
     async fn expiry_sweep_holds_files_of_in_progress_detections() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id, pipeline_id, _seed_file) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
         // A free expired file: eligible for the sweep.
-        let free = expired_file(&mut conn, workspace_id, account_id).await?;
+        let free = expired_file(&mut conn, seeded.workspace_id, seeded.account_id).await?;
 
         // An expired file that is the input of a Pending detection.
-        let held_file = expired_file(&mut conn, workspace_id, account_id).await?;
+        let held_file = expired_file(&mut conn, seeded.workspace_id, seeded.account_id).await?;
         let _detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
-                pipeline_id,
-                account_id,
+                seeded.pipeline_id,
+                seeded.account_id,
                 held_file.id,
             ))
             .await?;
@@ -1059,11 +1062,14 @@ mod tests {
     #[tokio::test]
     async fn purge_lifecycle_lists_then_stamps() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let file = conn
-            .create_workspace_file(NewWorkspaceFile::test(workspace_id, account_id))
+            .create_workspace_file(NewWorkspaceFile::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
 
         // A live file is not pending purge.
@@ -1099,19 +1105,25 @@ mod tests {
     #[tokio::test]
     async fn delete_files_in_workspace_transitions_only_live_scoped_rows() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let a = conn
-            .create_workspace_file(NewWorkspaceFile::test(workspace_id, account_id))
+            .create_workspace_file(NewWorkspaceFile::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
         let b = conn
-            .create_workspace_file(NewWorkspaceFile::test(workspace_id, account_id))
+            .create_workspace_file(NewWorkspaceFile::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
 
         // Deleting [a, b, unknown] returns exactly the two live rows it changed.
         let deleted = conn
-            .delete_files_in_workspace(workspace_id, &[a.id, b.id, Uuid::now_v7()])
+            .delete_files_in_workspace(seeded.workspace_id, &[a.id, b.id, Uuid::now_v7()])
             .await?;
         let mut deleted_ids: Vec<_> = deleted.iter().map(|f| f.id).collect();
         deleted_ids.sort();
@@ -1121,7 +1133,7 @@ mod tests {
 
         // A second call transitions nothing (already deleted).
         assert!(
-            conn.delete_files_in_workspace(workspace_id, &[a.id, b.id])
+            conn.delete_files_in_workspace(seeded.workspace_id, &[a.id, b.id])
                 .await?
                 .is_empty()
         );

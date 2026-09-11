@@ -5,11 +5,23 @@ use std::time::Duration;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
-use crate::types::{ApiTokenType, CursorPage, CursorPagination, session};
+use crate::types::{ApiTokenType, CursorPage, CursorPagination, keyset, session};
 use crate::{Error, PgConnection, Result, schema};
+
+/// Keyset for paginating an account's API tokens: newest first by `issued_at`,
+/// `id` as the tiebreaker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiTokenCursor {
+    /// When the token was issued.
+    pub issued_at: Timestamp,
+    /// Token id (tiebreaker).
+    pub id: uuid::Uuid,
+}
 
 /// Repository for account API token database operations.
 ///
@@ -110,7 +122,7 @@ pub trait AccountApiTokenRepository {
     fn cursor_list_account_api_tokens(
         &mut self,
         account_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<ApiTokenCursor>,
     ) -> impl Future<Output = Result<CursorPage<AccountApiToken>>> + Send;
 
     /// Soft-deletes all expired account API tokens system-wide.
@@ -358,20 +370,23 @@ impl AccountApiTokenRepository for PgConnection {
     async fn cursor_list_account_api_tokens(
         &mut self,
         account_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<ApiTokenCursor>,
     ) -> Result<CursorPage<AccountApiToken>> {
         use diesel::dsl::{count_star, now};
         use schema::account_api_tokens::{self, dsl};
 
-        let base_filter = dsl::account_id
-            .eq(account_id)
-            .and(dsl::deleted_at.is_null())
-            .and(dsl::expired_at.is_null().or(dsl::expired_at.gt(now)));
+        // One boxed base query reused for the count and the page.
+        let scoped = || {
+            account_api_tokens::table
+                .filter(dsl::account_id.eq(account_id))
+                .filter(dsl::deleted_at.is_null())
+                .filter(dsl::expired_at.is_null().or(dsl::expired_at.gt(now)))
+                .into_boxed()
+        };
 
         let total = if pagination.include_count {
             Some(
-                account_api_tokens::table
-                    .filter(base_filter)
+                scoped()
                     .select(count_star())
                     .get_result(self)
                     .await
@@ -381,34 +396,27 @@ impl AccountApiTokenRepository for PgConnection {
             None
         };
 
-        let items = if let Some(cursor) = &pagination.after {
-            let cursor_ts = jiff_diesel::Timestamp::from(cursor.timestamp);
-            account_api_tokens::table
-                .filter(base_filter)
-                .filter(
-                    dsl::issued_at
-                        .lt(cursor_ts)
-                        .or(dsl::issued_at.eq(cursor_ts).and(dsl::id.lt(cursor.id))),
-                )
-                .order((dsl::issued_at.desc(), dsl::id.desc()))
-                .limit(pagination.fetch_limit())
-                .select(AccountApiToken::as_select())
-                .load(self)
-                .await
-                .map_err(Error::from)?
-        } else {
-            account_api_tokens::table
-                .filter(base_filter)
-                .order((dsl::issued_at.desc(), dsl::id.desc()))
-                .limit(pagination.fetch_limit())
-                .select(AccountApiToken::as_select())
-                .load(self)
-                .await
-                .map_err(Error::from)?
-        };
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.issued_at), k.id));
+        let items = keyset!(
+            scoped(),
+            dsl::issued_at,
+            dsl::id,
+            pagination.direction,
+            after
+        )
+        .select(AccountApiToken::as_select())
+        .limit(pagination.fetch_limit())
+        .load(self)
+        .await
+        .map_err(Error::from)?;
 
         Ok(CursorPage::new(items, total, pagination.limit, |t| {
-            (t.issued_at.into(), t.id)
+            ApiTokenCursor {
+                issued_at: t.issued_at.into(),
+                id: t.id,
+            }
         }))
     }
 

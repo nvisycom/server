@@ -217,7 +217,7 @@ async fn list_invites(
     let page = conn
         .cursor_list_workspace_invites(
             workspace.id,
-            pagination.into(),
+            pagination.into_cursor(),
             query.to_sort(),
             query.to_filter(),
         )

@@ -53,7 +53,7 @@ async fn list_members(
     let page = conn
         .cursor_list_workspace_members_with_accounts(
             workspace.id,
-            pagination.into(),
+            pagination.into_cursor(),
             query.to_filter(),
         )
         .await?;

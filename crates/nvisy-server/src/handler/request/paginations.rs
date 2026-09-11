@@ -87,12 +87,19 @@ impl CursorPagination {
     pub fn limit(&self) -> u32 {
         self.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT)
     }
-}
 
-impl From<CursorPagination> for types::CursorPagination {
-    fn from(query: CursorPagination) -> Self {
-        let pagination = Self::from_cursor_string(query.limit() as i64, query.after.as_deref());
-        if query.include_count {
+    /// Converts to typed database pagination, decoding the opaque `after` cursor
+    /// against the query's keyset `K`. An `after` that does not decode to `K` is
+    /// treated as no cursor (a fresh first page). Defaults to descending; a caller
+    /// that walks ascending sets it with
+    /// [`with_direction`](types::CursorPagination::with_direction).
+    pub fn into_cursor<K>(self) -> types::CursorPagination<K>
+    where
+        K: types::CursorKey,
+    {
+        let pagination =
+            types::CursorPagination::from_cursor_string(self.limit() as i64, self.after.as_deref());
+        if self.include_count {
             pagination.with_count()
         } else {
             pagination

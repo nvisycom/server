@@ -45,7 +45,7 @@ async fn list_notifications(
     let mut conn = pg_client.get_connection().await?;
 
     let page = conn
-        .cursor_list_account_notifications(auth_state.account_id, pagination.into())
+        .cursor_list_account_notifications(auth_state.account_id, pagination.into_cursor())
         .await?;
 
     let response = NotificationsPage::from_cursor_page(page, Notification::from_model);

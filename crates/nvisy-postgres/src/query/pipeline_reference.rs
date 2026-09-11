@@ -182,19 +182,25 @@ mod tests {
     /// Seeds a pipeline plus `count` policies, returning `(workspace_id,
     /// pipeline_id, policy_ids)`.
     async fn seed(db: &TestDatabase, count: usize) -> anyhow::Result<(Uuid, Uuid, Vec<Uuid>)> {
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
         let pipeline = conn
-            .create_workspace_pipeline(NewWorkspacePipeline::test(workspace_id, account_id))
+            .create_workspace_pipeline(NewWorkspacePipeline::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
         let mut policy_ids = Vec::new();
         for _ in 0..count {
             let policy = conn
-                .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+                .create_workspace_policy(NewWorkspacePolicy::test(
+                    seeded.workspace_id,
+                    seeded.account_id,
+                ))
                 .await?;
             policy_ids.push(policy.id);
         }
-        Ok((workspace_id, pipeline.id, policy_ids))
+        Ok((seeded.workspace_id, pipeline.id, policy_ids))
     }
 
     #[tokio::test]
@@ -256,32 +262,41 @@ mod tests {
     #[tokio::test]
     async fn resolve_policy_slugs_preserves_order_and_rejects_unknown() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let alpha = conn
-            .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+            .create_workspace_policy(NewWorkspacePolicy::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
         let bravo = conn
-            .create_workspace_policy(NewWorkspacePolicy::test(workspace_id, account_id))
+            .create_workspace_policy(NewWorkspacePolicy::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
             .await?;
 
         // Resolution preserves request order, not storage order.
         let resolved = conn
-            .resolve_policy_slugs(workspace_id, &[bravo.slug.clone(), alpha.slug.clone()])
+            .resolve_policy_slugs(
+                seeded.workspace_id,
+                &[bravo.slug.clone(), alpha.slug.clone()],
+            )
             .await?;
         assert_eq!(resolved, Some(vec![bravo.id, alpha.id]));
 
         // An empty request resolves to an empty vec (not `None`).
         assert_eq!(
-            conn.resolve_policy_slugs(workspace_id, &[]).await?,
+            conn.resolve_policy_slugs(seeded.workspace_id, &[]).await?,
             Some(Vec::new())
         );
 
         // If any slug is unknown, the whole set is rejected with `None`.
         let unknown = Handle::test();
         assert_eq!(
-            conn.resolve_policy_slugs(workspace_id, &[alpha.slug.clone(), unknown])
+            conn.resolve_policy_slugs(seeded.workspace_id, &[alpha.slug.clone(), unknown])
                 .await?,
             None
         );

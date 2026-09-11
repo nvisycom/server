@@ -28,8 +28,9 @@ pub use crate::service::event::workspace_event::{
     FileUpdated, InviteAccepted, InviteCanceled, InviteCreated, InviteDeclined, MemberAdded,
     MemberDeleted, MemberUpdated, PipelineCreated, PipelineDeleted, PipelineUpdated, PolicyCreated,
     PolicyDeleted, PolicyUpdated, ProviderCreated, ProviderDeleted, ProviderUpdated,
-    RedactionCreated, WebhookCreated, WebhookDeleted, WebhookUpdated, WorkspaceCreated,
-    WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
+    RedactionCreated, ThreadAnchorAdded, ThreadAnchorRemoved, ThreadClosed, ThreadCommentCreated,
+    ThreadDeleted, ThreadOpened, ThreadRenamed, ThreadReopened, WebhookCreated, WebhookDeleted,
+    WebhookUpdated, WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
 };
 
 /// Who raised an event and where.

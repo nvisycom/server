@@ -4,14 +4,26 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceAssignment, UpdateWorkspaceAssignment, WorkspaceAssignment};
 use crate::types::{
     AccountRefRow, AssignmentFilter, ConstraintViolation, CursorPage, CursorPagination,
-    WorkspaceAssignmentConstraints,
+    WorkspaceAssignmentConstraints, keyset,
 };
 use crate::{Error, PgConnection, Result, schema};
+
+/// Keyset for paginating a workspace's assignments: newest first by `created_at`,
+/// `id` as the tiebreaker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssignmentCursor {
+    /// When the assignment was created.
+    pub created_at: Timestamp,
+    /// Assignment id (tiebreaker).
+    pub id: uuid::Uuid,
+}
 
 /// One assignment paired with the reviewer's account reference and the name of
 /// the file under review.
@@ -84,7 +96,7 @@ pub trait WorkspaceAssignmentRepository {
     fn cursor_list_workspace_assignments(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<AssignmentCursor>,
         filter: &AssignmentFilter,
     ) -> impl Future<Output = Result<CursorPage<AssignmentListRow>>> + Send;
 
@@ -214,7 +226,7 @@ impl WorkspaceAssignmentRepository for PgConnection {
     async fn cursor_list_workspace_assignments(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<AssignmentCursor>,
         filter: &AssignmentFilter,
     ) -> Result<CursorPage<AssignmentListRow>> {
         use schema::workspace_assignments::dsl;
@@ -255,8 +267,6 @@ impl WorkspaceAssignmentRepository for PgConnection {
             None
         };
 
-        let query = scoped();
-        let limit = pagination.fetch_limit();
         let selection = (
             WorkspaceAssignment::as_select(),
             (
@@ -267,31 +277,21 @@ impl WorkspaceAssignmentRepository for PgConnection {
             workspace_files::display_name.nullable(),
         );
 
-        let rows: Vec<(WorkspaceAssignment, AccountRefRow, Option<String>)> =
-            if let Some(cursor) = &pagination.after {
-                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
-
-                query
-                    .filter(
-                        dsl::created_at
-                            .lt(&cursor_time)
-                            .or(dsl::created_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                    )
-                    .select(selection)
-                    .order((dsl::created_at.desc(), dsl::id.desc()))
-                    .limit(limit)
-                    .load(self)
-                    .await
-                    .map_err(Error::from)?
-            } else {
-                query
-                    .select(selection)
-                    .order((dsl::created_at.desc(), dsl::id.desc()))
-                    .limit(limit)
-                    .load(self)
-                    .await
-                    .map_err(Error::from)?
-            };
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let rows: Vec<(WorkspaceAssignment, AccountRefRow, Option<String>)> = keyset!(
+            scoped(),
+            dsl::created_at,
+            dsl::id,
+            pagination.direction,
+            after
+        )
+        .select(selection)
+        .limit(pagination.fetch_limit())
+        .load(self)
+        .await
+        .map_err(Error::from)?;
 
         let items = rows
             .into_iter()
@@ -303,7 +303,10 @@ impl WorkspaceAssignmentRepository for PgConnection {
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
-            (row.assignment.created_at.into(), row.assignment.id)
+            AssignmentCursor {
+                created_at: row.assignment.created_at.into(),
+                id: row.assignment.id,
+            }
         }))
     }
 
@@ -356,14 +359,14 @@ mod tests {
     #[tokio::test]
     async fn create_is_idempotent_per_file_and_reviewer() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (_assigner, workspace_id, _pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let reviewer = db.seed_account().await;
         let mut conn = db.client.get_connection().await?;
 
         let created = conn
             .create_workspace_assignment(NewWorkspaceAssignment::test(
-                workspace_id,
-                file_id,
+                seeded.workspace_id,
+                seeded.file_id,
                 reviewer,
             ))
             .await?;
@@ -373,26 +376,28 @@ mod tests {
         // a second row.
         let again = conn
             .create_workspace_assignment(NewWorkspaceAssignment::test(
-                workspace_id,
-                file_id,
+                seeded.workspace_id,
+                seeded.file_id,
                 reviewer,
             ))
             .await?;
         assert_eq!(again, CreateAssignmentOutcome::AlreadyAssigned);
 
-        let file_rows = conn.list_file_assignments(workspace_id, file_id).await?;
+        let file_rows = conn
+            .list_file_assignments(seeded.workspace_id, seeded.file_id)
+            .await?;
         assert_eq!(file_rows.len(), 1);
         assert_eq!(file_rows[0].assignment.assignee_account_id, reviewer);
 
         // The targeted (file, assignee) lookup finds the same row, and returns
         // None for a reviewer who has no assignment on the file.
         let found = conn
-            .find_file_assignment_for_assignee(workspace_id, file_id, reviewer)
+            .find_file_assignment_for_assignee(seeded.workspace_id, seeded.file_id, reviewer)
             .await?;
         assert_eq!(found.map(|a| a.assignee_account_id), Some(reviewer));
         let other = db.seed_account().await;
         assert!(
-            conn.find_file_assignment_for_assignee(workspace_id, file_id, other)
+            conn.find_file_assignment_for_assignee(seeded.workspace_id, seeded.file_id, other)
                 .await?
                 .is_none()
         );
@@ -402,14 +407,14 @@ mod tests {
     #[tokio::test]
     async fn status_update_and_delete_round_trip() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (_assigner, workspace_id, _pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let reviewer = db.seed_account().await;
         let mut conn = db.client.get_connection().await?;
 
         let CreateAssignmentOutcome::Created(assignment) = conn
             .create_workspace_assignment(NewWorkspaceAssignment::test(
-                workspace_id,
-                file_id,
+                seeded.workspace_id,
+                seeded.file_id,
                 reviewer,
             ))
             .await?
@@ -430,7 +435,7 @@ mod tests {
 
         conn.delete_workspace_assignment(assignment.id).await?;
         assert!(
-            conn.find_assignment_in_workspace(workspace_id, assignment.id)
+            conn.find_assignment_in_workspace(seeded.workspace_id, assignment.id)
                 .await?
                 .is_none()
         );
@@ -440,7 +445,7 @@ mod tests {
     #[tokio::test]
     async fn cursor_list_filters_by_assignee_and_status() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (_assigner, workspace_id, _pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let alice = db.seed_account().await;
         let bob = db.seed_account().await;
         let mut conn = db.client.get_connection().await?;
@@ -448,8 +453,8 @@ mod tests {
         for reviewer in [alice, bob] {
             let _ = conn
                 .create_workspace_assignment(NewWorkspaceAssignment::test(
-                    workspace_id,
-                    file_id,
+                    seeded.workspace_id,
+                    seeded.file_id,
                     reviewer,
                 ))
                 .await?;
@@ -458,7 +463,7 @@ mod tests {
         // No filter: both reviewers' assignments.
         let all = conn
             .cursor_list_workspace_assignments(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 &AssignmentFilter::default(),
             )
@@ -468,7 +473,7 @@ mod tests {
         // Filter to one reviewer.
         let just_alice = conn
             .cursor_list_workspace_assignments(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 &AssignmentFilter {
                     assignee_account_id: Some(alice),
@@ -482,7 +487,7 @@ mod tests {
         // A status no assignment holds returns nothing.
         let none = conn
             .cursor_list_workspace_assignments(
-                workspace_id,
+                seeded.workspace_id,
                 CursorPagination::new(50),
                 &AssignmentFilter {
                     status: Some(AssignmentStatus::Done),
@@ -497,7 +502,7 @@ mod tests {
     #[tokio::test]
     async fn assigner_attribution_round_trips() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (assigner, workspace_id, _pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let reviewer = db.seed_account().await;
         let mut conn = db.client.get_connection().await?;
 
@@ -505,14 +510,14 @@ mod tests {
         // assignee it is made to.
         let CreateAssignmentOutcome::Created(assignment) = conn
             .create_workspace_assignment(NewWorkspaceAssignment {
-                assigned_account_id: Some(assigner),
-                ..NewWorkspaceAssignment::test(workspace_id, file_id, reviewer)
+                assigned_account_id: Some(seeded.account_id),
+                ..NewWorkspaceAssignment::test(seeded.workspace_id, seeded.file_id, reviewer)
             })
             .await?
         else {
             panic!("expected a fresh assignment");
         };
-        assert_eq!(assignment.assigned_account_id, Some(assigner));
+        assert_eq!(assignment.assigned_account_id, Some(seeded.account_id));
         assert_eq!(assignment.assignee_account_id, reviewer);
         Ok(())
     }
@@ -520,7 +525,7 @@ mod tests {
     #[tokio::test]
     async fn list_file_assignments_joins_assignee_and_file_name() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (assigner, workspace_id) = db.seed_account_and_workspace().await;
+        let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         // A named reviewer and a named file, so the joins have distinct values to
@@ -529,19 +534,21 @@ mod tests {
         let file = conn
             .create_workspace_file(NewWorkspaceFile {
                 display_name: Some("quarterly-report.pdf".to_owned()),
-                ..NewWorkspaceFile::test(workspace_id, assigner)
+                ..NewWorkspaceFile::test(seeded.workspace_id, seeded.account_id)
             })
             .await?;
 
         let _ = conn
             .create_workspace_assignment(NewWorkspaceAssignment::test(
-                workspace_id,
+                seeded.workspace_id,
                 file.id,
                 reviewer.id,
             ))
             .await?;
 
-        let rows = conn.list_file_assignments(workspace_id, file.id).await?;
+        let rows = conn
+            .list_file_assignments(seeded.workspace_id, file.id)
+            .await?;
         assert_eq!(rows.len(), 1);
         // The assignee join names the reviewer, not the assigner.
         assert_eq!(rows[0].assignee.username, reviewer.username);

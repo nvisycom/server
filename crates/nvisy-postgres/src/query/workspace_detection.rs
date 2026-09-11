@@ -4,6 +4,8 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{
@@ -11,9 +13,19 @@ use crate::model::{
     WorkspaceDetection, WorkspacePipeline,
 };
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Handle,
+    AccountRefRow, CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Handle, keyset,
 };
 use crate::{Error, PgConnection, Result, schema};
+
+/// Keyset for paginating detections: newest first by `started_at`, `id` as the
+/// tiebreaker. Shared by the pipeline-scoped and workspace-scoped listings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetectionCursor {
+    /// When the detection started.
+    pub started_at: Timestamp,
+    /// Detection id (tiebreaker).
+    pub id: uuid::Uuid,
+}
 
 /// Resolved display name of a detection's input file.
 ///
@@ -78,7 +90,7 @@ pub trait WorkspaceDetectionRepository {
     fn cursor_list_pipeline_detections(
         &mut self,
         pipeline_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<DetectionCursor>,
         filter: &DetectionFilter,
     ) -> impl Future<Output = Result<CursorPage<DetectionListRow>>> + Send;
 
@@ -94,7 +106,7 @@ pub trait WorkspaceDetectionRepository {
     fn cursor_list_workspace_detections(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<DetectionCursor>,
         filter: &DetectionFilter,
     ) -> impl Future<Output = Result<CursorPage<DetectionListRow>>> + Send;
 
@@ -245,7 +257,7 @@ impl WorkspaceDetectionRepository for PgConnection {
     async fn cursor_list_pipeline_detections(
         &mut self,
         pipeline_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<DetectionCursor>,
         filter: &DetectionFilter,
     ) -> Result<CursorPage<DetectionListRow>> {
         use schema::workspace_detections::dsl;
@@ -291,8 +303,6 @@ impl WorkspaceDetectionRepository for PgConnection {
             None
         };
 
-        let query = scoped();
-        let limit = pagination.fetch_limit();
         let selection = (
             WorkspaceDetection::as_select(),
             (
@@ -304,31 +314,21 @@ impl WorkspaceDetectionRepository for PgConnection {
             workspace_files::display_name.nullable(),
         );
 
-        let rows: Vec<(WorkspaceDetection, AccountRefRow, Handle, Option<String>)> =
-            if let Some(cursor) = &pagination.after {
-                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
-
-                query
-                    .filter(
-                        dsl::started_at
-                            .lt(&cursor_time)
-                            .or(dsl::started_at.eq(&cursor_time).and(dsl::id.lt(cursor.id))),
-                    )
-                    .select(selection)
-                    .order((dsl::started_at.desc(), dsl::id.desc()))
-                    .limit(limit)
-                    .load(self)
-                    .await
-                    .map_err(Error::from)?
-            } else {
-                query
-                    .select(selection)
-                    .order((dsl::started_at.desc(), dsl::id.desc()))
-                    .limit(limit)
-                    .load(self)
-                    .await
-                    .map_err(Error::from)?
-            };
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.started_at), k.id));
+        let rows: Vec<(WorkspaceDetection, AccountRefRow, Handle, Option<String>)> = keyset!(
+            scoped(),
+            dsl::started_at,
+            dsl::id,
+            pagination.direction,
+            after
+        )
+        .select(selection)
+        .limit(pagination.fetch_limit())
+        .load(self)
+        .await
+        .map_err(Error::from)?;
 
         let items = rows
             .into_iter()
@@ -343,14 +343,17 @@ impl WorkspaceDetectionRepository for PgConnection {
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
-            (row.detection.started_at.into(), row.detection.id)
+            DetectionCursor {
+                started_at: row.detection.started_at.into(),
+                id: row.detection.id,
+            }
         }))
     }
 
     async fn cursor_list_workspace_detections(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination,
+        pagination: CursorPagination<DetectionCursor>,
         filter: &DetectionFilter,
     ) -> Result<CursorPage<DetectionListRow>> {
         use schema::accounts::dsl as accounts;
@@ -402,7 +405,6 @@ impl WorkspaceDetectionRepository for PgConnection {
             None
         };
 
-        let limit = pagination.fetch_limit();
         let selection = (
             WorkspaceDetection::as_select(),
             pipelines::slug,
@@ -414,33 +416,21 @@ impl WorkspaceDetectionRepository for PgConnection {
             files::display_name.nullable(),
         );
 
-        let rows: Vec<(WorkspaceDetection, Handle, AccountRefRow, Option<String>)> =
-            if let Some(cursor) = &pagination.after {
-                let cursor_time = jiff_diesel::Timestamp::from(cursor.timestamp);
-
-                scoped()
-                    .filter(
-                        detections::started_at
-                            .lt(&cursor_time)
-                            .or(detections::started_at
-                                .eq(&cursor_time)
-                                .and(detections::id.lt(cursor.id))),
-                    )
-                    .select(selection)
-                    .order((detections::started_at.desc(), detections::id.desc()))
-                    .limit(limit)
-                    .load(self)
-                    .await
-                    .map_err(Error::from)?
-            } else {
-                scoped()
-                    .select(selection)
-                    .order((detections::started_at.desc(), detections::id.desc()))
-                    .limit(limit)
-                    .load(self)
-                    .await
-                    .map_err(Error::from)?
-            };
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.started_at), k.id));
+        let rows: Vec<(WorkspaceDetection, Handle, AccountRefRow, Option<String>)> = keyset!(
+            scoped(),
+            detections::started_at,
+            detections::id,
+            pagination.direction,
+            after
+        )
+        .select(selection)
+        .limit(pagination.fetch_limit())
+        .load(self)
+        .await
+        .map_err(Error::from)?;
 
         let items = rows
             .into_iter()
@@ -455,7 +445,10 @@ impl WorkspaceDetectionRepository for PgConnection {
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
-            (row.detection.started_at.into(), row.detection.id)
+            DetectionCursor {
+                started_at: row.detection.started_at.into(),
+                id: row.detection.id,
+            }
         }))
     }
 
@@ -645,14 +638,14 @@ mod tests {
     #[tokio::test]
     async fn claim_transitions_pending_and_honors_a_fresh_lease() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, _ws, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
-                pipeline_id,
-                account_id,
-                file_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.file_id,
             ))
             .await?;
         assert_eq!(detection.status, DetectionStatus::Pending);
@@ -684,14 +677,14 @@ mod tests {
     #[tokio::test]
     async fn finalize_requires_holding_the_claim() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, _ws, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
-                pipeline_id,
-                account_id,
-                file_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.file_id,
             ))
             .await?;
         let claimed = conn
@@ -718,7 +711,7 @@ mod tests {
             .await?
         );
         let (done, _pipeline) = conn
-            .find_workspace_detection_by_id(_ws, detection.id)
+            .find_workspace_detection_by_id(seeded.workspace_id, detection.id)
             .await?
             .expect("detection present");
         assert_eq!(done.status, DetectionStatus::Complete);
@@ -740,14 +733,14 @@ mod tests {
     #[tokio::test]
     async fn fail_detection_uses_the_same_claim_guard() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, _ws, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
-                pipeline_id,
-                account_id,
-                file_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.file_id,
             ))
             .await?;
         let claimed = conn
@@ -765,7 +758,7 @@ mod tests {
             .await?
         );
         let (failed, _p) = conn
-            .find_workspace_detection_by_id(_ws, detection.id)
+            .find_workspace_detection_by_id(seeded.workspace_id, detection.id)
             .await?
             .expect("present");
         assert_eq!(failed.status, DetectionStatus::Failed);
@@ -776,15 +769,15 @@ mod tests {
     #[tokio::test]
     async fn fail_pending_detection_only_while_unclaimed() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, _ws, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
         // A never-claimed detection can be failed by the enqueue-failure path.
         let pending = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
-                pipeline_id,
-                account_id,
-                file_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.file_id,
             ))
             .await?;
         assert!(
@@ -796,9 +789,9 @@ mod tests {
         // path is a no-op and does not clobber the outcome.
         let claimed_det = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
-                pipeline_id,
-                account_id,
-                file_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.file_id,
             ))
             .await?;
         let _ = conn
@@ -816,20 +809,20 @@ mod tests {
     #[tokio::test]
     async fn find_by_id_is_scoped_to_workspace_and_live_pipeline() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
-                pipeline_id,
-                account_id,
-                file_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.file_id,
             ))
             .await?;
 
         // Found within its own workspace.
         assert!(
-            conn.find_workspace_detection_by_id(workspace_id, detection.id)
+            conn.find_workspace_detection_by_id(seeded.workspace_id, detection.id)
                 .await?
                 .is_some()
         );
@@ -845,21 +838,22 @@ mod tests {
     #[tokio::test]
     async fn idempotency_key_lookup_is_scoped_to_the_pipeline() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, _ws, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
-        let mut detection = NewWorkspaceDetection::test(pipeline_id, account_id, file_id);
+        let mut detection =
+            NewWorkspaceDetection::test(seeded.pipeline_id, seeded.account_id, seeded.file_id);
         detection.idempotency_key = Some("key-123".to_owned());
         let detection = conn.create_workspace_detection(detection).await?;
 
         let found = conn
-            .find_detection_by_idempotency_key(pipeline_id, "key-123")
+            .find_detection_by_idempotency_key(seeded.pipeline_id, "key-123")
             .await?;
         assert_eq!(found.map(|d| d.id), Some(detection.id));
 
         // A different key does not match.
         assert!(
-            conn.find_detection_by_idempotency_key(pipeline_id, "other")
+            conn.find_detection_by_idempotency_key(seeded.pipeline_id, "other")
                 .await?
                 .is_none()
         );
@@ -869,22 +863,22 @@ mod tests {
     #[tokio::test]
     async fn cursor_list_filters_by_status_and_names_the_input_file() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, _ws, pipeline_id, file_id) = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_file().await;
         let mut conn = db.client.get_connection().await?;
 
         // A pending detection and a completed one on the same pipeline+file.
         let pending = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
-                pipeline_id,
-                account_id,
-                file_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.file_id,
             ))
             .await?;
         let to_complete = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
-                pipeline_id,
-                account_id,
-                file_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.file_id,
             ))
             .await?;
         let claimed = conn
@@ -902,7 +896,7 @@ mod tests {
         // Filter to Pending: only the pending detection, and the input file is named.
         let page = conn
             .cursor_list_pipeline_detections(
-                pipeline_id,
+                seeded.pipeline_id,
                 CursorPagination::new(50),
                 &DetectionFilter {
                     status: Some(DetectionStatus::Pending),

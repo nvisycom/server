@@ -61,8 +61,8 @@ mod tests {
     #[test]
     fn get_maps_each_scope_to_its_field_and_never_overrides_originals() {
         let over = RetentionOverride {
-            redacted_documents: Some(Retention::Forever),
-            audit_logs: Some(Retention::Days { days: 30 }),
+            redacted_documents: Some(Retention::Persistent),
+            audit_logs: Some(Retention::Fixed { days: 30 }),
             intermediates: None,
         };
 
@@ -71,11 +71,11 @@ mod tests {
         assert_eq!(over.get(RetentionScope::OriginalDocuments), None);
         assert_eq!(
             over.get(RetentionScope::RedactedDocuments),
-            Some(Retention::Forever)
+            Some(Retention::Persistent)
         );
         assert_eq!(
             over.get(RetentionScope::AuditLogs),
-            Some(Retention::Days { days: 30 })
+            Some(Retention::Fixed { days: 30 })
         );
         // A `None` field inherits the workspace baseline (no override reported).
         assert_eq!(over.get(RetentionScope::Intermediates), None);

@@ -143,7 +143,7 @@ async fn list_webhooks(
     let mut conn = pg_client.get_connection().await?;
 
     let page = conn
-        .cursor_list_workspace_webhooks(workspace.id, pagination.into())
+        .cursor_list_workspace_webhooks(workspace.id, pagination.into_cursor())
         .await?;
 
     tracing::debug!(

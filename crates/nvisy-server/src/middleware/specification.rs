@@ -376,7 +376,7 @@ mod tests {
                         "enumeration": {
                             "description": "field description",
                             "anyOf": [
-                                { "$ref": "#/components/schemas/SortOrder" },
+                                { "$ref": "#/components/schemas/Direction" },
                                 { "type": "null" }
                             ]
                         },
@@ -410,7 +410,7 @@ mod tests {
         );
         assert_eq!(
             schema.pointer("/properties/enumeration/$ref"),
-            Some(&json!("#/components/schemas/SortOrder")),
+            Some(&json!("#/components/schemas/Direction")),
             "optional referenced type hoists the non-null anyOf branch"
         );
         assert!(
