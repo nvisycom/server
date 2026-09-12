@@ -246,59 +246,60 @@ COMMENT ON COLUMN workspace_connection_syncs.metadata IS 'Non-encrypted metadata
 COMMENT ON COLUMN workspace_connection_syncs.started_at IS 'When the sync started';
 COMMENT ON COLUMN workspace_connection_syncs.completed_at IS 'When the sync finished';
 
--- File imports table (satellite): for a file that was imported from a
+-- Document imports table (satellite): for a document that was imported from a
 -- connection, the connection and remote object key it came from. Present only
--- for imported files; uploaded/generated files have no row here. Lives here
--- rather than on `workspace_files` because the FK target (`workspace_connections`)
--- is created by this migration, which runs after the files migration.
-CREATE TABLE workspace_file_imports (
-    -- One import origin per file; the file id is the primary key.
-    file_id         UUID PRIMARY KEY REFERENCES workspace_files (id) ON DELETE CASCADE,
+-- for imported documents; uploaded/generated documents have no row here. Lives
+-- here rather than on `workspace_documents` because the FK target
+-- (`workspace_connections`) is created by this migration, which runs after the
+-- files migration.
+CREATE TABLE workspace_document_imports (
+    -- One import origin per document; the document id is the primary key.
+    document_id     UUID PRIMARY KEY REFERENCES workspace_documents (id) ON DELETE CASCADE,
 
-    -- The connection and remote object key the file was imported from. Deleting
-    -- the connection drops the import origin rows (the files themselves remain).
+    -- The connection and remote object key the document was imported from.
+    -- Deleting the connection drops the import origin rows (documents remain).
     connection_id   UUID                NOT NULL REFERENCES workspace_connections (id) ON DELETE CASCADE,
     source_key      TEXT                NOT NULL,
     imported_at     TIMESTAMPTZ         NOT NULL DEFAULT now(),
-    CONSTRAINT workspace_file_imports_source_key_length CHECK (length(source_key) BETWEEN 1 AND 1024)
+    CONSTRAINT workspace_document_imports_source_key_length CHECK (length(source_key) BETWEEN 1 AND 1024)
 );
 
--- One imported file per (connection, remote key): makes re-imports idempotent
+-- One imported document per (connection, remote key): makes re-imports idempotent
 -- and backs the "already imported" lookup during sync.
-CREATE UNIQUE INDEX workspace_file_imports_source_object_unique_idx
-    ON workspace_file_imports (connection_id, source_key);
+CREATE UNIQUE INDEX workspace_document_imports_source_object_unique_idx
+    ON workspace_document_imports (connection_id, source_key);
 
-COMMENT ON TABLE workspace_file_imports IS 'Import origin for imported files: the connection and remote object key each came from.';
-COMMENT ON COLUMN workspace_file_imports.file_id IS 'The imported file this origin describes';
-COMMENT ON COLUMN workspace_file_imports.connection_id IS 'Connection the file was imported from';
-COMMENT ON COLUMN workspace_file_imports.source_key IS 'Remote object key the file was imported from';
-COMMENT ON COLUMN workspace_file_imports.imported_at IS 'When the file was imported';
+COMMENT ON TABLE workspace_document_imports IS 'Import origin for imported documents: the connection and remote object key each came from.';
+COMMENT ON COLUMN workspace_document_imports.document_id IS 'The imported document this origin describes';
+COMMENT ON COLUMN workspace_document_imports.connection_id IS 'Connection the document was imported from';
+COMMENT ON COLUMN workspace_document_imports.source_key IS 'Remote object key the document was imported from';
+COMMENT ON COLUMN workspace_document_imports.imported_at IS 'When the document was imported';
 
--- Records that a file was exported to a connection, so scheduled export of
--- redacted outputs stays idempotent (a file already exported to a connection is
--- not pushed again). A file may be exported to more than one connection, so the
--- key is (file_id, connection_id) rather than file_id alone.
-CREATE TABLE workspace_file_exports (
-    file_id         UUID                NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
+-- Records that a document was exported to a connection, so scheduled export of
+-- redacted outputs stays idempotent (a document already exported to a connection
+-- is not pushed again). A document may be exported to more than one connection,
+-- so the key is (document_id, connection_id) rather than document_id alone.
+CREATE TABLE workspace_document_exports (
+    document_id     UUID                NOT NULL REFERENCES workspace_documents (id) ON DELETE CASCADE,
     connection_id   UUID                NOT NULL REFERENCES workspace_connections (id) ON DELETE CASCADE,
 
-    -- The remote key the file was written to on the provider.
+    -- The remote key the document was written to on the provider.
     remote_key      TEXT                NOT NULL,
     exported_at     TIMESTAMPTZ         NOT NULL DEFAULT now(),
 
-    PRIMARY KEY (file_id, connection_id),
-    CONSTRAINT workspace_file_exports_remote_key_length CHECK (length(remote_key) BETWEEN 1 AND 1024)
+    PRIMARY KEY (document_id, connection_id),
+    CONSTRAINT workspace_document_exports_remote_key_length CHECK (length(remote_key) BETWEEN 1 AND 1024)
 );
 
--- Backs the "redacted files not yet exported to this connection" lookup.
-CREATE INDEX workspace_file_exports_connection_idx
-    ON workspace_file_exports (connection_id);
+-- Backs the "redacted documents not yet exported to this connection" lookup.
+CREATE INDEX workspace_document_exports_connection_idx
+    ON workspace_document_exports (connection_id);
 
-COMMENT ON TABLE workspace_file_exports IS 'Records files exported to a connection: the destination remote key and when.';
-COMMENT ON COLUMN workspace_file_exports.file_id IS 'The workspace file that was exported';
-COMMENT ON COLUMN workspace_file_exports.connection_id IS 'Connection the file was exported to';
-COMMENT ON COLUMN workspace_file_exports.remote_key IS 'Remote key the file was written to on the provider';
-COMMENT ON COLUMN workspace_file_exports.exported_at IS 'When the file was exported';
+COMMENT ON TABLE workspace_document_exports IS 'Records documents exported to a connection: the destination remote key and when.';
+COMMENT ON COLUMN workspace_document_exports.document_id IS 'The workspace document that was exported';
+COMMENT ON COLUMN workspace_document_exports.connection_id IS 'Connection the document was exported to';
+COMMENT ON COLUMN workspace_document_exports.remote_key IS 'Remote key the document was written to on the provider';
+COMMENT ON COLUMN workspace_document_exports.exported_at IS 'When the document was exported';
 
 -- Connection lifecycle and sync events feed the activity log, webhooks, and (for
 -- sync completion/failure) in-app notifications.

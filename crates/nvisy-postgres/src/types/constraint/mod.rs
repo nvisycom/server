@@ -16,19 +16,16 @@ mod workspace_members;
 mod workspace_webhooks;
 mod workspaces;
 
-// File-related constraint modules
-mod files;
+// Document / blob storage constraint modules
+mod documents;
+mod workspace_blobs;
 
 // Detection / pipeline-related constraint modules
 mod detections;
 mod pipeline_references;
 mod pipelines;
 
-// Assignment-related constraint modules
-mod assignments;
-
 // Thread-related constraint modules
-mod workspace_thread_anchors;
 mod workspace_thread_comments;
 mod workspace_threads;
 
@@ -40,18 +37,17 @@ pub use self::account_api_tokens::AccountApiTokenConstraints;
 pub use self::account_identities::AccountIdentityConstraints;
 pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
-pub use self::assignments::WorkspaceAssignmentConstraints;
 pub use self::detections::WorkspaceDetectionConstraints;
-pub use self::files::WorkspaceFileConstraints;
+pub use self::documents::WorkspaceDocumentConstraints;
 pub use self::pipeline_references::WorkspacePipelineReferenceConstraints;
 pub use self::pipelines::WorkspacePipelineConstraints;
 pub use self::workspace_activities::WorkspaceActivitiesConstraints;
+pub use self::workspace_blobs::WorkspaceBlobConstraints;
 pub use self::workspace_connection_syncs::WorkspaceConnectionSyncConstraints;
 pub use self::workspace_connections::WorkspaceConnectionConstraints;
 pub use self::workspace_invites::WorkspaceInviteConstraints;
 pub use self::workspace_members::WorkspaceMemberConstraints;
 pub use self::workspace_policies::WorkspacePolicyConstraints;
-pub use self::workspace_thread_anchors::WorkspaceThreadAnchorConstraints;
 pub use self::workspace_thread_comments::WorkspaceThreadCommentConstraints;
 pub use self::workspace_threads::WorkspaceThreadConstraints;
 pub use self::workspace_webhooks::WorkspaceWebhookConstraints;
@@ -77,15 +73,12 @@ pub enum ConstraintViolation {
     WorkspaceActivityLog(WorkspaceActivitiesConstraints),
     WorkspaceWebhook(WorkspaceWebhookConstraints),
 
-    // File-related constraints
-    WorkspaceFile(WorkspaceFileConstraints),
-
-    // Assignment-related constraints
-    WorkspaceAssignment(WorkspaceAssignmentConstraints),
+    // Document / blob storage constraints
+    WorkspaceDocument(WorkspaceDocumentConstraints),
+    WorkspaceBlob(WorkspaceBlobConstraints),
 
     // Comment-related constraints
     WorkspaceThread(WorkspaceThreadConstraints),
-    WorkspaceThreadAnchor(WorkspaceThreadAnchorConstraints),
     WorkspaceThreadComment(WorkspaceThreadCommentConstraints),
 
     // Detection / pipeline-related constraints
@@ -142,10 +135,9 @@ impl ConstraintViolation {
             WorkspaceInvite,
             WorkspaceActivityLog,
             WorkspaceWebhook,
-            WorkspaceFile,
-            WorkspaceAssignment,
+            WorkspaceDocument,
+            WorkspaceBlob,
             WorkspaceThread,
-            WorkspaceThreadAnchor,
             WorkspaceThreadComment,
             WorkspacePipeline,
             WorkspaceDetection,
@@ -171,9 +163,16 @@ mod tests {
         );
 
         assert_eq!(
-            ConstraintViolation::new("workspace_files_version_number_min"),
-            Some(ConstraintViolation::WorkspaceFile(
-                WorkspaceFileConstraints::VersionNumberMin
+            ConstraintViolation::new("workspace_documents_display_name_length"),
+            Some(ConstraintViolation::WorkspaceDocument(
+                WorkspaceDocumentConstraints::DisplayNameLength
+            ))
+        );
+
+        assert_eq!(
+            ConstraintViolation::new("blobs_file_size_min"),
+            Some(ConstraintViolation::WorkspaceBlob(
+                WorkspaceBlobConstraints::FileSizeMin
             ))
         );
 

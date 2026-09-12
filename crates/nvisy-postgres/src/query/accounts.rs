@@ -33,6 +33,16 @@ pub trait AccountRepository {
         account_id: Uuid,
     ) -> impl Future<Output = Result<Option<Account>>> + Send;
 
+    /// Finds the live accounts for a set of ids in one query.
+    ///
+    /// Soft-deleted accounts and unknown ids are simply absent from the result,
+    /// which is unordered. Used to resolve a page's distinct accounts without a
+    /// per-id round-trip.
+    fn find_accounts_by_ids(
+        &mut self,
+        account_ids: &[Uuid],
+    ) -> impl Future<Output = Result<Vec<Account>>> + Send;
+
     /// Finds an account by email address.
     ///
     /// Retrieves an account using its email for authentication and lookup.
@@ -138,6 +148,22 @@ impl AccountRepository for PgConnection {
             .first(self)
             .await
             .optional()
+            .map_err(Error::from)
+    }
+
+    async fn find_accounts_by_ids(&mut self, account_ids: &[Uuid]) -> Result<Vec<Account>> {
+        use schema::accounts::{self, dsl};
+
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        accounts::table
+            .filter(dsl::id.eq_any(account_ids))
+            .filter(dsl::deleted_at.is_null())
+            .select(Account::as_select())
+            .load(self)
+            .await
             .map_err(Error::from)
     }
 

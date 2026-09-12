@@ -2,7 +2,7 @@
 
 use elide_pipeline::policy::PolicyDefinition;
 use jiff::Timestamp;
-use nvisy_postgres::model::WorkspacePolicy;
+use nvisy_postgres::model::{WorkspacePolicy, WorkspacePolicyVersion};
 use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -25,8 +25,10 @@ pub struct Policy {
     /// Policy description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// The structured policy body consumed by the engine.
+    /// The structured policy body consumed by the engine (the current version).
     pub definition: PolicyDefinition,
+    /// The current version number of the policy's definition.
+    pub version_number: i32,
     /// When the policy was created.
     pub created_at: Timestamp,
     /// When the policy was last updated.
@@ -82,16 +84,17 @@ impl PolicySummary {
 pub type PoliciesPage = Page<PolicySummary>;
 
 impl Policy {
-    /// Creates a response from a database model and its created_by, decrypting the
-    /// definition.
+    /// Creates a response from a policy and its current version, decrypting the
+    /// version's definition.
     pub fn from_model(
         policy: WorkspacePolicy,
+        version: WorkspacePolicyVersion,
         workspace_slug: Handle,
         created_by: AccountRef,
         crypto: &CryptoService,
     ) -> crate::response::Result<Self> {
         let definition =
-            crypto.decrypt_json::<PolicyDefinition>(policy.workspace_id, &policy.definition)?;
+            crypto.decrypt_json::<PolicyDefinition>(policy.workspace_id, &version.definition)?;
 
         Ok(Self {
             slug: policy.slug,
@@ -100,6 +103,7 @@ impl Policy {
             display_name: policy.display_name,
             description: policy.description,
             definition,
+            version_number: version.version_number,
             created_at: policy.created_at.into(),
             updated_at: policy.updated_at.into(),
         })

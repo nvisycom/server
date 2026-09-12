@@ -4,11 +4,11 @@ mod account_provisioner;
 mod assistant;
 mod auth_issuer;
 mod avatar;
+mod blob_reaper;
 mod crypto;
 mod detection;
 mod engine;
 mod event;
-mod file_reaper;
 mod health;
 mod infra;
 mod integration;
@@ -42,28 +42,27 @@ pub use crate::service::assistant::{
 };
 pub use crate::service::auth_issuer::AuthIssuer;
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
+pub use crate::service::blob_reaper::BlobReaper;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
-pub(crate) use crate::service::detection::resolve_policies;
+pub(crate) use crate::service::detection::resolve_pinned_policies;
 pub use crate::service::detection::{
     DetectionCoordinator, DetectionJob, DetectionOutboxDrainer, DetectionQueue,
     DetectionStatusEvent, DetectionWorker, detection_subject,
 };
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::event::{
-    AssignmentStatusChanged, ConnectionCreated, ConnectionDeleted, ConnectionSyncCompleted,
-    ConnectionSyncFailed, ConnectionSyncStarted, ConnectionUpdated, DetectionCompleted,
-    DetectionFailed, DetectionStarted, EventEmitter, EventKind, EventOrigin, EventOutboxDrainer,
-    FileAssigned, FileCreated, FileDeleted, FileUnassigned, FileUpdated, InviteAccepted,
-    InviteCanceled, InviteCreated, InviteDeclined, MemberAdded, MemberDeleted, MemberUpdated,
-    Notification, NotifyTarget, PipelineCreated, PipelineDeleted, PipelineUpdated, PolicyCreated,
-    PolicyDeleted, PolicyUpdated, ProviderCreated, ProviderDeleted, ProviderUpdated,
-    RedactionCreated, ThreadAnchorAdded, ThreadAnchorRemoved, ThreadClosed, ThreadCommentCreated,
-    ThreadDeleted, ThreadOpened, ThreadRenamed, ThreadReopened, WebhookCreated, WebhookDeleted,
-    WebhookDelivery, WebhookUpdated, WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent,
-    WorkspaceUpdated, event_outbox_row,
+    ConnectionCreated, ConnectionDeleted, ConnectionSyncCompleted, ConnectionSyncFailed,
+    ConnectionSyncStarted, ConnectionUpdated, DetectionCompleted, DetectionFailed,
+    DetectionStarted, DocumentCreated, DocumentDeleted, DocumentUpdated, EventEmitter, EventKind,
+    EventOrigin, EventOutboxDrainer, InviteAccepted, InviteCanceled, InviteCreated, InviteDeclined,
+    MemberAdded, MemberDeleted, MemberUpdated, Notification, NotifyTarget, PipelineCreated,
+    PipelineDeleted, PipelineUpdated, PolicyCreated, PolicyDeleted, PolicyUpdated, ProviderCreated,
+    ProviderDeleted, ProviderUpdated, RedactionCreated, ReviewAssigned, ReviewUnassigned,
+    ReviewVerified, ThreadClosed, ThreadCommentCreated, ThreadDeleted, ThreadOpened, ThreadRenamed,
+    ThreadReopened, WebhookCreated, WebhookDeleted, WebhookDelivery, WebhookUpdated,
+    WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated, event_outbox_row,
 };
-pub use crate::service::file_reaper::FileReaper;
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::infra::Infra;
 pub use crate::service::integration::{
@@ -255,7 +254,7 @@ impl ServiceState {
             self.infra.clone(),
             self.connection_sync.clone(),
         ));
-        workers.spawn(FileReaper::new(self.infra.clone()));
+        workers.spawn(BlobReaper::new(self.infra.clone()));
         workers.spawn(EventOutboxDrainer::new(self.infra.clone()));
         workers.spawn(DetectionOutboxDrainer::new(
             self.infra.clone(),

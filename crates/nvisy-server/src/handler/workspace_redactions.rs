@@ -108,17 +108,16 @@ async fn get_redaction_review(
     // Resolve the redaction and its review audit file row under a scoped
     // connection, then release it before the object-store load so the pooled
     // connection is not held across the NATS round-trip.
-    let review_file = {
+    let review_blob = {
         let mut conn = pg_client.get_connection().await?;
 
         let redaction =
             find_redaction(&mut conn, workspace.id, path_params.redaction_id.as_uuid()).await?;
 
-        blob.resolve_review_file(&mut conn, workspace.id, redaction.review_file_id)
-            .await?
+        blob.resolve_review_blob(&mut conn, redaction.id).await?
     };
 
-    let review = blob.load_audit(&engine, workspace.id, &review_file).await?;
+    let review = blob.load_audit(&engine, workspace.id, &review_blob).await?;
 
     Ok((StatusCode::OK, Json(review)))
 }

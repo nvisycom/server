@@ -22,15 +22,15 @@ pub use crate::service::event::drainer::EventOutboxDrainer;
 pub use crate::service::event::emitter::{EventEmitter, event_outbox_row};
 pub use crate::service::event::kind::{EventKind, Notification, NotifyTarget, WebhookDelivery};
 pub use crate::service::event::workspace_event::{
-    AssignmentStatusChanged, ConnectionCreated, ConnectionDeleted, ConnectionSyncCompleted,
-    ConnectionSyncFailed, ConnectionSyncStarted, ConnectionUpdated, DetectionCompleted,
-    DetectionFailed, DetectionStarted, FileAssigned, FileCreated, FileDeleted, FileUnassigned,
-    FileUpdated, InviteAccepted, InviteCanceled, InviteCreated, InviteDeclined, MemberAdded,
-    MemberDeleted, MemberUpdated, PipelineCreated, PipelineDeleted, PipelineUpdated, PolicyCreated,
-    PolicyDeleted, PolicyUpdated, ProviderCreated, ProviderDeleted, ProviderUpdated,
-    RedactionCreated, ThreadAnchorAdded, ThreadAnchorRemoved, ThreadClosed, ThreadCommentCreated,
-    ThreadDeleted, ThreadOpened, ThreadRenamed, ThreadReopened, WebhookCreated, WebhookDeleted,
-    WebhookUpdated, WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
+    ConnectionCreated, ConnectionDeleted, ConnectionSyncCompleted, ConnectionSyncFailed,
+    ConnectionSyncStarted, ConnectionUpdated, DetectionCompleted, DetectionFailed,
+    DetectionStarted, DocumentCreated, DocumentDeleted, DocumentUpdated, InviteAccepted,
+    InviteCanceled, InviteCreated, InviteDeclined, MemberAdded, MemberDeleted, MemberUpdated,
+    PipelineCreated, PipelineDeleted, PipelineUpdated, PolicyCreated, PolicyDeleted, PolicyUpdated,
+    ProviderCreated, ProviderDeleted, ProviderUpdated, RedactionCreated, ReviewAssigned,
+    ReviewUnassigned, ReviewVerified, ThreadClosed, ThreadCommentCreated, ThreadDeleted,
+    ThreadOpened, ThreadRenamed, ThreadReopened, WebhookCreated, WebhookDeleted, WebhookUpdated,
+    WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
 };
 
 /// Who raised an event and where.

@@ -25,7 +25,7 @@ pub const MAX_EXPORT_ROWS: usize = 100_000;
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityFilterQuery {
-    /// Keep only these activity types (e.g. `file.created`). Repeat the `type`
+    /// Keep only these activity types (e.g. `document.created`). Repeat the `type`
     /// parameter for several; omit for no type constraint.
     // Named `types` because `type` is a reserved word; exposed as `type`.
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
@@ -110,20 +110,24 @@ mod tests {
 
     #[tokio::test]
     async fn reads_a_single_repeated_type_key() {
-        let query: ActivityFilterQuery = extract("type=file.created").await;
+        let query: ActivityFilterQuery = extract("type=document.created").await;
         assert_eq!(
             query.types,
-            Some(vec![ActivityType::FileCreated]),
+            Some(vec![ActivityType::DocumentCreated]),
             "a single `type` value should populate the filter",
         );
     }
 
     #[tokio::test]
     async fn reads_several_repeated_type_keys() {
-        let query: ActivityFilterQuery = extract("type=file.created&type=file.deleted").await;
+        let query: ActivityFilterQuery =
+            extract("type=document.created&type=document.deleted").await;
         assert_eq!(
             query.types,
-            Some(vec![ActivityType::FileCreated, ActivityType::FileDeleted]),
+            Some(vec![
+                ActivityType::DocumentCreated,
+                ActivityType::DocumentDeleted
+            ]),
             "repeated `type` values should all land in the filter",
         );
     }

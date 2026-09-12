@@ -53,6 +53,9 @@ tracing = { workspace = true, features = [] }
 # Errors
 thiserror = { workspace = true, features = [] }
 
+# Derive macros & utilities
+strum = { workspace = true, features = ["derive"] }
+
 # Primitive datatypes
 uuid = { workspace = true, features = ["v7"] }
 base64 = { workspace = true, features = [] }

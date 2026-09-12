@@ -11,9 +11,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use elide_pipeline::RasterMode;
-use nvisy_postgres::model::{UpdateWorkspaceDetection, WorkspaceDetection, WorkspacePipeline};
+use nvisy_postgres::model::{
+    NewBlob, NewWorkspaceAudit, UpdateWorkspaceDetection, WorkspaceDetection, WorkspacePipeline,
+};
 use nvisy_postgres::query::{
-    EventOutboxRepository, WorkspaceDetectionRepository, WorkspaceFileRepository,
+    DetectionPolicyVersionRepository, EventOutboxRepository, WorkspaceAuditRepository,
+    WorkspaceBlobRepository, WorkspaceDetectionRepository, WorkspaceDocumentRepository,
     WorkspaceRepository,
 };
 use nvisy_postgres::types::{DetectionStatus, Json, RasterPolicy, WorkspaceSettings};
@@ -325,9 +328,9 @@ impl DetectionWorker {
         JobOutcome::Done
     }
 
-    /// Best-effort reclaim of a staged object whose file row did not commit. A
-    /// failure only defers cleanup, so it is logged, never propagated.
-    async fn discard_staged(&self, staged: &nvisy_postgres::model::NewWorkspaceFile) {
+    /// Best-effort reclaim of a staged object whose blob did not commit. A failure
+    /// only defers cleanup, so it is logged, never propagated.
+    async fn discard_staged(&self, staged: &NewBlob) {
         if let Err(err) = self.blob.discard_staged_object(staged).await {
             tracing::warn!(
                 target: TRACING_TARGET,
@@ -340,15 +343,14 @@ impl DetectionWorker {
 
     /// Stages a detection's enrichment intermediates, or returns `None` when the
     /// analysis ran no enricher for any group (its artifact set serializes empty).
-    /// Skipping the empty case avoids an intermediates file that a client would
+    /// Skipping the empty case avoids an intermediates blob that a client would
     /// fetch only to find nothing.
     async fn stage_intermediates<T: serde::Serialize>(
         &self,
         pipeline: &WorkspacePipeline,
         settings: &WorkspaceSettings,
-        account_id: Uuid,
         artifacts: &T,
-    ) -> Result<Option<nvisy_postgres::model::NewWorkspaceFile>> {
+    ) -> Result<Option<NewBlob>> {
         // The set serializes to `{ body, parts }`; an un-enriched document has a
         // null body and no parts, and there is nothing worth persisting.
         let value = serde_json::to_value(artifacts).map_err(|err| {
@@ -365,11 +367,11 @@ impl DetectionWorker {
             return Ok(None);
         }
 
-        let file = self
+        let blob = self
             .blob
-            .stage_intermediates(pipeline, &settings.retention, account_id, artifacts)
+            .stage_intermediates(pipeline, &settings.retention, artifacts)
             .await?;
-        Ok(Some(file))
+        Ok(Some(blob))
     }
 
     /// Performs the analysis and records the detection as `Complete`.
@@ -387,17 +389,23 @@ impl DetectionWorker {
         claim_token: jiff::Timestamp,
     ) -> Result<()> {
         // Phase 1: read the inputs under a connection, then drop it.
-        let (file, request, policies, settings) = {
+        let (document, blob, request, policies, policy_version_ids, settings) = {
             let mut conn = self.infra.postgres.get_connection().await?;
 
             let workspace = conn
                 .find_workspace_by_id(job.workspace_id)
                 .await?
                 .ok_or_else(|| ErrorKind::NotFound.with_message("Workspace not found"))?;
-            let file = conn
-                .find_file_in_workspace(job.workspace_id, detection.input_file_id)
+            let document = conn
+                .find_document_in_workspace(job.workspace_id, detection.input_document_id)
                 .await?
-                .ok_or_else(|| ErrorKind::NotFound.with_message("Input file not found"))?;
+                .ok_or_else(|| ErrorKind::NotFound.with_message("Input document not found"))?;
+            let blob = conn
+                .find_blob_by_id(document.blob_id)
+                .await?
+                .ok_or_else(|| {
+                    ErrorKind::NotFound.with_message("Input document content not found")
+                })?;
 
             let definition =
                 PipelineDefinition::from_parts(pipeline.definition.clone(), Vec::new()).map_err(
@@ -417,16 +425,31 @@ impl DetectionWorker {
                 raster_mode_of(&settings),
             );
 
-            let policies =
+            let resolved =
                 resolve_policies(&mut conn, &self.infra.crypto, job.workspace_id, pipeline.id)
                     .await?;
-            if policies.is_empty() {
+            if resolved.is_empty() {
                 return Err(ErrorKind::BadRequest
                     .with_message("Pipeline has no policies")
                     .with_resource("pipeline"));
             }
+            // Split the resolved set into the version ids the run pins and the
+            // definitions the engine consumes.
+            let mut policy_version_ids = Vec::with_capacity(resolved.len());
+            let mut policies = Vec::with_capacity(resolved.len());
+            for policy in resolved {
+                policy_version_ids.push(policy.version_id);
+                policies.push(policy.definition);
+            }
 
-            (file, request, policies, settings)
+            (
+                document,
+                blob,
+                request,
+                policies,
+                policy_version_ids,
+                settings,
+            )
         };
 
         // Phase 2: the slow work — document build, analysis inference, and audit
@@ -435,19 +458,22 @@ impl DetectionWorker {
         // CPU-bound and would otherwise pin an async worker thread for the whole
         // analysis, so keeping it off the async pool lets many detections run at
         // once without starving the rest of the server.
-        let document = self.blob.build_document(&file, detection.id).await?;
+        let engine_document = self
+            .blob
+            .build_document(&document, &blob, detection.id)
+            .await?;
         let analyzed = self
             .engine
-            .analyze_blocking(document, policies, request)
+            .analyze_blocking(engine_document, policies, request)
             .await?;
         let audit = &analyzed.audit;
 
-        // Write the (non-transactional) audit object first, then commit its file
-        // row together with the detection's usage and status in one transaction
-        // below.
-        let audit_file = self
+        // Write the (non-transactional) audit object first, then commit its blob
+        // and base-audit row together with the detection's usage and status in one
+        // transaction below.
+        let audit_blob = self
             .blob
-            .stage_analyzed_document(pipeline, &settings.retention, detection.account_id, audit)
+            .stage_analyzed_document(pipeline, &settings.retention, audit)
             .await?;
 
         // Stage the enrichment intermediates (OCR layout, transcript, tokenized
@@ -455,13 +481,8 @@ impl DetectionWorker {
         // analysis missed. An analysis that ran no enricher produces an empty
         // artifact set — nothing is stored and the detection carries no
         // intermediates reference.
-        let intermediates_file = self
-            .stage_intermediates(
-                pipeline,
-                &settings,
-                detection.account_id,
-                &analyzed.artifacts,
-            )
+        let intermediates_blob = self
+            .stage_intermediates(pipeline, &settings, &analyzed.artifacts)
             .await?;
 
         // Record inference usage: per-model token rows into the usage table (the
@@ -484,7 +505,7 @@ impl DetectionWorker {
         // transaction rolls back so we do not stamp over the new owner's work or
         // leak usage/audit rows for a detection we lost. Kept to reclaim the
         // just-staged object if the transaction does not commit: on rollback its
-        // `workspace_files` row never lands, so the row-driven reaper could never
+        // `workspace_blobs` row never lands, so the blob-driven reaper could never
         // find the object otherwise. Build the outbox row here so the finalize
         // transaction is `PgError`-typed for its rollback sentinel, and insert it
         // alongside the finalize so the `Complete` event commits atomically with
@@ -492,7 +513,7 @@ impl DetectionWorker {
         let completed_event = WorkspaceEvent::DetectionCompleted(DetectionCompleted {
             detection_id: detection.id,
             pipeline_slug: pipeline.slug.clone(),
-            input_file_name: Some(file.display_name.clone()),
+            input_document_name: Some(document.display_name.clone()),
             notify: detection.account_id,
         });
         let outbox_row = event_outbox_row(
@@ -508,17 +529,37 @@ impl DetectionWorker {
         // transaction, so the pool was free during the analysis above.
         let mut conn = self.infra.postgres.get_connection().await?;
         // Kept to reclaim the staged objects if the transaction does not commit:
-        // on rollback their `workspace_files` rows never land, so the row-driven
+        // on rollback their `workspace_blobs` rows never land, so the blob-driven
         // reaper could never find the objects otherwise.
-        let staged_audit = audit_file.clone();
-        let staged_intermediates = intermediates_file.clone();
+        let staged_audit = audit_blob.clone();
+        let staged_intermediates = intermediates_blob.clone();
+        let detection_id = detection.id;
+        let workspace_id = job.workspace_id;
         let finalized = conn
             .transaction(async |conn| {
-                let audit_file_id = conn.create_workspace_file(audit_file).await?.id;
-                let intermediates_file_id = match intermediates_file {
-                    Some(file) => Some(conn.create_workspace_file(file).await?.id),
+                // The base audit resolves (shares or inserts) its blob and records
+                // the reference in this same transaction.
+                let audit = conn
+                    .create_audit(
+                        NewWorkspaceAudit::base(workspace_id, Uuid::nil(), detection_id),
+                        audit_blob,
+                    )
+                    .await?;
+                // Pin the exact policy versions this analysis consumed, so the
+                // detection is reproducible against them regardless of later edits.
+                conn.record_detection_policy_versions(
+                    workspace_id,
+                    detection_id,
+                    &policy_version_ids,
+                )
+                .await?;
+                // The intermediate is a blob-ref on the detection; resolving the
+                // blob records the detection's reference to it.
+                let intermediate_blob = match intermediates_blob {
+                    Some(blob) => Some(conn.find_or_create_blob(blob).await?),
                     None => None,
                 };
+                let intermediate_blob_id = intermediate_blob.as_ref().map(|blob| blob.id);
                 if let Some(usage) = &usage {
                     conn.record_detection_usage(&usage.per_model).await?;
                 }
@@ -527,8 +568,7 @@ impl DetectionWorker {
                         detection.id,
                         claim_token,
                         UpdateWorkspaceDetection {
-                            audit_file_id: Some(Some(audit_file_id)),
-                            intermediates_file_id: Some(intermediates_file_id),
+                            intermediate_blob_id: Some(intermediate_blob_id),
                             metadata,
                             ..Default::default()
                         },
@@ -541,12 +581,29 @@ impl DetectionWorker {
                     return Err(PgError::Query(DieselError::RollbackTransaction));
                 }
                 conn.insert_event_outbox(outbox_row).await?;
-                Ok::<_, PgError>(())
+                // The resolved storage paths, so an object staged for content that
+                // deduplicated onto an existing blob can be reclaimed after commit.
+                let intermediate_path = intermediate_blob.map(|blob| blob.storage_path);
+                Ok::<_, PgError>((audit.blob_id, intermediate_path))
             })
             .await;
 
         match finalized {
-            Ok(()) => {}
+            Ok((audit_blob_id, intermediate_path)) => {
+                // A base audit or intermediate whose content deduplicated onto an
+                // existing blob is pointed at that blob's stored object, orphaning
+                // the object staged for it. Reclaim the redundant staged objects.
+                if let Ok(Some(blob)) = conn.find_blob_by_id(audit_blob_id).await
+                    && blob.storage_path != staged_audit.storage_path
+                {
+                    self.discard_staged(&staged_audit).await;
+                }
+                if let Some(staged) = &staged_intermediates
+                    && intermediate_path.as_deref() != Some(staged.storage_path.as_str())
+                {
+                    self.discard_staged(staged).await;
+                }
+            }
             Err(PgError::Query(DieselError::RollbackTransaction)) => {
                 self.discard_staged(&staged_audit).await;
                 if let Some(staged) = &staged_intermediates {

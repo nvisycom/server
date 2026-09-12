@@ -1,8 +1,8 @@
 //! Comment handlers: posting, editing, and deleting the messages within a
-//! thread. The thread lifecycle (open/close/reopen/rename/delete), anchors, and
-//! the timeline live in the sibling `workspace_threads` and
-//! `workspace_thread_anchors` modules; `workspace_threads` also owns the helpers
-//! shared here (mention resolution, assistant enqueue, lookups).
+//! thread. The thread lifecycle (open/close/reopen/rename/delete), the review
+//! transitions, and the timeline live in the sibling `workspace_threads` module,
+//! which also owns the helpers shared here (mention resolution, assistant
+//! enqueue, lookups).
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
@@ -26,7 +26,7 @@ use crate::service::{AssistantQueue, ServiceState, ThreadCommentCreated, Workspa
 /// Posts a comment (message) in a thread.
 ///
 /// `@username` mentions in the body notify those workspace members. Requires
-/// `Comment`.
+/// `Review`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -38,7 +38,7 @@ use crate::service::{AssistantQueue, ServiceState, ThreadCommentCreated, Workspa
 async fn create_comment(
     State(pg_client): State<PgClient>,
     State(assistant): State<AssistantQueue>,
-    authz: Authorized<markers::Comment>,
+    authz: Authorized<markers::Review>,
     Path(path_params): Path<ThreadPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateComment>,
@@ -93,7 +93,7 @@ async fn create_comment(
                 WorkspaceEvent::ThreadCommentCreated(ThreadCommentCreated {
                     comment_id: comment.id,
                     thread_id: thread.id,
-                    file_id: thread.file_id,
+                    document_id: thread.document_id,
                     author_username: author_username.clone(),
                     mentioned: recipients,
                 }),
@@ -131,7 +131,7 @@ fn create_comment_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Post a comment")
         .description(
             "Posts a comment (message) in a thread. @username mentions notify those \
-             members. Requires the Comment permission. Returns 409 if the thread is \
+             members. Requires the Review permission. Returns 409 if the thread is \
              closed.",
         )
         .response::<201, Json<Comment>>()
@@ -153,7 +153,7 @@ fn create_comment_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_comment(
     State(pg_client): State<PgClient>,
-    authz: Authorized<markers::Comment>,
+    authz: Authorized<markers::Review>,
     Path(path_params): Path<CommentPathParams>,
     ValidateJson(request): ValidateJson<UpdateComment>,
 ) -> Result<(StatusCode, Json<Comment>)> {
@@ -208,7 +208,7 @@ fn update_comment_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_comment(
     State(pg_client): State<PgClient>,
-    authz: Authorized<markers::Comment>,
+    authz: Authorized<markers::Review>,
     Path(path_params): Path<CommentPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting comment");

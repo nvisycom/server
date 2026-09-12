@@ -16,5 +16,5 @@ pub use coordinator::DetectionCoordinator;
 pub use drainer::DetectionOutboxDrainer;
 pub use job::{DetectionJob, DetectionStatusEvent, detection_subject};
 pub use service::DetectionQueue;
-pub(crate) use support::resolve_policies;
+pub(crate) use support::resolve_pinned_policies;
 pub use worker::DetectionWorker;

@@ -8,7 +8,6 @@ mod analytics;
 mod auth_oidc;
 mod authentication;
 mod workspace_activities;
-mod workspace_assignments;
 
 pub(crate) use auth_oidc::consume_reauth_proof;
 mod account_api_tokens;
@@ -25,14 +24,13 @@ mod utility;
 mod workspace_connection_syncs;
 mod workspace_connections;
 mod workspace_detections;
-mod workspace_files;
+mod workspace_documents;
 mod workspace_invites;
 mod workspace_members;
 mod workspace_pipelines;
 mod workspace_policies;
 mod workspace_providers;
 mod workspace_redactions;
-mod workspace_thread_anchors;
 mod workspace_thread_comments;
 mod workspace_threads;
 mod workspace_webhooks;
@@ -82,15 +80,13 @@ fn private_routes(service_state: ServiceState) -> ApiRouter<ServiceState> {
         .merge(workspace_activities::routes())
         .merge(analytics::routes())
         .merge(workspace_members::routes())
-        .merge(workspace_assignments::routes())
         .merge(workspace_threads::routes())
         .merge(workspace_thread_comments::routes())
-        .merge(workspace_thread_anchors::routes())
         .merge(workspace_connections::routes())
         .merge(workspace_providers::routes())
         .merge(connection_oauth::private_routes())
         .merge(workspace_connection_syncs::routes())
-        .merge(workspace_files::routes(
+        .merge(workspace_documents::routes(
             service_state.upload.max_file_body_bytes,
         ))
         .merge(workspace_pipelines::routes())

@@ -17,9 +17,9 @@ pub struct DetectionFilter {
     /// Filter by detection status.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<DetectionStatus>,
-    /// Filter by the source file the detection analyzes.
+    /// Filter by the source document the detection analyzes.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_file_id: Option<Uuid>,
+    pub input_document_id: Option<Uuid>,
     /// Filter by the owning pipeline. Ignored by the single-pipeline listing
     /// (already scoped to one pipeline); used by the workspace-wide listing.
     #[serde(skip_serializing_if = "Option::is_none")]

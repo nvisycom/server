@@ -193,7 +193,7 @@ mod tests {
         let mut policy_ids = Vec::new();
         for _ in 0..count {
             let policy = conn
-                .create_workspace_policy(NewWorkspacePolicy::test(
+                .create_test_policy(NewWorkspacePolicy::test(
                     seeded.workspace_id,
                     seeded.account_id,
                 ))
@@ -266,13 +266,13 @@ mod tests {
         let mut conn = db.client.get_connection().await?;
 
         let alpha = conn
-            .create_workspace_policy(NewWorkspacePolicy::test(
+            .create_test_policy(NewWorkspacePolicy::test(
                 seeded.workspace_id,
                 seeded.account_id,
             ))
             .await?;
         let bravo = conn
-            .create_workspace_policy(NewWorkspacePolicy::test(
+            .create_test_policy(NewWorkspacePolicy::test(
                 seeded.workspace_id,
                 seeded.account_id,
             ))

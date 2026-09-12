@@ -2,13 +2,12 @@
 //! listing).
 
 use garde::Validate;
-use nvisy_postgres::types::ThreadFilter;
+use nvisy_postgres::types::{ReviewStatus, ThreadFilter};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::extract::validators::validate_non_blank;
-use crate::handler::request::CommentAnchor;
 
 /// Path parameters addressing one thread by its opaque id.
 #[must_use]
@@ -19,11 +18,11 @@ pub struct ThreadPathParams {
     pub thread_id: Uuid,
 }
 
-/// Request payload to open a comment thread with its first message.
+/// Request payload to open a workspace discussion thread with its first message.
 ///
-/// A thread pins a discussion to a location within a file (`anchor`), to a file
-/// as a whole (no anchor), or — when opened on the workspace endpoint — to no
-/// file at all. `@username` mentions in the opening body notify those members.
+/// A workspace thread is free-form discussion pinned to no document; document
+/// reviews are auto-created on detection, not opened by hand. `@username`
+/// mentions in the opening body notify those members.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -36,14 +35,16 @@ pub struct OpenThread {
     /// The opening message text (1-10000 characters).
     #[garde(length(chars, min = 1, max = 10_000), custom(validate_non_blank))]
     pub body: String,
-    /// Locations within the file the thread is pinned to. Empty for a file-level
-    /// thread (no pin). Ignored for a workspace-level thread (no file).
-    ///
-    /// The `max = 32` limit is the same cap `add_anchor` enforces per thread
-    /// (`nvisy_postgres::query::MAX_THREAD_ANCHORS`); keep the two in sync.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[garde(length(max = 32))]
-    pub anchors: Vec<CommentAnchor>,
+}
+
+/// Request payload to assign or unassign a document review.
+#[must_use]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignReview {
+    /// Account to assign the review to, or `null` to clear the current assignee.
+    #[garde(skip)]
+    pub assignee: Option<Uuid>,
 }
 
 /// Request payload to rename a thread (set or clear its title).
@@ -66,20 +67,23 @@ pub struct RenameThread {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceThreadsQuery {
-    /// Filter by the file the thread is pinned to.
-    pub file_id: Option<Uuid>,
+    /// Filter by the document the thread reviews.
+    pub document_id: Option<Uuid>,
     /// Filter by the thread's opening author.
     pub author: Option<Uuid>,
     /// Filter by open/closed state: `true` = closed only, `false` = open only.
     pub closed: Option<bool>,
+    /// Filter document reviews by their derived review status.
+    pub review_status: Option<ReviewStatus>,
 }
 
 impl From<WorkspaceThreadsQuery> for ThreadFilter {
     fn from(query: WorkspaceThreadsQuery) -> Self {
         ThreadFilter {
-            file_id: query.file_id,
+            document_id: query.document_id,
             author_account_id: query.author,
             closed: query.closed,
+            review_status: query.review_status,
         }
     }
 }

@@ -9,8 +9,11 @@ use crate::schema::workspace_redactions;
 /// A redaction: one redact pass over a detection's analysis.
 ///
 /// A detection can be redacted many times — each redact request may carry a
-/// different set of reviewer edits — so each redaction is its own row owning the
-/// review audit it applied and the redacted document it produced.
+/// different set of reviewer edits — so each redaction is its own row. Its review
+/// audit (the engine's audit after the reviewer edits were applied) is a
+/// [`WorkspaceAudit`](crate::model::WorkspaceAudit) row pointing back via
+/// `redaction_id`; the redacted output is a
+/// [`WorkspaceDocument`](crate::model::WorkspaceDocument) of kind `redacted`.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_redactions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -21,12 +24,9 @@ pub struct WorkspaceRedaction {
     pub detection_id: Uuid,
     /// Account that requested the redaction.
     pub account_id: Uuid,
-    /// Review audit (`file_kind = review`) recording the applied edits and the
-    /// redaction outcome. `None` only if the file was later hard-deleted.
-    pub review_file_id: Option<Uuid>,
-    /// Redacted document (`file_kind = redacted`) this redaction produced.
-    /// `None` only if the file was later hard-deleted.
-    pub output_file_id: Option<Uuid>,
+    /// Redacted document (`kind = redacted`) this redaction produced. `None` only
+    /// if the document was later hard-deleted.
+    pub output_document_id: Option<Uuid>,
     /// When the redaction was created.
     pub created_at: Timestamp,
 }
@@ -41,22 +41,19 @@ pub struct NewWorkspaceRedaction {
     pub detection_id: Uuid,
     /// Account that requested the redaction (required).
     pub account_id: Uuid,
-    /// Review audit holding the applied edits and outcome.
-    pub review_file_id: Option<Uuid>,
     /// Redacted output document this redaction produced.
-    pub output_file_id: Option<Uuid>,
+    pub output_document_id: Option<Uuid>,
 }
 
 impl NewWorkspaceRedaction {
     /// A minimal redaction of `detection_id`, attributed to `account_id`, for
-    /// tests. It carries no review or output file.
+    /// tests. It carries no output document.
     #[cfg(any(feature = "test_util", test))]
     pub fn test(detection_id: Uuid, account_id: Uuid) -> Self {
         Self {
             detection_id,
             account_id,
-            review_file_id: None,
-            output_file_id: None,
+            output_document_id: None,
         }
     }
 }

@@ -2,40 +2,43 @@
 //! interleaved timeline.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::{
-    WorkspaceThread as ThreadModel, WorkspaceThreadAnchor as AnchorModel,
-    WorkspaceThreadEvent as EventModel,
-};
+use nvisy_postgres::model::{WorkspaceThread as ThreadModel, WorkspaceThreadEvent as EventModel};
 use nvisy_postgres::query::{TimelineCursor, TimelineSource};
-use nvisy_postgres::types::ThreadEventKind;
+use nvisy_postgres::types::{ReviewStatus, ThreadEventKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{AccountRef, Comment, Page, ThreadAnchor};
+use super::{AccountRef, Comment, Page};
 
-/// Response type for a comment thread.
+/// Response type for a thread.
 ///
-/// A thread is the closable unit of discussion: opened by a workspace member,
-/// optionally pinned to a file (`fileId`) and locations within it (`anchors`),
-/// and closable to end the conversation. Its stream is a [`ThreadEntry`]
-/// timeline.
+/// A thread is either a free-form workspace discussion (no `documentId`, opened
+/// and closed by members) or a document's review (`documentId` set, one live
+/// thread per document, auto-created on the document's first detection). A
+/// document thread carries a derived `reviewStatus` and an optional `assignee`; a
+/// workspace thread carries neither. Its stream is a [`ThreadEntry`] timeline.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Thread {
     /// Unique identifier of the thread.
     pub id: Uuid,
-    /// File the thread is pinned to; `None` for a workspace-level thread.
+    /// Document this thread reviews; `None` for a workspace-level thread.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub file_id: Option<Uuid>,
+    pub document_id: Option<Uuid>,
     /// The thread's title; `None` for an untitled thread.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
     /// Account that opened the thread.
     pub author: AccountRef,
-    /// The thread's live anchors (locations within the file it is pinned to).
-    /// Empty for a file-level or workspace-level thread.
-    pub anchors: Vec<ThreadAnchor>,
+    /// The document review's current status, derived from the review timeline;
+    /// `None` for a workspace thread.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_status: Option<ReviewStatus>,
+    /// Account the document review is assigned to; `None` for a workspace thread
+    /// or an unassigned document review.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<AccountRef>,
     /// Whether the thread is closed.
     pub closed: bool,
     /// When the thread was closed, when closed.
@@ -47,8 +50,8 @@ pub struct Thread {
     pub updated_at: Timestamp,
 }
 
-/// One non-message entry in a thread timeline (closed, reopened, anchor
-/// added/removed).
+/// One non-message entry in a thread timeline (opened, closed, reopened,
+/// renamed, or a review transition).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadEvent {
@@ -59,8 +62,7 @@ pub struct ThreadEvent {
     /// Account that performed the action; `None` if that account was removed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actor: Option<AccountRef>,
-    /// Event-specific detail (an anchor snapshot for anchor events); `None` for
-    /// close/reopen.
+    /// Event-specific detail; `None` for events that carry none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<serde_json::Value>,
     /// When the event happened.
@@ -74,7 +76,8 @@ pub struct ThreadEvent {
 pub enum ThreadEntry {
     /// A message posted in the thread.
     Comment(Comment),
-    /// A lifecycle event (closed, reopened, anchor added/removed).
+    /// A lifecycle event (opened, closed, reopened, renamed, or a review
+    /// transition).
     Event(ThreadEvent),
 }
 
@@ -111,18 +114,21 @@ pub type ThreadsPage = Page<Thread>;
 pub type TimelinePage = Page<ThreadEntry>;
 
 impl Thread {
-    /// Creates a thread response from the database model, its live anchors, and
-    /// the resolved author reference.
-    pub fn from_model(thread: ThreadModel, anchors: Vec<AnchorModel>, author: AccountRef) -> Self {
+    /// Creates a thread response from the database model, the resolved author
+    /// reference, and the resolved assignee reference (absent for a workspace
+    /// thread or an unassigned document review).
+    pub fn from_model(
+        thread: ThreadModel,
+        author: AccountRef,
+        assignee: Option<AccountRef>,
+    ) -> Self {
         Self {
             id: thread.id,
-            file_id: thread.file_id,
+            document_id: thread.document_id,
             display_name: thread.display_name,
             author,
-            anchors: anchors
-                .into_iter()
-                .filter_map(ThreadAnchor::from_model)
-                .collect(),
+            review_status: thread.review_status,
+            assignee,
             closed: thread.closed_at.is_some(),
             closed_at: thread.closed_at.map(Into::into),
             created_at: thread.created_at.into(),

@@ -1,7 +1,7 @@
-//! Workspace thread-event repository: the immutable timeline entries (opened,
-//! closed, reopened, renamed, anchor added/removed) that the reader interleaves
-//! with the comments. Also houses the shared helpers the thread and anchor
-//! repositories use to record those events.
+//! Workspace thread-event repository: the immutable timeline entries (the
+//! discussion lifecycle and a file thread's review transitions) that the reader
+//! interleaves with the comments. Also houses the shared `record_event` helper
+//! the thread repository uses to record those events.
 
 use std::future::Future;
 
@@ -12,9 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::model::{
-    NewWorkspaceThreadEvent, WorkspaceThread, WorkspaceThreadAnchor, WorkspaceThreadEvent,
-};
+use crate::model::{NewWorkspaceThreadEvent, WorkspaceThread, WorkspaceThreadEvent};
 use crate::types::{AccountRefRow, ThreadEventKind};
 use crate::{Error, PgConnection, Result, schema};
 
@@ -189,8 +187,8 @@ impl WorkspaceThreadEventRepository for PgConnection {
     }
 }
 
-/// Inserts one thread timeline event. Shared by the thread and anchor
-/// repositories, which record events as part of their own transactions.
+/// Inserts one thread timeline event. Shared by the thread repository, which
+/// records events as part of its own transactions.
 pub(crate) async fn record_event(
     conn: &mut PgConnection,
     thread: &WorkspaceThread,
@@ -213,10 +211,4 @@ pub(crate) async fn record_event(
         .map_err(Error::from)?;
 
     Ok(())
-}
-
-/// A JSON snapshot of an anchor for a timeline event's `target`, so the timeline
-/// renders a removed anchor without its (now soft-deleted) row.
-pub(crate) fn anchor_snapshot(anchor: &WorkspaceThreadAnchor) -> Value {
-    serde_json::json!({ "anchorId": anchor.id, "anchor": anchor.anchor })
 }

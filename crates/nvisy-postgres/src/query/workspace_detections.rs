@@ -27,20 +27,21 @@ pub struct DetectionCursor {
     pub id: uuid::Uuid,
 }
 
-/// Resolved display name of a detection's input file.
+/// Resolved display name of a detection's input document.
 ///
-/// `None` when the file has been removed (e.g. by retention). Redacted outputs
-/// belong to redactions, not the detection, so they are not resolved here.
+/// `None` when the document has been removed (e.g. by retention). Redacted
+/// outputs belong to redactions, not the detection, so they are not resolved
+/// here.
 #[derive(Debug, Default, Clone)]
-pub struct DetectionFiles {
+pub struct DetectionDocuments {
     /// Display name of the input document the detection analyzes.
     pub input: Option<String>,
 }
 
 /// One row of a detection listing: the detection plus the context a response
 /// needs to render it without follow-up lookups — the triggering account, the
-/// owning pipeline's slug, and the input file's display name (`None` if the file
-/// was removed).
+/// owning pipeline's slug, and the input document's display name (`None` if the
+/// document was removed).
 #[derive(Debug, Clone)]
 pub struct DetectionListRow {
     /// The detection.
@@ -50,7 +51,7 @@ pub struct DetectionListRow {
     /// Slug of the detection's owning pipeline.
     pub pipeline_slug: Handle,
     /// Display name of the detection's input document, if still present.
-    pub input_file_name: Option<String>,
+    pub input_document_name: Option<String>,
 }
 
 /// Repository for workspace detection database operations.
@@ -85,8 +86,8 @@ pub trait WorkspaceDetectionRepository {
     ) -> impl Future<Output = Result<Option<WorkspaceDetection>>> + Send;
 
     /// Lists a specific pipeline's detections with cursor pagination. `filter`
-    /// narrows by status and/or file (its `pipeline_id` is ignored — the listing
-    /// is already pipeline-scoped).
+    /// narrows by status and/or document (its `pipeline_id` is ignored — the
+    /// listing is already pipeline-scoped).
     fn cursor_list_pipeline_detections(
         &mut self,
         pipeline_id: Uuid,
@@ -99,8 +100,8 @@ pub trait WorkspaceDetectionRepository {
     ///
     /// Detections carry no workspace reference of their own, so this joins through
     /// the owning pipeline and filters on its workspace. `filter` narrows by
-    /// status, file, and/or owning pipeline; use [`cursor_list_pipeline_detections`]
-    /// for a single pipeline.
+    /// status, document, and/or owning pipeline; use
+    /// [`cursor_list_pipeline_detections`] for a single pipeline.
     ///
     /// [`cursor_list_pipeline_detections`]: Self::cursor_list_pipeline_detections
     fn cursor_list_workspace_detections(
@@ -127,16 +128,16 @@ pub trait WorkspaceDetectionRepository {
         stale_before: jiff::Timestamp,
     ) -> impl Future<Output = Result<Option<WorkspaceDetection>>> + Send;
 
-    /// Resolves the display name of a detection's input file.
+    /// Resolves the display name of a detection's input document.
     ///
-    /// An indexed lookup by id; a file removed (e.g. by retention) yields `None`.
-    /// Used to name a single detection's input file in its response without
-    /// threading a join through the shared detection lookup.
-    fn detection_file_names(
+    /// An indexed lookup by id; a document removed (e.g. by retention) yields
+    /// `None`. Used to name a single detection's input document in its response
+    /// without threading a join through the shared detection lookup.
+    fn detection_document_names(
         &mut self,
         workspace_id: Uuid,
         detection: &WorkspaceDetection,
-    ) -> impl Future<Output = Result<DetectionFiles>> + Send;
+    ) -> impl Future<Output = Result<DetectionDocuments>> + Send;
 
     /// Transitions a detection to `Complete` only while the caller still holds
     /// its claim — the detection is still `Executing` and its `claimed_at` matches
@@ -144,7 +145,7 @@ pub trait WorkspaceDetectionRepository {
     /// `false` if the claim has gone stale (another worker re-claimed the
     /// detection after the lease expired), so the caller can abort without
     /// stamping over the new owner's work. `updates` carries the analyze results
-    /// (audit file, metadata); status and the claim guard are applied here.
+    /// (audit blob, metadata); status and the claim guard are applied here.
     fn finalize_detection(
         &mut self,
         detection_id: Uuid,
@@ -187,6 +188,21 @@ pub trait WorkspaceDetectionRepository {
         &mut self,
         usage: &[NewWorkspaceDetectionUsage],
     ) -> impl Future<Output = Result<()>> + Send;
+
+    /// Clears up to `limit` detections' intermediate references whose blob has
+    /// passed its retention window, dropping each cleared detection's reference to
+    /// its intermediate blob, and returns how many were cleared.
+    ///
+    /// An intermediate blob carries the `Intermediates` retention window, but
+    /// nothing else releases the detection's reference, so the blob would stay
+    /// pinned at `ref_count >= 1` and never reclaim. Nulling `intermediate_blob_id`
+    /// and releasing the reference here lets the blob reaper purge the bytes once
+    /// `ref_count` reaches zero; the detection row itself is retained. Runs in one
+    /// transaction so the null and the reference drop commit together.
+    fn clear_expired_intermediates(
+        &mut self,
+        limit: i64,
+    ) -> impl Future<Output = Result<usize>> + Send;
 }
 
 impl WorkspaceDetectionRepository for PgConnection {
@@ -261,26 +277,30 @@ impl WorkspaceDetectionRepository for PgConnection {
         filter: &DetectionFilter,
     ) -> Result<CursorPage<DetectionListRow>> {
         use schema::workspace_detections::dsl;
-        use schema::{accounts, workspace_detections, workspace_files, workspace_pipelines};
+        use schema::{accounts, workspace_detections, workspace_documents, workspace_pipelines};
 
         // One scoped builder for both the count and the page, so a future filter
         // cannot be added to one and forgotten on the other. The listing is
         // already scoped to one pipeline, so `filter.pipeline_id` is not applied.
-        // Join the owning pipeline (for its slug) and the input file (to name the
-        // detection's analyzed document) so a row is self-contained; the file is
-        // LEFT-joined so one removed by retention yields a null name.
+        // Join the owning pipeline (for its slug) and the input document (to name
+        // the detection's analyzed document) so a row is self-contained; the
+        // document is LEFT-joined so one removed by retention yields a null name.
         let scoped = || {
             let mut query = workspace_detections::table
                 .inner_join(accounts::table)
                 .inner_join(workspace_pipelines::table)
-                .left_join(workspace_files::table.on(dsl::input_file_id.eq(workspace_files::id)))
+                .left_join(
+                    workspace_documents::table.on(dsl::input_document_id
+                        .eq(workspace_documents::id)
+                        .and(workspace_documents::deleted_at.is_null())),
+                )
                 .filter(dsl::pipeline_id.eq(pipeline_id))
                 .into_boxed();
             if let Some(status) = filter.status {
                 query = query.filter(dsl::status.eq(status));
             }
-            if let Some(file_id) = filter.input_file_id {
-                query = query.filter(dsl::input_file_id.eq(file_id));
+            if let Some(document_id) = filter.input_document_id {
+                query = query.filter(dsl::input_document_id.eq(document_id));
             }
             if let Some(account_id) = filter.account_id {
                 query = query.filter(dsl::account_id.eq(account_id));
@@ -311,7 +331,7 @@ impl WorkspaceDetectionRepository for PgConnection {
                 accounts::avatar_url,
             ),
             workspace_pipelines::slug,
-            workspace_files::display_name.nullable(),
+            workspace_documents::display_name.nullable(),
         );
 
         let after = pagination
@@ -333,11 +353,11 @@ impl WorkspaceDetectionRepository for PgConnection {
         let items = rows
             .into_iter()
             .map(
-                |(detection, account, pipeline_slug, input_file_name)| DetectionListRow {
+                |(detection, account, pipeline_slug, input_document_name)| DetectionListRow {
                     detection,
                     account,
                     pipeline_slug,
-                    input_file_name,
+                    input_document_name,
                 },
             )
             .collect();
@@ -358,28 +378,32 @@ impl WorkspaceDetectionRepository for PgConnection {
     ) -> Result<CursorPage<DetectionListRow>> {
         use schema::accounts::dsl as accounts;
         use schema::workspace_detections::dsl as detections;
-        use schema::workspace_files::dsl as files;
+        use schema::workspace_documents::dsl as documents;
         use schema::workspace_pipelines::dsl as pipelines;
 
         // Detections have no workspace column; scope them through the owning
         // pipeline. The owning pipeline's slug, the triggering account, and the
-        // input file's name are selected alongside each detection so the
+        // input document's name are selected alongside each detection so the
         // cross-pipeline response can name its pipeline, trigger, and analyzed
-        // document without a per-row lookup. The input file is LEFT-joined so a
-        // file removed by retention yields a null name rather than dropping the
+        // document without a per-row lookup. The input document is LEFT-joined so a
+        // document removed by retention yields a null name rather than dropping the
         // detection.
         let scoped = || {
             let mut query = detections::workspace_detections
                 .inner_join(pipelines::workspace_pipelines)
                 .inner_join(accounts::accounts)
-                .left_join(files::workspace_files.on(detections::input_file_id.eq(files::id)))
+                .left_join(
+                    documents::workspace_documents.on(detections::input_document_id
+                        .eq(documents::id)
+                        .and(documents::deleted_at.is_null())),
+                )
                 .filter(pipelines::workspace_id.eq(workspace_id))
                 .into_boxed();
             if let Some(status) = filter.status {
                 query = query.filter(detections::status.eq(status));
             }
-            if let Some(file_id) = filter.input_file_id {
-                query = query.filter(detections::input_file_id.eq(file_id));
+            if let Some(document_id) = filter.input_document_id {
+                query = query.filter(detections::input_document_id.eq(document_id));
             }
             if let Some(pipeline_id) = filter.pipeline_id {
                 query = query.filter(detections::pipeline_id.eq(pipeline_id));
@@ -413,7 +437,7 @@ impl WorkspaceDetectionRepository for PgConnection {
                 accounts::display_name,
                 accounts::avatar_url,
             ),
-            files::display_name.nullable(),
+            documents::display_name.nullable(),
         );
 
         let after = pagination
@@ -435,11 +459,11 @@ impl WorkspaceDetectionRepository for PgConnection {
         let items = rows
             .into_iter()
             .map(
-                |(detection, pipeline_slug, account, input_file_name)| DetectionListRow {
+                |(detection, pipeline_slug, account, input_document_name)| DetectionListRow {
                     detection,
                     account,
                     pipeline_slug,
-                    input_file_name,
+                    input_document_name,
                 },
             )
             .collect();
@@ -487,22 +511,23 @@ impl WorkspaceDetectionRepository for PgConnection {
         Ok(claimed)
     }
 
-    async fn detection_file_names(
+    async fn detection_document_names(
         &mut self,
         workspace_id: Uuid,
         detection: &WorkspaceDetection,
-    ) -> Result<DetectionFiles> {
-        use schema::workspace_files::{self, dsl};
+    ) -> Result<DetectionDocuments> {
+        use schema::workspace_documents::{self, dsl};
 
         // Select the display name only, scoped to the workspace and excluding
-        // soft-deleted files, so a file removed by retention resolves to `None`.
+        // soft-deleted documents, so a document removed by retention resolves to
+        // `None`.
         async fn name_of(
             conn: &mut PgConnection,
             workspace_id: Uuid,
-            file_id: Uuid,
+            document_id: Uuid,
         ) -> Result<Option<String>> {
-            workspace_files::table
-                .filter(dsl::id.eq(file_id))
+            workspace_documents::table
+                .filter(dsl::id.eq(document_id))
                 .filter(dsl::workspace_id.eq(workspace_id))
                 .filter(dsl::deleted_at.is_null())
                 .select(dsl::display_name)
@@ -512,9 +537,9 @@ impl WorkspaceDetectionRepository for PgConnection {
                 .map_err(Error::from)
         }
 
-        let input = name_of(self, workspace_id, detection.input_file_id).await?;
+        let input = name_of(self, workspace_id, detection.input_document_id).await?;
 
-        Ok(DetectionFiles { input })
+        Ok(DetectionDocuments { input })
     }
 
     async fn finalize_detection(
@@ -622,6 +647,58 @@ impl WorkspaceDetectionRepository for PgConnection {
 
         Ok(())
     }
+
+    async fn clear_expired_intermediates(&mut self, limit: i64) -> Result<usize> {
+        use diesel::dsl::now;
+        use diesel_async::AsyncConnection;
+
+        use crate::query::WorkspaceBlobRepository;
+        use crate::schema::{workspace_blobs, workspace_detections};
+
+        self.transaction(async |conn| {
+            // The detections whose intermediate blob has passed its retention
+            // window, with that blob so its reference can be dropped after the
+            // pointer is nulled. Locked FOR UPDATE SKIP LOCKED so a concurrent
+            // sweep never selects the same row and double-drops its reference.
+            let expired: Vec<(Uuid, Uuid)> = workspace_detections::table
+                .inner_join(workspace_blobs::table.on(
+                    workspace_detections::intermediate_blob_id.eq(workspace_blobs::id.nullable()),
+                ))
+                .filter(workspace_blobs::expires_at.is_not_null())
+                .filter(workspace_blobs::expires_at.lt(now))
+                .filter(workspace_blobs::purged_at.is_null())
+                .limit(limit)
+                .select((workspace_detections::id, workspace_blobs::id))
+                .for_update()
+                .skip_locked()
+                .load(conn)
+                .await
+                .map_err(Error::from)?;
+
+            let mut dropped = 0usize;
+            for (detection_id, blob_id) in &expired {
+                // Scope the clear to the pointer still holding this blob, and gate
+                // the decrement on it actually being cleared: a concurrent sweep
+                // that already nulled it affects zero rows and must not decrement.
+                let cleared = diesel::update(
+                    workspace_detections::table
+                        .filter(workspace_detections::id.eq(detection_id))
+                        .filter(workspace_detections::intermediate_blob_id.eq(blob_id)),
+                )
+                .set(workspace_detections::intermediate_blob_id.eq(None::<Uuid>))
+                .execute(conn)
+                .await
+                .map_err(Error::from)?;
+                if cleared == 1 {
+                    conn.decrement_ref(*blob_id).await?;
+                    dropped += 1;
+                }
+            }
+
+            Ok(dropped)
+        })
+        .await
+    }
 }
 
 #[cfg(test)]
@@ -638,14 +715,14 @@ mod tests {
     #[tokio::test]
     async fn claim_transitions_pending_and_honors_a_fresh_lease() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.pipeline_id,
                 seeded.account_id,
-                seeded.file_id,
+                seeded.document_id,
             ))
             .await?;
         assert_eq!(detection.status, DetectionStatus::Pending);
@@ -677,14 +754,14 @@ mod tests {
     #[tokio::test]
     async fn finalize_requires_holding_the_claim() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.pipeline_id,
                 seeded.account_id,
-                seeded.file_id,
+                seeded.document_id,
             ))
             .await?;
         let claimed = conn
@@ -733,14 +810,14 @@ mod tests {
     #[tokio::test]
     async fn fail_detection_uses_the_same_claim_guard() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.pipeline_id,
                 seeded.account_id,
-                seeded.file_id,
+                seeded.document_id,
             ))
             .await?;
         let claimed = conn
@@ -769,7 +846,7 @@ mod tests {
     #[tokio::test]
     async fn fail_pending_detection_only_while_unclaimed() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
         // A never-claimed detection can be failed by the enqueue-failure path.
@@ -777,7 +854,7 @@ mod tests {
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.pipeline_id,
                 seeded.account_id,
-                seeded.file_id,
+                seeded.document_id,
             ))
             .await?;
         assert!(
@@ -791,7 +868,7 @@ mod tests {
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.pipeline_id,
                 seeded.account_id,
-                seeded.file_id,
+                seeded.document_id,
             ))
             .await?;
         let _ = conn
@@ -809,14 +886,14 @@ mod tests {
     #[tokio::test]
     async fn find_by_id_is_scoped_to_workspace_and_live_pipeline() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.pipeline_id,
                 seeded.account_id,
-                seeded.file_id,
+                seeded.document_id,
             ))
             .await?;
 
@@ -838,11 +915,11 @@ mod tests {
     #[tokio::test]
     async fn idempotency_key_lookup_is_scoped_to_the_pipeline() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let mut detection =
-            NewWorkspaceDetection::test(seeded.pipeline_id, seeded.account_id, seeded.file_id);
+            NewWorkspaceDetection::test(seeded.pipeline_id, seeded.account_id, seeded.document_id);
         detection.idempotency_key = Some("key-123".to_owned());
         let detection = conn.create_workspace_detection(detection).await?;
 
@@ -861,24 +938,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cursor_list_filters_by_status_and_names_the_input_file() -> anyhow::Result<()> {
+    async fn cursor_list_filters_by_status_and_names_the_input_document() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
-        // A pending detection and a completed one on the same pipeline+file.
+        // A pending detection and a completed one on the same pipeline+document.
         let pending = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.pipeline_id,
                 seeded.account_id,
-                seeded.file_id,
+                seeded.document_id,
             ))
             .await?;
         let to_complete = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.pipeline_id,
                 seeded.account_id,
-                seeded.file_id,
+                seeded.document_id,
             ))
             .await?;
         let claimed = conn
@@ -893,7 +970,8 @@ mod tests {
             )
             .await?;
 
-        // Filter to Pending: only the pending detection, and the input file is named.
+        // Filter to Pending: only the pending detection, and the input document is
+        // named.
         let page = conn
             .cursor_list_pipeline_detections(
                 seeded.pipeline_id,
@@ -912,8 +990,8 @@ mod tests {
             vec![pending.id]
         );
         assert!(
-            page.items[0].input_file_name.is_some(),
-            "input file name should resolve through the join"
+            page.items[0].input_document_name.is_some(),
+            "input document name should resolve through the join"
         );
         Ok(())
     }
@@ -925,6 +1003,89 @@ mod tests {
 
         // An empty usage slice writes nothing and does not error.
         conn.record_detection_usage(&[]).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn expired_intermediate_is_nulled_and_its_blob_becomes_reclaimable() -> anyhow::Result<()>
+    {
+        use crate::model::NewBlob;
+        use crate::query::WorkspaceBlobRepository;
+        use crate::test_util::backdate;
+
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_pipeline_and_document().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let detection = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.document_id,
+            ))
+            .await?;
+
+        // Attach an intermediate blob the way the worker does: resolve the blob
+        // (recording a reference), then finalize the claimed detection pointing at
+        // it.
+        let mut new_blob = NewBlob::test(seeded.workspace_id);
+        new_blob.expires_at = Some((Timestamp::now() + Span::new().hours(1)).into());
+        let blob = conn.find_or_create_blob(new_blob).await?;
+        assert_eq!(blob.ref_count, 1);
+
+        let claimed = conn
+            .claim_detection(detection.id, Timestamp::now() - Span::new().minutes(5))
+            .await?
+            .expect("claim");
+        let finalized = conn
+            .finalize_detection(
+                detection.id,
+                jiff::Timestamp::from(claimed.claimed_at.expect("claimed")),
+                UpdateWorkspaceDetection {
+                    intermediate_blob_id: Some(Some(blob.id)),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert!(finalized);
+
+        backdate::blob_span(
+            &mut conn,
+            blob.id,
+            Timestamp::now() - Span::new().hours(2),
+            Timestamp::now() - Span::new().hours(1),
+        )
+        .await?;
+
+        // Pinned by the detection's reference, so not yet due.
+        assert!(
+            !conn
+                .blobs_due_for_purge(50)
+                .await?
+                .iter()
+                .any(|b| b.id == blob.id),
+            "a referenced intermediate blob is not due while the pointer is set"
+        );
+
+        let cleared = conn.clear_expired_intermediates(50).await?;
+        assert_eq!(cleared, 1);
+
+        // The pointer is nulled and the blob dropped to zero references, so it is
+        // now reclaimable; the detection row itself is retained.
+        let (after, _pipeline) = conn
+            .find_workspace_detection_by_id(seeded.workspace_id, detection.id)
+            .await?
+            .expect("detection retained");
+        assert!(after.intermediate_blob_id.is_none());
+        let blob_after = conn.find_blob_by_id(blob.id).await?.expect("blob present");
+        assert_eq!(blob_after.ref_count, 0);
+        assert!(
+            conn.blobs_due_for_purge(50)
+                .await?
+                .iter()
+                .any(|b| b.id == blob.id),
+            "an unreferenced, expired intermediate blob is due for purge"
+        );
         Ok(())
     }
 }

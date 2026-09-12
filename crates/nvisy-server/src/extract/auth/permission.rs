@@ -18,21 +18,21 @@ pub enum Permission {
     /// Can delete the entire workspace.
     DeleteWorkspace,
 
-    // File permissions
-    /// Can list files and view their metadata.
-    ViewFiles,
-    /// Can upload new files to the workspace.
-    UploadFiles,
-    /// Can update file metadata and properties.
-    UpdateFiles,
-    /// Can download the bytes of original (source) files.
-    DownloadOriginalFiles,
-    /// Can download the bytes of redacted output files.
-    DownloadRedactedFiles,
+    // Document permissions
+    /// Can list documents and view their metadata.
+    ViewDocuments,
+    /// Can upload new documents to the workspace.
+    UploadDocuments,
+    /// Can update document metadata and properties.
+    UpdateDocuments,
+    /// Can download the bytes of original (source) documents.
+    DownloadOriginalDocuments,
+    /// Can download the bytes of redacted output documents.
+    DownloadRedactedDocuments,
     /// Can download detection audit content (analyses and reviews).
     DownloadAudit,
-    /// Can delete files from the workspace.
-    DeleteFiles,
+    /// Can delete documents from the workspace.
+    DeleteDocuments,
 
     // Pipeline permissions
     /// Can view pipelines in the workspace.
@@ -47,24 +47,27 @@ pub enum Permission {
     // Detection permissions
     /// Can view detections and their results (analyses, redactions, audits).
     ViewDetections,
-    /// Can run detections (analyze a file for findings).
+    /// Can run detections (analyze a document for findings).
     RunDetections,
-    /// Can run redactions (apply policies and produce a redacted file).
+    /// Can run redactions (apply policies and produce a redacted document).
     RunRedactions,
 
-    // Assignment permissions
-    /// Can view file review assignments (who is reviewing what).
-    ViewAssignments,
-    /// Can assign files to reviewers and unassign them.
-    AssignTasks,
-
-    // Comment permissions
-    /// Can view comments on files.
-    ViewComments,
-    /// Can write comments and replies (and edit or delete one's own).
-    Comment,
-    /// Can close and reopen comment threads.
-    CloseComments,
+    // Review / collaboration permissions
+    //
+    // A document thread is the review of its document, so viewing and
+    // participating in a thread are the review permissions; a workspace thread is
+    // a free discussion that rides on the same two.
+    /// Can view threads: workspace discussions and document reviews (with their
+    /// assignee and status).
+    ViewReviews,
+    /// Can participate: open a workspace thread, post/edit/delete one's own
+    /// comments, and verify a document review.
+    Review,
+    /// Can close and reopen workspace discussion threads (document reviews derive
+    /// their status and are not closed this way).
+    ManageThreads,
+    /// Can assign a document's review to a reviewer and unassign it.
+    AssignReviews,
 
     // Reporting permissions
     /// Can view workspace analytics.
@@ -129,17 +132,15 @@ impl Permission {
     #[must_use]
     pub const fn minimum_required_role(self) -> WorkspaceRole {
         match self {
-            // Reviewer-level permissions (review access, no original files)
+            // Reviewer-level permissions (review access, no original documents)
             Self::ViewWorkspace
-            | Self::ViewFiles
-            | Self::DownloadRedactedFiles
+            | Self::ViewDocuments
+            | Self::DownloadRedactedDocuments
             | Self::DownloadAudit
             | Self::ViewPipelines
             | Self::ViewDetections
-            | Self::ViewAssignments
-            | Self::ViewComments
-            | Self::Comment
-            | Self::CloseComments
+            | Self::ViewReviews
+            | Self::Review
             | Self::ViewAnalytics
             | Self::ViewActivity
             | Self::ViewMembers
@@ -149,16 +150,17 @@ impl Permission {
             | Self::ViewWebhooks => WorkspaceRole::Reviewer,
 
             // Editor-level permissions (create and modify own resources)
-            Self::UploadFiles
-            | Self::UpdateFiles
-            | Self::DownloadOriginalFiles
-            | Self::DeleteFiles
+            Self::UploadDocuments
+            | Self::UpdateDocuments
+            | Self::DownloadOriginalDocuments
+            | Self::DeleteDocuments
             | Self::CreatePipelines
             | Self::UpdatePipelines
             | Self::DeletePipelines
             | Self::RunDetections
             | Self::RunRedactions
-            | Self::AssignTasks
+            | Self::ManageThreads
+            | Self::AssignReviews
             | Self::RunConnectionSyncs => WorkspaceRole::Editor,
 
             // Admin-level permissions (manage workspace resources)
@@ -199,15 +201,15 @@ mod tests {
         // The review-vs-original split is a real boundary: a Reviewer may see and
         // download redacted output and audit, but never the original bytes.
         assert_eq!(
-            Permission::ViewFiles.minimum_required_role(),
+            Permission::ViewDocuments.minimum_required_role(),
             WorkspaceRole::Reviewer
         );
         assert_eq!(
-            Permission::DownloadRedactedFiles.minimum_required_role(),
+            Permission::DownloadRedactedDocuments.minimum_required_role(),
             WorkspaceRole::Reviewer
         );
         assert_eq!(
-            Permission::DownloadOriginalFiles.minimum_required_role(),
+            Permission::DownloadOriginalDocuments.minimum_required_role(),
             WorkspaceRole::Editor
         );
 
@@ -236,7 +238,7 @@ mod tests {
             WorkspaceRole::Admin,
             WorkspaceRole::Owner,
         ] {
-            assert!(Permission::ViewFiles.is_permitted_by_role(role));
+            assert!(Permission::ViewDocuments.is_permitted_by_role(role));
         }
         // An Owner-only permission is denied to everyone below Owner.
         assert!(!Permission::ManageRoles.is_permitted_by_role(WorkspaceRole::Admin));

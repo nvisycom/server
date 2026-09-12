@@ -21,22 +21,24 @@ mod analytics;
 mod pipeline_references;
 mod search;
 mod workspace_activities;
-mod workspace_assignments;
 mod workspace_assistant_jobs;
+mod workspace_audits;
+mod workspace_blobs;
 mod workspace_connection_schedule;
 mod workspace_connection_syncs;
 mod workspace_connections;
 mod workspace_detection_jobs;
+mod workspace_detection_policy_versions;
 mod workspace_detections;
+mod workspace_documents;
 mod workspace_event_outbox;
-mod workspace_files;
 mod workspace_invites;
 mod workspace_members;
 mod workspace_pipelines;
 mod workspace_policies;
+mod workspace_policy_versions;
 mod workspace_providers;
 mod workspace_redactions;
-mod workspace_thread_anchors;
 mod workspace_thread_comments;
 mod workspace_thread_events;
 mod workspace_threads;
@@ -55,32 +57,32 @@ pub use analytics::{
 };
 pub use pipeline_references::PipelineReferenceRepository;
 pub use workspace_activities::{ActivityCursor, ActivityFilter, WorkspaceActivityRepository};
-pub use workspace_assignments::{
-    AssignmentCursor, AssignmentListRow, CreateAssignmentOutcome, WorkspaceAssignmentRepository,
-};
 pub use workspace_assistant_jobs::AssistantJobOutboxRepository;
+pub use workspace_audits::WorkspaceAuditRepository;
+pub use workspace_blobs::{ReclaimableBlob, WorkspaceBlobRepository};
 pub use workspace_connection_schedule::WorkspaceConnectionScheduleRepository;
 pub use workspace_connection_syncs::{ConnectionSyncCursor, WorkspaceConnectionSyncRepository};
 pub use workspace_connections::{
     ConnectionCursor, ScheduledConnection, WorkspaceConnectionRepository,
 };
 pub use workspace_detection_jobs::DetectionJobOutboxRepository;
+pub use workspace_detection_policy_versions::DetectionPolicyVersionRepository;
 pub use workspace_detections::{
-    DetectionCursor, DetectionFiles, DetectionListRow, WorkspaceDetectionRepository,
+    DetectionCursor, DetectionDocuments, DetectionListRow, WorkspaceDetectionRepository,
+};
+pub use workspace_documents::{
+    DocumentCursor, DocumentWithBlob, ImportedDocumentRef, WorkspaceDocumentRepository,
 };
 pub use workspace_event_outbox::EventOutboxRepository;
-pub use workspace_files::{ExpiredFileRef, FileCursor, ImportedFileRef, WorkspaceFileRepository};
 pub use workspace_invites::{InviteCursor, WorkspaceInviteRepository};
 pub use workspace_members::{
     AccountWorkspaceCursor, WorkspaceMemberCursor, WorkspaceMemberRepository,
 };
 pub use workspace_pipelines::{PipelineCursor, WorkspacePipelineRepository};
-pub use workspace_policies::{PolicyCursor, WorkspacePolicyRepository};
+pub use workspace_policies::{PolicyCursor, PolicyWithVersion, WorkspacePolicyRepository};
+pub use workspace_policy_versions::WorkspacePolicyVersionRepository;
 pub use workspace_providers::{ProviderCursor, WorkspaceProviderRepository};
 pub use workspace_redactions::{RedactionCursor, WorkspaceRedactionRepository};
-pub use workspace_thread_anchors::{
-    AddAnchorOutcome, MAX_THREAD_ANCHORS, WorkspaceThreadAnchorRepository,
-};
 pub use workspace_thread_comments::WorkspaceThreadCommentRepository;
 pub use workspace_thread_events::{TimelineCursor, TimelineSource, WorkspaceThreadEventRepository};
 pub use workspace_threads::{ThreadCursor, WorkspaceThreadRepository};

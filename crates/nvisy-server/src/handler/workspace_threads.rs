@@ -1,16 +1,19 @@
-//! Thread handlers: the thread lifecycle (open, list, close, reopen, rename,
-//! delete) and its GitHub-issue-style timeline. The messages within a thread are
-//! handled by the sibling `workspace_thread_comments` module, and its anchors by
-//! `workspace_thread_anchors`; both draw on the mention-resolution,
+//! Thread handlers: the thread lifecycle and its GitHub-issue-style timeline.
+//! The messages within a thread are handled by the sibling
+//! `workspace_thread_comments` module, which draws on the mention-resolution,
 //! assistant-enqueue, and lookup helpers exported here.
 //!
-//! A thread is the closable unit: it is opened by a workspace member with a
-//! first message, optionally pinned to a file and locations within it (anchors),
-//! and can be closed, reopened, renamed, or deleted as a whole. Closing,
-//! reopening, renaming, and anchor changes are recorded as timeline events
+//! A thread is one of two things. A *workspace thread* is free-form discussion,
+//! opened by a member with a first message and closable, reopenable, renamable,
+//! or deletable as a whole. A *document thread* is a document's review: exactly one live
+//! thread per document, auto-created on the document's first detection (never opened by
+//! hand), carrying an optional assignee and a `review_status` derived from the
+//! review timeline (detection → needs review, redaction → in review, verify →
+//! resolved). Lifecycle and review transitions are recorded as timeline events
 //! interleaved with the messages. `@username` mentions notify those workspace
-//! members. Viewing, writing, and closing all require the corresponding
-//! Reviewer-tier permission.
+//! members. Viewing (`ViewReviews`) and participating — commenting and verifying
+//! a review (`Review`) — are Reviewer-tier; closing/reopening a workspace thread
+//! (`ManageThreads`) and assigning a review (`AssignReviews`) are Editor-tier.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -22,9 +25,9 @@ use nvisy_postgres::model::{
     NewWorkspaceAssistantJob, NewWorkspaceThread, WorkspaceThread, WorkspaceThreadComment,
 };
 use nvisy_postgres::query::{
-    AssistantJobOutboxRepository, TimelineCursor, WorkspaceFileRepository,
-    WorkspaceMemberRepository, WorkspaceThreadAnchorRepository, WorkspaceThreadCommentRepository,
-    WorkspaceThreadEventRepository, WorkspaceThreadRepository,
+    AccountRepository, AssistantJobOutboxRepository, TimelineCursor, WorkspaceDocumentRepository,
+    WorkspaceMemberRepository, WorkspaceThreadCommentRepository, WorkspaceThreadEventRepository,
+    WorkspaceThreadRepository,
 };
 use nvisy_postgres::types::{CursorPage, Direction, Handle};
 use nvisy_postgres::{ASSISTANT_ACCOUNT_ID, ASSISTANT_HANDLE, AsyncConnection, PgClient, PgConn};
@@ -32,85 +35,31 @@ use uuid::Uuid;
 
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
-    CursorPagination, OpenThread, RenameThread, ThreadPathParams, WorkspaceFilePathParams,
-    WorkspaceThreadsQuery,
+    AssignReview, CursorPagination, OpenThread, RenameThread, ThreadPathParams,
+    WorkspaceDocumentPathParams, WorkspaceThreadsQuery,
 };
 use crate::handler::response::{
-    Comment, Thread, ThreadEntry, ThreadEvent, ThreadsPage, TimelinePage,
+    AccountRef, Comment, Thread, ThreadEntry, ThreadEvent, ThreadsPage, TimelinePage,
 };
-use crate::handler::utility::resolve_account_ref;
-use crate::handler::workspace_thread_anchors::encode_anchors;
+use crate::handler::utility::{
+    resolve_account_ref, resolve_account_ref_opt, resolve_workspace_member_ref,
+};
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
-    AssistantJob, AssistantQueue, EventEmitter, EventOrigin, ServiceState, ThreadClosed,
-    ThreadDeleted, ThreadOpened, ThreadRenamed, ThreadReopened, WorkspaceEvent,
+    AssistantJob, AssistantQueue, EventEmitter, EventOrigin, ReviewAssigned, ReviewUnassigned,
+    ReviewVerified, ServiceState, ThreadClosed, ThreadDeleted, ThreadOpened, ThreadRenamed,
+    ThreadReopened, WorkspaceEvent,
 };
 
 /// Tracing target for comment operations.
 pub(crate) const TRACING_TARGET: &str = "nvisy_server::handler::comments";
 
-/// Opens a thread pinned to a file, with its first message.
+/// Opens a workspace-level discussion thread (not tied to any document), with its
+/// first message.
 ///
-/// Any `anchors` pin the thread to locations within the file; omit them for a
-/// file-level thread. `@username` mentions in the opening body notify those
-/// workspace members. Requires `Comment`.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-        file_id = %path_params.file_id,
-    )
-)]
-async fn open_file_thread(
-    State(pg_client): State<PgClient>,
-    State(assistant): State<AssistantQueue>,
-    authz: Authorized<markers::Comment>,
-    Path(path_params): Path<WorkspaceFilePathParams>,
-    security: SecurityContext,
-    ValidateJson(request): ValidateJson<OpenThread>,
-) -> Result<(StatusCode, Json<Thread>)> {
-    tracing::debug!(target: TRACING_TARGET, "Opening file thread");
-
-    let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    // The file must exist in the workspace.
-    conn.find_file_in_workspace(workspace.id, path_params.file_id)
-        .await?
-        .ok_or_else(|| Error::not_found("file"))?;
-
-    open_thread(
-        &mut conn,
-        workspace.id,
-        Some(path_params.file_id),
-        authz.account_id,
-        &security,
-        &assistant,
-        request,
-    )
-    .await
-}
-
-fn open_file_thread_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Open a file thread")
-        .description(
-            "Opens a comment thread on a file with its first message, optionally \
-             pinned to locations within the file. @username mentions notify those \
-             members. Requires the Comment permission.",
-        )
-        .response::<201, Json<Thread>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
-}
-
-/// Opens a workspace-level thread (not pinned to any file), with its first
-/// message.
-///
-/// `@username` mentions in the opening body notify those workspace members.
-/// Requires `Comment`.
+/// Document reviews are auto-created on detection, not opened by hand, so this is the
+/// only open endpoint. `@username` mentions in the opening body notify those
+/// workspace members. Requires `Review`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -121,7 +70,7 @@ fn open_file_thread_docs(op: TransformOperation) -> TransformOperation {
 async fn open_workspace_thread(
     State(pg_client): State<PgClient>,
     State(assistant): State<AssistantQueue>,
-    authz: Authorized<markers::Comment>,
+    authz: Authorized<markers::Review>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<OpenThread>,
 ) -> Result<(StatusCode, Json<Thread>)> {
@@ -133,7 +82,6 @@ async fn open_workspace_thread(
     open_thread(
         &mut conn,
         workspace.id,
-        None,
         authz.account_id,
         &security,
         &assistant,
@@ -145,9 +93,9 @@ async fn open_workspace_thread(
 fn open_workspace_thread_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Open a workspace thread")
         .description(
-            "Opens a workspace-level comment thread (not pinned to any file) with \
+            "Opens a workspace-level discussion thread (not tied to any document) with \
              its first message. @username mentions notify those members. Requires \
-             the Comment permission.",
+             the Review permission.",
         )
         .response::<201, Json<Thread>>()
         .response::<400, Json<ErrorResponse>>()
@@ -155,13 +103,12 @@ fn open_workspace_thread_docs(op: TransformOperation) -> TransformOperation {
         .response::<403, Json<ErrorResponse>>()
 }
 
-/// Opens a thread with its opening comment and any initial anchors, and records
-/// the opened event, all in one transaction. Shared by the file and workspace
-/// open endpoints.
+/// Opens a workspace discussion thread with its opening comment, records the
+/// opened event, and — if the assistant was addressed — queues its reply job,
+/// all in one transaction.
 async fn open_thread(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    file_id: Option<Uuid>,
     author_id: Uuid,
     security: &SecurityContext,
     assistant: &AssistantQueue,
@@ -175,30 +122,23 @@ async fn open_thread(
         addressed_assistant,
     } = resolve_mentions(conn, workspace_id, &request.body, author_id).await?;
 
-    // A file-level (or workspace-level) thread carries no anchors; a workspace
-    // thread never pins to a file.
-    let anchors = if file_id.is_some() {
-        encode_anchors(request.anchors)?
-    } else {
-        Vec::new()
-    };
-
+    // A workspace thread carries no document and no review status.
     let new_thread = NewWorkspaceThread {
         workspace_id,
-        file_id,
+        document_id: None,
         author_account_id: author_id,
         display_name: request.display_name,
+        review_status: None,
     };
 
     let author_username = resolve_account_ref(conn, author_id).await?.username;
 
-    // Open the thread (with its opening comment and anchors), record its event,
-    // and — if the assistant was addressed — queue the reply job, all in one
-    // transaction so the rows, the event, and the job commit or roll back
-    // together.
+    // Open the thread (with its opening comment), record its event, and — if the
+    // assistant was addressed — queue the reply job, all in one transaction so
+    // the rows, the event, and the job commit or roll back together.
     let (thread, queued_assistant) = conn
         .transaction(async |conn| {
-            let (thread, opening) = conn.open_thread(new_thread, request.body, anchors).await?;
+            let (thread, opening) = conn.open_thread(new_thread, request.body).await?;
 
             emit_thread_event(
                 conn,
@@ -206,7 +146,7 @@ async fn open_thread(
                 WorkspaceEvent::ThreadOpened(ThreadOpened {
                     thread_id: thread.id,
                     opening_comment_id: opening.id,
-                    file_id: thread.file_id,
+                    document_id: thread.document_id,
                     author_username: author_username.clone(),
                     mentioned: recipients,
                 }),
@@ -239,7 +179,7 @@ async fn open_thread(
 
 /// Lists a workspace's threads with cursor pagination, most recent first.
 ///
-/// Filter by `fileId`, `author`, and `closed`. Requires `ViewComments`.
+/// Filter by `documentId`, `author`, and `closed`. Requires `ViewReviews`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -249,7 +189,7 @@ async fn open_thread(
 )]
 async fn list_threads(
     State(pg_client): State<PgClient>,
-    authz: Authorized<markers::ViewComments>,
+    authz: Authorized<markers::ViewReviews>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<WorkspaceThreadsQuery>,
 ) -> Result<(StatusCode, Json<ThreadsPage>)> {
@@ -262,24 +202,35 @@ async fn list_threads(
         .cursor_list_threads(workspace.id, pagination.into_cursor(), &query.into())
         .await?;
 
-    // Fetch the whole page's live anchors in one query, then group them by thread
-    // (the query returns them ordered by thread, so each thread's anchors form a
-    // contiguous run).
-    let thread_ids: Vec<Uuid> = page.items.iter().map(|row| row.item.id).collect();
-    let mut anchors_by_thread: HashMap<Uuid, Vec<_>> = HashMap::new();
-    for anchor in conn.list_anchors_for_threads(&thread_ids).await? {
-        anchors_by_thread
-            .entry(anchor.thread_id)
-            .or_default()
-            .push(anchor);
-    }
+    // Resolve the page's distinct assignees (document reviews) in one query, so
+    // each thread response can carry its assignee reference without an N+1 lookup.
+    let assignee_ids: BTreeSet<Uuid> = page
+        .items
+        .iter()
+        .filter_map(|row| row.item.assignee_account_id)
+        .collect();
+    let assignee_ids: Vec<Uuid> = assignee_ids.into_iter().collect();
+    let assignees: HashMap<Uuid, AccountRef> = conn
+        .find_accounts_by_ids(&assignee_ids)
+        .await?
+        .into_iter()
+        .map(|account| {
+            (
+                account.id,
+                AccountRef::new(account.username, account.display_name, account.avatar_url),
+            )
+        })
+        .collect();
 
     let threads = page
         .items
         .into_iter()
         .map(|row| {
-            let anchors = anchors_by_thread.remove(&row.item.id).unwrap_or_default();
-            Thread::from_model(row.item, anchors, row.account.into())
+            let assignee = row
+                .item
+                .assignee_account_id
+                .and_then(|id| assignees.get(&id).cloned());
+            Thread::from_model(row.item, row.account.into(), assignee)
         })
         .collect();
 
@@ -296,7 +247,7 @@ fn list_threads_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List threads")
         .description(
             "Returns the workspace's threads, most recent first, with optional \
-             file, author, and closed filters.",
+             document, author, and closed filters.",
         )
         .response::<200, Json<ThreadsPage>>()
         .response::<401, Json<ErrorResponse>>()
@@ -304,7 +255,7 @@ fn list_threads_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Deletes a thread and all of its comments (soft delete). Requires
-/// `CloseComments`.
+/// `ManageThreads`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -315,7 +266,7 @@ fn list_threads_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn delete_thread(
     State(pg_client): State<PgClient>,
-    authz: Authorized<markers::CloseComments>,
+    authz: Authorized<markers::ManageThreads>,
     Path(path_params): Path<ThreadPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
@@ -333,7 +284,7 @@ async fn delete_thread(
             workspace_origin(workspace.id, authz.account_id, &security),
             WorkspaceEvent::ThreadDeleted(ThreadDeleted {
                 thread_id: thread.id,
-                file_id: thread.file_id,
+                document_id: thread.document_id,
             }),
         )
         .await?;
@@ -348,14 +299,14 @@ async fn delete_thread(
 
 fn delete_thread_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete a thread")
-        .description("Soft-deletes a thread and all of its comments. Requires CloseComments.")
+        .description("Soft-deletes a thread and all of its comments. Requires ManageThreads.")
         .response::<200, ()>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Closes a thread, ending its discussion. Requires `CloseComments`.
+/// Closes a thread, ending its discussion. Requires `ManageThreads`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -366,7 +317,7 @@ fn delete_thread_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn close_thread(
     State(pg_client): State<PgClient>,
-    authz: Authorized<markers::CloseComments>,
+    authz: Authorized<markers::ManageThreads>,
     Path(path_params): Path<ThreadPathParams>,
     security: SecurityContext,
 ) -> Result<(StatusCode, Json<Thread>)> {
@@ -392,7 +343,7 @@ async fn close_thread(
                 workspace_origin(workspace.id, authz.account_id, &security),
                 WorkspaceEvent::ThreadClosed(ThreadClosed {
                     thread_id: thread.id,
-                    file_id: thread.file_id,
+                    document_id: thread.document_id,
                 }),
             )
             .await?;
@@ -409,14 +360,14 @@ async fn close_thread(
 
 fn close_thread_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Close a thread")
-        .description("Closes a thread, ending the discussion. Requires CloseComments.")
+        .description("Closes a thread, ending the discussion. Requires ManageThreads.")
         .response::<200, Json<Thread>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Reopens a closed thread. Requires `CloseComments`.
+/// Reopens a closed thread. Requires `ManageThreads`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -427,7 +378,7 @@ fn close_thread_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn reopen_thread(
     State(pg_client): State<PgClient>,
-    authz: Authorized<markers::CloseComments>,
+    authz: Authorized<markers::ManageThreads>,
     Path(path_params): Path<ThreadPathParams>,
     security: SecurityContext,
 ) -> Result<(StatusCode, Json<Thread>)> {
@@ -452,7 +403,7 @@ async fn reopen_thread(
                 workspace_origin(workspace.id, authz.account_id, &security),
                 WorkspaceEvent::ThreadReopened(ThreadReopened {
                     thread_id: thread.id,
-                    file_id: thread.file_id,
+                    document_id: thread.document_id,
                 }),
             )
             .await?;
@@ -469,14 +420,14 @@ async fn reopen_thread(
 
 fn reopen_thread_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Reopen a thread")
-        .description("Reopens a closed thread. Requires CloseComments.")
+        .description("Reopens a closed thread. Requires ManageThreads.")
         .response::<200, Json<Thread>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Renames a thread (sets or clears its title). Requires `CloseComments`.
+/// Renames a thread (sets or clears its title). Requires `ManageThreads`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -487,7 +438,7 @@ fn reopen_thread_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn rename_thread(
     State(pg_client): State<PgClient>,
-    authz: Authorized<markers::CloseComments>,
+    authz: Authorized<markers::ManageThreads>,
     Path(path_params): Path<ThreadPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<RenameThread>,
@@ -517,7 +468,7 @@ async fn rename_thread(
                 workspace_origin(workspace.id, authz.account_id, &security),
                 WorkspaceEvent::ThreadRenamed(ThreadRenamed {
                     thread_id: thread.id,
-                    file_id: thread.file_id,
+                    document_id: thread.document_id,
                 }),
             )
             .await?;
@@ -534,7 +485,7 @@ async fn rename_thread(
 
 fn rename_thread_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Rename a thread")
-        .description("Sets or clears a thread's title. Requires CloseComments.")
+        .description("Sets or clears a thread's title. Requires ManageThreads.")
         .response::<200, Json<Thread>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
@@ -543,7 +494,7 @@ fn rename_thread_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Returns a thread's full timeline: comments and lifecycle events interleaved,
-/// oldest first. Requires `ViewComments`.
+/// oldest first. Requires `ViewReviews`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -554,7 +505,7 @@ fn rename_thread_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn list_thread_timeline(
     State(pg_client): State<PgClient>,
-    authz: Authorized<markers::ViewComments>,
+    authz: Authorized<markers::ViewReviews>,
     Path(path_params): Path<ThreadPathParams>,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<TimelinePage>)> {
@@ -608,7 +559,7 @@ fn list_thread_timeline_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List a thread's timeline")
         .description(
             "Returns the thread's timeline — comments and lifecycle events (opened, \
-             closed, reopened, renamed, anchor added/removed) interleaved, oldest \
+             closed, reopened, renamed, and review transitions) interleaved, oldest \
              first, with cursor pagination.",
         )
         .response::<200, Json<TimelinePage>>()
@@ -617,12 +568,177 @@ fn list_thread_timeline_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Builds a full [`Thread`] response for `thread`, loading its live anchors and
-/// resolving its author.
+/// Verifies a document's review, moving it to `resolved`.
+///
+/// Verification is whole-document: one gesture marks the entire review pass done.
+/// Records a `review.verified` timeline event and raises a `review.verified`
+/// workspace event. Requires `Review` (a reviewer signs off their own work).
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
+        document_id = %path_params.document_id,
+    )
+)]
+async fn verify_review(
+    State(pg_client): State<PgClient>,
+    authz: Authorized<markers::Review>,
+    Path(path_params): Path<WorkspaceDocumentPathParams>,
+    security: SecurityContext,
+) -> Result<(StatusCode, Json<Thread>)> {
+    tracing::debug!(target: TRACING_TARGET, "Verifying document review");
+
+    let workspace = authz.workspace;
+    let mut conn = pg_client.get_connection().await?;
+
+    let document = conn
+        .find_document_in_workspace(workspace.id, path_params.document_id)
+        .await?
+        .ok_or_else(|| Error::not_found("document"))?;
+    let thread = conn
+        .find_document_thread(workspace.id, path_params.document_id)
+        .await?
+        .ok_or_else(|| Error::not_found("workspace_thread"))?;
+
+    let verified = conn
+        .transaction(async |conn| {
+            let verified = conn.verify_review(thread.id, authz.account_id).await?;
+            emit_thread_event(
+                conn,
+                workspace_origin(workspace.id, authz.account_id, &security),
+                WorkspaceEvent::ReviewVerified(ReviewVerified {
+                    thread_id: thread.id,
+                    document_id: document.id,
+                    document_name: document.display_name.clone(),
+                }),
+            )
+            .await?;
+            Ok::<_, Error>(verified)
+        })
+        .await?;
+
+    let response = thread_response(&mut conn, verified).await?;
+
+    tracing::info!(target: TRACING_TARGET, "Document review verified");
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+fn verify_review_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Verify a document review")
+        .description(
+            "Verifies a document's review as a whole, moving it to `resolved`. Requires \
+             Review.",
+        )
+        .response::<200, Json<Thread>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
+/// Assigns or unassigns a document's review.
+///
+/// A `null` assignee clears the current one. An assignee must be a workspace
+/// member. Records a `review.assigned` or `review.unassigned` timeline event and
+/// raises the matching workspace event (assigning notifies the reviewer unless
+/// they assigned themselves). Requires `AssignReviews`.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
+        document_id = %path_params.document_id,
+    )
+)]
+async fn assign_review(
+    State(pg_client): State<PgClient>,
+    authz: Authorized<markers::AssignReviews>,
+    Path(path_params): Path<WorkspaceDocumentPathParams>,
+    security: SecurityContext,
+    ValidateJson(request): ValidateJson<AssignReview>,
+) -> Result<(StatusCode, Json<Thread>)> {
+    tracing::debug!(target: TRACING_TARGET, "Assigning document review");
+
+    let workspace = authz.workspace;
+    let mut conn = pg_client.get_connection().await?;
+
+    let document = conn
+        .find_document_in_workspace(workspace.id, path_params.document_id)
+        .await?
+        .ok_or_else(|| Error::not_found("document"))?;
+    let thread = conn
+        .find_document_thread(workspace.id, path_params.document_id)
+        .await?
+        .ok_or_else(|| Error::not_found("workspace_thread"))?;
+
+    // An assignee (when set) must be a workspace member, resolved to its handle
+    // for the event; clearing needs no lookup. Scoping to membership also keeps a
+    // non-member's identity from being exposed across workspaces.
+    let assignee_ref =
+        resolve_workspace_member_ref(&mut conn, workspace.id, request.assignee).await?;
+    if request.assignee.is_some() && assignee_ref.is_none() {
+        return Err(Error::not_found("account"));
+    }
+
+    let updated = conn
+        .transaction(async |conn| {
+            let updated = conn
+                .assign_review(thread.id, request.assignee, authz.account_id)
+                .await?;
+            let event = match (request.assignee, &assignee_ref) {
+                (Some(assignee), Some(assignee_ref)) => {
+                    WorkspaceEvent::ReviewAssigned(ReviewAssigned {
+                        thread_id: thread.id,
+                        document_id: document.id,
+                        document_name: document.display_name.clone(),
+                        assignee_username: assignee_ref.username.clone(),
+                        // The reviewer is notified unless they assigned themselves.
+                        notify: (assignee != authz.account_id).then_some(assignee),
+                    })
+                }
+                _ => WorkspaceEvent::ReviewUnassigned(ReviewUnassigned {
+                    thread_id: thread.id,
+                    document_id: document.id,
+                    document_name: Some(document.display_name.clone()),
+                }),
+            };
+            emit_thread_event(
+                conn,
+                workspace_origin(workspace.id, authz.account_id, &security),
+                event,
+            )
+            .await?;
+            Ok::<_, Error>(updated)
+        })
+        .await?;
+
+    let response = thread_response(&mut conn, updated).await?;
+
+    tracing::info!(target: TRACING_TARGET, "Document review assignment updated");
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+fn assign_review_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Assign a document review")
+        .description(
+            "Assigns a document's review to a workspace member, or clears the assignee \
+             with a null `assignee`. Requires AssignReviews.",
+        )
+        .response::<200, Json<Thread>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
+/// Builds a full [`Thread`] response for `thread`, resolving its author and (for
+/// a document review) its assignee.
 async fn thread_response(conn: &mut PgConn, thread: WorkspaceThread) -> Result<Thread> {
-    let anchors = conn.list_thread_anchors(thread.id).await?;
     let author = resolve_account_ref(conn, thread.author_account_id).await?;
-    Ok(Thread::from_model(thread, anchors, author))
+    let assignee = resolve_account_ref_opt(conn, thread.assignee_account_id).await?;
+    Ok(Thread::from_model(thread, author, assignee))
 }
 
 /// Finds a live thread in the workspace or returns a 404.
@@ -784,8 +900,8 @@ pub(crate) fn workspace_origin<'a>(
     }
 }
 
-/// Emits one thread collaboration event (a lifecycle change, an anchor change,
-/// or a new comment) onto the outbox.
+/// Emits one thread collaboration event (a lifecycle change, a review
+/// transition, or a new comment) onto the outbox.
 pub(crate) async fn emit_thread_event(
     conn: &mut PgConn,
     origin: EventOrigin<'_>,
@@ -801,8 +917,12 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/files/{fileId}/threads/",
-            post_with(open_file_thread, open_file_thread_docs),
+            "/workspaces/{workspaceSlug}/documents/{documentId}/review/verify/",
+            post_with(verify_review, verify_review_docs),
+        )
+        .api_route(
+            "/workspaces/{workspaceSlug}/documents/{documentId}/review/assignee/",
+            put_with(assign_review, assign_review_docs),
         )
         .api_route(
             "/workspaces/{workspaceSlug}/threads/",

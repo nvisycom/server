@@ -113,7 +113,7 @@ impl<P: RequiredPermission> OperationInput for Authorized<P> {
 /// the `P` in [`Authorized<P>`].
 ///
 /// The markers land in a dedicated `markers` module, kept namespaced through the
-/// re-export chain so callers write `Authorized<markers::ViewFiles>` and the
+/// re-export chain so callers write `Authorized<markers::ViewDocuments>` and the
 /// generated types never crowd the flat extractor namespace.
 macro_rules! authz_permissions {
     ($($marker:ident => $permission:expr),+ $(,)?) => {
@@ -138,13 +138,13 @@ authz_permissions! {
     ViewWorkspace => Permission::ViewWorkspace,
     UpdateWorkspace => Permission::UpdateWorkspace,
     DeleteWorkspace => Permission::DeleteWorkspace,
-    ViewFiles => Permission::ViewFiles,
-    UploadFiles => Permission::UploadFiles,
-    UpdateFiles => Permission::UpdateFiles,
-    DownloadOriginalFiles => Permission::DownloadOriginalFiles,
-    DownloadRedactedFiles => Permission::DownloadRedactedFiles,
+    ViewDocuments => Permission::ViewDocuments,
+    UploadDocuments => Permission::UploadDocuments,
+    UpdateDocuments => Permission::UpdateDocuments,
+    DownloadOriginalDocuments => Permission::DownloadOriginalDocuments,
+    DownloadRedactedDocuments => Permission::DownloadRedactedDocuments,
     DownloadAudit => Permission::DownloadAudit,
-    DeleteFiles => Permission::DeleteFiles,
+    DeleteDocuments => Permission::DeleteDocuments,
     ViewPipelines => Permission::ViewPipelines,
     CreatePipelines => Permission::CreatePipelines,
     UpdatePipelines => Permission::UpdatePipelines,
@@ -152,11 +152,10 @@ authz_permissions! {
     ViewDetections => Permission::ViewDetections,
     RunDetections => Permission::RunDetections,
     RunRedactions => Permission::RunRedactions,
-    ViewAssignments => Permission::ViewAssignments,
-    AssignTasks => Permission::AssignTasks,
-    ViewComments => Permission::ViewComments,
-    Comment => Permission::Comment,
-    CloseComments => Permission::CloseComments,
+    ViewReviews => Permission::ViewReviews,
+    Review => Permission::Review,
+    ManageThreads => Permission::ManageThreads,
+    AssignReviews => Permission::AssignReviews,
     ViewAnalytics => Permission::ViewAnalytics,
     ViewActivity => Permission::ViewActivity,
     ViewMembers => Permission::ViewMembers,

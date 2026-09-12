@@ -160,13 +160,13 @@ mod tests {
     /// Seeds a detection and returns `(account_id, workspace_id, pipeline_id,
     /// detection_id)` — a redaction's FK parent plus the context tests scope on.
     async fn seed_detection(db: &TestDatabase) -> anyhow::Result<(Uuid, Uuid, Uuid, Uuid)> {
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.pipeline_id,
                 seeded.account_id,
-                seeded.file_id,
+                seeded.document_id,
             ))
             .await?;
         Ok((

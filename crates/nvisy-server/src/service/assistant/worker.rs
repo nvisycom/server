@@ -383,7 +383,7 @@ impl AssistantWorker {
             let event = WorkspaceEvent::ThreadCommentCreated(ThreadCommentCreated {
                 comment_id: comment.id,
                 thread_id: thread.id,
-                file_id: thread.file_id,
+                document_id: thread.document_id,
                 author_username: nvisy_postgres::ASSISTANT_HANDLE.parse().map_err(|_| {
                     ErrorKind::InternalServerError.with_message("Invalid assistant handle")
                 })?,

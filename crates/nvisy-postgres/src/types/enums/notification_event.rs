@@ -22,10 +22,8 @@ db_enum! {
         RedactionCreated = "pipeline.redaction.created",
         /// A detection failed.
         DetectionFailed = "pipeline.detection.failed",
-        /// A file was assigned to the reviewer.
-        FileAssigned = "file.assigned",
-        /// The reviewer was unassigned from a file.
-        FileUnassigned = "file.unassigned",
+        /// A file's review was assigned to the reviewer.
+        ReviewAssigned = "review.assigned",
         /// An account was mentioned in a comment.
         CommentMentioned = "comment.mentioned",
     }

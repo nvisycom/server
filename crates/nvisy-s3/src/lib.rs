@@ -19,5 +19,5 @@ mod key;
 pub use client::{BlobStore, GetObject, S3Config};
 pub use error::{Error, Result};
 pub use key::{
-    AccountAvatarKey, ArtifactKey, AuditKey, Bucket, FileKey, ObjectKey, WorkspaceAvatarKey,
+    AccountAvatarKey, AuditKey, Bucket, DocumentKey, IntermediateKey, ObjectKey, WorkspaceAvatarKey,
 };

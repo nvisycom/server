@@ -355,7 +355,7 @@ mod tests {
             .create_workspace_webhook(NewWorkspaceWebhook::test(
                 seeded.workspace_id,
                 seeded.account_id,
-                vec![WebhookEvent::FileCreated],
+                vec![WebhookEvent::DocumentCreated],
             ))
             .await?;
 
@@ -396,7 +396,7 @@ mod tests {
             .create_workspace_webhook(NewWorkspaceWebhook::test(
                 seeded.workspace_id,
                 seeded.account_id,
-                vec![WebhookEvent::FileCreated],
+                vec![WebhookEvent::DocumentCreated],
             ))
             .await?;
 
@@ -424,7 +424,7 @@ mod tests {
             .create_workspace_webhook(NewWorkspaceWebhook::test(
                 seeded.workspace_id,
                 seeded.account_id,
-                vec![WebhookEvent::FileCreated, WebhookEvent::FileDeleted],
+                vec![WebhookEvent::DocumentCreated, WebhookEvent::DocumentDeleted],
             ))
             .await?;
         // Subscribed to a different event only: does not match FileCreated.
@@ -440,7 +440,7 @@ mod tests {
             .create_workspace_webhook(NewWorkspaceWebhook::test(
                 seeded.workspace_id,
                 seeded.account_id,
-                vec![WebhookEvent::FileCreated],
+                vec![WebhookEvent::DocumentCreated],
             ))
             .await?;
         let _ = conn.suspend_webhook(suspended.id).await?;
@@ -449,13 +449,13 @@ mod tests {
             .create_workspace_webhook(NewWorkspaceWebhook::test(
                 seeded.workspace_id,
                 seeded.account_id,
-                vec![WebhookEvent::FileCreated],
+                vec![WebhookEvent::DocumentCreated],
             ))
             .await?;
         conn.delete_workspace_webhook(deleted.id).await?;
 
         let matched = conn
-            .find_webhooks_for_event(seeded.workspace_id, WebhookEvent::FileCreated)
+            .find_webhooks_for_event(seeded.workspace_id, WebhookEvent::DocumentCreated)
             .await?;
         assert_eq!(
             matched.iter().map(|w| w.id).collect::<Vec<_>>(),

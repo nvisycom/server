@@ -12,15 +12,14 @@
 //! change.
 
 use nvisy_postgres::types::{
-    ActivityPayload, AssignmentActivityParams, AssignmentStatus, CommentMentionedParams,
-    ConnectionActivityParams, ConnectionId, ConnectionSyncCompletedParams,
-    ConnectionSyncFailedParams, DetectionActivityParams, DetectionCompletedParams,
-    DetectionFailedParams, DetectionId, FileActivityParams, FileAssignedParams,
-    FileUnassignedParams, Handle, InviteActivityParams, MemberActivityParams, MemberJoinedParams,
-    NotificationPayload, PipelineActivityParams, PolicyActivityParams, ProviderActivityParams,
-    ProviderId, RedactionActivityParams, RedactionCreatedParams, RedactionId, ThreadActivityParams,
-    ThreadAnchorActivityParams, ThreadCommentActivityParams, WebhookActivityParams, WebhookEvent,
-    WebhookId, WorkspaceActivityParams, WorkspaceRole,
+    ActivityPayload, CommentMentionedParams, ConnectionActivityParams, ConnectionId,
+    ConnectionSyncCompletedParams, ConnectionSyncFailedParams, DetectionActivityParams,
+    DetectionCompletedParams, DetectionFailedParams, DetectionId, DocumentActivityParams, Handle,
+    InviteActivityParams, MemberActivityParams, MemberJoinedParams, NotificationPayload,
+    PipelineActivityParams, PolicyActivityParams, ProviderActivityParams, ProviderId,
+    RedactionActivityParams, RedactionCreatedParams, RedactionId, ReviewActivityParams,
+    ReviewAssignedParams, ThreadActivityParams, ThreadCommentActivityParams, WebhookActivityParams,
+    WebhookEvent, WebhookId, WorkspaceActivityParams, WorkspaceRole,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -57,13 +56,13 @@ workspace_events! {
     WebhookUpdated          => "webhook.updated",
     WebhookDeleted          => "webhook.deleted",
 
-    FileCreated             => "file.created",
-    FileUpdated             => "file.updated",
-    FileDeleted             => "file.deleted",
+    DocumentCreated         => "document.created",
+    DocumentUpdated         => "document.updated",
+    DocumentDeleted         => "document.deleted",
 
-    FileAssigned            => "file.assigned",
-    FileUnassigned          => "file.unassigned",
-    AssignmentStatusChanged => "file.assignment.updated",
+    ReviewVerified          => "review.verified",
+    ReviewAssigned          => "review.assigned",
+    ReviewUnassigned        => "review.unassigned",
 
     PipelineCreated         => "pipeline.created",
     PipelineUpdated         => "pipeline.updated",
@@ -84,35 +83,32 @@ workspace_events! {
     ThreadReopened       => "thread.reopened",
     ThreadRenamed        => "thread.renamed",
     ThreadDeleted        => "thread.deleted",
-    ThreadAnchorAdded    => "thread.anchor.added",
-    ThreadAnchorRemoved  => "thread.anchor.removed",
     ThreadCommentCreated => "thread.comment.created",
 }
 
-/// The webhook body for a file event: just the file's display name.
+/// The webhook body for a document event: just the document's display name.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct FileWebhookBody<'a> {
+struct DocumentWebhookBody<'a> {
     display_name: &'a str,
 }
 
-/// The webhook body for `file.created`: the display name plus the byte size.
+/// The webhook body for `document.created`: the display name plus the byte size.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct FileCreatedWebhookBody<'a> {
+struct DocumentCreatedWebhookBody<'a> {
     display_name: &'a str,
-    file_size_bytes: i64,
+    document_size_bytes: i64,
 }
 
-/// The webhook body for an assignment event: the assignee and status, plus the
-/// file name when it is still known (omitted if the file was removed).
+/// The webhook body for a review event: the document name, plus the assignee when the
+/// review is assigned (omitted for verification or when clearing the assignee).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AssignmentWebhookBody<'a> {
+struct ReviewWebhookBody<'a> {
+    display_name: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    display_name: Option<&'a str>,
-    assignee: &'a Handle,
-    status: AssignmentStatus,
+    assignee: Option<&'a Handle>,
 }
 
 /// Serializes a webhook body to JSON, failing closed to `None` (no body) rather
@@ -374,133 +370,166 @@ fn webhook_activity(webhook_id: Uuid, webhook_name: &str) -> WebhookActivityPara
     }
 }
 
-/// A file was created. Carries its byte size for the webhook body.
+/// A document was created. Carries its byte size for the webhook body.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileCreated {
-    pub file_id: Uuid,
-    pub file_name: String,
-    pub file_size_bytes: i64,
+pub struct DocumentCreated {
+    pub document_id: Uuid,
+    pub document_name: String,
+    pub document_size_bytes: i64,
 }
 
-impl EventKind for FileCreated {
-    const TAG: &'static str = "file.created";
+impl EventKind for DocumentCreated {
+    const TAG: &'static str = "document.created";
 
     fn resource_id(&self) -> Uuid {
-        self.file_id
+        self.document_id
     }
 
     fn activity(&self) -> ActivityPayload {
-        ActivityPayload::FileCreated(file_activity(self.file_id, &self.file_name))
+        ActivityPayload::DocumentCreated(document_activity(self.document_id, &self.document_name))
     }
 
     fn webhook(&self) -> Option<WebhookDelivery> {
         Some(WebhookDelivery {
-            event: WebhookEvent::FileCreated,
-            body: webhook_body(&FileCreatedWebhookBody {
-                display_name: &self.file_name,
-                file_size_bytes: self.file_size_bytes,
+            event: WebhookEvent::DocumentCreated,
+            body: webhook_body(&DocumentCreatedWebhookBody {
+                display_name: &self.document_name,
+                document_size_bytes: self.document_size_bytes,
             }),
         })
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileUpdated {
-    pub file_id: Uuid,
-    pub file_name: String,
+pub struct DocumentUpdated {
+    pub document_id: Uuid,
+    pub document_name: String,
 }
 
-impl EventKind for FileUpdated {
-    const TAG: &'static str = "file.updated";
+impl EventKind for DocumentUpdated {
+    const TAG: &'static str = "document.updated";
 
     fn resource_id(&self) -> Uuid {
-        self.file_id
+        self.document_id
     }
 
     fn activity(&self) -> ActivityPayload {
-        ActivityPayload::FileUpdated(file_activity(self.file_id, &self.file_name))
+        ActivityPayload::DocumentUpdated(document_activity(self.document_id, &self.document_name))
     }
 
     fn webhook(&self) -> Option<WebhookDelivery> {
         Some(WebhookDelivery {
-            event: WebhookEvent::FileUpdated,
-            body: webhook_body(&FileWebhookBody {
-                display_name: &self.file_name,
+            event: WebhookEvent::DocumentUpdated,
+            body: webhook_body(&DocumentWebhookBody {
+                display_name: &self.document_name,
             }),
         })
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileDeleted {
-    pub file_id: Uuid,
-    pub file_name: String,
+pub struct DocumentDeleted {
+    pub document_id: Uuid,
+    pub document_name: String,
 }
 
-impl EventKind for FileDeleted {
-    const TAG: &'static str = "file.deleted";
+impl EventKind for DocumentDeleted {
+    const TAG: &'static str = "document.deleted";
 
     fn resource_id(&self) -> Uuid {
-        self.file_id
+        self.document_id
     }
 
     fn activity(&self) -> ActivityPayload {
-        ActivityPayload::FileDeleted(file_activity(self.file_id, &self.file_name))
+        ActivityPayload::DocumentDeleted(document_activity(self.document_id, &self.document_name))
     }
 
     fn webhook(&self) -> Option<WebhookDelivery> {
         Some(WebhookDelivery {
-            event: WebhookEvent::FileDeleted,
-            body: webhook_body(&FileWebhookBody {
-                display_name: &self.file_name,
+            event: WebhookEvent::DocumentDeleted,
+            body: webhook_body(&DocumentWebhookBody {
+                display_name: &self.document_name,
             }),
         })
     }
 }
 
-/// Builds the shared file activity params.
-fn file_activity(file_id: Uuid, file_name: &str) -> FileActivityParams {
-    FileActivityParams {
-        file_id,
-        file_name: file_name.to_owned(),
+/// Builds the shared document activity params.
+fn document_activity(document_id: Uuid, document_name: &str) -> DocumentActivityParams {
+    DocumentActivityParams {
+        document_id,
+        document_name: document_name.to_owned(),
     }
 }
 
-/// A file was assigned to a reviewer. A file always exists at assign time, so its
-/// name is present. Notifies the reviewer unless they assigned themselves.
+/// A document's review was verified (the review thread reached `resolved`). Raises no
+/// notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileAssigned {
-    pub assignment_id: Uuid,
-    pub file_id: Uuid,
-    pub file_name: String,
+pub struct ReviewVerified {
+    pub thread_id: Uuid,
+    pub document_id: Uuid,
+    pub document_name: String,
+}
+
+impl EventKind for ReviewVerified {
+    const TAG: &'static str = "review.verified";
+
+    fn resource_id(&self) -> Uuid {
+        self.thread_id
+    }
+
+    fn activity(&self) -> ActivityPayload {
+        ActivityPayload::ReviewVerified(ReviewActivityParams {
+            thread_id: self.thread_id,
+            document_id: self.document_id,
+            assignee_username: None,
+        })
+    }
+
+    fn webhook(&self) -> Option<WebhookDelivery> {
+        Some(WebhookDelivery {
+            event: WebhookEvent::ReviewVerified,
+            body: webhook_body(&ReviewWebhookBody {
+                display_name: &self.document_name,
+                assignee: None,
+            }),
+        })
+    }
+}
+
+/// A document's review was assigned to a reviewer. A document always exists at
+/// assign time, so its name is present. Notifies the reviewer unless they assigned
+/// themselves.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewAssigned {
+    pub thread_id: Uuid,
+    pub document_id: Uuid,
+    pub document_name: String,
     pub assignee_username: Handle,
-    pub status: AssignmentStatus,
     pub notify: Option<Uuid>,
 }
 
-impl EventKind for FileAssigned {
-    const TAG: &'static str = "file.assigned";
+impl EventKind for ReviewAssigned {
+    const TAG: &'static str = "review.assigned";
 
     fn resource_id(&self) -> Uuid {
-        self.assignment_id
+        self.thread_id
     }
 
     fn activity(&self) -> ActivityPayload {
-        ActivityPayload::FileAssigned(AssignmentActivityParams {
-            assignment_id: self.assignment_id,
-            file_name: Some(self.file_name.clone()),
-            assignee_username: self.assignee_username.clone(),
-            status: self.status,
+        ActivityPayload::ReviewAssigned(ReviewActivityParams {
+            thread_id: self.thread_id,
+            document_id: self.document_id,
+            assignee_username: Some(self.assignee_username.clone()),
         })
     }
 
     fn webhook(&self) -> Option<WebhookDelivery> {
         Some(WebhookDelivery {
-            event: WebhookEvent::FileAssigned,
-            body: webhook_body(&AssignmentWebhookBody {
-                display_name: Some(&self.file_name),
-                assignee: &self.assignee_username,
-                status: self.status,
+            event: WebhookEvent::ReviewAssigned,
+            body: webhook_body(&ReviewWebhookBody {
+                display_name: &self.document_name,
+                assignee: Some(&self.assignee_username),
             }),
         })
     }
@@ -508,100 +537,45 @@ impl EventKind for FileAssigned {
     fn notification(self) -> Vec<Notification> {
         Notification::to_account(
             self.notify,
-            NotificationPayload::FileAssigned(FileAssignedParams {
-                assignment_id: self.assignment_id,
-                file_id: self.file_id,
-                file_name: self.file_name,
+            NotificationPayload::ReviewAssigned(ReviewAssignedParams {
+                thread_id: self.thread_id,
+                document_id: self.document_id,
+                document_name: Some(self.document_name),
             }),
         )
     }
 }
 
-/// A reviewer was unassigned from a file. The assignment can outlive its file
-/// (removed by retention), so the name is optional. Notifies the former reviewer
-/// unless they unassigned themselves.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileUnassigned {
-    pub assignment_id: Uuid,
-    pub file_id: Uuid,
-    pub file_name: Option<String>,
-    pub assignee_username: Handle,
-    pub status: AssignmentStatus,
-    pub notify: Option<Uuid>,
-}
-
-impl EventKind for FileUnassigned {
-    const TAG: &'static str = "file.unassigned";
-
-    fn resource_id(&self) -> Uuid {
-        self.assignment_id
-    }
-
-    fn activity(&self) -> ActivityPayload {
-        ActivityPayload::FileUnassigned(AssignmentActivityParams {
-            assignment_id: self.assignment_id,
-            file_name: self.file_name.clone(),
-            assignee_username: self.assignee_username.clone(),
-            status: self.status,
-        })
-    }
-
-    fn webhook(&self) -> Option<WebhookDelivery> {
-        Some(WebhookDelivery {
-            event: WebhookEvent::FileUnassigned,
-            body: webhook_body(&AssignmentWebhookBody {
-                display_name: self.file_name.as_deref(),
-                assignee: &self.assignee_username,
-                status: self.status,
-            }),
-        })
-    }
-
-    fn notification(self) -> Vec<Notification> {
-        Notification::to_account(
-            self.notify,
-            NotificationPayload::FileUnassigned(FileUnassignedParams {
-                file_id: self.file_id,
-                file_name: self.file_name,
-            }),
-        )
-    }
-}
-
-/// A file assignment's review status changed. The file may since have been
+/// A document's review assignee was cleared. The document may since have been
 /// removed, so its name is optional. Raises no notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AssignmentStatusChanged {
-    pub assignment_id: Uuid,
-    pub file_id: Uuid,
-    pub file_name: Option<String>,
-    pub assignee_username: Handle,
-    pub status: AssignmentStatus,
+pub struct ReviewUnassigned {
+    pub thread_id: Uuid,
+    pub document_id: Uuid,
+    pub document_name: Option<String>,
 }
 
-impl EventKind for AssignmentStatusChanged {
-    const TAG: &'static str = "file.assignment.updated";
+impl EventKind for ReviewUnassigned {
+    const TAG: &'static str = "review.unassigned";
 
     fn resource_id(&self) -> Uuid {
-        self.assignment_id
+        self.thread_id
     }
 
     fn activity(&self) -> ActivityPayload {
-        ActivityPayload::AssignmentStatusChanged(AssignmentActivityParams {
-            assignment_id: self.assignment_id,
-            file_name: self.file_name.clone(),
-            assignee_username: self.assignee_username.clone(),
-            status: self.status,
+        ActivityPayload::ReviewUnassigned(ReviewActivityParams {
+            thread_id: self.thread_id,
+            document_id: self.document_id,
+            assignee_username: None,
         })
     }
 
     fn webhook(&self) -> Option<WebhookDelivery> {
         Some(WebhookDelivery {
-            event: WebhookEvent::AssignmentStatusChanged,
-            body: webhook_body(&AssignmentWebhookBody {
-                display_name: self.file_name.as_deref(),
-                assignee: &self.assignee_username,
-                status: self.status,
+            event: WebhookEvent::ReviewUnassigned,
+            body: webhook_body(&ReviewWebhookBody {
+                display_name: self.document_name.as_deref().unwrap_or_default(),
+                assignee: None,
             }),
         })
     }
@@ -640,7 +614,7 @@ crud_events! {
 pub struct DetectionCompleted {
     pub detection_id: Uuid,
     pub pipeline_slug: Handle,
-    pub input_file_name: Option<String>,
+    pub input_document_name: Option<String>,
     pub notify: Uuid,
 }
 
@@ -671,7 +645,7 @@ impl EventKind for DetectionCompleted {
             payload: NotificationPayload::DetectionCompleted(DetectionCompletedParams {
                 detection_id: DetectionId::from_uuid(self.detection_id),
                 pipeline_slug: self.pipeline_slug,
-                input_file_name: self.input_file_name,
+                input_document_name: self.input_document_name,
             }),
         }]
     }
@@ -682,7 +656,7 @@ impl EventKind for DetectionCompleted {
 pub struct DetectionFailed {
     pub detection_id: Uuid,
     pub pipeline_slug: Handle,
-    pub input_file_name: Option<String>,
+    pub input_document_name: Option<String>,
     pub error: Option<String>,
     pub notify: Uuid,
 }
@@ -711,7 +685,7 @@ impl EventKind for DetectionFailed {
             payload: NotificationPayload::DetectionFailed(DetectionFailedParams {
                 detection_id: DetectionId::from_uuid(self.detection_id),
                 pipeline_slug: self.pipeline_slug,
-                input_file_name: self.input_file_name,
+                input_document_name: self.input_document_name,
                 error: self.error,
             }),
         }]
@@ -734,7 +708,7 @@ pub struct RedactionCreated {
     /// The redaction that was produced (its own id, distinct from the detection's
     /// — a detection can produce many redactions).
     pub redaction_id: Uuid,
-    pub input_file_name: Option<String>,
+    pub input_document_name: Option<String>,
     pub notify: Uuid,
 }
 
@@ -768,7 +742,7 @@ impl EventKind for RedactionCreated {
                 redaction_id: RedactionId::from_uuid(self.redaction_id),
                 detection_id: DetectionId::from_uuid(self.detection_id),
                 pipeline_slug: self.pipeline_slug,
-                input_file_name: self.input_file_name,
+                input_document_name: self.input_document_name,
             }),
         }]
     }
@@ -805,7 +779,7 @@ pub struct ThreadOpened {
     pub thread_id: Uuid,
     /// Id of the thread's opening comment, referenced by mention notifications.
     pub opening_comment_id: Uuid,
-    pub file_id: Option<Uuid>,
+    pub document_id: Option<Uuid>,
     /// Username of the thread's opener, shown in the mention notification.
     pub author_username: Handle,
     /// Accounts mentioned in the opening body, to notify. Empty when none.
@@ -822,7 +796,7 @@ impl EventKind for ThreadOpened {
     fn activity(&self) -> ActivityPayload {
         ActivityPayload::ThreadOpened(ThreadActivityParams {
             thread_id: self.thread_id,
-            file_id: self.file_id,
+            document_id: self.document_id,
         })
     }
 
@@ -843,7 +817,7 @@ impl EventKind for ThreadOpened {
                 payload: NotificationPayload::CommentMentioned(CommentMentionedParams {
                     comment_id: self.opening_comment_id,
                     thread_id: self.thread_id,
-                    file_id: self.file_id,
+                    document_id: self.document_id,
                     author_username: self.author_username.clone(),
                 }),
             })
@@ -854,9 +828,9 @@ impl EventKind for ThreadOpened {
 // Thread close / reopen / rename: activity + webhook, no notification or extra
 // fields.
 crud_events! {
-    fields { thread_id: Uuid, file_id: Option<Uuid> }
+    fields { thread_id: Uuid, document_id: Option<Uuid> }
     id = thread_id;
-    activity(this) = ThreadActivityParams { thread_id: this.thread_id, file_id: this.file_id };
+    activity(this) = ThreadActivityParams { thread_id: this.thread_id, document_id: this.document_id };
     webhook = yes;
 
     /// A thread was closed.
@@ -869,31 +843,13 @@ crud_events! {
 
 // Thread deletion: activity only, no webhook.
 crud_events! {
-    fields { thread_id: Uuid, file_id: Option<Uuid> }
+    fields { thread_id: Uuid, document_id: Option<Uuid> }
     id = thread_id;
-    activity(this) = ThreadActivityParams { thread_id: this.thread_id, file_id: this.file_id };
+    activity(this) = ThreadActivityParams { thread_id: this.thread_id, document_id: this.document_id };
     webhook = no;
 
     /// A thread was deleted.
     ThreadDeleted => "thread.deleted",
-}
-
-// Thread anchor add / remove: activity + webhook, keyed on the anchor. No
-// notification.
-crud_events! {
-    fields { thread_id: Uuid, anchor_id: Uuid, file_id: Option<Uuid> }
-    id = anchor_id;
-    activity(this) = ThreadAnchorActivityParams {
-        thread_id: this.thread_id,
-        anchor_id: this.anchor_id,
-        file_id: this.file_id,
-    };
-    webhook = yes;
-
-    /// An anchor was added to a thread.
-    ThreadAnchorAdded => "thread.anchor.added",
-    /// An anchor was removed from a thread.
-    ThreadAnchorRemoved => "thread.anchor.removed",
 }
 
 /// A comment (message) was posted in a thread. Notifies each mentioned account
@@ -903,7 +859,7 @@ crud_events! {
 pub struct ThreadCommentCreated {
     pub comment_id: Uuid,
     pub thread_id: Uuid,
-    pub file_id: Option<Uuid>,
+    pub document_id: Option<Uuid>,
     /// Username of the comment's author, shown in the mention notification.
     pub author_username: Handle,
     /// Accounts mentioned in the comment body, to notify. Empty when none.
@@ -921,7 +877,7 @@ impl EventKind for ThreadCommentCreated {
         ActivityPayload::ThreadCommentCreated(ThreadCommentActivityParams {
             comment_id: self.comment_id,
             thread_id: self.thread_id,
-            file_id: self.file_id,
+            document_id: self.document_id,
         })
     }
 
@@ -934,7 +890,7 @@ impl EventKind for ThreadCommentCreated {
                 payload: NotificationPayload::CommentMentioned(CommentMentionedParams {
                     comment_id: self.comment_id,
                     thread_id: self.thread_id,
-                    file_id: self.file_id,
+                    document_id: self.document_id,
                     author_username: self.author_username.clone(),
                 }),
             })

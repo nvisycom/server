@@ -11,4 +11,8 @@ pub enum WorkspaceThreadConstraints {
     /// The closed-at and closed-by columns disagree on the closed state.
     #[strum(serialize = "workspace_threads_closed_consistent")]
     ClosedConsistent,
+    /// The file-id and review-status presence disagree (a file thread must carry a
+    /// review status and a workspace thread must not).
+    #[strum(serialize = "workspace_threads_review_status_file")]
+    ReviewStatusFile,
 }

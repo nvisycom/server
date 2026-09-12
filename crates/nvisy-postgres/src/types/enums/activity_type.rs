@@ -52,18 +52,18 @@ db_enum! {
         WebhookUpdated = "webhook.updated",
         /// Webhook was deleted.
         WebhookDeleted = "webhook.deleted",
-        /// File was created.
-        FileCreated = "file.created",
-        /// File was updated.
-        FileUpdated = "file.updated",
-        /// File was deleted.
-        FileDeleted = "file.deleted",
-        /// File was assigned to a reviewer.
-        FileAssigned = "file.assigned",
-        /// A reviewer was unassigned from a file.
-        FileUnassigned = "file.unassigned",
-        /// A file assignment's review status changed.
-        AssignmentStatusChanged = "file.assignment.updated",
+        /// Document was created.
+        DocumentCreated = "document.created",
+        /// Document was updated.
+        DocumentUpdated = "document.updated",
+        /// Document was deleted.
+        DocumentDeleted = "document.deleted",
+        /// A document's review was verified.
+        ReviewVerified = "review.verified",
+        /// A document's review was assigned to a reviewer.
+        ReviewAssigned = "review.assigned",
+        /// A document's review assignee was cleared.
+        ReviewUnassigned = "review.unassigned",
         /// Pipeline was created.
         PipelineCreated = "pipeline.created",
         /// Pipeline was updated.
@@ -94,17 +94,13 @@ db_enum! {
         ThreadRenamed = "thread.renamed",
         /// A thread was deleted.
         ThreadDeleted = "thread.deleted",
-        /// An anchor was added to a thread.
-        ThreadAnchorAdded = "thread.anchor.added",
-        /// An anchor was removed from a thread.
-        ThreadAnchorRemoved = "thread.anchor.removed",
         /// A comment (message) was posted in a thread.
         ThreadCommentCreated = "thread.comment.created",
     }
 }
 
 impl ActivityType {
-    /// The canonical dotted tag for this type, e.g. `file.created` or
+    /// The canonical dotted tag for this type, e.g. `document.created` or
     /// `pipeline.redaction.created` — the same string used on the wire and in the
     /// DB, from the variant's `strum(serialize)`.
     pub fn as_tag(self) -> &'static str {
@@ -112,7 +108,7 @@ impl ActivityType {
     }
 
     /// The object half of the tag: everything before the final segment, e.g.
-    /// `file` for `file.created`, `pipeline.redaction` for
+    /// `document` for `document.created`, `pipeline.redaction` for
     /// `pipeline.redaction.created`, `connection.sync` for
     /// `connection.sync.failed`.
     pub fn object_type(self) -> &'static str {
@@ -124,7 +120,7 @@ impl ActivityType {
     }
 
     /// The action half of the tag: the final segment, e.g. `created` for
-    /// `file.created`, `created` for `pipeline.redaction.created`.
+    /// `document.created`, `created` for `pipeline.redaction.created`.
     pub fn action_type(self) -> &'static str {
         let tag = self.as_tag();
         match tag.rsplit_once('.') {
@@ -164,8 +160,8 @@ mod tests {
     #[test]
     fn split_takes_the_last_segment_as_the_action() {
         // Two-part tag.
-        assert_eq!(ActivityType::FileCreated.object_type(), "file");
-        assert_eq!(ActivityType::FileCreated.action_type(), "created");
+        assert_eq!(ActivityType::DocumentCreated.object_type(), "document");
+        assert_eq!(ActivityType::DocumentCreated.action_type(), "created");
         // Three-part tags: object is everything before the final segment.
         assert_eq!(
             ActivityType::RedactionCreated.object_type(),
