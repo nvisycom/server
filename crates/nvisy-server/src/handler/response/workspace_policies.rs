@@ -57,6 +57,9 @@ pub struct WorkspacePolicySummary {
     /// Policy description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// How the policy came to exist. A one-shot policy (minted from labels) is
+    /// hidden from the list and not pipeline-attachable until promoted.
+    pub kind: PolicyKind,
     /// When the policy was created.
     pub created_at: Timestamp,
     /// When the policy was last updated.
@@ -77,6 +80,7 @@ impl WorkspacePolicySummary {
             created_by,
             display_name: policy.display_name,
             description: policy.description,
+            kind: policy.kind,
             created_at: policy.created_at.into(),
             updated_at: policy.updated_at.into(),
         }

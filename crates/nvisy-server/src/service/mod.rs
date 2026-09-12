@@ -15,6 +15,7 @@ mod integration;
 mod notification;
 mod oidc;
 mod password;
+mod policy;
 mod run_blob_store;
 mod session_keys;
 mod user_agent;
@@ -76,6 +77,7 @@ pub use crate::service::oidc::{
     OidcAuthorization, OidcConfig, OidcError, OidcIdentity, OidcService, RedirectKind,
 };
 pub use crate::service::password::PasswordService;
+pub use crate::service::policy::{PolicyService, ResolvedPolicy};
 pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
 pub use crate::service::user_agent::UserAgentParser;
@@ -343,6 +345,20 @@ macro_rules! impl_di_compose {
     )+};
 }
 
+/// Derives [`FromRef`] for a stateless unit service that holds nothing and
+/// operates entirely on the connection passed to each of its methods.
+///
+/// [`FromRef`]: axum::extract::FromRef
+macro_rules! impl_di_unit {
+    ($($t:ident),+ $(,)?) => {$(
+        impl axum::extract::FromRef<ServiceState> for $t {
+            fn from_ref(_state: &ServiceState) -> Self {
+                $t
+            }
+        }
+    )+};
+}
+
 /// Derives [`FromRef`] for a single ambient client by cloning it out of the
 /// shared [`Infra`].
 ///
@@ -427,10 +443,6 @@ impl axum::extract::FromRef<ServiceState> for AuthIssuer {
     }
 }
 
-// `AccountProvisioner` is stateless; it operates entirely on the connection
-// passed to each method.
-impl axum::extract::FromRef<ServiceState> for AccountProvisioner {
-    fn from_ref(_state: &ServiceState) -> Self {
-        AccountProvisioner
-    }
-}
+// Stateless unit services, holding nothing and acting on the connection passed to
+// each method:
+impl_di_unit!(AccountProvisioner, PolicyService);

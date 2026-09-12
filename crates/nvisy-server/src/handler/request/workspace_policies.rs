@@ -1,6 +1,6 @@
 //! Policy request types.
 
-use elide_pipeline::entity::LabelRef;
+use elide_pipeline::entity::{LabelCatalog, LabelRef};
 use elide_pipeline::governance::policy::{LabelScope, Policy, PolicyRule, TemplateOrigin};
 use elide_pipeline::governance::redaction::{ModalityRedactions, TextRedaction};
 use elide_pipeline::template::PolicyTemplate;
@@ -241,6 +241,18 @@ fn validate_body(body: &PolicyBody, _: &()) -> garde::Result {
         if labels.len() > 64 {
             return Err(garde::Error::new("at most 64 labels are allowed"));
         }
+        let catalog = LabelCatalog::with_builtins();
+        let unknown: Vec<&str> = labels
+            .iter()
+            .filter(|id| !catalog.contains(&LabelRef::new(id.as_str())))
+            .map(String::as_str)
+            .collect();
+        if !unknown.is_empty() {
+            return Err(garde::Error::new(format!(
+                "unknown labels: {}",
+                unknown.join(", ")
+            )));
+        }
     }
     Ok(())
 }
@@ -350,5 +362,21 @@ mod tests {
             }),
         };
         assert!(inline.oneshot_content_hash().is_none());
+    }
+
+    #[test]
+    fn validate_body_accepts_known_labels_and_rejects_unknown() {
+        let known = PolicyBody::Labels {
+            labels: vec!["person_name".to_owned(), "email_address".to_owned()],
+            action: OneshotAction::Mask,
+        };
+        assert!(validate_body(&known, &()).is_ok());
+
+        let unknown = PolicyBody::Labels {
+            labels: vec!["person_name".to_owned(), "not_a_real_label".to_owned()],
+            action: OneshotAction::Mask,
+        };
+        let err = validate_body(&unknown, &()).expect_err("unknown label is rejected");
+        assert!(err.to_string().contains("not_a_real_label"));
     }
 }

@@ -203,6 +203,14 @@ impl WorkspacePolicyRepository for PgConnection {
         definition: serde_json::Value,
         version_metadata: Option<serde_json::Value>,
     ) -> Result<OneshotPolicy> {
+        if new_policy.kind != PolicyKind::Oneshot
+            || new_policy.content_hash.as_deref() != Some(content_hash.as_slice())
+        {
+            return Err(Error::unexpected(
+                "one-shot policy kind and content hash do not match",
+            ));
+        }
+
         let workspace_id = new_policy.workspace_id;
 
         // Reuse an identical live one-shot if one already exists.
@@ -845,6 +853,46 @@ mod tests {
             .await?;
         assert!(other.created);
         assert_ne!(other.policy.policy.id, first.policy.policy.id);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_or_create_oneshot_rejects_mismatched_kind_or_hash() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // An authored kind is not a one-shot: rejected before any write.
+        let mut wrong_kind = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        wrong_kind.kind = PolicyKind::Authored;
+        wrong_kind.content_hash = Some(vec![9, 9, 9]);
+        assert!(
+            conn.find_or_create_oneshot_policy(
+                wrong_kind,
+                vec![9, 9, 9],
+                serde_json::json!({"v":1}),
+                None,
+            )
+            .await
+            .is_err(),
+            "authored kind is rejected"
+        );
+
+        // A content hash that disagrees with the lookup key is rejected.
+        let mut wrong_hash = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        wrong_hash.kind = PolicyKind::Oneshot;
+        wrong_hash.content_hash = Some(vec![1, 1, 1]);
+        assert!(
+            conn.find_or_create_oneshot_policy(
+                wrong_hash,
+                vec![2, 2, 2],
+                serde_json::json!({"v":1}),
+                None,
+            )
+            .await
+            .is_err(),
+            "mismatched content hash is rejected"
+        );
         Ok(())
     }
 
