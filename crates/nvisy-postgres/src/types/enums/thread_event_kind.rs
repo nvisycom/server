@@ -21,9 +21,9 @@ db_enum! {
         /// The thread's display name was changed.
         Renamed = "thread.renamed",
         /// A detection ran on the file, so its review is needed.
-        DetectionCreated = "review.detection_created",
+        DetectionCreated = "review.detection.created",
         /// A redaction (review pass) was made on the file.
-        RedactionCreated = "review.redaction_created",
+        RedactionCreated = "review.redaction.created",
         /// The file's review was verified (approved).
         Verified = "review.verified",
         /// A new detection reopened a previously verified review.

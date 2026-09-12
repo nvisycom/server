@@ -8,12 +8,12 @@ db_enum! {
     /// Corresponds to the `WEBHOOK_EVENT` PostgreSQL enum and configures which
     /// events a webhook receives.
     pub enum WebhookEvent = "crate::schema::sql_types::WebhookEvent" {
-        /// A new file was created.
-        FileCreated = "file.created",
-        /// A file was updated.
-        FileUpdated = "file.updated",
-        /// A file was deleted.
-        FileDeleted = "file.deleted",
+        /// A new document was created.
+        DocumentCreated = "document.created",
+        /// A document was updated.
+        DocumentUpdated = "document.updated",
+        /// A document was deleted.
+        DocumentDeleted = "document.deleted",
         /// A member was added.
         MemberAdded = "member.added",
         /// A member was removed.
@@ -38,11 +38,11 @@ db_enum! {
         ProviderUpdated = "provider.updated",
         /// A provider was deleted.
         ProviderDeleted = "provider.deleted",
-        /// A file's review was verified.
+        /// A document's review was verified.
         ReviewVerified = "review.verified",
-        /// A file's review was assigned to a reviewer.
+        /// A document's review was assigned to a reviewer.
         ReviewAssigned = "review.assigned",
-        /// A file's review assignee was cleared.
+        /// A document's review assignee was cleared.
         ReviewUnassigned = "review.unassigned",
         /// A pipeline was created.
         PipelineCreated = "pipeline.created",
@@ -79,9 +79,9 @@ impl WebhookEvent {
     /// Returns the event category as a string.
     pub fn category(&self) -> &'static str {
         match self {
-            WebhookEvent::FileCreated | WebhookEvent::FileUpdated | WebhookEvent::FileDeleted => {
-                "file"
-            }
+            WebhookEvent::DocumentCreated
+            | WebhookEvent::DocumentUpdated
+            | WebhookEvent::DocumentDeleted => "document",
             WebhookEvent::ReviewVerified
             | WebhookEvent::ReviewAssigned
             | WebhookEvent::ReviewUnassigned => "review",
@@ -117,7 +117,7 @@ impl WebhookEvent {
     /// Returns the event as a subject string for NATS routing.
     ///
     /// The event name is already a dotted, NATS-legal subject (e.g.
-    /// `file.created`, `pipeline.redaction.created`), so this is the event's own
+    /// `document.created`, `pipeline.redaction.created`), so this is the event's own
     /// string representation (from its `strum(serialize)`).
     pub fn as_subject(&self) -> &'static str {
         self.into()

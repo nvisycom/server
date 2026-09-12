@@ -25,8 +25,8 @@ pub mod webhook_event;
 pub mod webhook_status;
 pub mod workspace_role;
 
-// File-related enumerations
-pub mod file_kind;
+// Document-related enumerations
+pub mod document_kind;
 
 // Detection / pipeline-related enumerations
 pub mod detection_status;
@@ -40,7 +40,7 @@ pub use activity_type::ActivityType;
 pub use api_token_type::ApiTokenType;
 pub use connection_type::ConnectionType;
 pub use detection_status::DetectionStatus;
-pub use file_kind::FileKind;
+pub use document_kind::DocumentKind;
 pub use identity_provider::IdentityProvider;
 pub use invite_status::InviteStatus;
 pub use notification_event::NotificationEvent;

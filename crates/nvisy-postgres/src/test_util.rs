@@ -14,9 +14,10 @@ use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::client::PgClientMigrationExt;
-use crate::model::{NewAccount, NewWorkspace, NewWorkspaceFile, NewWorkspacePipeline};
+use crate::model::{NewAccount, NewBlob, NewWorkspace, NewWorkspaceDocument, NewWorkspacePipeline};
 use crate::query::{
-    AccountRepository, WorkspaceFileRepository, WorkspacePipelineRepository, WorkspaceRepository,
+    AccountRepository, WorkspaceDocumentRepository, WorkspacePipelineRepository,
+    WorkspaceRepository,
 };
 use crate::{PgClient, PgConfig};
 
@@ -147,13 +148,13 @@ impl TestDatabase {
         }
     }
 
-    /// Seeds an account, a workspace, a pipeline, and an input file — the FK
-    /// parents a detection (and, through it, a redaction) requires.
+    /// Seeds an account, a workspace, a pipeline, and an input document (with its
+    /// blob) — the FK parents a detection (and, through it, a redaction) requires.
     ///
     /// # Panics
     ///
     /// Panics if any insert fails.
-    pub async fn seed_pipeline_and_file(&self) -> SeededPipeline {
+    pub async fn seed_pipeline_and_document(&self) -> SeededPipeline {
         let SeededWorkspace {
             account_id,
             workspace_id,
@@ -167,16 +168,19 @@ impl TestDatabase {
             .create_workspace_pipeline(NewWorkspacePipeline::test(workspace_id, account_id))
             .await
             .expect("failed to seed pipeline");
-        let file = conn
-            .create_workspace_file(NewWorkspaceFile::test(workspace_id, account_id))
+        let document = conn
+            .create_workspace_document(
+                NewWorkspaceDocument::test(workspace_id, account_id, Uuid::nil()),
+                NewBlob::test(workspace_id),
+            )
             .await
-            .expect("failed to seed file");
+            .expect("failed to seed document");
 
         SeededPipeline {
             account_id,
             workspace_id,
             pipeline_id: pipeline.id,
-            file_id: file.id,
+            document_id: document.id,
         }
     }
 }
@@ -190,8 +194,8 @@ pub struct SeededWorkspace {
     pub workspace_id: Uuid,
 }
 
-/// An account, workspace, pipeline, and input file, seeded for a test — the FK
-/// parents a detection and redaction need.
+/// An account, workspace, pipeline, and input document, seeded for a test — the
+/// FK parents a detection and redaction need.
 #[derive(Debug, Clone, Copy)]
 pub struct SeededPipeline {
     /// The account that owns everything.
@@ -200,8 +204,8 @@ pub struct SeededPipeline {
     pub workspace_id: Uuid,
     /// The pipeline.
     pub pipeline_id: Uuid,
-    /// The input file.
-    pub file_id: Uuid,
+    /// The input document.
+    pub document_id: Uuid,
 }
 
 /// Test-only helpers that backdate a single row's timestamp column(s).
@@ -279,6 +283,6 @@ pub mod backdate {
     // `completed_at >= started_at` holds (a two-step update would momentarily
     // violate it).
     backdate!(notification_span = account_notifications.(created_at, expires_at));
-    backdate!(file_span = workspace_files.(created_at, expires_at));
+    backdate!(blob_span = workspace_blobs.(created_at, expires_at));
     backdate!(detection_span = workspace_detections.(started_at, completed_at));
 }

@@ -54,17 +54,16 @@ async fn get_detection_analysis(
     // Resolve the detection and its audit file row under a scoped connection, then
     // release it before the object-store load below so the pooled connection is
     // not held across the NATS round-trip.
-    let audit_file = {
+    let audit_blob = {
         let mut conn = pg_client.get_connection().await?;
 
         let (detection, _pipeline) =
             find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
 
-        blob.resolve_audit_file(&mut conn, workspace.id, &detection)
-            .await?
+        blob.resolve_audit_blob(&mut conn, &detection).await?
     };
 
-    let analyzed = blob.load_audit(&engine, workspace.id, &audit_file).await?;
+    let analyzed = blob.load_audit(&engine, workspace.id, &audit_blob).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Detection analysis retrieved");
 
@@ -89,7 +88,7 @@ fn get_detection_analysis_docs(op: TransformOperation) -> TransformOperation {
 ///
 /// Available only for a detection whose analysis enriched (ran an enricher for a
 /// group); a detection with no enrichment has none — 404. Requires
-/// `DownloadOriginalFiles`, since intermediates carry the original document's
+/// `DownloadOriginalDocuments`, since intermediates carry the original document's
 /// content.
 #[tracing::instrument(
     skip_all,
@@ -103,7 +102,7 @@ async fn get_detection_intermediates(
     State(pg_client): State<PgClient>,
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
-    authz: Authorized<markers::DownloadOriginalFiles>,
+    authz: Authorized<markers::DownloadOriginalDocuments>,
     Path(path_params): Path<DetectionPathParams>,
 ) -> Result<(StatusCode, Json<ArtifactSet>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting detection intermediates");
@@ -113,18 +112,18 @@ async fn get_detection_intermediates(
     // Resolve the detection and its intermediates file row under a scoped
     // connection, then release it before the object-store load so the pooled
     // connection is not held across the NATS round-trip.
-    let intermediates_file = {
+    let intermediates_blob = {
         let mut conn = pg_client.get_connection().await?;
 
         let (detection, _pipeline) =
             find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
 
-        blob.resolve_intermediates_file(&mut conn, workspace.id, &detection)
+        blob.resolve_intermediates_blob(&mut conn, &detection)
             .await?
     };
 
     let intermediates = blob
-        .load_intermediates(&engine, workspace.id, &intermediates_file)
+        .load_intermediates(&engine, workspace.id, &intermediates_blob)
         .await?;
 
     tracing::debug!(target: TRACING_TARGET, "Detection intermediates retrieved");
@@ -177,18 +176,15 @@ async fn download_detection_audit(
     // Resolve the detection and its audit file row under a scoped connection, then
     // release it before the object-store load below so the pooled connection is
     // not held across the NATS round-trip.
-    let (detection_id, audit_file) = {
+    let detection_id = path_params.detection_id.as_uuid();
+    let audit_blob = {
         let mut conn = pg_client.get_connection().await?;
 
-        let (detection, _pipeline) =
-            find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
-        let audit_file = blob
-            .resolve_audit_file(&mut conn, workspace.id, &detection)
-            .await?;
-        (detection.id, audit_file)
+        let (detection, _pipeline) = find_detection(&mut conn, workspace.id, detection_id).await?;
+        blob.resolve_audit_blob(&mut conn, &detection).await?
     };
 
-    let audit = blob.load_audit(&engine, workspace.id, &audit_file).await?;
+    let audit = blob.load_audit(&engine, workspace.id, &audit_blob).await?;
 
     let (content_type, filename, body) = match query.format {
         ExportFormat::Json => {

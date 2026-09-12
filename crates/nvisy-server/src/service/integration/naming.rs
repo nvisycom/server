@@ -2,7 +2,7 @@
 
 use std::path::Path as StdPath;
 
-use nvisy_postgres::model::WorkspaceFile;
+use nvisy_postgres::model::WorkspaceDocument;
 
 /// The final path segment of a key (its file name), or the whole key when it
 /// contains no separator.
@@ -22,17 +22,21 @@ pub(super) fn object_extension(key: &str) -> Option<String> {
         .map(str::to_ascii_lowercase)
 }
 
-/// The remote key an exported file is written under.
+/// The remote key an exported document is written under.
 ///
-/// The base name is the file's display name. For an object store the key is
+/// The base name is the document's display name. For an object store the key is
 /// namespaced under `object_prefix` (e.g. `redacted/`) so exports never overwrite
-/// imported originals, and under the file's id so two files that share a display
-/// name do not overwrite each other at the same path. A file service creates a
-/// new file from the base name directly, since it never overwrites.
-pub(super) fn export_key(file: &WorkspaceFile, object_store: bool, object_prefix: &str) -> String {
-    let name = object_basename(&file.display_name);
+/// imported originals, and under the document's id so two documents that share a
+/// display name do not overwrite each other at the same path. A file service
+/// creates a new file from the base name directly, since it never overwrites.
+pub(super) fn export_key(
+    document: &WorkspaceDocument,
+    object_store: bool,
+    object_prefix: &str,
+) -> String {
+    let name = object_basename(&document.display_name);
     if object_store {
-        format!("{object_prefix}{}/{name}", file.id)
+        format!("{object_prefix}{}/{name}", document.id)
     } else {
         name
     }

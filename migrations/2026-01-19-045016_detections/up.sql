@@ -28,26 +28,15 @@ CREATE TABLE workspace_detections (
     pipeline_id     UUID                    NOT NULL REFERENCES workspace_pipelines (id) ON DELETE CASCADE,
     account_id      UUID                    NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
-    -- The two files a detection relates to, each a distinct role. The input is
-    -- the source document (required); the audit blob is produced by the analysis,
-    -- so it is null until the pass completes. Redacted outputs are not here — a
-    -- detection produces many redactions, each owning its own output (see the
-    -- workspace_redactions table below).
-    --   input:  the original document being analyzed.
-    --   audit:  the engine's analysis (Audit), a `file_kind = audit` file held
-    --           between detect and redact; redact reads it as the source of truth.
-    -- A detection is append-only audit history: its file references survive the
-    -- files themselves. Files are only ever soft-deleted (their objects purged),
-    -- so these ON DELETE actions fire only on a hard delete. The app never hard-
-    -- deletes an individual file; the one hard delete is a whole-workspace
-    -- teardown, which cascades files and detections away together. The input
-    -- therefore cascades — a workspace deletion that removes the source document
-    -- should remove its detections too. The produced audit uses ON DELETE SET
-    -- NULL so that, in that same teardown, it clears rather than cascades
-    -- (redundant here, but the correct action for a produced artifact).
-    input_file_id   UUID                    NOT NULL REFERENCES workspace_files (id) ON DELETE CASCADE,
-    audit_file_id   UUID                    DEFAULT NULL REFERENCES workspace_files (id) ON DELETE SET NULL,
-    intermediates_file_id UUID              DEFAULT NULL REFERENCES workspace_files (id) ON DELETE SET NULL,
+    -- What a detection relates to. The input is the source document (required);
+    -- the produced analysis (Audit) is its own row in workspace_audits pointing
+    -- back here, so there is no audit column. The enrichment intermediate (OCR
+    -- layout, transcript) is a blob the analysis may produce, served to the client;
+    -- null until (and unless) an enricher runs. A detection is append-only history:
+    -- the input cascades with a whole-workspace teardown; the intermediate blob
+    -- reference clears (SET NULL) as the correct action for a produced artifact.
+    input_document_id     UUID              NOT NULL REFERENCES workspace_documents (id) ON DELETE CASCADE,
+    intermediate_blob_id  UUID              DEFAULT NULL REFERENCES workspace_blobs (id) ON DELETE SET NULL,
 
     -- Detection attributes
     trigger_type    PIPELINE_TRIGGER_TYPE   NOT NULL DEFAULT 'user',
@@ -89,43 +78,31 @@ CREATE INDEX workspace_detections_status_idx
     ON workspace_detections (status, started_at DESC)
     WHERE status IN ('pending', 'executing', 'complete');
 
--- Detections analyzing a given input file, newest first.
-CREATE INDEX workspace_detections_input_file_idx
-    ON workspace_detections (input_file_id, started_at DESC);
+-- Detections analyzing a given input document, newest first.
+CREATE INDEX workspace_detections_input_document_idx
+    ON workspace_detections (input_document_id, started_at DESC);
 
--- The file-expiry sweep's hold check matches a candidate file against a
--- detection's input OR audit file; the input side is covered above, this covers
--- the audit side. Partial, since most detections eventually carry an audit but
--- the column is NULL until analysis writes it.
-CREATE INDEX workspace_detections_audit_file_idx
-    ON workspace_detections (audit_file_id)
-    WHERE audit_file_id IS NOT NULL;
-
--- Same shape for the enrichment intermediates file, NULL until (and unless) a
--- detection's analysis runs an enricher (an analysis with none produces no file).
-CREATE INDEX workspace_detections_intermediates_file_idx
-    ON workspace_detections (intermediates_file_id)
-    WHERE intermediates_file_id IS NOT NULL;
+-- Back the enrichment intermediate blob reference, NULL until (and unless) a
+-- detection's analysis runs an enricher (an analysis with none produces none).
+CREATE INDEX workspace_detections_intermediate_blob_idx
+    ON workspace_detections (intermediate_blob_id)
+    WHERE intermediate_blob_id IS NOT NULL;
 
 -- Idempotent detect: at most one detection per (pipeline, idempotency key).
 CREATE UNIQUE INDEX workspace_detections_idempotency_idx
     ON workspace_detections (pipeline_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
 
--- A detection is append-only history: its file references (input/audit) are kept
--- even after those files are deleted, so the record of what it analyzed
--- survives. The `ON DELETE SET NULL` FK would fire only on a hard file delete,
--- which never happens (files are soft-deleted); a reference to a soft-deleted
--- file resolves to "gone" at read time, distinct from a NULL that means the
--- detection never had one.
+-- A detection is append-only history: its document reference is kept even after
+-- the document is soft-deleted, so the record of what it analyzed survives; a
+-- reference to a soft-deleted document resolves to "gone" at read time.
 
-COMMENT ON TABLE workspace_detections IS 'Detections: one analysis pass of a file through a pipeline.';
+COMMENT ON TABLE workspace_detections IS 'Detections: one analysis pass of a document through a pipeline.';
 COMMENT ON COLUMN workspace_detections.id IS 'Unique detection identifier';
 COMMENT ON COLUMN workspace_detections.pipeline_id IS 'Pipeline whose config drove the detection';
 COMMENT ON COLUMN workspace_detections.account_id IS 'Account that triggered the detection';
-COMMENT ON COLUMN workspace_detections.input_file_id IS 'Source document the detection analyzes';
-COMMENT ON COLUMN workspace_detections.audit_file_id IS 'Audit file (file_kind=audit) holding the analysis between detect and redact';
-COMMENT ON COLUMN workspace_detections.intermediates_file_id IS 'Intermediates file (file_kind=intermediate) holding the enrichment (OCR layout, transcript) served to the client';
+COMMENT ON COLUMN workspace_detections.input_document_id IS 'Source document the detection analyzes';
+COMMENT ON COLUMN workspace_detections.intermediate_blob_id IS 'Enrichment intermediate blob (OCR layout, transcript) served to the client; NULL if no enricher ran';
 COMMENT ON COLUMN workspace_detections.trigger_type IS 'How the detection was initiated';
 COMMENT ON COLUMN workspace_detections.status IS 'Current detection status';
 COMMENT ON COLUMN workspace_detections.idempotency_key IS 'Detect idempotency key (dedupes retries)';
@@ -254,6 +231,57 @@ COMMENT ON COLUMN workspace_detection_jobs.attempts IS 'Number of publish attemp
 COMMENT ON COLUMN workspace_detection_jobs.next_attempt_at IS 'Earliest time the row may next be claimed; advanced by a backoff after each failed attempt';
 COMMENT ON COLUMN workspace_detection_jobs.created_at IS 'Timestamp when the job was queued';
 COMMENT ON COLUMN workspace_detection_jobs.resolved_at IS 'When a terminal (processed or failed) row was resolved by an operator; NULL until then. A manual affordance for inspecting the outbox after the fact';
+
+-- Audits: the engine's findings set over a document. Every audit is one row.
+-- The base audit is produced by a detection (redaction_id and derived_from NULL);
+-- a review audit is produced by a redaction applying reviewer edits, and carries
+-- redaction_id plus derived_from — the base audit it was edited from. The bytes
+-- live in a blob; this row is the provenance. Audits and reviews were once two
+-- file kinds; they are the same type, distinguished only by this lineage.
+--
+-- The table's natural home is here, with its always-set detection_id parent. The
+-- redaction_id foreign key is added by the later redactions migration, since
+-- workspace_redactions does not exist yet.
+CREATE TABLE workspace_audits (
+    -- Primary identifier
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- References
+    workspace_id        UUID                NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+    blob_id             UUID                NOT NULL REFERENCES workspace_blobs (id),
+
+    -- The detection that produced the base analysis this audit belongs to
+    -- (always set). A review audit additionally names the redaction that produced
+    -- it and the base audit it was edited from; both NULL for a base audit. The
+    -- redaction_id foreign key is added by the redactions migration.
+    detection_id        UUID                NOT NULL REFERENCES workspace_detections (id) ON DELETE CASCADE,
+    redaction_id        UUID                DEFAULT NULL,
+    derived_from        UUID                DEFAULT NULL REFERENCES workspace_audits (id) ON DELETE SET NULL,
+    CONSTRAINT workspace_audits_review_consistent CHECK (
+        (redaction_id IS NULL) = (derived_from IS NULL)
+    ),
+
+    -- Timing
+    created_at          TIMESTAMPTZ         NOT NULL DEFAULT current_timestamp
+);
+
+-- A detection's audits, newest first (its base audit and every review derived
+-- through its redactions).
+CREATE INDEX workspace_audits_detection_idx
+    ON workspace_audits (detection_id, created_at DESC);
+
+-- Back the blob foreign key (ref-count maintenance and reclamation walks it).
+CREATE INDEX workspace_audits_blob_idx
+    ON workspace_audits (blob_id);
+
+COMMENT ON TABLE workspace_audits IS 'Findings sets over a document: a detection''s base audit and the review audits redactions derive from it, sharing one type via lineage.';
+COMMENT ON COLUMN workspace_audits.id IS 'Unique audit identifier';
+COMMENT ON COLUMN workspace_audits.workspace_id IS 'Owning workspace';
+COMMENT ON COLUMN workspace_audits.blob_id IS 'Blob holding the findings bytes';
+COMMENT ON COLUMN workspace_audits.detection_id IS 'Detection whose analysis this audit belongs to';
+COMMENT ON COLUMN workspace_audits.redaction_id IS 'Redaction that produced this review audit; NULL for a base audit';
+COMMENT ON COLUMN workspace_audits.derived_from IS 'Base audit this review was edited from; NULL for a base audit';
+COMMENT ON COLUMN workspace_audits.created_at IS 'When the audit was created';
 
 -- Detection run events feed the activity log, webhooks, and (for terminal
 -- completion/failure) in-app notifications.

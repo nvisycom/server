@@ -22,13 +22,15 @@ mod pipeline_references;
 mod search;
 mod workspace_activities;
 mod workspace_assistant_jobs;
+mod workspace_audits;
+mod workspace_blobs;
 mod workspace_connection_schedule;
 mod workspace_connection_syncs;
 mod workspace_connections;
 mod workspace_detection_jobs;
 mod workspace_detections;
+mod workspace_documents;
 mod workspace_event_outbox;
-mod workspace_files;
 mod workspace_invites;
 mod workspace_members;
 mod workspace_pipelines;
@@ -54,6 +56,8 @@ pub use analytics::{
 pub use pipeline_references::PipelineReferenceRepository;
 pub use workspace_activities::{ActivityCursor, ActivityFilter, WorkspaceActivityRepository};
 pub use workspace_assistant_jobs::AssistantJobOutboxRepository;
+pub use workspace_audits::WorkspaceAuditRepository;
+pub use workspace_blobs::{ReclaimableBlob, WorkspaceBlobRepository};
 pub use workspace_connection_schedule::WorkspaceConnectionScheduleRepository;
 pub use workspace_connection_syncs::{ConnectionSyncCursor, WorkspaceConnectionSyncRepository};
 pub use workspace_connections::{
@@ -61,10 +65,12 @@ pub use workspace_connections::{
 };
 pub use workspace_detection_jobs::DetectionJobOutboxRepository;
 pub use workspace_detections::{
-    DetectionCursor, DetectionFiles, DetectionListRow, WorkspaceDetectionRepository,
+    DetectionCursor, DetectionDocuments, DetectionListRow, WorkspaceDetectionRepository,
+};
+pub use workspace_documents::{
+    DocumentCursor, DocumentWithBlob, ImportedDocumentRef, WorkspaceDocumentRepository,
 };
 pub use workspace_event_outbox::EventOutboxRepository;
-pub use workspace_files::{ExpiredFileRef, FileCursor, ImportedFileRef, WorkspaceFileRepository};
 pub use workspace_invites::{InviteCursor, WorkspaceInviteRepository};
 pub use workspace_members::{
     AccountWorkspaceCursor, WorkspaceMemberCursor, WorkspaceMemberRepository,

@@ -93,7 +93,7 @@ async fn create_comment(
                 WorkspaceEvent::ThreadCommentCreated(ThreadCommentCreated {
                     comment_id: comment.id,
                     thread_id: thread.id,
-                    file_id: thread.file_id,
+                    document_id: thread.document_id,
                     author_username: author_username.clone(),
                     mentioned: recipients,
                 }),

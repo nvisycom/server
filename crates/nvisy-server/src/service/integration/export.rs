@@ -10,9 +10,11 @@ use std::str::FromStr;
 
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
-use nvisy_postgres::model::{WorkspaceConnection, WorkspaceFile};
-use nvisy_postgres::query::WorkspaceFileRepository;
-use nvisy_s3::FileKey;
+use nvisy_postgres::model::{Blob, WorkspaceConnection, WorkspaceDocument};
+use nvisy_postgres::query::{
+    DocumentWithBlob, WorkspaceBlobRepository, WorkspaceDocumentRepository,
+};
+use nvisy_s3::DocumentKey;
 use tokio::io::AsyncRead;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
@@ -72,14 +74,21 @@ impl Exporter {
             let mut conn = self.infra.postgres.get_connection().await?;
             let mut files = Vec::with_capacity(file_ids.len());
             for file_id in file_ids {
-                match conn
-                    .find_file_in_workspace(connection.workspace_id, file_id)
-                    .await?
-                {
-                    Some(file) => files.push(file),
-                    None => tracing::warn!(
+                let document = conn
+                    .find_document_in_workspace(connection.workspace_id, file_id)
+                    .await?;
+                let Some(document) = document else {
+                    tracing::warn!(
                         target: TRACING_TARGET,
                         %file_id, "Skipping export of file not found in workspace",
+                    );
+                    continue;
+                };
+                match conn.find_blob_by_id(document.blob_id).await? {
+                    Some(blob) => files.push(DocumentWithBlob { document, blob }),
+                    None => tracing::warn!(
+                        target: TRACING_TARGET,
+                        %file_id, "Skipping export of file whose content is gone",
                     ),
                 }
             }
@@ -113,8 +122,21 @@ impl Exporter {
 
         let pending = {
             let mut conn = self.infra.postgres.get_connection().await?;
-            conn.redacted_files_not_exported(connection.workspace_id, connection.id)
-                .await?
+            let documents = conn
+                .redacted_documents_not_exported(connection.workspace_id, connection.id)
+                .await?;
+            let mut pending = Vec::with_capacity(documents.len());
+            for document in documents {
+                match conn.find_blob_by_id(document.blob_id).await? {
+                    Some(blob) => pending.push(DocumentWithBlob { document, blob }),
+                    None => tracing::warn!(
+                        target: TRACING_TARGET,
+                        document_id = %document.id,
+                        "Skipping redacted export whose content is gone",
+                    ),
+                }
+            }
+            pending
         };
         let exported = self
             .export_files(connection, config, pending, EXPORT_PREFIX_REDACTED)
@@ -144,7 +166,7 @@ impl Exporter {
         &self,
         connection: &WorkspaceConnection,
         config: &ConnectionConfig,
-        files: Vec<WorkspaceFile>,
+        files: Vec<DocumentWithBlob>,
         object_prefix: &str,
     ) -> Result<u64> {
         use futures::stream::{self, StreamExt};
@@ -155,16 +177,16 @@ impl Exporter {
 
         let exported = stream::iter(files)
             .map(|file| async move {
-                let remote_key = export_key(&file, object_store, object_prefix);
+                let remote_key = export_key(&file.document, object_store, object_prefix);
                 match self
-                    .export_one(source, connection, &file, &remote_key)
+                    .export_one(source, connection, &file.document, &file.blob, &remote_key)
                     .await
                 {
                     Ok(()) => 1u64,
                     Err(err) => {
                         tracing::warn!(
                             target: TRACING_TARGET,
-                            file_id = %file.id, error = %err,
+                            file_id = %file.document.id, error = %err,
                             "Skipping file that failed to export",
                         );
                         0
@@ -186,18 +208,19 @@ impl Exporter {
     #[tracing::instrument(
         name = "sync.export_one",
         skip_all,
-        fields(connection_id = %connection.id, file_id = %file.id, key = %remote_key),
+        fields(connection_id = %connection.id, file_id = %document.id, key = %remote_key),
     )]
     async fn export_one(
         &self,
         source: &dyn FileSource,
         connection: &WorkspaceConnection,
-        file: &WorkspaceFile,
+        document: &WorkspaceDocument,
+        blob: &Blob,
         remote_key: &str,
     ) -> Result<()> {
         tracing::debug!(target: TRACING_TARGET, "Exporting file to connection");
 
-        let file_key = FileKey::from_str(&file.storage_path).map_err(|err| {
+        let file_key = DocumentKey::from_str(&blob.storage_path).map_err(|err| {
             ErrorKind::InternalServerError
                 .with_message("Invalid file storage path")
                 .with_context(err.to_string())
@@ -217,38 +240,38 @@ impl Exporter {
                 .with_message("Failed to read stored file for export")
                 .with_context(err.to_string())
         }));
-        let content_type = mime_from_extension(&file.file_extension);
-        // `file_size_bytes` is the plaintext size (measured on import before
-        // encryption), which is exactly what the decrypted body streams out — the
-        // Content-Length a provider like Dropbox requires up front.
+        let content_type = mime_from_extension(&document.file_extension);
+        // The blob's `file_size_bytes` is the plaintext size (measured on import
+        // before encryption), which is exactly what the decrypted body streams out
+        // — the Content-Length a provider like Dropbox requires up front.
         source
             .put_stream(FileUpload {
                 key: remote_key,
                 content_type: content_type.as_str(),
-                content_length: file.file_size_bytes.max(0) as u64,
+                content_length: blob.file_size_bytes.max(0) as u64,
                 body,
             })
             .await?;
 
         // Record the export (upsert) so both manual and scheduled paths dedupe:
-        // a file exported here is not re-pushed by a later scheduled export.
-        self.record_exported_file(file, connection, remote_key)
+        // a document exported here is not re-pushed by a later scheduled export.
+        self.record_exported_file(document, connection, remote_key)
             .await?;
 
         tracing::debug!(target: TRACING_TARGET, "File exported");
         Ok(())
     }
 
-    /// Records that a file was exported to a connection so a scheduled export
+    /// Records that a document was exported to a connection so a scheduled export
     /// does not push it again.
     async fn record_exported_file(
         &self,
-        file: &WorkspaceFile,
+        document: &WorkspaceDocument,
         connection: &WorkspaceConnection,
         remote_key: &str,
     ) -> Result<()> {
         let mut conn = self.infra.postgres.get_connection().await?;
-        conn.record_exported_file(file.id, connection.id, remote_key.to_owned())
+        conn.record_exported_document(document.id, connection.id, remote_key.to_owned())
             .await?;
         Ok(())
     }

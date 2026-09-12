@@ -7,15 +7,16 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::str::FromStr;
 
 use bytes::Bytes;
 use futures::stream::{self, StreamExt};
 use futures::{Stream, TryStreamExt};
-use nvisy_postgres::model::{NewWorkspaceFile, WorkspaceConnection, WorkspaceFile};
-use nvisy_postgres::query::{WorkspaceFileRepository, WorkspaceRepository};
-use nvisy_postgres::types::{FileKind, SyncDeletionPolicy};
-use nvisy_s3::{Bucket, FileKey};
+use nvisy_postgres::model::{
+    NewBlob, NewWorkspaceDocument, WorkspaceConnection, WorkspaceDocument,
+};
+use nvisy_postgres::query::{WorkspaceDocumentRepository, WorkspaceRepository};
+use nvisy_postgres::types::{DocumentKind, SyncDeletionPolicy};
+use nvisy_s3::{Bucket, DocumentKey};
 use tokio::io::AsyncRead;
 use tokio_util::io::StreamReader;
 use uuid::Uuid;
@@ -224,7 +225,7 @@ impl Importer {
                     return;
                 }
             };
-            match conn.imported_files_for_connection(connection.id).await {
+            match conn.imported_documents_for_connection(connection.id).await {
                 Ok(files) => files,
                 Err(err) => {
                     tracing::error!(target: TRACING_TARGET, error = %err, "Failed to list imported files for reconciliation");
@@ -238,10 +239,7 @@ impl Importer {
             if remote_keys.contains(&file.source_key) {
                 continue;
             }
-            if let Err(err) = self
-                .remove_vanished_file(file.file_id, &file.storage_path)
-                .await
-            {
+            if let Err(err) = self.remove_vanished_file(file.document_id).await {
                 tracing::warn!(
                     target: TRACING_TARGET,
                     key = %file.source_key, error = %err,
@@ -257,25 +255,15 @@ impl Importer {
         }
     }
 
-    /// Deletes a single file whose source object is gone.
+    /// Deletes a single document whose source object is gone.
     ///
-    /// The file row is soft-deleted first so it stops being readable, then its
-    /// stored object is removed to reclaim storage. Object removal is
-    /// best-effort: the row is already tombstoned, so a failure only leaves an
-    /// orphaned object, which is logged.
-    async fn remove_vanished_file(&self, file_id: Uuid, storage_path: &str) -> Result<()> {
+    /// The document is soft-deleted, which drops its blob reference; the backing
+    /// object is not removed here, since its bytes may be shared with another
+    /// document. The reaper reclaims the blob once its last reference is gone and
+    /// its retention window has passed.
+    async fn remove_vanished_file(&self, document_id: Uuid) -> Result<()> {
         let mut conn = self.infra.postgres.get_connection().await?;
-        conn.delete_workspace_file(file_id).await?;
-
-        if let Ok(file_key) = FileKey::from_str(storage_path)
-            && let Err(err) = self.infra.blobs.delete(&file_key).await
-        {
-            tracing::error!(
-                target: TRACING_TARGET,
-                error = %err,
-                "Failed to delete stored object for vanished source object",
-            );
-        }
+        conn.delete_workspace_document(document_id).await?;
         Ok(())
     }
 
@@ -292,7 +280,7 @@ impl Importer {
         account_id: Uuid,
         entry: &SourceEntry,
         expires_at: Option<jiff::Timestamp>,
-    ) -> Result<WorkspaceFile> {
+    ) -> Result<WorkspaceDocument> {
         // Stream external bytes -> hash+measure -> encrypt -> files store.
         let bytes = source.get_stream(&entry.key).await?;
         let (measured, measurements) = HashingReader::new(stream_to_reader(bytes));
@@ -302,7 +290,7 @@ impl Importer {
                 .encrypt_reader(connection.workspace_id, measured),
         );
 
-        let file_key = FileKey::generate(connection.workspace_id);
+        let file_key = DocumentKey::generate(connection.workspace_id);
         self.infra.blobs.put(&file_key, ciphertext).await?;
 
         // The object now exists in storage; if recording it in the database
@@ -332,7 +320,7 @@ impl Importer {
         }
     }
 
-    /// Inserts the [`WorkspaceFile`] row for a freshly imported object. The
+    /// Inserts the document and blob rows for a freshly imported object. The
     /// retention `expires_at` is resolved once per sync by the caller and passed
     /// in, so this only holds a pooled connection for the insert itself.
     async fn record_imported_file(
@@ -340,10 +328,10 @@ impl Importer {
         connection: &WorkspaceConnection,
         account_id: Uuid,
         entry: &SourceEntry,
-        file_key: &FileKey,
+        file_key: &DocumentKey,
         measurements: &Measurements,
         expires_at: Option<jiff::Timestamp>,
-    ) -> Result<WorkspaceFile> {
+    ) -> Result<WorkspaceDocument> {
         let mut conn = self.infra.postgres.get_connection().await?;
         // The display name and extension come from the entry's name; the
         // import-origin key (recorded below) is the entry's provider key, which
@@ -351,22 +339,28 @@ impl Importer {
         let filename = object_basename(&entry.name);
         let extension = object_extension(&entry.name);
 
-        let new_file = NewWorkspaceFile {
+        // The content-addressed fields (size, hash) and retention live on the blob;
+        // the human-facing name, extension, and creator live on the document.
+        let new_blob = NewBlob {
+            workspace_id: connection.workspace_id,
+            content_hash: measurements.sha256().to_vec(),
+            file_size_bytes: measurements.bytes() as i64,
+            storage_path: file_key.to_string(),
+            storage_bucket: Bucket::Documents.name().to_owned(),
+            expires_at: expires_at.map(Into::into),
+        };
+        let new_document = NewWorkspaceDocument {
             workspace_id: connection.workspace_id,
             account_id,
+            blob_id: Uuid::nil(),
+            kind: Some(DocumentKind::Original),
             display_name: Some(filename.clone()),
             original_filename: Some(filename),
             file_extension: extension,
-            file_kind: Some(FileKind::Original),
-            file_size_bytes: measurements.bytes() as i64,
-            file_hash_sha256: measurements.sha256().to_vec(),
-            storage_path: file_key.to_string(),
-            storage_bucket: Bucket::Files.name().to_owned(),
-            expires_at: expires_at.map(Into::into),
-            ..Default::default()
+            metadata: None,
         };
         Ok(conn
-            .record_imported_file(new_file, connection.id, entry.key.clone())
+            .record_imported_document(new_document, new_blob, connection.id, entry.key.clone())
             .await?)
     }
 }

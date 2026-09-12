@@ -7,5 +7,5 @@ mod object_key;
 
 pub use avatar_key::{AccountAvatarKey, WorkspaceAvatarKey};
 pub use bucket::Bucket;
-pub use document_key::{ArtifactKey, AuditKey, FileKey};
+pub use document_key::{AuditKey, DocumentKey, IntermediateKey};
 pub use object_key::ObjectKey;

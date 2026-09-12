@@ -13,9 +13,9 @@ use crate::types::ReviewStatus;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadFilter {
-    /// Filter by the file the thread reviews.
+    /// Filter by the document the thread reviews.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub file_id: Option<Uuid>,
+    pub document_id: Option<Uuid>,
     /// Filter by the account that opened the thread.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author_account_id: Option<Uuid>,
@@ -23,7 +23,7 @@ pub struct ThreadFilter {
     /// `Some(false)` = open only, `None` = either.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed: Option<bool>,
-    /// Filter file review threads by their review status.
+    /// Filter document review threads by their review status.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub review_status: Option<ReviewStatus>,
 }

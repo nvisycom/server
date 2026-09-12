@@ -2,12 +2,12 @@
 
 mod comments;
 mod detections;
-mod files;
+mod documents;
 mod invites;
 mod members;
 
 pub use comments::ThreadFilter;
 pub use detections::DetectionFilter;
-pub use files::FileFilter;
+pub use documents::DocumentFilter;
 pub use invites::InviteFilter;
 pub use members::MemberFilter;

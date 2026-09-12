@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceDetection as DetectionModel;
-use nvisy_postgres::query::DetectionFiles;
+use nvisy_postgres::query::DetectionDocuments;
 use nvisy_postgres::types::{
     DetectionId, DetectionMetadata, DetectionStatus, Handle, PipelineTriggerType,
 };
@@ -28,11 +28,11 @@ pub struct Detection {
     /// Handle of the workspace this detection belongs to.
     pub workspace_slug: Handle,
     /// Source document this detection analyzes.
-    pub input_file_id: Uuid,
+    pub input_document_id: Uuid,
     /// Display name of the source document, for showing the detection without a
     /// separate file lookup. `None` if the file was removed (e.g. by retention).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_file_name: Option<String>,
+    pub input_document_name: Option<String>,
     /// Account that triggered the detection.
     pub triggered_by: AccountRef,
     /// How the detection was triggered.
@@ -66,7 +66,7 @@ impl Detection {
         pipeline_slug: Handle,
         workspace_slug: Handle,
         triggered_by: AccountRef,
-        files: DetectionFiles,
+        files: DetectionDocuments,
     ) -> Self {
         // Surface the failure reason (written to metadata.error by the worker /
         // enqueue-failure path) as a dedicated field for a failed detection.
@@ -77,8 +77,8 @@ impl Detection {
             id: DetectionId::from_uuid(detection.id),
             pipeline_slug,
             workspace_slug,
-            input_file_id: detection.input_file_id,
-            input_file_name: files.input,
+            input_document_id: detection.input_document_id,
+            input_document_name: files.input,
             triggered_by,
             trigger_type: detection.trigger_type,
             status: detection.status,

@@ -351,8 +351,8 @@ mod tests {
     fn row(actor: &str, user_agent: &str) -> ActivityExportRow {
         ActivityExportRow {
             timestamp: "2026-01-01T00:00:00Z".to_owned(),
-            activity_type: "file.created".to_owned(),
-            object_type: "file".to_owned(),
+            activity_type: "document.created".to_owned(),
+            object_type: "document".to_owned(),
             action_type: "created".to_owned(),
             actor: actor.to_owned(),
             object_id: String::new(),

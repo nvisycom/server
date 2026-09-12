@@ -205,7 +205,7 @@ pub(crate) async fn fail_detection(
             WorkspaceEvent::DetectionFailed(DetectionFailed {
                 detection_id,
                 pipeline_slug,
-                input_file_name: None,
+                input_document_name: None,
                 error: Some(reason.to_owned()),
                 notify: triggered_by,
             }),

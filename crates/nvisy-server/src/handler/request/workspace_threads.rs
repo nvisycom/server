@@ -67,8 +67,8 @@ pub struct RenameThread {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceThreadsQuery {
-    /// Filter by the file the thread reviews.
-    pub file_id: Option<Uuid>,
+    /// Filter by the document the thread reviews.
+    pub document_id: Option<Uuid>,
     /// Filter by the thread's opening author.
     pub author: Option<Uuid>,
     /// Filter by open/closed state: `true` = closed only, `false` = open only.
@@ -80,7 +80,7 @@ pub struct WorkspaceThreadsQuery {
 impl From<WorkspaceThreadsQuery> for ThreadFilter {
     fn from(query: WorkspaceThreadsQuery) -> Self {
         ThreadFilter {
-            file_id: query.file_id,
+            document_id: query.document_id,
             author_account_id: query.author,
             closed: query.closed,
             review_status: query.review_status,

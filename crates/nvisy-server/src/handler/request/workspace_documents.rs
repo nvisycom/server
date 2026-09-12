@@ -1,4 +1,4 @@
-//! File request types.
+//! Document request types.
 
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
@@ -6,31 +6,31 @@ use std::collections::{BTreeSet, HashSet};
 use derive_more::{AsRef, Into};
 use elide_pipeline::FormatRegistry;
 use garde::Validate;
-use nvisy_postgres::model::UpdateWorkspaceFile as UpdateFileModel;
-use nvisy_postgres::types::FileFilter;
+use nvisy_postgres::model::UpdateWorkspaceDocument as UpdateDocumentModel;
+use nvisy_postgres::types::DocumentFilter;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::handler::utility::FileHash;
+use crate::handler::utility::DocumentHash;
 use crate::service::{EngineService, UnknownFormatToken};
 
-/// Request to update file metadata.
+/// Request to update document metadata.
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct UpdateFile {
-    /// New display name for the file.
+pub struct UpdateDocument {
+    /// New display name for the document.
     #[garde(length(chars, min = 1, max = 255))]
     pub display_name: Option<String>,
     /// Updated metadata.
     pub metadata: Option<serde_json::Value>,
 }
 
-impl UpdateFile {
-    pub fn into_model(self) -> UpdateFileModel {
-        UpdateFileModel {
+impl UpdateDocument {
+    pub fn into_model(self) -> UpdateDocumentModel {
+        UpdateDocumentModel {
             display_name: self.display_name,
             metadata: self.metadata,
             ..Default::default()
@@ -38,19 +38,19 @@ impl UpdateFile {
     }
 }
 
-/// Request to delete several files in one call.
+/// Request to delete several documents in one call.
 ///
-/// The `100`-id cap bounds the work one call fans out into: the resolve query,
-/// the delete transaction, and one best-effort object purge per file.
+/// The `100`-id cap bounds the work one call fans out into: the resolve query and
+/// the delete transaction.
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct DeleteFiles {
-    /// Ids of the files to delete. Ids that are unknown, already deleted, or in
-    /// another workspace are skipped rather than failing the request.
+pub struct DeleteDocuments {
+    /// Ids of the documents to delete. Ids that are unknown, already deleted, or
+    /// in another workspace are skipped rather than failing the request.
     #[garde(length(min = 1, max = 100))]
-    pub file_ids: Vec<Uuid>,
+    pub document_ids: Vec<Uuid>,
 }
 
 /// Defines a transparent string newtype whose OpenAPI schema enumerates the
@@ -102,12 +102,12 @@ registry_token!(
     |format| std::iter::once(format.modality().to_owned())
 );
 
-/// Query parameters for listing files.
+/// Query parameters for listing documents.
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ListFiles {
-    /// Search by file name (case-insensitive, partial match).
+pub struct ListDocuments {
+    /// Search by document name (case-insensitive, partial match).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search: Option<String>,
     /// Filter by file extension. Each entry expands to its format's full
@@ -117,22 +117,22 @@ pub struct ListFiles {
     /// Filter by modality (`text`, `tabular`, `image`, `audio`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modality: Option<Vec<ModalityToken>>,
-    /// Filter to files whose content is exactly this SHA-256. Lets a client check
-    /// whether identical content already exists in the workspace before uploading
-    /// it.
+    /// Filter to documents whose content is exactly this SHA-256. Lets a client
+    /// check whether identical content already exists in the workspace before
+    /// uploading it.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub hash: Option<FileHash>,
+    pub hash: Option<DocumentHash>,
 }
 
-impl ListFiles {
+impl ListDocuments {
     /// Converts to the DB filter, resolving format and modality tokens to file
     /// extensions against the engine's codec registry.
     ///
     /// `formats` and `modality` are separate facets combined with AND: when both
-    /// are given, only files whose extension is in both sets match (their
+    /// are given, only documents whose extension is in both sets match (their
     /// intersection). A facet that is absent imposes no constraint. Returns
     /// [`UnknownFormatToken`] if a token matches no known extension or modality.
-    pub fn to_filter(&self, engine: &EngineService) -> Result<FileFilter, UnknownFormatToken> {
+    pub fn to_filter(&self, engine: &EngineService) -> Result<DocumentFilter, UnknownFormatToken> {
         let formats = self.formats.as_deref();
         let formats = formats.map(|t| engine.resolve_extensions(t)).transpose()?;
 
@@ -147,10 +147,10 @@ impl ListFiles {
             .filter(|s| !s.is_empty())
             .map(str::to_owned);
 
-        Ok(FileFilter {
+        Ok(DocumentFilter {
             search,
             extensions: intersect_facets(formats, modality),
-            hash: self.hash.as_ref().map(FileHash::to_bytes),
+            hash: self.hash.as_ref().map(DocumentHash::to_bytes),
         })
     }
 }

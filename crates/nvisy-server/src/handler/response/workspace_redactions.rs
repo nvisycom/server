@@ -31,7 +31,7 @@ pub struct RedactionResult {
     /// Redacted output document this redaction produced. `None` only if the file
     /// was removed (e.g. by retention).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_file_id: Option<Uuid>,
+    pub output_document_id: Option<Uuid>,
     /// Account that requested the redaction.
     pub requested_by: AccountRef,
     /// When the redaction was created.
@@ -53,7 +53,7 @@ impl RedactionResult {
             id: RedactionId::from_uuid(redaction.id),
             detection_id: DetectionId::from_uuid(redaction.detection_id),
             workspace_slug,
-            output_file_id: redaction.output_file_id,
+            output_document_id: redaction.output_document_id,
             requested_by,
             created_at: redaction.created_at.into(),
         }

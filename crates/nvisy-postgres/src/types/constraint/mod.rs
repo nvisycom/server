@@ -16,8 +16,9 @@ mod workspace_members;
 mod workspace_webhooks;
 mod workspaces;
 
-// File-related constraint modules
-mod files;
+// Document / blob storage constraint modules
+mod documents;
+mod workspace_blobs;
 
 // Detection / pipeline-related constraint modules
 mod detections;
@@ -37,10 +38,11 @@ pub use self::account_identities::AccountIdentityConstraints;
 pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
 pub use self::detections::WorkspaceDetectionConstraints;
-pub use self::files::WorkspaceFileConstraints;
+pub use self::documents::WorkspaceDocumentConstraints;
 pub use self::pipeline_references::WorkspacePipelineReferenceConstraints;
 pub use self::pipelines::WorkspacePipelineConstraints;
 pub use self::workspace_activities::WorkspaceActivitiesConstraints;
+pub use self::workspace_blobs::WorkspaceBlobConstraints;
 pub use self::workspace_connection_syncs::WorkspaceConnectionSyncConstraints;
 pub use self::workspace_connections::WorkspaceConnectionConstraints;
 pub use self::workspace_invites::WorkspaceInviteConstraints;
@@ -71,8 +73,9 @@ pub enum ConstraintViolation {
     WorkspaceActivityLog(WorkspaceActivitiesConstraints),
     WorkspaceWebhook(WorkspaceWebhookConstraints),
 
-    // File-related constraints
-    WorkspaceFile(WorkspaceFileConstraints),
+    // Document / blob storage constraints
+    WorkspaceDocument(WorkspaceDocumentConstraints),
+    WorkspaceBlob(WorkspaceBlobConstraints),
 
     // Comment-related constraints
     WorkspaceThread(WorkspaceThreadConstraints),
@@ -132,7 +135,8 @@ impl ConstraintViolation {
             WorkspaceInvite,
             WorkspaceActivityLog,
             WorkspaceWebhook,
-            WorkspaceFile,
+            WorkspaceDocument,
+            WorkspaceBlob,
             WorkspaceThread,
             WorkspaceThreadComment,
             WorkspacePipeline,
@@ -159,9 +163,16 @@ mod tests {
         );
 
         assert_eq!(
-            ConstraintViolation::new("workspace_files_version_number_min"),
-            Some(ConstraintViolation::WorkspaceFile(
-                WorkspaceFileConstraints::VersionNumberMin
+            ConstraintViolation::new("workspace_documents_display_name_length"),
+            Some(ConstraintViolation::WorkspaceDocument(
+                WorkspaceDocumentConstraints::DisplayNameLength
+            ))
+        );
+
+        assert_eq!(
+            ConstraintViolation::new("blobs_file_size_min"),
+            Some(ConstraintViolation::WorkspaceBlob(
+                WorkspaceBlobConstraints::FileSizeMin
             ))
         );
 

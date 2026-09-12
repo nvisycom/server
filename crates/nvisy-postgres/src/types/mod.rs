@@ -13,24 +13,24 @@ mod utilities;
 pub use constraint::{
     AccountApiTokenConstraints, AccountConstraints, AccountIdentityConstraints,
     AccountNotificationConstraints, ConstraintViolation, WorkspaceActivitiesConstraints,
-    WorkspaceConnectionConstraints, WorkspaceConnectionSyncConstraints, WorkspaceConstraints,
-    WorkspaceDetectionConstraints, WorkspaceFileConstraints, WorkspaceInviteConstraints,
-    WorkspaceMemberConstraints, WorkspacePipelineConstraints,
+    WorkspaceBlobConstraints, WorkspaceConnectionConstraints, WorkspaceConnectionSyncConstraints,
+    WorkspaceConstraints, WorkspaceDetectionConstraints, WorkspaceDocumentConstraints,
+    WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspacePipelineConstraints,
     WorkspacePipelineReferenceConstraints, WorkspacePolicyConstraints,
     WorkspaceThreadCommentConstraints, WorkspaceThreadConstraints, WorkspaceWebhookConstraints,
 };
 pub use enums::{
-    ActivityType, ApiTokenType, ConnectionType, DetectionStatus, FileKind, IdentityProvider,
+    ActivityType, ApiTokenType, ConnectionType, DetectionStatus, DocumentKind, IdentityProvider,
     InviteStatus, NotificationEvent, OutboxStatus, PipelineStatus, PipelineTriggerType,
     ProviderType, ReviewStatus, SyncDeletionPolicy, SyncMode, SyncStatus, SyncTriggerType,
     ThreadEventKind, WebhookEvent, WebhookStatus, WorkspaceRole,
 };
-pub use filtering::{DetectionFilter, FileFilter, InviteFilter, MemberFilter, ThreadFilter};
+pub use filtering::{DetectionFilter, DocumentFilter, InviteFilter, MemberFilter, ThreadFilter};
 pub use handle::{HANDLE_MAX_LENGTH, HANDLE_MIN_LENGTH, Handle, HandleError};
 pub use json::{
     ActivityPayload, CommentMentionedParams, ConnectionActivityParams,
     ConnectionSyncCompletedParams, ConnectionSyncFailedParams, DetectionActivityParams,
-    DetectionCompletedParams, DetectionFailedParams, DetectionMetadata, FileActivityParams,
+    DetectionCompletedParams, DetectionFailedParams, DetectionMetadata, DocumentActivityParams,
     InvalidHeader, InviteActivityParams, Json, MemberActivityParams, MemberJoinedParams,
     NotificationPayload, PipelineActivityParams, PipelineMetadata, PolicyActivityParams,
     ProviderActivityParams, RasterPolicy, RedactionActivityParams, RedactionCreatedParams,

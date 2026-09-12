@@ -16,8 +16,8 @@ use uuid::Uuid;
 pub struct WorkspaceDetectionsQuery {
     /// Filter by detection status.
     pub status: Option<DetectionStatus>,
-    /// Filter by the source file the detection analyzes.
-    pub file_id: Option<Uuid>,
+    /// Filter by the source document the detection analyzes.
+    pub document_id: Option<Uuid>,
     /// Filter by the owning pipeline.
     pub pipeline_id: Option<Uuid>,
     /// Filter by the account that triggered the detection.
@@ -30,7 +30,7 @@ impl From<WorkspaceDetectionsQuery> for DetectionFilter {
     fn from(query: WorkspaceDetectionsQuery) -> Self {
         DetectionFilter {
             status: query.status,
-            input_file_id: query.file_id,
+            input_document_id: query.document_id,
             pipeline_id: query.pipeline_id,
             account_id: query.triggered_by,
             trigger_type: query.trigger_type,
@@ -47,8 +47,8 @@ impl From<WorkspaceDetectionsQuery> for DetectionFilter {
 pub struct PipelineDetectionsQuery {
     /// Filter by detection status.
     pub status: Option<DetectionStatus>,
-    /// Filter by the source file the detection analyzes.
-    pub file_id: Option<Uuid>,
+    /// Filter by the source document the detection analyzes.
+    pub document_id: Option<Uuid>,
     /// Filter by the account that triggered the detection.
     pub triggered_by: Option<Uuid>,
     /// Filter by how the detection was initiated (user vs system).
@@ -59,7 +59,7 @@ impl From<PipelineDetectionsQuery> for DetectionFilter {
     fn from(query: PipelineDetectionsQuery) -> Self {
         DetectionFilter {
             status: query.status,
-            input_file_id: query.file_id,
+            input_document_id: query.document_id,
             pipeline_id: None,
             account_id: query.triggered_by,
             trigger_type: query.trigger_type,
@@ -67,17 +67,17 @@ impl From<PipelineDetectionsQuery> for DetectionFilter {
     }
 }
 
-/// Request payload to start a detection over a file.
+/// Request payload to start a detection over a document.
 ///
-/// Analyzes the file with the pipeline's configuration and returns the
+/// Analyzes the document with the pipeline's configuration and returns the
 /// detection, which holds the findings for review before redaction.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
 pub struct CreateDetection {
-    /// The file to analyze.
-    pub file_id: Uuid,
+    /// The document to analyze.
+    pub document_id: Uuid,
     /// Per-document scope (languages, jurisdictions, document labels).
     ///
     /// Overrides the pipeline's `defaultScope` when present; absent falls back to

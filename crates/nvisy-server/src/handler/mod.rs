@@ -24,7 +24,7 @@ mod utility;
 mod workspace_connection_syncs;
 mod workspace_connections;
 mod workspace_detections;
-mod workspace_files;
+mod workspace_documents;
 mod workspace_invites;
 mod workspace_members;
 mod workspace_pipelines;
@@ -86,7 +86,7 @@ fn private_routes(service_state: ServiceState) -> ApiRouter<ServiceState> {
         .merge(workspace_providers::routes())
         .merge(connection_oauth::private_routes())
         .merge(workspace_connection_syncs::routes())
-        .merge(workspace_files::routes(
+        .merge(workspace_documents::routes(
             service_state.upload.max_file_body_bytes,
         ))
         .merge(workspace_pipelines::routes())

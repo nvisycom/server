@@ -7156,6 +7156,7 @@ dependencies = [
  "base64 0.23.1",
  "clap",
  "nvisy-core",
+ "strum 0.28.0",
  "thiserror 2.0.20",
  "tokio",
  "tracing",

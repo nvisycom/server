@@ -75,7 +75,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::{decode_ids, encode_ids, split_id_version};
-    use crate::key::document_key::FileKey;
+    use crate::key::document_key::DocumentKey;
 
     #[test]
     fn encode_decode_round_trips_two_uuids() {
@@ -102,9 +102,9 @@ mod tests {
     #[test]
     fn split_id_version_requires_the_underscore_separator() {
         // Prefix present but no `{id}_{version}` separator after it.
-        assert!(split_id_version::<FileKey>("file_noseparator").is_err());
+        assert!(split_id_version::<DocumentKey>("document_noseparator").is_err());
         // A well-formed payload splits into its two parts.
-        let (id, version) = split_id_version::<FileKey>("file_abc_v2").unwrap();
+        let (id, version) = split_id_version::<DocumentKey>("document_abc_v2").unwrap();
         assert_eq!((id, version), ("abc", "v2"));
     }
 }

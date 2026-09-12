@@ -59,9 +59,9 @@ pub struct DetectionCompletedParams {
     pub detection_id: DetectionId,
     /// Slug of the owning pipeline.
     pub pipeline_slug: Handle,
-    /// Display name of the analyzed file, if known.
+    /// Display name of the analyzed document, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_file_name: Option<String>,
+    pub input_document_name: Option<String>,
 }
 
 /// Params of a `pipeline.redaction.created` notification.
@@ -75,9 +75,9 @@ pub struct RedactionCreatedParams {
     pub detection_id: DetectionId,
     /// Slug of the owning pipeline.
     pub pipeline_slug: Handle,
-    /// Display name of the redacted file, if known.
+    /// Display name of the redacted document, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_file_name: Option<String>,
+    pub input_document_name: Option<String>,
 }
 
 /// Params of a `pipeline.detection.failed` notification.
@@ -89,27 +89,27 @@ pub struct DetectionFailedParams {
     pub detection_id: DetectionId,
     /// Slug of the owning pipeline.
     pub pipeline_slug: Handle,
-    /// Display name of the analyzed file, if known.
+    /// Display name of the analyzed document, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_file_name: Option<String>,
+    pub input_document_name: Option<String>,
     /// Failure reason, if available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
-/// Params of a `review.assigned` notification, sent to the reviewer a file's
+/// Params of a `review.assigned` notification, sent to the reviewer a document's
 /// review was assigned to.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewAssignedParams {
-    /// Id of the file's review thread.
+    /// Id of the document's review thread.
     pub thread_id: Uuid,
-    /// Id of the file to review.
-    pub file_id: Uuid,
-    /// Display name of the file to review, when it still exists.
+    /// Id of the document to review.
+    pub document_id: Uuid,
+    /// Display name of the document to review, when it still exists.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub file_name: Option<String>,
+    pub document_name: Option<String>,
 }
 
 /// Params of a `comment.mentioned` notification, sent to a mentioned account.
@@ -121,10 +121,10 @@ pub struct CommentMentionedParams {
     pub comment_id: Uuid,
     /// Id of the thread the comment is in.
     pub thread_id: Uuid,
-    /// Id of the file the thread is on, when it is file-pinned; `None` for a
-    /// workspace-level thread.
+    /// Id of the document the thread is on, when it is document-pinned; `None` for
+    /// a workspace-level thread.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub file_id: Option<Uuid>,
+    pub document_id: Option<Uuid>,
     /// Username of the account that wrote the comment (the mentioner).
     pub author_username: Handle,
 }
@@ -163,7 +163,7 @@ pub enum NotificationPayload {
     #[serde(rename = "pipeline.detection.failed")]
     DetectionFailed(DetectionFailedParams),
 
-    /// A file's review was assigned to the reviewer.
+    /// A document's review was assigned to the reviewer.
     #[serde(rename = "review.assigned")]
     ReviewAssigned(ReviewAssignedParams),
 
@@ -214,7 +214,7 @@ mod tests {
         let payload = NotificationPayload::DetectionCompleted(DetectionCompletedParams {
             detection_id,
             pipeline_slug: Handle::from_str("redact-invoices").unwrap(),
-            input_file_name: Some("invoice.pdf".to_owned()),
+            input_document_name: Some("invoice.pdf".to_owned()),
         });
 
         let value = serde_json::to_value(&payload).unwrap();

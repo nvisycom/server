@@ -1,4 +1,4 @@
-//! Two-UUID keys for documents, audits, and pipeline artifacts.
+//! Two-UUID keys for documents, audits, and pipeline intermediates.
 
 use std::fmt;
 use std::str::FromStr;
@@ -9,29 +9,29 @@ use super::bucket::Bucket;
 use super::object_key::{ObjectKey, decode_ids, encode_ids, strip_prefix};
 use crate::error::{Error, Result};
 
-/// A validated key for file objects.
+/// A validated key for document objects.
 ///
-/// The key is encoded as a `file_` prefix followed by URL-safe base64 of the
+/// The key is encoded as a `document_` prefix followed by URL-safe base64 of the
 /// concatenated workspace ID and object ID. This produces a key like
-/// `file_ABC123...` from two UUIDs (32 bytes → base64).
+/// `document_ABC123...` from two UUIDs (32 bytes → base64).
 ///
 /// The `object_id` is a UUID v7 generated at upload time, providing:
 /// - Time-ordered keys for efficient storage and retrieval
 /// - Guaranteed uniqueness within the workspace
 /// - No collision with database-generated IDs
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FileKey {
+pub struct DocumentKey {
     pub workspace_id: Uuid,
     pub object_id: Uuid,
 }
 
-impl ObjectKey for FileKey {
-    const BUCKET: Bucket = Bucket::Files;
-    const PREFIX: &'static str = "file_";
+impl ObjectKey for DocumentKey {
+    const BUCKET: Bucket = Bucket::Documents;
+    const PREFIX: &'static str = "document_";
 }
 
-impl FileKey {
-    /// Generates a new file key with a fresh UUID v7 object ID.
+impl DocumentKey {
+    /// Generates a new document key with a fresh UUID v7 object ID.
     ///
     /// Uses UUID v7, which is time-ordered and contains randomness, making keys
     /// both sortable and collision-resistant.
@@ -42,7 +42,7 @@ impl FileKey {
         }
     }
 
-    /// Creates a file key from existing IDs (for parsing stored keys).
+    /// Creates a document key from existing IDs (for parsing stored keys).
     pub fn from_parts(workspace_id: Uuid, object_id: Uuid) -> Self {
         Self {
             workspace_id,
@@ -52,7 +52,7 @@ impl FileKey {
 
     /// Regenerates the object ID with a fresh UUID v7.
     ///
-    /// Useful when creating a new version of a file while keeping the same
+    /// Useful when creating a new version of a document while keeping the same
     /// workspace association.
     pub fn regenerate(&mut self) {
         self.object_id = Uuid::now_v7();
@@ -70,13 +70,13 @@ impl FileKey {
     }
 }
 
-impl fmt::Display for FileKey {
+impl fmt::Display for DocumentKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{}", Self::PREFIX, self.encode_payload())
     }
 }
 
-impl FromStr for FileKey {
+impl FromStr for DocumentKey {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
@@ -89,7 +89,7 @@ impl FromStr for FileKey {
 /// Addresses a detection's analyzed document — the engine's detection result
 /// (the audit of what was found and redacted). Encoded as an `audit_` prefix
 /// followed by URL-safe base64 of the concatenated workspace ID and object ID
-/// (32 bytes → base64), like [`FileKey`].
+/// (32 bytes → base64), like [`DocumentKey`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AuditKey {
     pub workspace_id: Uuid,
@@ -139,25 +139,25 @@ impl FromStr for AuditKey {
     }
 }
 
-/// A validated key for a transient pipeline-artifact object.
+/// A validated key for a transient pipeline-intermediate object.
 ///
 /// Addresses a detection's enrichment intermediates (an image's OCR layout, an
-/// audio transcript). Encoded as an `artifact_` prefix followed by URL-safe
+/// audio transcript). Encoded as an `intermediate_` prefix followed by URL-safe
 /// base64 of the concatenated workspace ID and object ID (32 bytes → base64),
-/// like [`FileKey`].
+/// like [`DocumentKey`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ArtifactKey {
+pub struct IntermediateKey {
     pub workspace_id: Uuid,
     pub object_id: Uuid,
 }
 
-impl ObjectKey for ArtifactKey {
-    const BUCKET: Bucket = Bucket::Artifacts;
-    const PREFIX: &'static str = "artifact_";
+impl ObjectKey for IntermediateKey {
+    const BUCKET: Bucket = Bucket::Intermediates;
+    const PREFIX: &'static str = "intermediate_";
 }
 
-impl ArtifactKey {
-    /// Generates a new artifact key with a fresh UUID v7 object ID.
+impl IntermediateKey {
+    /// Generates a new intermediate key with a fresh UUID v7 object ID.
     pub fn generate(workspace_id: Uuid) -> Self {
         Self {
             workspace_id,
@@ -165,7 +165,7 @@ impl ArtifactKey {
         }
     }
 
-    /// Creates an artifact key from existing IDs (for parsing stored keys).
+    /// Creates an intermediate key from existing IDs (for parsing stored keys).
     pub fn from_parts(workspace_id: Uuid, object_id: Uuid) -> Self {
         Self {
             workspace_id,
@@ -174,7 +174,7 @@ impl ArtifactKey {
     }
 }
 
-impl fmt::Display for ArtifactKey {
+impl fmt::Display for IntermediateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -185,7 +185,7 @@ impl fmt::Display for ArtifactKey {
     }
 }
 
-impl FromStr for ArtifactKey {
+impl FromStr for IntermediateKey {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
@@ -199,38 +199,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn file_key_prefix_is_file() {
-        assert_eq!(FileKey::PREFIX, "file_");
+    fn document_key_prefix_is_document() {
+        assert_eq!(DocumentKey::PREFIX, "document_");
     }
 
     #[test]
-    fn file_key_generate_uses_uuid_v7() {
+    fn document_key_generate_uses_uuid_v7() {
         let workspace_id = Uuid::new_v4();
-        let key = FileKey::generate(workspace_id);
+        let key = DocumentKey::generate(workspace_id);
         assert_eq!(key.workspace_id, workspace_id);
         assert_eq!(key.object_id.get_version_num(), 7);
     }
 
     #[test]
-    fn file_key_display_has_prefix_and_expected_length() {
-        let key = FileKey::generate(Uuid::new_v4());
+    fn document_key_display_has_prefix_and_expected_length() {
+        let key = DocumentKey::generate(Uuid::new_v4());
         let encoded = key.to_string();
-        assert!(encoded.starts_with("file_"));
-        // prefix (5) + base64 of 32 bytes (43) = 48.
-        assert_eq!(encoded.len(), 48);
+        assert!(encoded.starts_with("document_"));
+        // prefix (9) + base64 of 32 bytes (43) = 52.
+        assert_eq!(encoded.len(), 52);
     }
 
     #[test]
-    fn file_key_round_trips_through_string() {
-        let key = FileKey::from_parts(Uuid::new_v4(), Uuid::new_v4());
-        let decoded: FileKey = key.to_string().parse().unwrap();
+    fn document_key_round_trips_through_string() {
+        let key = DocumentKey::from_parts(Uuid::new_v4(), Uuid::new_v4());
+        let decoded: DocumentKey = key.to_string().parse().unwrap();
         assert_eq!(key, decoded);
     }
 
     #[test]
-    fn file_key_rejects_wrong_prefix() {
-        assert!(FileKey::from_str("audit_abc").is_err());
-        assert!(FileKey::from_str("abc").is_err());
+    fn document_key_rejects_wrong_prefix() {
+        assert!(DocumentKey::from_str("audit_abc").is_err());
+        assert!(DocumentKey::from_str("abc").is_err());
     }
 
     #[test]
@@ -239,15 +239,15 @@ mod tests {
         let decoded: AuditKey = key.to_string().parse().unwrap();
         assert_eq!(key, decoded);
         assert!(key.to_string().starts_with("audit_"));
-        assert!(AuditKey::from_str("file_abc").is_err());
+        assert!(AuditKey::from_str("document_abc").is_err());
     }
 
     #[test]
-    fn artifact_key_round_trips_and_rejects_wrong_prefix() {
-        let key = ArtifactKey::from_parts(Uuid::new_v4(), Uuid::new_v4());
-        let decoded: ArtifactKey = key.to_string().parse().unwrap();
+    fn intermediate_key_round_trips_and_rejects_wrong_prefix() {
+        let key = IntermediateKey::from_parts(Uuid::new_v4(), Uuid::new_v4());
+        let decoded: IntermediateKey = key.to_string().parse().unwrap();
         assert_eq!(key, decoded);
-        assert!(key.to_string().starts_with("artifact_"));
-        assert!(ArtifactKey::from_str("audit_abc").is_err());
+        assert!(key.to_string().starts_with("intermediate_"));
+        assert!(IntermediateKey::from_str("audit_abc").is_err());
     }
 }

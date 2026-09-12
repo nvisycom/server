@@ -23,9 +23,9 @@ use super::{AccountRef, Comment, Page};
 pub struct Thread {
     /// Unique identifier of the thread.
     pub id: Uuid,
-    /// File this thread reviews; `None` for a workspace-level thread.
+    /// Document this thread reviews; `None` for a workspace-level thread.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub file_id: Option<Uuid>,
+    pub document_id: Option<Uuid>,
     /// The thread's title; `None` for an untitled thread.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
@@ -124,7 +124,7 @@ impl Thread {
     ) -> Self {
         Self {
             id: thread.id,
-            file_id: thread.file_id,
+            document_id: thread.document_id,
             display_name: thread.display_name,
             author,
             review_status: thread.review_status,

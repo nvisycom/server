@@ -1,8 +1,8 @@
 //! Workspace thread model: a discussion thread, either a workspace-level
-//! discussion or a file's review. Its messages are
+//! discussion or a document's review. Its messages are
 //! [`WorkspaceThreadComment`](super::WorkspaceThreadComment)s and its lifecycle
-//! history [`WorkspaceThreadEvent`](super::WorkspaceThreadEvent)s. A file thread
-//! also carries an assignee and a derived [`ReviewStatus`].
+//! history [`WorkspaceThreadEvent`](super::WorkspaceThreadEvent)s. A document
+//! thread also carries an assignee and a derived [`ReviewStatus`].
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
@@ -11,8 +11,8 @@ use uuid::Uuid;
 use crate::schema::workspace_threads;
 use crate::types::ReviewStatus;
 
-/// A discussion thread: a workspace discussion (`file_id` is `None`, open/closed
-/// lifecycle) or a file's review (`file_id` is set, carrying an assignee and a
+/// A discussion thread: a workspace discussion (`document_id` is `None`, open/closed
+/// lifecycle) or a document's review (`document_id` is set, carrying an assignee and a
 /// derived [`ReviewStatus`]).
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_threads)]
@@ -22,16 +22,16 @@ pub struct WorkspaceThread {
     pub id: Uuid,
     /// Workspace this thread belongs to (denormalized).
     pub workspace_id: Uuid,
-    /// File the thread reviews; `None` for a workspace-level thread.
-    pub file_id: Option<Uuid>,
+    /// Document the thread reviews; `None` for a workspace-level thread.
+    pub document_id: Option<Uuid>,
     /// Account that opened the thread.
     pub author_account_id: Uuid,
     /// Optional human-readable title; `None` for an untitled thread.
     pub display_name: Option<String>,
-    /// Reviewer the file's review is assigned to; `None` when unassigned or on a
+    /// Reviewer the document's review is assigned to; `None` when unassigned or on a
     /// workspace thread.
     pub assignee_account_id: Option<Uuid>,
-    /// Review state of a file thread, derived from review events; `None` on a
+    /// Review state of a document thread, derived from review events; `None` on a
     /// workspace thread.
     pub review_status: Option<ReviewStatus>,
     /// When the thread was closed; `None` while open (workspace threads only).
@@ -55,24 +55,24 @@ pub struct WorkspaceThread {
 pub struct NewWorkspaceThread {
     /// Workspace ID (required).
     pub workspace_id: Uuid,
-    /// File the thread reviews; `None` for a workspace-level thread.
-    pub file_id: Option<Uuid>,
+    /// Document the thread reviews; `None` for a workspace-level thread.
+    pub document_id: Option<Uuid>,
     /// Opening author account ID (required).
     pub author_account_id: Uuid,
     /// Optional title.
     pub display_name: Option<String>,
-    /// Initial review status; must be set for a file thread and `None` for a
-    /// workspace thread (the `(file_id IS NULL) = (review_status IS NULL)` check).
+    /// Initial review status; must be set for a document thread and `None` for a
+    /// workspace thread (the `(document_id IS NULL) = (review_status IS NULL)` check).
     pub review_status: Option<ReviewStatus>,
 }
 
 impl NewWorkspaceThread {
-    /// A minimal file review thread opened by `author`, for tests.
+    /// A minimal document review thread opened by `author`, for tests.
     #[cfg(any(feature = "test_util", test))]
-    pub fn test(workspace_id: Uuid, file_id: Uuid, author_account_id: Uuid) -> Self {
+    pub fn test(workspace_id: Uuid, document_id: Uuid, author_account_id: Uuid) -> Self {
         Self {
             workspace_id,
-            file_id: Some(file_id),
+            document_id: Some(document_id),
             author_account_id,
             display_name: None,
             review_status: Some(ReviewStatus::NeedsReview),

@@ -5,8 +5,8 @@
 //!
 //! A thread is one of two things. A *workspace thread* is free-form discussion,
 //! opened by a member with a first message and closable, reopenable, renamable,
-//! or deletable as a whole. A *file thread* is a file's review: exactly one live
-//! thread per file, auto-created on the file's first detection (never opened by
+//! or deletable as a whole. A *document thread* is a document's review: exactly one live
+//! thread per document, auto-created on the document's first detection (never opened by
 //! hand), carrying an optional assignee and a `review_status` derived from the
 //! review timeline (detection → needs review, redaction → in review, verify →
 //! resolved). Lifecycle and review transitions are recorded as timeline events
@@ -25,7 +25,7 @@ use nvisy_postgres::model::{
     NewWorkspaceAssistantJob, NewWorkspaceThread, WorkspaceThread, WorkspaceThreadComment,
 };
 use nvisy_postgres::query::{
-    AssistantJobOutboxRepository, TimelineCursor, WorkspaceFileRepository,
+    AssistantJobOutboxRepository, TimelineCursor, WorkspaceDocumentRepository,
     WorkspaceMemberRepository, WorkspaceThreadCommentRepository, WorkspaceThreadEventRepository,
     WorkspaceThreadRepository,
 };
@@ -36,7 +36,7 @@ use uuid::Uuid;
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
     AssignReview, CursorPagination, OpenThread, RenameThread, ThreadPathParams,
-    WorkspaceFilePathParams, WorkspaceThreadsQuery,
+    WorkspaceDocumentPathParams, WorkspaceThreadsQuery,
 };
 use crate::handler::response::{
     Comment, Thread, ThreadEntry, ThreadEvent, ThreadsPage, TimelinePage,
@@ -52,10 +52,10 @@ use crate::service::{
 /// Tracing target for comment operations.
 pub(crate) const TRACING_TARGET: &str = "nvisy_server::handler::comments";
 
-/// Opens a workspace-level discussion thread (not tied to any file), with its
+/// Opens a workspace-level discussion thread (not tied to any document), with its
 /// first message.
 ///
-/// File reviews are auto-created on detection, not opened by hand, so this is the
+/// Document reviews are auto-created on detection, not opened by hand, so this is the
 /// only open endpoint. `@username` mentions in the opening body notify those
 /// workspace members. Requires `Review`.
 #[tracing::instrument(
@@ -91,7 +91,7 @@ async fn open_workspace_thread(
 fn open_workspace_thread_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Open a workspace thread")
         .description(
-            "Opens a workspace-level discussion thread (not tied to any file) with \
+            "Opens a workspace-level discussion thread (not tied to any document) with \
              its first message. @username mentions notify those members. Requires \
              the Review permission.",
         )
@@ -120,10 +120,10 @@ async fn open_thread(
         addressed_assistant,
     } = resolve_mentions(conn, workspace_id, &request.body, author_id).await?;
 
-    // A workspace thread carries no file and no review status.
+    // A workspace thread carries no document and no review status.
     let new_thread = NewWorkspaceThread {
         workspace_id,
-        file_id: None,
+        document_id: None,
         author_account_id: author_id,
         display_name: request.display_name,
         review_status: None,
@@ -144,7 +144,7 @@ async fn open_thread(
                 WorkspaceEvent::ThreadOpened(ThreadOpened {
                     thread_id: thread.id,
                     opening_comment_id: opening.id,
-                    file_id: thread.file_id,
+                    document_id: thread.document_id,
                     author_username: author_username.clone(),
                     mentioned: recipients,
                 }),
@@ -177,7 +177,7 @@ async fn open_thread(
 
 /// Lists a workspace's threads with cursor pagination, most recent first.
 ///
-/// Filter by `fileId`, `author`, and `closed`. Requires `ViewReviews`.
+/// Filter by `documentId`, `author`, and `closed`. Requires `ViewReviews`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -200,7 +200,7 @@ async fn list_threads(
         .cursor_list_threads(workspace.id, pagination.into_cursor(), &query.into())
         .await?;
 
-    // Resolve the page's distinct assignees (file reviews) in one pass, so each
+    // Resolve the page's distinct assignees (document reviews) in one pass, so each
     // thread response can carry its assignee reference without an N+1 lookup.
     let assignee_ids: BTreeSet<Uuid> = page
         .items
@@ -239,7 +239,7 @@ fn list_threads_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List threads")
         .description(
             "Returns the workspace's threads, most recent first, with optional \
-             file, author, and closed filters.",
+             document, author, and closed filters.",
         )
         .response::<200, Json<ThreadsPage>>()
         .response::<401, Json<ErrorResponse>>()
@@ -276,7 +276,7 @@ async fn delete_thread(
             workspace_origin(workspace.id, authz.account_id, &security),
             WorkspaceEvent::ThreadDeleted(ThreadDeleted {
                 thread_id: thread.id,
-                file_id: thread.file_id,
+                document_id: thread.document_id,
             }),
         )
         .await?;
@@ -335,7 +335,7 @@ async fn close_thread(
                 workspace_origin(workspace.id, authz.account_id, &security),
                 WorkspaceEvent::ThreadClosed(ThreadClosed {
                     thread_id: thread.id,
-                    file_id: thread.file_id,
+                    document_id: thread.document_id,
                 }),
             )
             .await?;
@@ -395,7 +395,7 @@ async fn reopen_thread(
                 workspace_origin(workspace.id, authz.account_id, &security),
                 WorkspaceEvent::ThreadReopened(ThreadReopened {
                     thread_id: thread.id,
-                    file_id: thread.file_id,
+                    document_id: thread.document_id,
                 }),
             )
             .await?;
@@ -460,7 +460,7 @@ async fn rename_thread(
                 workspace_origin(workspace.id, authz.account_id, &security),
                 WorkspaceEvent::ThreadRenamed(ThreadRenamed {
                     thread_id: thread.id,
-                    file_id: thread.file_id,
+                    document_id: thread.document_id,
                 }),
             )
             .await?;
@@ -560,9 +560,9 @@ fn list_thread_timeline_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Verifies a file's review, moving it to `resolved`.
+/// Verifies a document's review, moving it to `resolved`.
 ///
-/// Verification is whole-file: one gesture marks the entire review pass done.
+/// Verification is whole-document: one gesture marks the entire review pass done.
 /// Records a `review.verified` timeline event and raises a `review.verified`
 /// workspace event. Requires `Review` (a reviewer signs off their own work).
 #[tracing::instrument(
@@ -570,26 +570,26 @@ fn list_thread_timeline_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %authz.account_id,
         workspace_id = %authz.workspace.id,
-        file_id = %path_params.file_id,
+        document_id = %path_params.document_id,
     )
 )]
 async fn verify_review(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::Review>,
-    Path(path_params): Path<WorkspaceFilePathParams>,
+    Path(path_params): Path<WorkspaceDocumentPathParams>,
     security: SecurityContext,
 ) -> Result<(StatusCode, Json<Thread>)> {
-    tracing::debug!(target: TRACING_TARGET, "Verifying file review");
+    tracing::debug!(target: TRACING_TARGET, "Verifying document review");
 
     let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
 
-    let file = conn
-        .find_file_in_workspace(workspace.id, path_params.file_id)
+    let document = conn
+        .find_document_in_workspace(workspace.id, path_params.document_id)
         .await?
-        .ok_or_else(|| Error::not_found("file"))?;
+        .ok_or_else(|| Error::not_found("document"))?;
     let thread = conn
-        .find_file_thread(workspace.id, path_params.file_id)
+        .find_document_thread(workspace.id, path_params.document_id)
         .await?
         .ok_or_else(|| Error::not_found("workspace_thread"))?;
 
@@ -601,8 +601,8 @@ async fn verify_review(
                 workspace_origin(workspace.id, authz.account_id, &security),
                 WorkspaceEvent::ReviewVerified(ReviewVerified {
                     thread_id: thread.id,
-                    file_id: file.id,
-                    file_name: file.display_name.clone(),
+                    document_id: document.id,
+                    document_name: document.display_name.clone(),
                 }),
             )
             .await?;
@@ -612,15 +612,15 @@ async fn verify_review(
 
     let response = thread_response(&mut conn, verified).await?;
 
-    tracing::info!(target: TRACING_TARGET, "File review verified");
+    tracing::info!(target: TRACING_TARGET, "Document review verified");
 
     Ok((StatusCode::OK, Json(response)))
 }
 
 fn verify_review_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Verify a file review")
+    op.summary("Verify a document review")
         .description(
-            "Verifies a file's review as a whole, moving it to `resolved`. Requires \
+            "Verifies a document's review as a whole, moving it to `resolved`. Requires \
              AssignReviews.",
         )
         .response::<200, Json<Thread>>()
@@ -629,7 +629,7 @@ fn verify_review_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Assigns or unassigns a file's review.
+/// Assigns or unassigns a document's review.
 ///
 /// A `null` assignee clears the current one. An assignee must be a workspace
 /// member. Records a `review.assigned` or `review.unassigned` timeline event and
@@ -640,27 +640,27 @@ fn verify_review_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %authz.account_id,
         workspace_id = %authz.workspace.id,
-        file_id = %path_params.file_id,
+        document_id = %path_params.document_id,
     )
 )]
 async fn assign_review(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::AssignReviews>,
-    Path(path_params): Path<WorkspaceFilePathParams>,
+    Path(path_params): Path<WorkspaceDocumentPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<AssignReview>,
 ) -> Result<(StatusCode, Json<Thread>)> {
-    tracing::debug!(target: TRACING_TARGET, "Assigning file review");
+    tracing::debug!(target: TRACING_TARGET, "Assigning document review");
 
     let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
 
-    let file = conn
-        .find_file_in_workspace(workspace.id, path_params.file_id)
+    let document = conn
+        .find_document_in_workspace(workspace.id, path_params.document_id)
         .await?
-        .ok_or_else(|| Error::not_found("file"))?;
+        .ok_or_else(|| Error::not_found("document"))?;
     let thread = conn
-        .find_file_thread(workspace.id, path_params.file_id)
+        .find_document_thread(workspace.id, path_params.document_id)
         .await?
         .ok_or_else(|| Error::not_found("workspace_thread"))?;
 
@@ -680,8 +680,8 @@ async fn assign_review(
                 (Some(assignee), Some(assignee_ref)) => {
                     WorkspaceEvent::ReviewAssigned(ReviewAssigned {
                         thread_id: thread.id,
-                        file_id: file.id,
-                        file_name: file.display_name.clone(),
+                        document_id: document.id,
+                        document_name: document.display_name.clone(),
                         assignee_username: assignee_ref.username.clone(),
                         // The reviewer is notified unless they assigned themselves.
                         notify: (assignee != authz.account_id).then_some(assignee),
@@ -689,8 +689,8 @@ async fn assign_review(
                 }
                 _ => WorkspaceEvent::ReviewUnassigned(ReviewUnassigned {
                     thread_id: thread.id,
-                    file_id: file.id,
-                    file_name: Some(file.display_name.clone()),
+                    document_id: document.id,
+                    document_name: Some(document.display_name.clone()),
                 }),
             };
             emit_thread_event(
@@ -705,15 +705,15 @@ async fn assign_review(
 
     let response = thread_response(&mut conn, updated).await?;
 
-    tracing::info!(target: TRACING_TARGET, "File review assignment updated");
+    tracing::info!(target: TRACING_TARGET, "Document review assignment updated");
 
     Ok((StatusCode::OK, Json(response)))
 }
 
 fn assign_review_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Assign a file review")
+    op.summary("Assign a document review")
         .description(
-            "Assigns a file's review to a workspace member, or clears the assignee \
+            "Assigns a document's review to a workspace member, or clears the assignee \
              with a null `assignee`. Requires AssignReviews.",
         )
         .response::<200, Json<Thread>>()
@@ -724,7 +724,7 @@ fn assign_review_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Builds a full [`Thread`] response for `thread`, resolving its author and (for
-/// a file review) its assignee.
+/// a document review) its assignee.
 async fn thread_response(conn: &mut PgConn, thread: WorkspaceThread) -> Result<Thread> {
     let author = resolve_account_ref(conn, thread.author_account_id).await?;
     let assignee = resolve_account_ref_opt(conn, thread.assignee_account_id).await?;
@@ -907,11 +907,11 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/files/{fileId}/review/verify/",
+            "/workspaces/{workspaceSlug}/documents/{documentId}/review/verify/",
             post_with(verify_review, verify_review_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/files/{fileId}/review/assignee/",
+            "/workspaces/{workspaceSlug}/documents/{documentId}/review/assignee/",
             put_with(assign_review, assign_review_docs),
         )
         .api_route(

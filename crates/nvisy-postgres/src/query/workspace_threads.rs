@@ -1,12 +1,12 @@
 //! Workspace thread repository. A thread is either a workspace discussion
-//! (open/closed lifecycle) or a file's review (an assignee and a derived
+//! (open/closed lifecycle) or a document's review (an assignee and a derived
 //! [`ReviewStatus`], driven by review events). Opening a workspace thread creates
-//! its first comment and records the `thread.opened` event; a file review thread
-//! is created lazily by [`find_or_create_file_thread`] when the file is first
+//! its first comment and records the `thread.opened` event; a document review thread
+//! is created lazily by [`find_or_create_document_thread`] when the document is first
 //! detected. Every lifecycle and review transition records its own timeline
 //! event. Deleting a thread hides it and its comments.
 //!
-//! [`find_or_create_file_thread`]: WorkspaceThreadRepository::find_or_create_file_thread
+//! [`find_or_create_document_thread`]: WorkspaceThreadRepository::find_or_create_document_thread
 
 use std::future::Future;
 
@@ -41,23 +41,23 @@ pub struct ThreadCursor {
 pub trait WorkspaceThreadRepository {
     /// Opens a workspace discussion thread with its first comment, recording the
     /// `thread.opened` timeline event, in one transaction. Returns the created
-    /// thread and its opening comment. For a file's review thread use
-    /// [`find_or_create_file_thread`](Self::find_or_create_file_thread) instead.
+    /// thread and its opening comment. For a document's review thread use
+    /// [`find_or_create_document_thread`](Self::find_or_create_document_thread) instead.
     fn open_thread(
         &mut self,
         new_thread: NewWorkspaceThread,
         opening_body: String,
     ) -> impl Future<Output = Result<(WorkspaceThread, WorkspaceThreadComment)>> + Send;
 
-    /// Returns the file's review thread, creating it if absent. A file has exactly
-    /// one live review thread (the review of that file). On creation the thread
+    /// Returns the document's review thread, creating it if absent. A document has exactly
+    /// one live review thread (the review of that document). On creation the thread
     /// starts at [`ReviewStatus::NeedsReview`] and records a
-    /// `review.detection_created` event; it is idempotent, so a repeat detection
+    /// `review.detection.created` event; it is idempotent, so a repeat detection
     /// returns the existing thread untouched.
-    fn find_or_create_file_thread(
+    fn find_or_create_document_thread(
         &mut self,
         workspace_id: Uuid,
-        file_id: Uuid,
+        document_id: Uuid,
         actor: Uuid,
     ) -> impl Future<Output = Result<WorkspaceThread>> + Send;
 
@@ -68,11 +68,11 @@ pub trait WorkspaceThreadRepository {
         thread_id: Uuid,
     ) -> impl Future<Output = Result<Option<WorkspaceThread>>> + Send;
 
-    /// Finds the live review thread for a file, if one exists.
-    fn find_file_thread(
+    /// Finds the live review thread for a document, if one exists.
+    fn find_document_thread(
         &mut self,
         workspace_id: Uuid,
-        file_id: Uuid,
+        document_id: Uuid,
     ) -> impl Future<Output = Result<Option<WorkspaceThread>>> + Send;
 
     /// Finds a live thread by id within a workspace, taking a row lock (`FOR
@@ -99,7 +99,7 @@ pub trait WorkspaceThreadRepository {
 
     /// Closes a workspace discussion thread, recording who closed it and a
     /// `thread.closed` timeline event, in one transaction. Applies only to
-    /// workspace threads; a file review thread (which uses `review_status`) matches
+    /// workspace threads; a document review thread (which uses `review_status`) matches
     /// no row and returns `NotFound`. The caller checks the open state first.
     fn close_thread(
         &mut self,
@@ -125,8 +125,8 @@ pub trait WorkspaceThreadRepository {
         actor: Uuid,
     ) -> impl Future<Output = Result<WorkspaceThread>> + Send;
 
-    /// Marks a file review [`InReview`](ReviewStatus::InReview) (a redaction pass
-    /// was made), recording a `review.redaction_created` event, unless it is
+    /// Marks a document review [`InReview`](ReviewStatus::InReview) (a redaction pass
+    /// was made), recording a `review.redaction.created` event, unless it is
     /// already [`Resolved`](ReviewStatus::Resolved). Returns the thread.
     fn mark_review_in_review(
         &mut self,
@@ -134,9 +134,9 @@ pub trait WorkspaceThreadRepository {
         actor: Uuid,
     ) -> impl Future<Output = Result<WorkspaceThread>> + Send;
 
-    /// Verifies a file review, moving it to [`Resolved`](ReviewStatus::Resolved)
+    /// Verifies a document review, moving it to [`Resolved`](ReviewStatus::Resolved)
     /// and recording a `review.verified` event, in one transaction. Applies only
-    /// to a file review that is not already resolved; anything else matches no row
+    /// to a document review that is not already resolved; anything else matches no row
     /// and returns `NotFound`.
     fn verify_review(
         &mut self,
@@ -144,7 +144,7 @@ pub trait WorkspaceThreadRepository {
         actor: Uuid,
     ) -> impl Future<Output = Result<WorkspaceThread>> + Send;
 
-    /// Reopens a resolved file review back to
+    /// Reopens a resolved document review back to
     /// [`NeedsReview`](ReviewStatus::NeedsReview) (a new detection invalidated it),
     /// recording a `review.reopened` event. A no-op returning the thread when it is
     /// not resolved.
@@ -154,7 +154,7 @@ pub trait WorkspaceThreadRepository {
         actor: Uuid,
     ) -> impl Future<Output = Result<WorkspaceThread>> + Send;
 
-    /// Sets or clears a file review's assignee, recording a `review.assigned` (or
+    /// Sets or clears a document review's assignee, recording a `review.assigned` (or
     /// `review.unassigned` when clearing) event carrying the assignee, in one
     /// transaction.
     fn assign_review(
@@ -217,19 +217,19 @@ impl WorkspaceThreadRepository for PgConnection {
         .await
     }
 
-    async fn find_or_create_file_thread(
+    async fn find_or_create_document_thread(
         &mut self,
         workspace_id: Uuid,
-        file_id: Uuid,
+        document_id: Uuid,
         actor: Uuid,
     ) -> Result<WorkspaceThread> {
         self.transaction(async |conn| {
             use schema::workspace_threads::{self, dsl};
 
-            // A file has exactly one live review thread. Lock it if it exists so a
+            // A document has exactly one live review thread. Lock it if it exists so a
             // concurrent detection does not create a second, then short-circuit.
             let existing = workspace_threads::table
-                .filter(dsl::file_id.eq(file_id))
+                .filter(dsl::document_id.eq(document_id))
                 .filter(dsl::workspace_id.eq(workspace_id))
                 .filter(dsl::deleted_at.is_null())
                 .select(WorkspaceThread::as_select())
@@ -242,12 +242,12 @@ impl WorkspaceThreadRepository for PgConnection {
                 return Ok(thread);
             }
 
-            // First detection on this file: create its review thread at
+            // First detection on this document: create its review thread at
             // `NeedsReview` and record the detection-created event.
             let thread = diesel::insert_into(workspace_threads::table)
                 .values(&NewWorkspaceThread {
                     workspace_id,
-                    file_id: Some(file_id),
+                    document_id: Some(document_id),
                     author_account_id: actor,
                     display_name: None,
                     review_status: Some(ReviewStatus::NeedsReview),
@@ -289,15 +289,15 @@ impl WorkspaceThreadRepository for PgConnection {
             .map_err(Error::from)
     }
 
-    async fn find_file_thread(
+    async fn find_document_thread(
         &mut self,
         workspace_id: Uuid,
-        file_id: Uuid,
+        document_id: Uuid,
     ) -> Result<Option<WorkspaceThread>> {
         use schema::workspace_threads::{self, dsl};
 
         workspace_threads::table
-            .filter(dsl::file_id.eq(file_id))
+            .filter(dsl::document_id.eq(document_id))
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceThread::as_select())
@@ -343,8 +343,8 @@ impl WorkspaceThreadRepository for PgConnection {
                 .filter(dsl::workspace_id.eq(workspace_id))
                 .filter(dsl::deleted_at.is_null())
                 .into_boxed();
-            if let Some(file_id) = filter.file_id {
-                query = query.filter(dsl::file_id.eq(file_id));
+            if let Some(document_id) = filter.document_id {
+                query = query.filter(dsl::document_id.eq(document_id));
             }
             if let Some(author_account_id) = filter.author_account_id {
                 query = query.filter(dsl::author_account_id.eq(author_account_id));
@@ -416,15 +416,15 @@ impl WorkspaceThreadRepository for PgConnection {
         self.transaction(async |conn| {
             use schema::workspace_threads::{self, dsl};
 
-            // The `file_id IS NULL` predicate limits this to workspace threads (a
-            // file review uses `review_status`), and `closed_at IS NULL` makes the
-            // transition atomic: an already-closed or file thread matches no row,
+            // The `document_id IS NULL` predicate limits this to workspace threads (a
+            // document review uses `review_status`), and `closed_at IS NULL` makes the
+            // transition atomic: an already-closed or document thread matches no row,
             // so the call returns `NotFound` rather than double-closing.
             let thread = diesel::update(
                 workspace_threads::table
                     .filter(dsl::id.eq(thread_id))
                     .filter(dsl::deleted_at.is_null())
-                    .filter(dsl::file_id.is_null())
+                    .filter(dsl::document_id.is_null())
                     .filter(dsl::closed_at.is_null()),
             )
             .set((dsl::closed_at.eq(now), dsl::closed_by.eq(actor)))
@@ -443,15 +443,15 @@ impl WorkspaceThreadRepository for PgConnection {
         self.transaction(async |conn| {
             use schema::workspace_threads::{self, dsl};
 
-            // Workspace threads only (`file_id IS NULL`), and `closed_at IS NOT
-            // NULL` makes it atomic: an already-open or file thread matches no row,
+            // Workspace threads only (`document_id IS NULL`), and `closed_at IS NOT
+            // NULL` makes it atomic: an already-open or document thread matches no row,
             // so a second concurrent reopen returns `NotFound` rather than
             // recording a duplicate `Reopened` event.
             let thread = diesel::update(
                 workspace_threads::table
                     .filter(dsl::id.eq(thread_id))
                     .filter(dsl::deleted_at.is_null())
-                    .filter(dsl::file_id.is_null())
+                    .filter(dsl::document_id.is_null())
                     .filter(dsl::closed_at.is_not_null()),
             )
             .set((
@@ -507,7 +507,7 @@ impl WorkspaceThreadRepository for PgConnection {
             use schema::workspace_threads::{self, dsl};
 
             // A redaction on an already-resolved review does not undo the
-            // verification: only a file review that is not yet resolved moves to
+            // verification: only a document review that is not yet resolved moves to
             // `in_review`. A redaction on a resolved review is a legitimate no-op
             // (the update matches no row), so fall back to reading the thread
             // rather than failing the redaction, and record no timeline event.
@@ -515,7 +515,7 @@ impl WorkspaceThreadRepository for PgConnection {
                 workspace_threads::table
                     .filter(dsl::id.eq(thread_id))
                     .filter(dsl::deleted_at.is_null())
-                    .filter(dsl::file_id.is_not_null())
+                    .filter(dsl::document_id.is_not_null())
                     .filter(dsl::review_status.ne(ReviewStatus::Resolved)),
             )
             .set(dsl::review_status.eq(ReviewStatus::InReview))
@@ -553,13 +553,13 @@ impl WorkspaceThreadRepository for PgConnection {
         self.transaction(async |conn| {
             use schema::workspace_threads::{self, dsl};
 
-            // Only a file review that is not already resolved can be verified; a
+            // Only a document review that is not already resolved can be verified; a
             // repeat verify (or a workspace thread) matches no row -> `NotFound`.
             let thread = diesel::update(
                 workspace_threads::table
                     .filter(dsl::id.eq(thread_id))
                     .filter(dsl::deleted_at.is_null())
-                    .filter(dsl::file_id.is_not_null())
+                    .filter(dsl::document_id.is_not_null())
                     .filter(dsl::review_status.ne(ReviewStatus::Resolved)),
             )
             .set(dsl::review_status.eq(ReviewStatus::Resolved))
@@ -584,7 +584,7 @@ impl WorkspaceThreadRepository for PgConnection {
                 workspace_threads::table
                     .filter(dsl::id.eq(thread_id))
                     .filter(dsl::deleted_at.is_null())
-                    .filter(dsl::file_id.is_not_null())
+                    .filter(dsl::document_id.is_not_null())
                     .filter(dsl::review_status.eq(ReviewStatus::Resolved)),
             )
             .set(dsl::review_status.eq(ReviewStatus::NeedsReview))
@@ -625,7 +625,7 @@ impl WorkspaceThreadRepository for PgConnection {
                 workspace_threads::table
                     .filter(dsl::id.eq(thread_id))
                     .filter(dsl::deleted_at.is_null())
-                    .filter(dsl::file_id.is_not_null()),
+                    .filter(dsl::document_id.is_not_null()),
             )
             .set(dsl::assignee_account_id.eq(assignee))
             .returning(WorkspaceThread::as_returning())
@@ -698,16 +698,20 @@ mod tests {
     #[tokio::test]
     async fn open_thread_creates_thread_and_opening_comment() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let (thread, opening) = conn
             .open_thread(
-                NewWorkspaceThread::test(seeded.workspace_id, seeded.file_id, seeded.account_id),
+                NewWorkspaceThread::test(
+                    seeded.workspace_id,
+                    seeded.document_id,
+                    seeded.account_id,
+                ),
                 "Opening message.".to_owned(),
             )
             .await?;
-        assert_eq!(thread.file_id, Some(seeded.file_id));
+        assert_eq!(thread.document_id, Some(seeded.document_id));
         assert!(thread.closed_at.is_none());
         assert_eq!(opening.thread_id, thread.id);
         assert_eq!(opening.body, "Opening message.");
@@ -738,7 +742,7 @@ mod tests {
             .open_thread(
                 NewWorkspaceThread {
                     workspace_id: seeded.workspace_id,
-                    file_id: None,
+                    document_id: None,
                     author_account_id: seeded.account_id,
                     display_name: None,
                     review_status: None,
@@ -746,7 +750,7 @@ mod tests {
                 "A general workspace discussion.".to_owned(),
             )
             .await?;
-        assert_eq!(thread.file_id, None);
+        assert_eq!(thread.document_id, None);
         assert_eq!(thread.review_status, None);
         Ok(())
     }
@@ -757,13 +761,13 @@ mod tests {
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
-        // Close/reopen apply to workspace threads (no file), which use the
+        // Close/reopen apply to workspace threads (no document), which use the
         // open/closed lifecycle rather than a review status.
         let (thread, _opening) = conn
             .open_thread(
                 NewWorkspaceThread {
                     workspace_id: seeded.workspace_id,
-                    file_id: None,
+                    document_id: None,
                     author_account_id: seeded.account_id,
                     display_name: None,
                     review_status: None,
@@ -811,18 +815,26 @@ mod tests {
     #[tokio::test]
     async fn file_thread_review_status_derives_from_events() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
-        // A detection creates the file's review thread at NeedsReview and is
+        // A detection creates the document's review thread at NeedsReview and is
         // idempotent: a repeat detection returns the same thread.
         let thread = conn
-            .find_or_create_file_thread(seeded.workspace_id, seeded.file_id, seeded.account_id)
+            .find_or_create_document_thread(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            )
             .await?;
-        assert_eq!(thread.file_id, Some(seeded.file_id));
+        assert_eq!(thread.document_id, Some(seeded.document_id));
         assert_eq!(thread.review_status, Some(ReviewStatus::NeedsReview));
         let again = conn
-            .find_or_create_file_thread(seeded.workspace_id, seeded.file_id, seeded.account_id)
+            .find_or_create_document_thread(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            )
             .await?;
         assert_eq!(again.id, thread.id);
 
@@ -836,16 +848,20 @@ mod tests {
 
         // A re-detection after resolution reopens it to NeedsReview.
         let reopened = conn
-            .find_or_create_file_thread(seeded.workspace_id, seeded.file_id, seeded.account_id)
+            .find_or_create_document_thread(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            )
             .await
             .map(|t| t.id)?;
         assert_eq!(reopened, thread.id);
         let reopened = conn.reopen_review(thread.id, seeded.account_id).await?;
         assert_eq!(reopened.review_status, Some(ReviewStatus::NeedsReview));
 
-        // Exactly one live thread exists for the file throughout.
+        // Exactly one live thread exists for the document throughout.
         assert!(
-            conn.find_file_thread(seeded.workspace_id, seeded.file_id)
+            conn.find_document_thread(seeded.workspace_id, seeded.document_id)
                 .await?
                 .is_some()
         );
@@ -872,11 +888,15 @@ mod tests {
     #[tokio::test]
     async fn assign_and_unassign_review_records_events() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let thread = conn
-            .find_or_create_file_thread(seeded.workspace_id, seeded.file_id, seeded.account_id)
+            .find_or_create_document_thread(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            )
             .await?;
         assert_eq!(thread.assignee_account_id, None);
 
@@ -919,7 +939,7 @@ mod tests {
 
         let new_workspace_thread = |author: Uuid| NewWorkspaceThread {
             workspace_id: seeded.workspace_id,
-            file_id: None,
+            document_id: None,
             author_account_id: author,
             display_name: None,
             review_status: None,
@@ -972,12 +992,16 @@ mod tests {
     #[tokio::test]
     async fn comment_edit_and_delete() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let (thread, opening) = conn
             .open_thread(
-                NewWorkspaceThread::test(seeded.workspace_id, seeded.file_id, seeded.account_id),
+                NewWorkspaceThread::test(
+                    seeded.workspace_id,
+                    seeded.document_id,
+                    seeded.account_id,
+                ),
                 "Opening.".to_owned(),
             )
             .await?;
@@ -1010,12 +1034,16 @@ mod tests {
     #[tokio::test]
     async fn create_reply_is_unique_per_triggering_comment() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let (thread, trigger) = conn
             .open_thread(
-                NewWorkspaceThread::test(seeded.workspace_id, seeded.file_id, seeded.account_id),
+                NewWorkspaceThread::test(
+                    seeded.workspace_id,
+                    seeded.document_id,
+                    seeded.account_id,
+                ),
                 "@assistant help".to_owned(),
             )
             .await?;
@@ -1106,7 +1134,7 @@ mod tests {
     #[tokio::test]
     async fn timeline_pages_comments_and_events_in_one_order() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
         // Build a workspace thread with a known set of timeline entries: opening
@@ -1116,7 +1144,7 @@ mod tests {
             .open_thread(
                 NewWorkspaceThread {
                     workspace_id: seeded.workspace_id,
-                    file_id: None,
+                    document_id: None,
                     author_account_id: seeded.account_id,
                     display_name: None,
                     review_status: None,

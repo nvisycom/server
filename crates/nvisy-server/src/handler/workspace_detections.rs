@@ -1,8 +1,8 @@
 //! Detection handlers: detect, review, and redact.
 //!
-//! A detection is one analysis of a file through a pipeline. Detect creates the
+//! A detection is one analysis of a document through a pipeline. Detect creates the
 //! detection and stores the findings; once it is complete a redaction consumes
-//! the findings (with optional reviewer edits) and produces a redacted file. A
+//! the findings (with optional reviewer edits) and produces a redacted document. A
 //! detection can be redacted many times.
 
 use aide::axum::ApiRouter;
@@ -11,17 +11,19 @@ use async_stream::stream;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::sse::Event;
+use elide_pipeline::policy::PolicyDefinition;
 use futures::StreamExt;
 use nvisy_postgres::model::{
-    NewWorkspaceDetection, NewWorkspaceDetectionJob, NewWorkspaceRedaction, WorkspaceDetection,
-    WorkspacePipeline,
+    Blob, NewWorkspaceAudit, NewWorkspaceDetection, NewWorkspaceDetectionJob, NewWorkspaceDocument,
+    NewWorkspaceRedaction, WorkspaceDetection, WorkspaceDocument, WorkspacePipeline,
 };
 use nvisy_postgres::query::{
-    DetectionFiles, DetectionJobOutboxRepository, PipelineReferenceRepository,
-    WorkspaceDetectionRepository, WorkspaceFileRepository, WorkspacePipelineRepository,
-    WorkspaceRedactionRepository, WorkspaceThreadRepository,
+    DetectionDocuments, DetectionJobOutboxRepository, PipelineReferenceRepository,
+    WorkspaceAuditRepository, WorkspaceBlobRepository, WorkspaceDetectionRepository,
+    WorkspaceDocumentRepository, WorkspacePipelineRepository, WorkspaceRedactionRepository,
+    WorkspaceThreadRepository,
 };
-use nvisy_postgres::types::DetectionStatus;
+use nvisy_postgres::types::{DetectionStatus, DocumentKind};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
@@ -44,7 +46,7 @@ use crate::service::{
 /// Tracing target for detection operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::detections";
 
-/// Starts a detection: analyzes a file with the pipeline's configuration.
+/// Starts a detection: analyzes a document with the pipeline's configuration.
 ///
 /// Returns the detection holding the findings for review. A repeated request with
 /// the same `Idempotency-Key` returns the existing detection instead of analyzing
@@ -91,7 +93,9 @@ async fn create_detection(
     {
         tracing::debug!(target: TRACING_TARGET, "Replaying detection for idempotency key");
         let trigger = resolve_account_ref(&mut conn, existing.account_id).await?;
-        let files = conn.detection_file_names(workspace.id, &existing).await?;
+        let documents = conn
+            .detection_document_names(workspace.id, &existing)
+            .await?;
         return Ok((
             StatusCode::OK,
             Json(Detection::from_model(
@@ -99,17 +103,17 @@ async fn create_detection(
                 pipeline.slug.clone(),
                 workspace.slug.clone(),
                 trigger,
-                files,
+                documents,
             )),
         ));
     }
 
     // Validate synchronously so a bad request fails fast (4xx) rather than as a
     // detection that immediately fails in the worker.
-    let file = conn
-        .find_file_in_workspace(pipeline.workspace_id, request.file_id)
+    let document = conn
+        .find_document_in_workspace(pipeline.workspace_id, request.document_id)
         .await?
-        .ok_or_else(|| Error::not_found("file"))?;
+        .ok_or_else(|| Error::not_found("document"))?;
 
     if conn.list_pipeline_policy_ids(pipeline.id).await?.is_empty() {
         return Err(ErrorKind::BadRequest
@@ -134,7 +138,7 @@ async fn create_detection(
     // detection's status (SSE at `.../events` or a re-read).
     let new_detection = NewWorkspaceDetection {
         pipeline_id: pipeline.id,
-        input_file_id: file.id,
+        input_document_id: document.id,
         account_id: authz.account_id,
         status: Some(DetectionStatus::Pending),
         idempotency_key: idempotency_key.clone(),
@@ -164,13 +168,14 @@ async fn create_detection(
             )
             .await?;
 
-            // The file's review is its thread: ensure it exists (one live thread
-            // per file) so this detection has somewhere to be reviewed. On the
-            // file's first detection this creates the thread at `needs_review` and
-            // records a `review.detection_created` timeline event; a re-detection
-            // finds the existing thread and reopens it if it was resolved.
+            // The document's review is its thread: ensure it exists (one live
+            // thread per document) so this detection has somewhere to be reviewed.
+            // On the document's first detection this creates the thread at
+            // `needs_review` and records a `review.detection.created` timeline
+            // event; a re-detection finds the existing thread and reopens it if it
+            // was resolved.
             let thread = conn
-                .find_or_create_file_thread(workspace.id, file.id, authz.account_id)
+                .find_or_create_document_thread(workspace.id, document.id, authz.account_id)
                 .await?;
             conn.reopen_review(thread.id, authz.account_id).await?;
             let job = DetectionJob {
@@ -209,9 +214,9 @@ async fn create_detection(
 
     let trigger = resolve_account_ref(&mut conn, detection_row.account_id).await?;
 
-    // The detection was just created from this file.
-    let files = DetectionFiles {
-        input: Some(file.display_name),
+    // The detection was just created from this document.
+    let documents = DetectionDocuments {
+        input: Some(document.display_name),
     };
 
     Ok((
@@ -221,7 +226,7 @@ async fn create_detection(
             pipeline.slug,
             workspace.slug,
             trigger,
-            files,
+            documents,
         )),
     ))
 }
@@ -229,7 +234,7 @@ async fn create_detection(
 fn create_detection_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Start a detection")
         .description(
-            "Starts analysis for a file and returns 202 with the detection in the \
+            "Starts analysis for a document and returns 202 with the detection in the \
              `pending` state; the analysis runs in the background. Watch the \
              detection's status via the SSE stream at \
              `.../detections/{detectionId}/events` (or re-read the detection) and \
@@ -285,8 +290,8 @@ async fn list_pipeline_detections(
             row.pipeline_slug,
             workspace.slug.clone(),
             row.account.into(),
-            DetectionFiles {
-                input: row.input_file_name,
+            DetectionDocuments {
+                input: row.input_document_name,
             },
         )
     });
@@ -298,7 +303,7 @@ fn list_pipeline_detections_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List pipeline detections")
         .description(
             "Returns detections for a specific pipeline, most recent first, with \
-             optional status, file, trigger-account, and trigger-type filters.",
+             optional status, document, trigger-account, and trigger-type filters.",
         )
         .response::<200, Json<DetectionsPage>>()
         .response::<401, Json<ErrorResponse>>()
@@ -346,8 +351,8 @@ async fn list_workspace_detections(
                 row.pipeline_slug,
                 workspace.slug.clone(),
                 row.account.into(),
-                DetectionFiles {
-                    input: row.input_file_name,
+                DetectionDocuments {
+                    input: row.input_document_name,
                 },
             )
         })),
@@ -358,7 +363,7 @@ fn list_workspace_detections_docs(op: TransformOperation) -> TransformOperation 
     op.summary("List workspace detections")
         .description(
             "Returns all detections across the workspace, most recent first, \
-             with optional status, file, pipeline, trigger-account, and \
+             with optional status, document, pipeline, trigger-account, and \
              trigger-type filters.",
         )
         .response::<200, Json<DetectionsPage>>()
@@ -390,7 +395,9 @@ async fn get_detection(
         find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
 
     let trigger = resolve_account_ref(&mut conn, detection.account_id).await?;
-    let files = conn.detection_file_names(workspace.id, &detection).await?;
+    let documents = conn
+        .detection_document_names(workspace.id, &detection)
+        .await?;
 
     tracing::debug!(target: TRACING_TARGET, "Detection retrieved");
 
@@ -401,7 +408,7 @@ async fn get_detection(
             pipeline.slug,
             workspace.slug,
             trigger,
-            files,
+            documents,
         )),
     ))
 }
@@ -571,10 +578,27 @@ fn status_event(event: &DetectionStatusEvent) -> Event {
         .unwrap_or_else(|_| Event::default().event("status"))
 }
 
+/// The pre-flight inputs a redaction reads under a connection before releasing it
+/// for the slow analysis and staging work.
+struct RedactInputs {
+    detection: WorkspaceDetection,
+    pipeline: WorkspacePipeline,
+    /// The detection's input document.
+    document: WorkspaceDocument,
+    /// The input document's backing blob (for its extension and byte access).
+    source_blob: Blob,
+    /// The detection's base audit id, recorded as the review audit's
+    /// `derived_from`.
+    base_audit_id: Uuid,
+    /// The base audit's backing blob, loaded to seed the working audit.
+    audit_blob: Blob,
+    policies: Vec<PolicyDefinition>,
+}
+
 /// Redacts a detection using its findings, storing the result.
 ///
 /// Applies the pipeline's policies to the detection's stored analysis, stores the
-/// redacted bytes as a new file, and emits a redaction event. Requires
+/// redacted bytes as a new document, and emits a redaction event. Requires
 /// `RunRedactions` permission. A detection can be redacted more than once.
 #[tracing::instrument(
     skip_all,
@@ -602,8 +626,8 @@ async fn redact_detection(
     // Holding a pooled connection across the audit load, redaction inference, and
     // object I/O below would pin it for many seconds and starve the pool under
     // load, so this scope drops the connection before that slow work begins. Only
-    // the audit file row is resolved here; its bytes are loaded in phase 2.
-    let (detection, pipeline, file, audit_file, policies) = {
+    // the audit blob is resolved here; its bytes are loaded in phase 2.
+    let inputs = {
         let mut conn = pg_client.get_connection().await?;
 
         let (detection, pipeline) =
@@ -616,12 +640,18 @@ async fn redact_detection(
                 .with_resource("detection"));
         }
 
-        // The source document is normally held back from retention while the
-        // detection is unfinished (see files_due_for_expiry), so this is reachable
-        // only if the input was explicitly deleted; surface a message that names
-        // the cause.
-        let file = conn
-            .find_file_in_workspace(workspace.id, detection.input_file_id)
+        // The source document is reachable only if it was not explicitly deleted;
+        // surface a message that names the cause.
+        let document = conn
+            .find_document_in_workspace(workspace.id, detection.input_document_id)
+            .await?
+            .ok_or_else(|| {
+                ErrorKind::Conflict
+                    .with_message("The detection's source document is no longer available")
+                    .with_resource("detection")
+            })?;
+        let source_blob = conn
+            .find_blob_by_id(document.blob_id)
             .await?
             .ok_or_else(|| {
                 ErrorKind::Conflict
@@ -629,12 +659,31 @@ async fn redact_detection(
                     .with_resource("detection")
             })?;
 
-        let audit_file = blob
-            .resolve_audit_file(&mut conn, workspace.id, &detection)
-            .await?;
+        // The base audit (its `derived_from` for the review audit) and its blob.
+        let base_audit = conn.find_base_audit(detection.id).await?.ok_or_else(|| {
+            ErrorKind::Conflict
+                .with_message("Detection has no analysis yet")
+                .with_resource("detection")
+        })?;
+        let audit_blob = conn
+            .find_blob_by_id(base_audit.blob_id)
+            .await?
+            .ok_or_else(|| {
+                ErrorKind::NotFound
+                    .with_message("The analysis for this detection has been deleted")
+                    .with_resource("detection")
+            })?;
         let policies = resolve_policies(&mut conn, &crypto, workspace.id, pipeline.id).await?;
 
-        (detection, pipeline, file, audit_file, policies)
+        RedactInputs {
+            detection,
+            pipeline,
+            document,
+            source_blob,
+            base_audit_id: base_audit.id,
+            audit_blob,
+            policies,
+        }
     };
 
     // Phase 2: the slow work — loading the analysis, applying reviewer edits, the
@@ -645,7 +694,9 @@ async fn redact_detection(
     // mutated on disk: reviewer edits and the redaction outcome land on this
     // clone, which is persisted as the redaction's own review audit, leaving the
     // detection analysis immutable and re-redactable.
-    let mut reviewed = blob.load_audit(&engine, workspace.id, &audit_file).await?;
+    let mut reviewed = blob
+        .load_audit(&engine, workspace.id, &inputs.audit_blob)
+        .await?;
 
     // Layer the reviewer's edits onto the working audit's report before redaction.
     // Both validation and landing are report-relative (an unknown target, a
@@ -658,38 +709,39 @@ async fn redact_detection(
         edits.apply(&mut reviewed.report)?;
     }
 
-    let document = blob.build_document(&file, detection.id).await?;
+    let document = blob
+        .build_document(&inputs.document, &inputs.source_blob, inputs.detection.id)
+        .await?;
 
     // No per-request key: the server does not yet drive keyed operators
     // (HMAC/encrypt), whose `KeyConfig` would be supplied here. The codec params
     // and document context are read back from the audit, recorded at detect time.
     let redacted = engine
-        .anonymize(document, &policies, &mut reviewed, None)
+        .anonymize(document, &inputs.policies, &mut reviewed, None)
         .await?;
 
     // Stage both produced objects (redacted document + review audit) outside the
-    // transaction — object writes are not transactional — then commit their file
-    // rows and the redaction row together. On rollback the staged objects are
-    // reclaimed so no orphaned bytes accrue.
+    // transaction — object writes are not transactional — then commit their blobs,
+    // document, audit, and redaction rows together. On rollback the staged objects
+    // are reclaimed so no orphaned bytes accrue.
     let retention = workspace.settings.or_default().retention;
     let staged_output = blob
-        .stage_redacted_file(
-            &file,
-            &pipeline,
+        .stage_redacted_document(
+            &inputs.document,
+            &inputs.pipeline,
             &retention,
-            authz.account_id,
             redacted.bytes,
         )
         .await?;
     // Staging the review audit after the output means a failure here would strand
-    // the already-written output object (no row to reclaim it); discard it first.
+    // the already-written output object (no blob to reclaim it); discard it first.
     let staged_review = match blob
-        .stage_review_audit(&pipeline, &retention, authz.account_id, &reviewed)
+        .stage_review_audit(&inputs.pipeline, &retention, &reviewed)
         .await
     {
         Ok(staged) => staged,
         Err(err) => {
-            blob.discard_staged_object(&staged_output).await.ok();
+            blob.discard_staged_object(&staged_output.0).await.ok();
             return Err(err);
         }
     };
@@ -699,16 +751,44 @@ async fn redact_detection(
     let mut conn = pg_client.get_connection().await?;
     let redaction = conn
         .transaction(async |conn| {
-            let output_file = conn.create_workspace_file(staged_output.clone()).await?;
-            let review_file = conn.create_workspace_file(staged_review.clone()).await?;
+            // The redacted output is a first-class document (kind=redacted); its
+            // blob is resolved (shared or created) as the document is created.
+            let output_document = conn
+                .create_workspace_document(
+                    NewWorkspaceDocument {
+                        workspace_id: workspace.id,
+                        account_id: authz.account_id,
+                        blob_id: Uuid::nil(),
+                        kind: Some(DocumentKind::Redacted),
+                        display_name: Some(staged_output.1.clone()),
+                        original_filename: Some(inputs.document.original_filename.clone()),
+                        file_extension: Some(inputs.document.file_extension.clone()),
+                        metadata: None,
+                    },
+                    staged_output.0.clone(),
+                )
+                .await?;
             let redaction = conn
                 .create_redaction(NewWorkspaceRedaction {
-                    detection_id: detection.id,
+                    detection_id: inputs.detection.id,
                     account_id: authz.account_id,
-                    review_file_id: Some(review_file.id),
-                    output_file_id: Some(output_file.id),
+                    output_document_id: Some(output_document.id),
                 })
                 .await?;
+            // The review audit records its lineage: the redaction that produced it
+            // and the base audit it was edited from. Creating it resolves and
+            // references its blob in this same transaction.
+            conn.create_audit(
+                NewWorkspaceAudit::review(
+                    workspace.id,
+                    Uuid::nil(),
+                    inputs.detection.id,
+                    redaction.id,
+                    inputs.base_audit_id,
+                ),
+                staged_review.clone(),
+            )
+            .await?;
             conn.emit_event(
                 EventOrigin {
                     workspace_id: workspace.id,
@@ -716,21 +796,21 @@ async fn redact_detection(
                     security: &security,
                 },
                 WorkspaceEvent::RedactionCreated(RedactionCreated {
-                    detection_id: detection.id,
-                    pipeline_slug: pipeline.slug.clone(),
+                    detection_id: inputs.detection.id,
+                    pipeline_slug: inputs.pipeline.slug.clone(),
                     redaction_id: redaction.id,
-                    input_file_name: Some(file.display_name.clone()),
-                    notify: detection.account_id,
+                    input_document_name: Some(inputs.document.display_name.clone()),
+                    notify: inputs.detection.account_id,
                 }),
             )
             .await?;
 
-            // A redaction pass moves the file's review to `in_review` (unless it
-            // is already resolved), recording a `review.redaction_created`
+            // A redaction pass moves the document's review to `in_review` (unless
+            // it is already resolved), recording a `review.redaction.created`
             // timeline event. The review thread already exists from detection;
             // find-or-create keeps this robust if it somehow does not.
             let thread = conn
-                .find_or_create_file_thread(workspace.id, file.id, authz.account_id)
+                .find_or_create_document_thread(workspace.id, inputs.document.id, authz.account_id)
                 .await?;
             conn.mark_review_in_review(thread.id, authz.account_id)
                 .await?;
@@ -743,7 +823,7 @@ async fn redact_detection(
         Err(err) => {
             // The rows rolled back, so their staged objects are orphans: reclaim
             // both (best effort — a failure only leaves them for a later sweep).
-            blob.discard_staged_object(&staged_output).await.ok();
+            blob.discard_staged_object(&staged_output.0).await.ok();
             blob.discard_staged_object(&staged_review).await.ok();
             return Err(err);
         }
@@ -751,7 +831,7 @@ async fn redact_detection(
 
     tracing::info!(
         target: TRACING_TARGET,
-        detection_id = %detection.id,
+        detection_id = %inputs.detection.id,
         redaction_id = %redaction.id,
         "Detection redacted"
     );

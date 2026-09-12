@@ -1,39 +1,41 @@
 //! Logical stores within the single S3 bucket.
 
+use std::str::FromStr;
+
+use strum::{EnumString, IntoStaticStr};
+
 /// A logical store — a class of first-party object with its own key prefix and
 /// key type inside the shared S3 bucket.
 ///
 /// Each variant maps to a stable [`name`](Self::name) (recorded in the
-/// `workspace_files` `storage_bucket` column, so a stored object can be routed
+/// `workspace_blobs` `storage_bucket` column, so a stored object can be routed
 /// back to its store) and an S3 key [`prefix`](Self::prefix) that namespaces its
 /// objects.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IntoStaticStr, EnumString)]
 pub enum Bucket {
-    /// Uploaded and processed document files.
-    Files,
+    /// Uploaded and processed document objects.
+    #[strum(serialize = "DOCUMENTS")]
+    Documents,
     /// Detection analysis blobs (audits, review audits).
+    #[strum(serialize = "DOCUMENT_AUDITS")]
     Audits,
-    /// Transient pipeline artifacts (enrichment intermediates: OCR layout,
-    /// transcripts).
-    Artifacts,
+    /// Transient pipeline intermediates (enrichment: OCR layout, transcripts).
+    #[strum(serialize = "PIPELINE_INTERMEDIATES")]
+    Intermediates,
     /// Account avatars.
+    #[strum(serialize = "ACCOUNT_AVATARS")]
     AccountAvatars,
     /// Workspace avatars (logos).
+    #[strum(serialize = "WORKSPACE_AVATARS")]
     WorkspaceAvatars,
 }
 
 impl Bucket {
-    /// The stable identifier stored in `workspace_files.storage_bucket`, so a
+    /// The stable identifier stored in `workspace_blobs.storage_bucket`, so a
     /// stored object can be routed back to the store that holds it.
     #[must_use]
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Files => "DOCUMENT_FILES",
-            Self::Audits => "DOCUMENT_AUDITS",
-            Self::Artifacts => "PIPELINE_ARTIFACTS",
-            Self::AccountAvatars => "ACCOUNT_AVATARS",
-            Self::WorkspaceAvatars => "WORKSPACE_AVATARS",
-        }
+    pub fn name(self) -> &'static str {
+        self.into()
     }
 
     /// The S3 key prefix under which this store's objects live within the shared
@@ -41,9 +43,9 @@ impl Bucket {
     #[must_use]
     pub const fn prefix(self) -> &'static str {
         match self {
-            Self::Files => "files",
+            Self::Documents => "documents",
             Self::Audits => "audits",
-            Self::Artifacts => "artifacts",
+            Self::Intermediates => "intermediates",
             Self::AccountAvatars => "account-avatars",
             Self::WorkspaceAvatars => "workspace-avatars",
         }
@@ -53,14 +55,7 @@ impl Bucket {
     /// name is unrecognized (a stale or corrupt `storage_bucket` value).
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "DOCUMENT_FILES" => Some(Self::Files),
-            "DOCUMENT_AUDITS" => Some(Self::Audits),
-            "PIPELINE_ARTIFACTS" => Some(Self::Artifacts),
-            "ACCOUNT_AVATARS" => Some(Self::AccountAvatars),
-            "WORKSPACE_AVATARS" => Some(Self::WorkspaceAvatars),
-            _ => None,
-        }
+        Self::from_str(name).ok()
     }
 }
 
@@ -73,9 +68,9 @@ mod tests {
     #[test]
     fn name_round_trips_through_from_name() {
         for bucket in [
-            Bucket::Files,
+            Bucket::Documents,
             Bucket::Audits,
-            Bucket::Artifacts,
+            Bucket::Intermediates,
             Bucket::AccountAvatars,
             Bucket::WorkspaceAvatars,
         ] {

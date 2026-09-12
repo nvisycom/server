@@ -24,13 +24,13 @@ pub use crate::service::event::kind::{EventKind, Notification, NotifyTarget, Web
 pub use crate::service::event::workspace_event::{
     ConnectionCreated, ConnectionDeleted, ConnectionSyncCompleted, ConnectionSyncFailed,
     ConnectionSyncStarted, ConnectionUpdated, DetectionCompleted, DetectionFailed,
-    DetectionStarted, FileCreated, FileDeleted, FileUpdated, InviteAccepted, InviteCanceled,
-    InviteCreated, InviteDeclined, MemberAdded, MemberDeleted, MemberUpdated, PipelineCreated,
-    PipelineDeleted, PipelineUpdated, PolicyCreated, PolicyDeleted, PolicyUpdated, ProviderCreated,
-    ProviderDeleted, ProviderUpdated, RedactionCreated, ReviewAssigned, ReviewUnassigned,
-    ReviewVerified, ThreadClosed, ThreadCommentCreated, ThreadDeleted, ThreadOpened, ThreadRenamed,
-    ThreadReopened, WebhookCreated, WebhookDeleted, WebhookUpdated, WorkspaceCreated,
-    WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
+    DetectionStarted, DocumentCreated, DocumentDeleted, DocumentUpdated, InviteAccepted,
+    InviteCanceled, InviteCreated, InviteDeclined, MemberAdded, MemberDeleted, MemberUpdated,
+    PipelineCreated, PipelineDeleted, PipelineUpdated, PolicyCreated, PolicyDeleted, PolicyUpdated,
+    ProviderCreated, ProviderDeleted, ProviderUpdated, RedactionCreated, ReviewAssigned,
+    ReviewUnassigned, ReviewVerified, ThreadClosed, ThreadCommentCreated, ThreadDeleted,
+    ThreadOpened, ThreadRenamed, ThreadReopened, WebhookCreated, WebhookDeleted, WebhookUpdated,
+    WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
 };
 
 /// Who raised an event and where.

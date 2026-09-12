@@ -17,7 +17,7 @@ use diesel::sql_types::Timestamptz;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use crate::types::{DetectionStatus, FileKind};
+use crate::types::{DetectionStatus, DocumentKind};
 use crate::{Error, PgConnection, Result, schema};
 
 /// Per-day detection counts and durations, as loaded from the grouped detection
@@ -104,24 +104,24 @@ pub struct UsageByModel {
     pub total_tokens: Option<i64>,
 }
 
-/// Live-file count and byte total for one `file_kind`, as loaded. `SUM(bigint)`
-/// is `numeric`, so the byte total arrives as `BigDecimal` and is narrowed to
-/// `i64` when building [`StorageByKind`].
+/// Live-document count and byte total for one document `kind`, as loaded.
+/// `SUM(bigint)` is `numeric`, so the byte total arrives as `BigDecimal` and is
+/// narrowed to `i64` when building [`StorageByKind`].
 #[derive(Debug, Clone, Queryable)]
 struct StorageKindRow {
-    file_kind: FileKind,
+    kind: DocumentKind,
     file_count: i64,
     total_bytes: Option<BigDecimal>,
 }
 
-/// Live-file count and byte total for one `file_kind` in a workspace.
+/// Live-document count and byte total for one document `kind` in a workspace.
 #[derive(Debug, Clone)]
 pub struct StorageByKind {
-    /// The file kind this row aggregates.
-    pub file_kind: FileKind,
-    /// Number of live files of this kind.
+    /// The document kind this row aggregates.
+    pub kind: DocumentKind,
+    /// Number of live documents of this kind.
     pub file_count: i64,
-    /// Total bytes of live files of this kind.
+    /// Total bytes of live documents of this kind.
     pub total_bytes: i64,
 }
 
@@ -149,7 +149,7 @@ pub struct DetectionDurations {
 /// [`snapshot`](WorkspaceAnalyticsRepository::snapshot).
 #[derive(Debug, Clone)]
 pub struct AnalyticsSnapshot {
-    /// Live-file counts and byte totals, one per `file_kind` present.
+    /// Live-document counts and byte totals, one per document `kind` present.
     pub storage: Vec<StorageByKind>,
     /// Detection counts, one per `status` present.
     pub detections: Vec<DetectionStatusCount>,
@@ -273,21 +273,25 @@ impl WorkspaceAnalyticsRepository for PgConnection {
     }
 }
 
-/// Live-file count and byte total per `file_kind`. Only kinds with a live file
-/// appear; the caller zero-fills the rest.
+/// Live-document count and byte total per document `kind`. Bytes live on the
+/// blob, so each document is joined to its blob for the size. Only kinds with a
+/// live document appear; the caller zero-fills the rest.
 async fn load_storage_by_kind(
     conn: &mut PgConnection,
     workspace_id: Uuid,
 ) -> Result<Vec<StorageByKind>> {
     use bigdecimal::ToPrimitive;
     use diesel::dsl::{count_star, sum};
-    use schema::workspace_files::{self, dsl};
+    use schema::workspace_blobs::dsl as blobs;
+    use schema::workspace_documents::dsl as documents;
+    use schema::{workspace_blobs, workspace_documents};
 
-    let rows: Vec<StorageKindRow> = workspace_files::table
-        .filter(dsl::workspace_id.eq(workspace_id))
-        .filter(dsl::deleted_at.is_null())
-        .group_by(dsl::file_kind)
-        .select((dsl::file_kind, count_star(), sum(dsl::file_size_bytes)))
+    let rows: Vec<StorageKindRow> = workspace_documents::table
+        .inner_join(workspace_blobs::table)
+        .filter(documents::workspace_id.eq(workspace_id))
+        .filter(documents::deleted_at.is_null())
+        .group_by(documents::kind)
+        .select((documents::kind, count_star(), sum(blobs::file_size_bytes)))
         .load(conn)
         .await
         .map_err(Error::from)?;
@@ -299,7 +303,7 @@ async fn load_storage_by_kind(
     Ok(rows
         .into_iter()
         .map(|row| StorageByKind {
-            file_kind: row.file_kind,
+            kind: row.kind,
             file_count: row.file_count,
             total_bytes: row.total_bytes.and_then(|b| b.to_i64()).unwrap_or(0),
         })
@@ -540,9 +544,11 @@ mod tests {
 
     use super::*;
     use crate::PgConn;
-    use crate::model::{NewWorkspaceDetection, NewWorkspaceDetectionUsage, NewWorkspaceFile};
+    use crate::model::{
+        NewBlob, NewWorkspaceDetection, NewWorkspaceDetectionUsage, NewWorkspaceDocument,
+    };
     use crate::query::{
-        WorkspaceAnalyticsRepository, WorkspaceDetectionRepository, WorkspaceFileRepository,
+        WorkspaceAnalyticsRepository, WorkspaceDetectionRepository, WorkspaceDocumentRepository,
     };
     use crate::test_util::{TestDatabase, backdate};
 
@@ -553,12 +559,12 @@ mod tests {
         conn: &mut PgConn,
         pipeline_id: Uuid,
         account_id: Uuid,
-        input_file_id: Uuid,
+        input_document_id: Uuid,
         started_ago: Span,
         duration: Span,
     ) -> anyhow::Result<Uuid> {
         let started = Timestamp::now() - started_ago;
-        let mut new = NewWorkspaceDetection::test(pipeline_id, account_id, input_file_id);
+        let mut new = NewWorkspaceDetection::test(pipeline_id, account_id, input_document_id);
         new.status = Some(DetectionStatus::Complete);
         let detection = conn.create_workspace_detection(new).await?;
         // Backdate the run span so the day-bucket and duration aggregates see a
@@ -570,18 +576,22 @@ mod tests {
     #[tokio::test]
     async fn snapshot_aggregates_storage_detections_and_usage_by_group() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
-        // Storage: the seeded original file plus a second original and a redacted.
-        let mut redacted = NewWorkspaceFile::test(seeded.workspace_id, seeded.account_id);
-        redacted.file_kind = Some(FileKind::Redacted);
-        let _ = conn.create_workspace_file(redacted).await?;
+        // Storage: the seeded original document plus a second original and a
+        // redacted, each backed by its own blob.
+        let mut redacted =
+            NewWorkspaceDocument::test(seeded.workspace_id, seeded.account_id, Uuid::nil());
+        redacted.kind = Some(DocumentKind::Redacted);
         let _ = conn
-            .create_workspace_file(NewWorkspaceFile::test(
-                seeded.workspace_id,
-                seeded.account_id,
-            ))
+            .create_workspace_document(redacted, NewBlob::test(seeded.workspace_id))
+            .await?;
+        let _ = conn
+            .create_workspace_document(
+                NewWorkspaceDocument::test(seeded.workspace_id, seeded.account_id, Uuid::nil()),
+                NewBlob::test(seeded.workspace_id),
+            )
             .await?;
 
         // Detections: one Complete (with a duration) and one Pending.
@@ -589,7 +599,7 @@ mod tests {
             &mut conn,
             seeded.pipeline_id,
             seeded.account_id,
-            seeded.file_id,
+            seeded.document_id,
             Span::new().hours(2),
             Span::new().seconds(10),
         )
@@ -598,7 +608,7 @@ mod tests {
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.pipeline_id,
                 seeded.account_id,
-                seeded.file_id,
+                seeded.document_id,
             ))
             .await?;
 
@@ -611,18 +621,18 @@ mod tests {
 
         let snapshot = conn.snapshot(seeded.workspace_id).await?;
 
-        // Storage: 2 original files + 1 redacted, grouped by kind.
+        // Storage: 2 original documents + 1 redacted, grouped by kind.
         let original = snapshot
             .storage
             .iter()
-            .find(|s| s.file_kind == FileKind::Original)
+            .find(|s| s.kind == DocumentKind::Original)
             .expect("original kind present");
         assert_eq!(original.file_count, 2);
         assert!(
             snapshot
                 .storage
                 .iter()
-                .any(|s| s.file_kind == FileKind::Redacted)
+                .any(|s| s.kind == DocumentKind::Redacted)
         );
 
         // Detections: one Complete, one Pending, grouped by status.
@@ -660,13 +670,13 @@ mod tests {
         let seeded = db.seed_account_and_workspace().await;
 
         // A different workspace with a detection.
-        let other = db.seed_pipeline_and_file().await;
+        let other = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
         let _ = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 other.pipeline_id,
                 other.account_id,
-                other.file_id,
+                other.document_id,
             ))
             .await?;
 
@@ -690,7 +700,7 @@ mod tests {
     #[tokio::test]
     async fn detections_by_day_buckets_within_the_window() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_file().await;
+        let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
         // Two detections started ~1 day ago (same UTC day), one ~3 days ago.
@@ -698,7 +708,7 @@ mod tests {
             &mut conn,
             seeded.pipeline_id,
             seeded.account_id,
-            seeded.file_id,
+            seeded.document_id,
             Span::new().hours(25),
             Span::new().seconds(5),
         )
@@ -707,7 +717,7 @@ mod tests {
             &mut conn,
             seeded.pipeline_id,
             seeded.account_id,
-            seeded.file_id,
+            seeded.document_id,
             Span::new().hours(26),
             Span::new().seconds(5),
         )
@@ -716,7 +726,7 @@ mod tests {
             &mut conn,
             seeded.pipeline_id,
             seeded.account_id,
-            seeded.file_id,
+            seeded.document_id,
             Span::new().hours(72),
             Span::new().seconds(5),
         )

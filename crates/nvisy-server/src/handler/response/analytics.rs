@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use jiff::ToSpan;
 use jiff::civil::Date;
 use nvisy_postgres::query::{AnalyticsSnapshot, DetectionDayPoint};
-use nvisy_postgres::types::{DetectionStatus, FileKind};
+use nvisy_postgres::types::{DetectionStatus, DocumentKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
@@ -64,20 +64,20 @@ pub struct StorageAnalytics {
     pub total_bytes: i64,
     /// Number of live files.
     pub file_count: i64,
-    /// Per-kind breakdown, one entry per `file_kind` (zero-filled), in a stable
-    /// order.
+    /// Per-kind breakdown, one entry per document `kind` (zero-filled), in a
+    /// stable order.
     pub by_kind: Vec<StorageKindEntry>,
 }
 
-/// One `file_kind`'s share of a workspace's storage.
+/// One document `kind`'s share of a workspace's storage.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageKindEntry {
-    /// The file kind.
-    pub kind: FileKind,
-    /// Number of live files of this kind.
+    /// The document kind.
+    pub kind: DocumentKind,
+    /// Number of live documents of this kind.
     pub file_count: i64,
-    /// Total bytes of live files of this kind.
+    /// Total bytes of live documents of this kind.
     pub total_bytes: i64,
 }
 
@@ -124,9 +124,9 @@ impl WorkspaceAnalytics {
             durations,
             usage,
         } = snapshot;
-        let by_kind: Vec<StorageKindEntry> = FileKind::iter()
+        let by_kind: Vec<StorageKindEntry> = DocumentKind::iter()
             .map(|kind| {
-                let row = storage.iter().find(|r| r.file_kind == kind);
+                let row = storage.iter().find(|r| r.kind == kind);
                 StorageKindEntry {
                     kind,
                     file_count: row.map_or(0, |r| r.file_count),
@@ -294,18 +294,13 @@ mod tests {
 
     #[test]
     fn zero_fills_every_kind_and_status_and_derives_totals() {
-        let storage = vec![
-            StorageByKind {
-                file_kind: FileKind::Original,
-                file_count: 2,
-                total_bytes: 300,
-            },
-            StorageByKind {
-                file_kind: FileKind::Redacted,
-                file_count: 1,
-                total_bytes: 50,
-            },
-        ];
+        // Only original documents have storage here; redacted is absent so the
+        // zero-fill can be checked on a genuinely-missing kind.
+        let storage = vec![StorageByKind {
+            kind: DocumentKind::Original,
+            file_count: 2,
+            total_bytes: 300,
+        }];
         let detections = vec![
             DetectionStatusCount {
                 status: DetectionStatus::Complete,
@@ -342,25 +337,25 @@ mod tests {
             usage,
         });
 
-        // Every FileKind / DetectionStatus is present (zero-filled), so the
+        // Every DocumentKind / DetectionStatus is present (zero-filled), so the
         // breakdown lengths equal the enum sizes.
-        assert_eq!(a.storage.by_kind.len(), FileKind::iter().count());
+        assert_eq!(a.storage.by_kind.len(), DocumentKind::iter().count());
         assert_eq!(
             a.detections.by_status.len(),
             DetectionStatus::iter().count()
         );
-        // Absent audit kind is zero, not missing.
-        let audit = a
+        // Absent redacted kind is zero, not missing.
+        let redacted = a
             .storage
             .by_kind
             .iter()
-            .find(|e| e.kind == FileKind::Audit)
+            .find(|e| e.kind == DocumentKind::Redacted)
             .unwrap();
-        assert_eq!((audit.file_count, audit.total_bytes), (0, 0));
+        assert_eq!((redacted.file_count, redacted.total_bytes), (0, 0));
 
         // Totals sum the breakdown.
-        assert_eq!(a.storage.total_bytes, 350);
-        assert_eq!(a.storage.file_count, 3);
+        assert_eq!(a.storage.total_bytes, 300);
+        assert_eq!(a.storage.file_count, 2);
         assert_eq!(a.detections.total, 4);
 
         // error_rate = failed / (completed + failed) = 1 / 4.
@@ -443,7 +438,7 @@ mod tests {
         assert_eq!(a.detections.avg_duration_ms, None);
         assert_eq!(a.storage.total_bytes, 0);
         // Still every kind/status present, all zero except queued.
-        assert_eq!(a.storage.by_kind.len(), FileKind::iter().count());
+        assert_eq!(a.storage.by_kind.len(), DocumentKind::iter().count());
         assert_eq!(a.detections.total, 5);
     }
 }

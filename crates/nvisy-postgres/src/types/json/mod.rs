@@ -15,7 +15,7 @@ mod workspace_metadata;
 mod workspace_settings;
 
 pub use activity_params::{
-    ActivityPayload, ConnectionActivityParams, DetectionActivityParams, FileActivityParams,
+    ActivityPayload, ConnectionActivityParams, DetectionActivityParams, DocumentActivityParams,
     InviteActivityParams, MemberActivityParams, PipelineActivityParams, PolicyActivityParams,
     ProviderActivityParams, RedactionActivityParams, ReviewActivityParams, ThreadActivityParams,
     ThreadCommentActivityParams, WebhookActivityParams, WorkspaceActivityParams,

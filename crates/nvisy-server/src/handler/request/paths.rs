@@ -32,13 +32,13 @@ pub struct InviteCodePathParams {
     pub invite_code: String,
 }
 
-/// Path parameters for file operations within a workspace context.
+/// Path parameters for document operations within a workspace context.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct WorkspaceFilePathParams {
-    /// Unique identifier of the file.
-    pub file_id: Uuid,
+pub struct WorkspaceDocumentPathParams {
+    /// Unique identifier of the document.
+    pub document_id: Uuid,
 }
 
 /// Path parameters for webhook operations.

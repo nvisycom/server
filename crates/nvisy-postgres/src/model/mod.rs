@@ -10,16 +10,18 @@ mod accounts;
 mod pipeline_references;
 mod workspace_activities;
 mod workspace_assistant_jobs;
+mod workspace_audits;
+mod workspace_blobs;
 mod workspace_connection_schedule;
 mod workspace_connection_syncs;
 mod workspace_connections;
 mod workspace_detection_jobs;
 mod workspace_detection_usage;
 mod workspace_detections;
+mod workspace_document_exports;
+mod workspace_document_imports;
+mod workspace_documents;
 mod workspace_event_outbox;
-mod workspace_file_exports;
-mod workspace_file_imports;
-mod workspace_files;
 mod workspace_invites;
 mod workspace_members;
 mod workspace_pipelines;
@@ -42,6 +44,8 @@ pub use accounts::{Account, NewAccount, UpdateAccount};
 pub use pipeline_references::PipelinePolicy;
 pub use workspace_activities::{NewWorkspaceActivity, WorkspaceActivity};
 pub use workspace_assistant_jobs::{NewWorkspaceAssistantJob, WorkspaceAssistantJob};
+pub use workspace_audits::{NewWorkspaceAudit, WorkspaceAudit};
+pub use workspace_blobs::{Blob, NewBlob};
 pub use workspace_connection_schedule::{
     NewWorkspaceConnectionSchedule, WorkspaceConnectionSchedule,
 };
@@ -57,10 +61,10 @@ pub use workspace_detection_usage::{NewWorkspaceDetectionUsage, WorkspaceDetecti
 pub use workspace_detections::{
     NewWorkspaceDetection, UpdateWorkspaceDetection, WorkspaceDetection,
 };
+pub use workspace_document_exports::{NewWorkspaceDocumentExport, WorkspaceDocumentExport};
+pub use workspace_document_imports::{NewWorkspaceDocumentImport, WorkspaceDocumentImport};
+pub use workspace_documents::{NewWorkspaceDocument, UpdateWorkspaceDocument, WorkspaceDocument};
 pub use workspace_event_outbox::{NewWorkspaceEventOutbox, WorkspaceEventOutbox};
-pub use workspace_file_exports::{NewWorkspaceFileExport, WorkspaceFileExport};
-pub use workspace_file_imports::{NewWorkspaceFileImport, WorkspaceFileImport};
-pub use workspace_files::{NewWorkspaceFile, UpdateWorkspaceFile, WorkspaceFile};
 pub use workspace_invites::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
 pub use workspace_members::{NewWorkspaceMember, UpdateWorkspaceMember, WorkspaceMember};
 pub use workspace_pipelines::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
