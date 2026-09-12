@@ -143,6 +143,15 @@ pub trait WorkspacePolicyRepository {
         updates: UpdateWorkspacePolicy,
     ) -> impl Future<Output = Result<WorkspacePolicy>> + Send;
 
+    /// Promotes a one-shot policy to authored, clearing its dedup hash, only while
+    /// it is still a live one-shot. Returns whether the transition changed a row,
+    /// so a concurrent promotion (or an already-authored policy) is a no-op rather
+    /// than a duplicate.
+    fn promote_policy_to_authored(
+        &mut self,
+        policy_id: Uuid,
+    ) -> impl Future<Output = Result<bool>> + Send;
+
     /// Soft deletes a policy by setting the deletion timestamp.
     fn delete_workspace_policy(
         &mut self,
@@ -467,6 +476,29 @@ impl WorkspacePolicyRepository for PgConnection {
         .map_err(Error::from)?;
 
         Ok(policy)
+    }
+
+    async fn promote_policy_to_authored(&mut self, policy_id: Uuid) -> Result<bool> {
+        use schema::workspace_policies::{self, dsl};
+
+        // Conditional on the row still being a live one-shot, so the transition is
+        // atomic: a concurrent promotion updates zero rows and the caller emits no
+        // duplicate event.
+        let affected = diesel::update(
+            workspace_policies::table
+                .filter(dsl::id.eq(policy_id))
+                .filter(dsl::deleted_at.is_null())
+                .filter(dsl::kind.eq(PolicyKind::Oneshot)),
+        )
+        .set((
+            dsl::kind.eq(PolicyKind::Authored),
+            dsl::content_hash.eq(None::<Vec<u8>>),
+        ))
+        .execute(self)
+        .await
+        .map_err(Error::from)?;
+
+        Ok(affected == 1)
     }
 
     async fn delete_workspace_policy(&mut self, policy_id: Uuid) -> Result<()> {
@@ -969,6 +1001,40 @@ mod tests {
                 .await?
                 .is_some()
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn promote_to_authored_transitions_once() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let mut new_oneshot =
+            NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        new_oneshot.kind = PolicyKind::Oneshot;
+        new_oneshot.content_hash = Some(vec![1, 2, 3]);
+        let oneshot = conn
+            .find_or_create_oneshot_policy(
+                new_oneshot,
+                vec![1, 2, 3],
+                serde_json::json!({ "test": true }),
+                None,
+            )
+            .await?;
+        let policy_id = oneshot.policy.policy.id;
+
+        // The first promotion flips the row; a second is a no-op, so a concurrent
+        // caller cannot double-promote or emit a duplicate event.
+        assert!(conn.promote_policy_to_authored(policy_id).await?);
+        assert!(!conn.promote_policy_to_authored(policy_id).await?);
+
+        let promoted = conn
+            .find_policy_in_workspace(seeded.workspace_id, policy_id)
+            .await?
+            .expect("policy present");
+        assert_eq!(promoted.kind, PolicyKind::Authored);
+        assert!(promoted.content_hash.is_none());
         Ok(())
     }
 }

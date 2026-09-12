@@ -245,12 +245,10 @@ impl PolicyService {
         let policy_id = existing.id;
         let event_slug = existing.slug.clone();
 
+        // A definition edit on a one-shot promotes it to authored: its content no
+        // longer matches its content-address, so it leaves the dedup set. A
+        // label-only edit leaves a one-shot as it is.
         let promote = existing.kind == PolicyKind::Oneshot && new_definition.is_some();
-        let (kind, content_hash) = if promote {
-            (Some(PolicyKind::Authored), Some(None))
-        } else {
-            (None, None)
-        };
 
         let account_id = origin.account_id;
         let workspace_id = origin.workspace_id;
@@ -259,13 +257,15 @@ impl PolicyService {
                 conn.create_policy_version(workspace_id, policy_id, account_id, definition, None)
                     .await?;
             }
+            // Promote conditionally so the Oneshot -> Authored transition is atomic
+            // and emits PolicyPromoted only when this call is the one that flips it;
+            // the field write below carries the label edits either way.
+            let promoted = promote && conn.promote_policy_to_authored(policy_id).await?;
             conn.update_workspace_policy(
                 policy_id,
                 model::UpdateWorkspacePolicy {
                     display_name: request.display_name,
                     description: request.description,
-                    kind,
-                    content_hash,
                     ..Default::default()
                 },
             )
@@ -274,10 +274,20 @@ impl PolicyService {
                 origin,
                 event::WorkspaceEvent::PolicyUpdated(event::PolicyUpdated {
                     policy_id,
-                    policy_slug: event_slug,
+                    policy_slug: event_slug.clone(),
                 }),
             )
             .await?;
+            if promoted {
+                conn.emit_event(
+                    origin,
+                    event::WorkspaceEvent::PolicyPromoted(event::PolicyPromoted {
+                        policy_id,
+                        policy_slug: event_slug,
+                    }),
+                )
+                .await?;
+            }
             Ok::<(), Error>(())
         })
         .await?;
@@ -298,33 +308,23 @@ impl PolicyService {
         policy_slug: &str,
     ) -> Result<(WithAccountRef<WorkspacePolicy>, WorkspacePolicyVersion)> {
         let found = find_policy(conn, origin.workspace_id, policy_slug).await?;
-
-        if found.item.kind == PolicyKind::Authored {
-            let version = current_version(conn, origin.workspace_id, &found.item).await?;
-            return Ok((found, version));
-        }
-
         let policy_id = found.item.id;
         let policy_slug_owned = found.item.slug.clone();
 
+        // Promote conditionally inside the transaction so the Oneshot -> Authored
+        // transition is atomic: an already-authored policy or a concurrent
+        // promotion changes no row and emits no event.
         conn.transaction(async |conn| {
-            conn.update_workspace_policy(
-                policy_id,
-                model::UpdateWorkspacePolicy {
-                    kind: Some(PolicyKind::Authored),
-                    content_hash: Some(None),
-                    ..Default::default()
-                },
-            )
-            .await?;
-            conn.emit_event(
-                origin,
-                event::WorkspaceEvent::PolicyPromoted(event::PolicyPromoted {
-                    policy_id,
-                    policy_slug: policy_slug_owned,
-                }),
-            )
-            .await?;
+            if conn.promote_policy_to_authored(policy_id).await? {
+                conn.emit_event(
+                    origin,
+                    event::WorkspaceEvent::PolicyPromoted(event::PolicyPromoted {
+                        policy_id,
+                        policy_slug: policy_slug_owned,
+                    }),
+                )
+                .await?;
+            }
             Ok::<(), Error>(())
         })
         .await?;
