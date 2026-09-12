@@ -22,7 +22,7 @@ pub struct Document {
     pub display_name: String,
     /// Original filename when uploaded.
     pub original_filename: String,
-    /// File extension (without dot). Resolved from the backing blob.
+    /// File extension (without dot). Owned by the document.
     pub extension: String,
     /// Size in bytes. Resolved from the backing blob.
     pub size: i64,

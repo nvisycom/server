@@ -673,7 +673,14 @@ async fn redact_detection(
                     .with_message("The analysis for this detection has been deleted")
                     .with_resource("detection")
             })?;
-        let policies = resolve_policies(&mut conn, &crypto, workspace.id, pipeline.id).await?;
+        // Redaction reuses the pipeline's current policies for the anonymize
+        // codec; it operates on an existing detection, which already pinned the
+        // versions it ran, so only the definitions are needed here.
+        let policies = resolve_policies(&mut conn, &crypto, workspace.id, pipeline.id)
+            .await?
+            .into_iter()
+            .map(|policy| policy.definition)
+            .collect();
 
         RedactInputs {
             detection,

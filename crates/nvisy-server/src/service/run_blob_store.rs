@@ -95,21 +95,40 @@ impl RunBlobStore {
         conn: &mut PgConn,
         blob: &ReclaimableBlob,
     ) -> Result<PurgeOutcome> {
-        if let Err(err) = self
-            .delete_object(&blob.storage_bucket, &blob.storage_path)
-            .await
-        {
-            tracing::error!(
-                target: TRACING_TARGET,
-                blob_id = %blob.id,
-                error = %err,
-                "Failed to purge blob object; left for the reaper to retry",
-            );
-            return Ok(PurgeOutcome::Pending);
-        }
+        use nvisy_postgres::AsyncConnection;
 
-        conn.mark_blob_purged(blob.id).await?;
-        Ok(PurgeOutcome::Purged)
+        // Re-check the blob under a row lock before deleting its object: a reference
+        // acquired since the sweep read it makes the blob no longer reclaimable, and
+        // deleting the object would strand a live reference. Holding the lock across
+        // the object delete keeps the mark_blob_purged consistent with the removal.
+        let outcome = conn
+            .transaction(async |conn| {
+                let Some(_locked) = conn.lock_reclaimable_blob(blob.id).await? else {
+                    return Ok(PurgeOutcome::Pending);
+                };
+
+                self.delete_object(&blob.storage_bucket, &blob.storage_path)
+                    .await?;
+
+                conn.mark_blob_purged(blob.id).await?;
+                Ok::<_, Error>(PurgeOutcome::Purged)
+            })
+            .await;
+
+        // A failed object delete (or lost lock) rolls the transaction back, leaving
+        // `purged_at` NULL so the reconcile sweep retries.
+        match outcome {
+            Ok(outcome) => Ok(outcome),
+            Err(err) => {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    blob_id = %blob.id,
+                    error = %err,
+                    "Failed to purge blob object; left for the reaper to retry",
+                );
+                Ok(PurgeOutcome::Pending)
+            }
+        }
     }
 
     /// Removes an object from whichever store its blob names. An unparseable
@@ -423,6 +442,7 @@ impl RunBlobStore {
             conn,
             audit.blob_id,
             "The analysis for this detection has been deleted",
+            "detection",
         )
         .await
     }
@@ -496,6 +516,7 @@ impl RunBlobStore {
             conn,
             blob_id,
             "The intermediates for this detection have been deleted",
+            "detection",
         )
         .await
     }
@@ -568,23 +589,25 @@ impl RunBlobStore {
             conn,
             audit.blob_id,
             "The review audit for this redaction has been deleted",
+            "redaction",
         )
         .await
     }
 
     /// Fetches a blob by id, mapping a reclaimed (absent) blob to a 404 with
-    /// `gone_message`. Shared by the audit/intermediate/review resolvers, which
-    /// differ only in that message.
+    /// `gone_message` naming `resource`. Shared by the audit/intermediate/review
+    /// resolvers, which differ in that message and the resource they name.
     async fn blob_or_gone(
         &self,
         conn: &mut PgConn,
         blob_id: Uuid,
         gone_message: &'static str,
+        resource: &'static str,
     ) -> Result<Blob> {
         conn.find_blob_by_id(blob_id).await?.ok_or_else(|| {
             ErrorKind::NotFound
                 .with_message(gone_message)
-                .with_resource("detection")
+                .with_resource(resource)
         })
     }
 }

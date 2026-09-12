@@ -291,6 +291,16 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
 
+    workspace_detection_policy_versions (detection_id, policy_version_id) {
+        detection_id -> Uuid,
+        policy_version_id -> Uuid,
+        workspace_id -> Uuid,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
     workspace_detection_usage (id) {
         id -> Uuid,
         detection_id -> Uuid,
@@ -465,11 +475,26 @@ diesel::table! {
         slug -> Text,
         display_name -> Text,
         description -> Nullable<Text>,
-        definition -> Bytea,
+        current_version_id -> Nullable<Uuid>,
         metadata -> Jsonb,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
+    workspace_policy_versions (id) {
+        id -> Uuid,
+        policy_id -> Uuid,
+        workspace_id -> Uuid,
+        account_id -> Uuid,
+        version_number -> Int4,
+        definition -> Bytea,
+        metadata -> Jsonb,
+        created_at -> Timestamptz,
     }
 }
 
@@ -616,6 +641,9 @@ diesel::joinable!(workspace_connection_syncs -> workspace_connections (connectio
 diesel::joinable!(workspace_connections -> accounts (account_id));
 diesel::joinable!(workspace_connections -> workspaces (workspace_id));
 diesel::joinable!(workspace_detection_jobs -> workspace_detections (detection_id));
+diesel::joinable!(workspace_detection_policy_versions -> workspace_detections (detection_id));
+diesel::joinable!(workspace_detection_policy_versions -> workspace_policy_versions (policy_version_id));
+diesel::joinable!(workspace_detection_policy_versions -> workspaces (workspace_id));
 diesel::joinable!(workspace_detection_usage -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detections -> accounts (account_id));
 diesel::joinable!(workspace_detections -> workspace_blobs (intermediate_blob_id));
@@ -637,6 +665,8 @@ diesel::joinable!(workspace_pipelines -> accounts (account_id));
 diesel::joinable!(workspace_pipelines -> workspaces (workspace_id));
 diesel::joinable!(workspace_policies -> accounts (account_id));
 diesel::joinable!(workspace_policies -> workspaces (workspace_id));
+diesel::joinable!(workspace_policy_versions -> accounts (account_id));
+diesel::joinable!(workspace_policy_versions -> workspaces (workspace_id));
 diesel::joinable!(workspace_providers -> accounts (account_id));
 diesel::joinable!(workspace_providers -> workspaces (workspace_id));
 diesel::joinable!(workspace_redactions -> accounts (account_id));
@@ -666,6 +696,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_connection_syncs,
     workspace_connections,
     workspace_detection_jobs,
+    workspace_detection_policy_versions,
     workspace_detection_usage,
     workspace_detections,
     workspace_document_exports,
@@ -677,6 +708,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_pipeline_policies,
     workspace_pipelines,
     workspace_policies,
+    workspace_policy_versions,
     workspace_providers,
     workspace_redactions,
     workspace_thread_comments,

@@ -14,7 +14,9 @@ use futures::{Stream, TryStreamExt};
 use nvisy_postgres::model::{
     NewBlob, NewWorkspaceDocument, WorkspaceConnection, WorkspaceDocument,
 };
-use nvisy_postgres::query::{WorkspaceDocumentRepository, WorkspaceRepository};
+use nvisy_postgres::query::{
+    WorkspaceBlobRepository, WorkspaceDocumentRepository, WorkspaceRepository,
+};
 use nvisy_postgres::types::{DocumentKind, SyncDeletionPolicy};
 use nvisy_s3::{Bucket, DocumentKey};
 use tokio::io::AsyncRead;
@@ -359,9 +361,25 @@ impl Importer {
             file_extension: extension,
             metadata: None,
         };
-        Ok(conn
+        let document = conn
             .record_imported_document(new_document, new_blob, connection.id, entry.key.clone())
-            .await?)
+            .await?;
+
+        // If the imported content deduplicated onto an existing blob, the document
+        // points at that blob's stored object and the object staged for it here is
+        // orphaned. Reclaim it best-effort.
+        if let Some(blob) = conn.find_blob_by_id(document.blob_id).await?
+            && blob.storage_path != file_key.to_string()
+            && let Err(err) = self.infra.blobs.delete(file_key).await
+        {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                error = %err,
+                "Failed to remove staged object after import deduplication",
+            );
+        }
+
+        Ok(document)
     }
 }
 

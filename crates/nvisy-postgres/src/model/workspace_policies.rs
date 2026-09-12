@@ -8,10 +8,13 @@ use uuid::Uuid;
 use crate::schema::workspace_policies;
 use crate::types::Handle;
 
-/// Workspace policy representing a structured redaction governance policy.
+/// Workspace policy: the logical identity of a redaction governance policy.
 ///
-/// The `definition` holds an `elide-governance` `PolicyDefinition` (rules,
-/// labels, fallback, retention) that the redaction engine consumes.
+/// The policy is a stable identity (slug, display name); its content is
+/// versioned. `current_version_id` names the live [`WorkspacePolicyVersion`]
+/// whose encrypted `definition` the redaction engine consumes.
+///
+/// [`WorkspacePolicyVersion`]: crate::model::WorkspacePolicyVersion
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -28,8 +31,8 @@ pub struct WorkspacePolicy {
     pub display_name: String,
     /// Policy description.
     pub description: Option<String>,
-    /// Encrypted Policy body (the engine's Policy type as JSON).
-    pub definition: Vec<u8>,
+    /// The live version whose definition the engine consumes.
+    pub current_version_id: Option<Uuid>,
     /// Metadata for filtering/display.
     pub metadata: JsonValue,
     /// Timestamp when the policy was created.
@@ -40,7 +43,12 @@ pub struct WorkspacePolicy {
     pub deleted_at: Option<Timestamp>,
 }
 
-/// Data for creating a new workspace policy.
+/// Data for creating a new logical policy row.
+///
+/// The policy's first version (carrying the definition) is inserted alongside
+/// this row; see [`WorkspacePolicyRepository::create_workspace_policy`].
+///
+/// [`WorkspacePolicyRepository::create_workspace_policy`]: crate::query::WorkspacePolicyRepository::create_workspace_policy
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = workspace_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -56,18 +64,16 @@ pub struct NewWorkspacePolicy {
     pub display_name: String,
     /// Policy description.
     pub description: Option<String>,
-    /// Encrypted Policy body (the engine's Policy type as JSON).
-    pub definition: Vec<u8>,
     /// Metadata for filtering/display.
     pub metadata: Option<JsonValue>,
 }
 
 impl NewWorkspacePolicy {
-    /// A minimal policy for `workspace_id`, for tests.
+    /// A minimal logical policy for `workspace_id`, for tests.
     ///
     /// Both the slug and the display name are unique per call, so several test
     /// policies fit in one workspace without colliding on the per-workspace
-    /// unique indexes. The definition is a non-empty placeholder blob.
+    /// unique indexes.
     #[cfg(any(feature = "test_util", test))]
     pub fn test(workspace_id: Uuid, account_id: Uuid) -> Self {
         let hex = Uuid::now_v7().simple().to_string();
@@ -78,13 +84,18 @@ impl NewWorkspacePolicy {
             slug: Handle::test(),
             display_name: format!("Test Policy {suffix}"),
             description: None,
-            definition: vec![1, 2, 3],
             metadata: None,
         }
     }
 }
 
-/// Data for updating a workspace policy.
+/// Data for updating a logical policy's identity fields.
+///
+/// The definition is not here: editing a policy's definition mints a new version
+/// (see [`WorkspacePolicyRepository::create_policy_version`]) rather than
+/// mutating the logical row.
+///
+/// [`WorkspacePolicyRepository::create_policy_version`]: crate::query::WorkspacePolicyRepository::create_policy_version
 #[derive(Debug, Clone, Default, AsChangeset)]
 #[diesel(table_name = workspace_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -94,8 +105,6 @@ pub struct UpdateWorkspacePolicy {
     pub display_name: Option<String>,
     /// Policy description.
     pub description: Option<Option<String>>,
-    /// Encrypted Policy body (the engine's Policy type as JSON).
-    pub definition: Option<Vec<u8>>,
     /// Metadata for filtering/display.
     pub metadata: Option<JsonValue>,
     /// Soft delete timestamp.

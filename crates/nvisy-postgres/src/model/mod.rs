@@ -16,6 +16,7 @@ mod workspace_connection_schedule;
 mod workspace_connection_syncs;
 mod workspace_connections;
 mod workspace_detection_jobs;
+mod workspace_detection_policy_versions;
 mod workspace_detection_usage;
 mod workspace_detections;
 mod workspace_document_exports;
@@ -26,6 +27,7 @@ mod workspace_invites;
 mod workspace_members;
 mod workspace_pipelines;
 mod workspace_policies;
+mod workspace_policy_versions;
 mod workspace_providers;
 mod workspace_redactions;
 mod workspace_thread_comments;
@@ -56,6 +58,7 @@ pub use workspace_connections::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
 pub use workspace_detection_jobs::{NewWorkspaceDetectionJob, WorkspaceDetectionJob};
+pub use workspace_detection_policy_versions::DetectionPolicyVersion;
 pub use workspace_detection_usage::{NewWorkspaceDetectionUsage, WorkspaceDetectionUsage};
 // Detection / pipeline models
 pub use workspace_detections::{
@@ -69,6 +72,7 @@ pub use workspace_invites::{NewWorkspaceInvite, UpdateWorkspaceInvite, Workspace
 pub use workspace_members::{NewWorkspaceMember, UpdateWorkspaceMember, WorkspaceMember};
 pub use workspace_pipelines::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
 pub use workspace_policies::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
+pub use workspace_policy_versions::{NewWorkspacePolicyVersion, WorkspacePolicyVersion};
 pub use workspace_providers::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};
 pub use workspace_redactions::{NewWorkspaceRedaction, WorkspaceRedaction};
 pub use workspace_thread_comments::{

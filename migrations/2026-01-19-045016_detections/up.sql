@@ -283,6 +283,36 @@ COMMENT ON COLUMN workspace_audits.redaction_id IS 'Redaction that produced this
 COMMENT ON COLUMN workspace_audits.derived_from IS 'Base audit this review was edited from; NULL for a base audit';
 COMMENT ON COLUMN workspace_audits.created_at IS 'When the audit was created';
 
+-- Detection policy-version pin: the exact policy versions a detection's analysis
+-- ran against, captured when the analysis is committed. A policy's definition is
+-- versioned (see the policies migration) and consumed live at run time; recording
+-- the resolved versions here makes a detection reproducible against the config
+-- that produced it, independent of later policy edits or soft-deletes. A pinned
+-- version can never be deleted (ON DELETE RESTRICT); versions are immutable anyway.
+CREATE TABLE workspace_detection_policy_versions (
+    -- The detection whose analysis pinned these versions; the pin is deleted with
+    -- its detection.
+    detection_id        UUID        NOT NULL REFERENCES workspace_detections (id) ON DELETE CASCADE,
+
+    -- The policy version the analysis consumed.
+    policy_version_id   UUID        NOT NULL REFERENCES workspace_policy_versions (id) ON DELETE RESTRICT,
+
+    -- Denormalized workspace scope.
+    workspace_id        UUID        NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+
+    PRIMARY KEY (detection_id, policy_version_id)
+);
+
+-- Back the policy-version foreign key (so a version delete attempt is checked
+-- without scanning, and per-version lookups are indexed).
+CREATE INDEX workspace_detection_policy_versions_version_idx
+    ON workspace_detection_policy_versions (policy_version_id);
+
+COMMENT ON TABLE workspace_detection_policy_versions IS 'The exact policy versions a detection''s analysis ran against; pins a detection to reproducible config.';
+COMMENT ON COLUMN workspace_detection_policy_versions.detection_id IS 'Detection whose analysis pinned these versions';
+COMMENT ON COLUMN workspace_detection_policy_versions.policy_version_id IS 'Policy version the analysis consumed';
+COMMENT ON COLUMN workspace_detection_policy_versions.workspace_id IS 'Denormalized workspace scope';
+
 -- Detection run events feed the activity log, webhooks, and (for terminal
 -- completion/failure) in-app notifications.
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.detection.started';

@@ -25,7 +25,7 @@ use nvisy_postgres::model::{
     NewWorkspaceAssistantJob, NewWorkspaceThread, WorkspaceThread, WorkspaceThreadComment,
 };
 use nvisy_postgres::query::{
-    AssistantJobOutboxRepository, TimelineCursor, WorkspaceDocumentRepository,
+    AccountRepository, AssistantJobOutboxRepository, TimelineCursor, WorkspaceDocumentRepository,
     WorkspaceMemberRepository, WorkspaceThreadCommentRepository, WorkspaceThreadEventRepository,
     WorkspaceThreadRepository,
 };
@@ -39,9 +39,11 @@ use crate::handler::request::{
     WorkspaceDocumentPathParams, WorkspaceThreadsQuery,
 };
 use crate::handler::response::{
-    Comment, Thread, ThreadEntry, ThreadEvent, ThreadsPage, TimelinePage,
+    AccountRef, Comment, Thread, ThreadEntry, ThreadEvent, ThreadsPage, TimelinePage,
 };
-use crate::handler::utility::{resolve_account_ref, resolve_account_ref_opt};
+use crate::handler::utility::{
+    resolve_account_ref, resolve_account_ref_opt, resolve_workspace_member_ref,
+};
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
     AssistantJob, AssistantQueue, EventEmitter, EventOrigin, ReviewAssigned, ReviewUnassigned,
@@ -200,19 +202,25 @@ async fn list_threads(
         .cursor_list_threads(workspace.id, pagination.into_cursor(), &query.into())
         .await?;
 
-    // Resolve the page's distinct assignees (document reviews) in one pass, so each
-    // thread response can carry its assignee reference without an N+1 lookup.
+    // Resolve the page's distinct assignees (document reviews) in one query, so
+    // each thread response can carry its assignee reference without an N+1 lookup.
     let assignee_ids: BTreeSet<Uuid> = page
         .items
         .iter()
         .filter_map(|row| row.item.assignee_account_id)
         .collect();
-    let mut assignees: HashMap<Uuid, _> = HashMap::with_capacity(assignee_ids.len());
-    for id in assignee_ids {
-        if let Some(account) = resolve_account_ref_opt(&mut conn, Some(id)).await? {
-            assignees.insert(id, account);
-        }
-    }
+    let assignee_ids: Vec<Uuid> = assignee_ids.into_iter().collect();
+    let assignees: HashMap<Uuid, AccountRef> = conn
+        .find_accounts_by_ids(&assignee_ids)
+        .await?
+        .into_iter()
+        .map(|account| {
+            (
+                account.id,
+                AccountRef::new(account.username, account.display_name, account.avatar_url),
+            )
+        })
+        .collect();
 
     let threads = page
         .items
@@ -621,7 +629,7 @@ fn verify_review_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Verify a document review")
         .description(
             "Verifies a document's review as a whole, moving it to `resolved`. Requires \
-             AssignReviews.",
+             Review.",
         )
         .response::<200, Json<Thread>>()
         .response::<401, Json<ErrorResponse>>()
@@ -665,8 +673,10 @@ async fn assign_review(
         .ok_or_else(|| Error::not_found("workspace_thread"))?;
 
     // An assignee (when set) must be a workspace member, resolved to its handle
-    // for the event; clearing needs no lookup.
-    let assignee_ref = resolve_account_ref_opt(&mut conn, request.assignee).await?;
+    // for the event; clearing needs no lookup. Scoping to membership also keeps a
+    // non-member's identity from being exposed across workspaces.
+    let assignee_ref =
+        resolve_workspace_member_ref(&mut conn, workspace.id, request.assignee).await?;
     if request.assignee.is_some() && assignee_ref.is_none() {
         return Err(Error::not_found("account"));
     }

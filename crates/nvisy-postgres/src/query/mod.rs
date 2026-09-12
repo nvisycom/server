@@ -28,6 +28,7 @@ mod workspace_connection_schedule;
 mod workspace_connection_syncs;
 mod workspace_connections;
 mod workspace_detection_jobs;
+mod workspace_detection_policy_versions;
 mod workspace_detections;
 mod workspace_documents;
 mod workspace_event_outbox;
@@ -35,6 +36,7 @@ mod workspace_invites;
 mod workspace_members;
 mod workspace_pipelines;
 mod workspace_policies;
+mod workspace_policy_versions;
 mod workspace_providers;
 mod workspace_redactions;
 mod workspace_thread_comments;
@@ -64,6 +66,7 @@ pub use workspace_connections::{
     ConnectionCursor, ScheduledConnection, WorkspaceConnectionRepository,
 };
 pub use workspace_detection_jobs::DetectionJobOutboxRepository;
+pub use workspace_detection_policy_versions::DetectionPolicyVersionRepository;
 pub use workspace_detections::{
     DetectionCursor, DetectionDocuments, DetectionListRow, WorkspaceDetectionRepository,
 };
@@ -76,7 +79,8 @@ pub use workspace_members::{
     AccountWorkspaceCursor, WorkspaceMemberCursor, WorkspaceMemberRepository,
 };
 pub use workspace_pipelines::{PipelineCursor, WorkspacePipelineRepository};
-pub use workspace_policies::{PolicyCursor, WorkspacePolicyRepository};
+pub use workspace_policies::{PolicyCursor, PolicyWithVersion, WorkspacePolicyRepository};
+pub use workspace_policy_versions::WorkspacePolicyVersionRepository;
 pub use workspace_providers::{ProviderCursor, WorkspaceProviderRepository};
 pub use workspace_redactions::{RedactionCursor, WorkspaceRedactionRepository};
 pub use workspace_thread_comments::WorkspaceThreadCommentRepository;

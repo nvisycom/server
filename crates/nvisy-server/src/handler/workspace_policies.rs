@@ -11,8 +11,10 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use elide_pipeline::policy::PolicyDefinition;
-use nvisy_postgres::model::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
-use nvisy_postgres::query::WorkspacePolicyRepository;
+use nvisy_postgres::model::{
+    NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy, WorkspacePolicyVersion,
+};
+use nvisy_postgres::query::{WorkspacePolicyRepository, WorkspacePolicyVersionRepository};
 use nvisy_postgres::types::WithAccountRef;
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
@@ -73,15 +75,17 @@ async fn create_policy(
         slug: request.slug,
         display_name,
         description,
-        definition: encrypted,
         metadata: None,
     };
 
-    // Insert the policy and record the outbox event atomically, so the event is
-    // never lost, nor recorded for an insert that rolled back.
-    let policy = conn
+    // Insert the policy with its first version and record the outbox event
+    // atomically, so the event is never lost, nor recorded for an insert that
+    // rolled back.
+    let created = conn
         .transaction(async |conn| {
-            let policy = conn.create_workspace_policy(new_policy).await?;
+            let created = conn
+                .create_workspace_policy(new_policy, encrypted, None)
+                .await?;
             conn.emit_event(
                 EventOrigin {
                     workspace_id: workspace.id,
@@ -89,21 +93,27 @@ async fn create_policy(
                     security: &security,
                 },
                 WorkspaceEvent::PolicyCreated(PolicyCreated {
-                    policy_id: policy.id,
-                    policy_slug: policy.slug.clone(),
+                    policy_id: created.policy.id,
+                    policy_slug: created.policy.slug.clone(),
                 }),
             )
             .await?;
-            Ok::<_, Error>(policy)
+            Ok::<_, Error>(created)
         })
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, policy_slug = %policy.slug, "Policy created");
+    tracing::info!(target: TRACING_TARGET, policy_slug = %created.policy.slug, "Policy created");
 
     // The creator is the authenticated caller; resolve their handle directly.
     let creator = resolve_account_ref(&mut conn, account_id).await?;
 
-    let response = Policy::from_model(policy, workspace.slug, creator, &crypto)?;
+    let response = Policy::from_model(
+        created.policy,
+        created.version,
+        workspace.slug,
+        creator,
+        &crypto,
+    )?;
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -183,6 +193,7 @@ async fn read_policy(
     let mut conn = pg_client.get_connection().await?;
 
     let found = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
+    let version = current_version(&mut conn, workspace.id, &found.item).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace policy read");
 
@@ -190,6 +201,7 @@ async fn read_policy(
         StatusCode::OK,
         Json(Policy::from_model(
             found.item,
+            version,
             workspace.slug,
             found.account.into(),
             &crypto,
@@ -232,18 +244,20 @@ async fn update_policy(
     let account_id = authz.account_id;
     let mut conn = pg_client.get_connection().await?;
 
-    // Confirm the policy exists in this workspace before mutating.
+    // Confirm the policy exists in this workspace, and load its current version
+    // (its definition carries the server-owned template origin).
     let existing = find_policy(&mut conn, workspace.id, &path_params.policy_slug)
         .await?
         .item;
+    let current = current_version(&mut conn, workspace.id, &existing).await?;
 
     // A replaced body keeps the policy's server-owned template origin: the caller
     // authored new rules, but where the policy came from is provenance the client
-    // cannot set or clear. Carry the stored origin forward onto the new draft.
-    let definition = match request.definition {
+    // cannot set or clear. Carry the current version's origin forward.
+    let encrypted_definition = match request.definition {
         Some(draft) => {
             let template = crypto
-                .decrypt_json::<PolicyDefinition>(workspace.id, &existing.definition)?
+                .decrypt_json::<PolicyDefinition>(workspace.id, &current.definition)?
                 .template;
             let definition = draft.into_definition(template);
             Some(crypto.encrypt_json(workspace.id, &definition)?)
@@ -251,19 +265,26 @@ async fn update_policy(
         None => None,
     };
 
-    let updates = UpdateWorkspacePolicy {
-        display_name: request.display_name,
-        description: request.description,
-        definition,
-        ..Default::default()
-    };
-
-    // Update the policy and record the outbox event atomically, so the event is
-    // never lost, nor recorded for an update that rolled back.
     let policy_id = existing.id;
     let policy_slug = existing.slug.clone();
+
+    // A definition change mints a new version; a label-only change mutates the
+    // logical row in place. Either way, record the outbox event atomically with
+    // the write.
     conn.transaction(async |conn| {
-        conn.update_workspace_policy(policy_id, updates).await?;
+        if let Some(encrypted) = encrypted_definition {
+            conn.create_policy_version(workspace.id, policy_id, account_id, encrypted, None)
+                .await?;
+        }
+        conn.update_workspace_policy(
+            policy_id,
+            UpdateWorkspacePolicy {
+                display_name: request.display_name,
+                description: request.description,
+                ..Default::default()
+            },
+        )
+        .await?;
         conn.emit_event(
             EventOrigin {
                 workspace_id: workspace.id,
@@ -281,8 +302,15 @@ async fn update_policy(
     .await?;
 
     let found = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
+    let version = current_version(&mut conn, workspace.id, &found.item).await?;
 
-    let response = Policy::from_model(found.item, workspace.slug, found.account.into(), &crypto)?;
+    let response = Policy::from_model(
+        found.item,
+        version,
+        workspace.slug,
+        found.account.into(),
+        &crypto,
+    )?;
 
     tracing::info!(target: TRACING_TARGET, "Policy updated");
 
@@ -371,6 +399,21 @@ async fn find_policy(
     conn.find_policy_in_workspace_by_slug(workspace_id, policy_slug)
         .await?
         .ok_or_else(|| Error::not_found("policy"))
+}
+
+/// Loads a policy's current version (the one whose definition the engine
+/// consumes). A live policy always has a current version.
+async fn current_version(
+    conn: &mut PgConn,
+    workspace_id: Uuid,
+    policy: &WorkspacePolicy,
+) -> Result<WorkspacePolicyVersion> {
+    let version_id = policy
+        .current_version_id
+        .ok_or_else(|| Error::not_found("policy_version"))?;
+    conn.find_policy_version(workspace_id, version_id)
+        .await?
+        .ok_or_else(|| Error::not_found("policy_version"))
 }
 
 /// Returns routes for workspace policy management.

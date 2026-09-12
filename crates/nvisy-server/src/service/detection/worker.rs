@@ -15,8 +15,9 @@ use nvisy_postgres::model::{
     NewBlob, NewWorkspaceAudit, UpdateWorkspaceDetection, WorkspaceDetection, WorkspacePipeline,
 };
 use nvisy_postgres::query::{
-    EventOutboxRepository, WorkspaceAuditRepository, WorkspaceBlobRepository,
-    WorkspaceDetectionRepository, WorkspaceDocumentRepository, WorkspaceRepository,
+    DetectionPolicyVersionRepository, EventOutboxRepository, WorkspaceAuditRepository,
+    WorkspaceBlobRepository, WorkspaceDetectionRepository, WorkspaceDocumentRepository,
+    WorkspaceRepository,
 };
 use nvisy_postgres::types::{DetectionStatus, Json, RasterPolicy, WorkspaceSettings};
 use nvisy_postgres::{AsyncConnection, DieselError, Error as PgError};
@@ -388,7 +389,7 @@ impl DetectionWorker {
         claim_token: jiff::Timestamp,
     ) -> Result<()> {
         // Phase 1: read the inputs under a connection, then drop it.
-        let (document, blob, request, policies, settings) = {
+        let (document, blob, request, policies, policy_version_ids, settings) = {
             let mut conn = self.infra.postgres.get_connection().await?;
 
             let workspace = conn
@@ -424,16 +425,31 @@ impl DetectionWorker {
                 raster_mode_of(&settings),
             );
 
-            let policies =
+            let resolved =
                 resolve_policies(&mut conn, &self.infra.crypto, job.workspace_id, pipeline.id)
                     .await?;
-            if policies.is_empty() {
+            if resolved.is_empty() {
                 return Err(ErrorKind::BadRequest
                     .with_message("Pipeline has no policies")
                     .with_resource("pipeline"));
             }
+            // Split the resolved set into the version ids the run pins and the
+            // definitions the engine consumes.
+            let mut policy_version_ids = Vec::with_capacity(resolved.len());
+            let mut policies = Vec::with_capacity(resolved.len());
+            for policy in resolved {
+                policy_version_ids.push(policy.version_id);
+                policies.push(policy.definition);
+            }
 
-            (document, blob, request, policies, settings)
+            (
+                document,
+                blob,
+                request,
+                policies,
+                policy_version_ids,
+                settings,
+            )
         };
 
         // Phase 2: the slow work — document build, analysis inference, and audit
@@ -523,17 +539,27 @@ impl DetectionWorker {
             .transaction(async |conn| {
                 // The base audit resolves (shares or inserts) its blob and records
                 // the reference in this same transaction.
-                conn.create_audit(
-                    NewWorkspaceAudit::base(workspace_id, Uuid::nil(), detection_id),
-                    audit_blob,
+                let audit = conn
+                    .create_audit(
+                        NewWorkspaceAudit::base(workspace_id, Uuid::nil(), detection_id),
+                        audit_blob,
+                    )
+                    .await?;
+                // Pin the exact policy versions this analysis consumed, so the
+                // detection is reproducible against them regardless of later edits.
+                conn.record_detection_policy_versions(
+                    workspace_id,
+                    detection_id,
+                    &policy_version_ids,
                 )
                 .await?;
                 // The intermediate is a blob-ref on the detection; resolving the
                 // blob records the detection's reference to it.
-                let intermediate_blob_id = match intermediates_blob {
-                    Some(blob) => Some(conn.find_or_create_blob(blob).await?.id),
+                let intermediate_blob = match intermediates_blob {
+                    Some(blob) => Some(conn.find_or_create_blob(blob).await?),
                     None => None,
                 };
+                let intermediate_blob_id = intermediate_blob.as_ref().map(|blob| blob.id);
                 if let Some(usage) = &usage {
                     conn.record_detection_usage(&usage.per_model).await?;
                 }
@@ -555,12 +581,29 @@ impl DetectionWorker {
                     return Err(PgError::Query(DieselError::RollbackTransaction));
                 }
                 conn.insert_event_outbox(outbox_row).await?;
-                Ok::<_, PgError>(())
+                // The resolved storage paths, so an object staged for content that
+                // deduplicated onto an existing blob can be reclaimed after commit.
+                let intermediate_path = intermediate_blob.map(|blob| blob.storage_path);
+                Ok::<_, PgError>((audit.blob_id, intermediate_path))
             })
             .await;
 
         match finalized {
-            Ok(()) => {}
+            Ok((audit_blob_id, intermediate_path)) => {
+                // A base audit or intermediate whose content deduplicated onto an
+                // existing blob is pointed at that blob's stored object, orphaning
+                // the object staged for it. Reclaim the redundant staged objects.
+                if let Ok(Some(blob)) = conn.find_blob_by_id(audit_blob_id).await
+                    && blob.storage_path != staged_audit.storage_path
+                {
+                    self.discard_staged(&staged_audit).await;
+                }
+                if let Some(staged) = &staged_intermediates
+                    && intermediate_path.as_deref() != Some(staged.storage_path.as_str())
+                {
+                    self.discard_staged(staged).await;
+                }
+            }
             Err(PgError::Query(DieselError::RollbackTransaction)) => {
                 self.discard_staged(&staged_audit).await;
                 if let Some(staged) = &staged_intermediates {

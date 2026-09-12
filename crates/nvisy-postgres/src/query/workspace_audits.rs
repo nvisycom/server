@@ -64,6 +64,42 @@ impl WorkspaceAuditRepository for PgConnection {
         use schema::workspace_audits;
 
         self.transaction(async |conn| {
+            // A review audit's lineage must stay within its own detection: the base
+            // it derives from and the redaction that produced it both belong to the
+            // same detection and workspace. The foreign keys only prove the rows
+            // exist; this rejects a cross-detection or cross-workspace mix that the
+            // both-or-neither check constraint cannot catch.
+            if let Some(derived_from) = new_audit.derived_from {
+                let base = workspace_audits::table
+                    .filter(workspace_audits::id.eq(derived_from))
+                    .select(WorkspaceAudit::as_select())
+                    .first(conn)
+                    .await
+                    .map_err(Error::from)?;
+                if base.detection_id != new_audit.detection_id
+                    || base.workspace_id != new_audit.workspace_id
+                {
+                    return Err(Error::unexpected(
+                        "Review audit derives from an audit of another detection",
+                    ));
+                }
+            }
+            if let Some(redaction_id) = new_audit.redaction_id {
+                use schema::workspace_redactions;
+
+                let detection_id = workspace_redactions::table
+                    .filter(workspace_redactions::id.eq(redaction_id))
+                    .select(workspace_redactions::detection_id)
+                    .first::<Uuid>(conn)
+                    .await
+                    .map_err(Error::from)?;
+                if detection_id != new_audit.detection_id {
+                    return Err(Error::unexpected(
+                        "Review audit's redaction belongs to another detection",
+                    ));
+                }
+            }
+
             // Resolve (share or insert) the blob, which records this audit's
             // reference; then insert the audit pointed at it. One reference is
             // recorded per referrer, in the transaction that creates the referrer.
@@ -113,7 +149,9 @@ impl WorkspaceAuditRepository for PgConnection {
 
         self.transaction(async |conn| {
             // The audits whose blob has passed its retention window, with the blob
-            // each references so its reference can be dropped after deletion.
+            // each references so its reference can be dropped after deletion. Locked
+            // FOR UPDATE SKIP LOCKED so a concurrent sweep never selects the same
+            // row and double-drops its reference.
             let expired: Vec<(Uuid, Uuid)> = workspace_audits::table
                 .inner_join(
                     workspace_blobs::table.on(workspace_audits::blob_id.eq(workspace_blobs::id)),
@@ -123,22 +161,59 @@ impl WorkspaceAuditRepository for PgConnection {
                 .filter(workspace_blobs::purged_at.is_null())
                 .limit(limit)
                 .select((workspace_audits::id, workspace_audits::blob_id))
+                .for_update()
+                .skip_locked()
                 .load(conn)
                 .await
                 .map_err(Error::from)?;
 
+            let mut dropped = 0usize;
             for (audit_id, blob_id) in &expired {
-                diesel::delete(workspace_audits::table.filter(workspace_audits::id.eq(audit_id)))
+                // A review audit derived from a base audit must go before the base:
+                // `derived_from` is ON DELETE SET NULL, so deleting a base first
+                // would null a surviving review's `derived_from` while its
+                // `redaction_id` stays set, violating workspace_audits_review_consistent.
+                // Deleting the derived reviews here keeps the lineage consistent and
+                // reclaims their blob references too.
+                let derived: Vec<(Uuid, Uuid)> = workspace_audits::table
+                    .filter(workspace_audits::derived_from.eq(audit_id))
+                    .select((workspace_audits::id, workspace_audits::blob_id))
+                    .for_update()
+                    .load(conn)
+                    .await
+                    .map_err(Error::from)?;
+
+                for (review_id, review_blob_id) in &derived {
+                    let removed = diesel::delete(
+                        workspace_audits::table.filter(workspace_audits::id.eq(review_id)),
+                    )
                     .execute(conn)
                     .await
                     .map_err(Error::from)?;
-                // Each audit recorded one reference to its blob when created, so
-                // one delete drops one reference — correct even when several audits
-                // share a deduplicated blob.
-                conn.decrement_ref(*blob_id).await?;
+                    if removed == 1 {
+                        conn.decrement_ref(*review_blob_id).await?;
+                        dropped += 1;
+                    }
+                }
+
+                // Each audit recorded one reference to its blob when created, so one
+                // delete drops one reference — correct even when several audits share
+                // a deduplicated blob. Gate the decrement on the delete actually
+                // removing the row, so a row already removed above (a derived review
+                // also selected as expired) is not double-counted.
+                let removed = diesel::delete(
+                    workspace_audits::table.filter(workspace_audits::id.eq(audit_id)),
+                )
+                .execute(conn)
+                .await
+                .map_err(Error::from)?;
+                if removed == 1 {
+                    conn.decrement_ref(*blob_id).await?;
+                    dropped += 1;
+                }
             }
 
-            Ok(expired.len())
+            Ok(dropped)
         })
         .await
     }
@@ -338,6 +413,86 @@ mod tests {
             .await?
             .expect("blob present");
         assert_eq!(blob.ref_count, 1, "its reference is intact");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn expiring_a_base_deletes_its_derived_review_without_violating_lineage()
+    -> anyhow::Result<()> {
+        use jiff::{Span, Timestamp};
+
+        use crate::test_util::backdate;
+
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_pipeline_and_document().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let detection = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.document_id,
+            ))
+            .await?;
+
+        // A base audit whose blob is already past due.
+        let mut base_blob = NewBlob::test(seeded.workspace_id);
+        base_blob.expires_at = Some((Timestamp::now() + Span::new().hours(1)).into());
+        let base = conn
+            .create_audit(
+                NewWorkspaceAudit::base(seeded.workspace_id, Uuid::nil(), detection.id),
+                base_blob,
+            )
+            .await?;
+        backdate::blob_span(
+            &mut conn,
+            base.blob_id,
+            Timestamp::now() - Span::new().hours(2),
+            Timestamp::now() - Span::new().hours(1),
+        )
+        .await?;
+
+        // A review audit derived from that base, whose own blob is still within its
+        // window. Deleting the base first would null this review's derived_from while
+        // its redaction_id stays set, violating workspace_audits_review_consistent.
+        let redaction = conn
+            .create_redaction(NewWorkspaceRedaction::test(detection.id, seeded.account_id))
+            .await?;
+        let mut review_blob = NewBlob::test(seeded.workspace_id);
+        review_blob.expires_at = Some((Timestamp::now() + Span::new().hours(1)).into());
+        let review = conn
+            .create_audit(
+                NewWorkspaceAudit::review(
+                    seeded.workspace_id,
+                    Uuid::nil(),
+                    detection.id,
+                    redaction.id,
+                    base.id,
+                ),
+                review_blob,
+            )
+            .await?;
+
+        // The sweep deletes the base and its derived review together, dropping both
+        // blob references, and never trips the lineage check constraint.
+        let deleted = conn.delete_expired_audits(50).await?;
+        assert_eq!(
+            deleted, 2,
+            "the base and its derived review are both removed"
+        );
+        assert!(conn.find_base_audit(detection.id).await?.is_none());
+        assert!(conn.find_redaction_audit(redaction.id).await?.is_none());
+        assert_eq!(
+            conn.find_blob_by_id(base.blob_id).await?.unwrap().ref_count,
+            0,
+        );
+        assert_eq!(
+            conn.find_blob_by_id(review.blob_id)
+                .await?
+                .unwrap()
+                .ref_count,
+            0,
+        );
         Ok(())
     }
 }

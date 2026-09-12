@@ -290,8 +290,9 @@ impl WorkspaceDetectionRepository for PgConnection {
                 .inner_join(accounts::table)
                 .inner_join(workspace_pipelines::table)
                 .left_join(
-                    workspace_documents::table
-                        .on(dsl::input_document_id.eq(workspace_documents::id)),
+                    workspace_documents::table.on(dsl::input_document_id
+                        .eq(workspace_documents::id)
+                        .and(workspace_documents::deleted_at.is_null())),
                 )
                 .filter(dsl::pipeline_id.eq(pipeline_id))
                 .into_boxed();
@@ -392,8 +393,9 @@ impl WorkspaceDetectionRepository for PgConnection {
                 .inner_join(pipelines::workspace_pipelines)
                 .inner_join(accounts::accounts)
                 .left_join(
-                    documents::workspace_documents
-                        .on(detections::input_document_id.eq(documents::id)),
+                    documents::workspace_documents.on(detections::input_document_id
+                        .eq(documents::id)
+                        .and(documents::deleted_at.is_null())),
                 )
                 .filter(pipelines::workspace_id.eq(workspace_id))
                 .into_boxed();
@@ -656,7 +658,8 @@ impl WorkspaceDetectionRepository for PgConnection {
         self.transaction(async |conn| {
             // The detections whose intermediate blob has passed its retention
             // window, with that blob so its reference can be dropped after the
-            // pointer is nulled.
+            // pointer is nulled. Locked FOR UPDATE SKIP LOCKED so a concurrent
+            // sweep never selects the same row and double-drops its reference.
             let expired: Vec<(Uuid, Uuid)> = workspace_detections::table
                 .inner_join(workspace_blobs::table.on(
                     workspace_detections::intermediate_blob_id.eq(workspace_blobs::id.nullable()),
@@ -666,22 +669,33 @@ impl WorkspaceDetectionRepository for PgConnection {
                 .filter(workspace_blobs::purged_at.is_null())
                 .limit(limit)
                 .select((workspace_detections::id, workspace_blobs::id))
+                .for_update()
+                .skip_locked()
                 .load(conn)
                 .await
                 .map_err(Error::from)?;
 
+            let mut dropped = 0usize;
             for (detection_id, blob_id) in &expired {
-                diesel::update(
-                    workspace_detections::table.filter(workspace_detections::id.eq(detection_id)),
+                // Scope the clear to the pointer still holding this blob, and gate
+                // the decrement on it actually being cleared: a concurrent sweep
+                // that already nulled it affects zero rows and must not decrement.
+                let cleared = diesel::update(
+                    workspace_detections::table
+                        .filter(workspace_detections::id.eq(detection_id))
+                        .filter(workspace_detections::intermediate_blob_id.eq(blob_id)),
                 )
                 .set(workspace_detections::intermediate_blob_id.eq(None::<Uuid>))
                 .execute(conn)
                 .await
                 .map_err(Error::from)?;
-                conn.decrement_ref(*blob_id).await?;
+                if cleared == 1 {
+                    conn.decrement_ref(*blob_id).await?;
+                    dropped += 1;
+                }
             }
 
-            Ok(expired.len())
+            Ok(dropped)
         })
         .await
     }

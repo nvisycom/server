@@ -234,19 +234,36 @@ pub(crate) enum FailOutcome {
     PersistFailed,
 }
 
-/// Resolves a pipeline's live policy references into decrypted engine policies.
+/// A policy resolved for a detection run: its decrypted definition and the id of
+/// the version that definition came from, so the run can pin what it consumed.
+pub(crate) struct ResolvedPolicy {
+    /// The version the definition was resolved from.
+    pub version_id: Uuid,
+    /// The decrypted policy the engine consumes.
+    pub definition: PolicyDefinition,
+}
+
+/// Resolves a pipeline's live policy references to their current versions,
+/// decrypting each version's definition.
+///
+/// Each resolved policy carries the version id it came from, so the caller can
+/// pin the exact versions the detection ran against.
 pub(crate) async fn resolve_policies(
     conn: &mut nvisy_postgres::PgConn,
     crypto: &CryptoService,
     workspace_id: Uuid,
     pipeline_id: Uuid,
-) -> Result<Vec<PolicyDefinition>> {
+) -> Result<Vec<ResolvedPolicy>> {
     let ids = conn.list_pipeline_policy_ids(pipeline_id).await?;
     let mut policies = Vec::with_capacity(ids.len());
     for id in ids {
-        if let Some(model) = conn.find_policy_in_workspace(workspace_id, id).await? {
-            policies
-                .push(crypto.decrypt_json::<PolicyDefinition>(workspace_id, &model.definition)?);
+        if let Some(found) = conn.find_policy_with_version(workspace_id, id).await? {
+            let definition =
+                crypto.decrypt_json::<PolicyDefinition>(workspace_id, &found.version.definition)?;
+            policies.push(ResolvedPolicy {
+                version_id: found.version.id,
+                definition,
+            });
         }
     }
     Ok(policies)

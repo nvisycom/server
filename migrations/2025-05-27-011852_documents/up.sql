@@ -41,8 +41,10 @@ CREATE TABLE workspace_blobs (
     CONSTRAINT blobs_purged_after_created CHECK (purged_at IS NULL OR purged_at >= created_at)
 );
 
--- Deduplication lookup: an incoming blob reuses a live match on this key.
-CREATE INDEX blobs_dedup_idx
+-- Deduplication lookup: an incoming blob reuses a live match on this key. Unique
+-- over live blobs so concurrent identical uploads converge on one row via
+-- ON CONFLICT rather than inserting duplicates.
+CREATE UNIQUE INDEX blobs_dedup_idx
     ON workspace_blobs (workspace_id, content_hash, file_size_bytes)
     WHERE purged_at IS NULL;
 

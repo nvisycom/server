@@ -76,6 +76,17 @@ pub trait WorkspaceBlobRepository {
 
     /// Marks a blob's backing object reclaimed (stamps `purged_at`).
     fn mark_blob_purged(&mut self, blob_id: Uuid) -> impl Future<Output = Result<()>> + Send;
+
+    /// Row-locks a blob and returns it only while it is still reclaimable
+    /// (`ref_count = 0`, not yet purged), holding the lock for the transaction.
+    ///
+    /// The reaper re-checks this under the lock before deleting the backing
+    /// object, so a reference acquired between the sweep's read and the purge
+    /// keeps the object alive.
+    fn lock_reclaimable_blob(
+        &mut self,
+        blob_id: Uuid,
+    ) -> impl Future<Output = Result<Option<Blob>>> + Send;
 }
 
 impl WorkspaceBlobRepository for PgConnection {
@@ -102,8 +113,16 @@ impl WorkspaceBlobRepository for PgConnection {
             return Ok(blob);
         }
 
+        // No live match was visible, but a concurrent transaction may have inserted
+        // one that this snapshot cannot see. `ON CONFLICT` on the live-blob dedup
+        // index converges on that row and bumps its reference instead of inserting
+        // a duplicate.
         diesel::insert_into(workspace_blobs::table)
             .values((&new_blob, dsl::ref_count.eq(1)))
+            .on_conflict((dsl::workspace_id, dsl::content_hash, dsl::file_size_bytes))
+            .filter_target(dsl::purged_at.is_null())
+            .do_update()
+            .set(dsl::ref_count.eq(dsl::ref_count + 1))
             .returning(Blob::as_returning())
             .get_result(self)
             .await
@@ -113,11 +132,17 @@ impl WorkspaceBlobRepository for PgConnection {
     async fn increment_ref(&mut self, blob_id: Uuid) -> Result<()> {
         use schema::workspace_blobs::{self, dsl};
 
-        diesel::update(workspace_blobs::table.filter(dsl::id.eq(blob_id)))
-            .set(dsl::ref_count.eq(dsl::ref_count + 1))
-            .execute(self)
-            .await
-            .map_err(Error::from)?;
+        // Never resurrect a purged blob: a reference is only meaningful while the
+        // backing object still exists.
+        diesel::update(
+            workspace_blobs::table
+                .filter(dsl::id.eq(blob_id))
+                .filter(dsl::purged_at.is_null()),
+        )
+        .set(dsl::ref_count.eq(dsl::ref_count + 1))
+        .execute(self)
+        .await
+        .map_err(Error::from)?;
         Ok(())
     }
 
@@ -189,6 +214,21 @@ impl WorkspaceBlobRepository for PgConnection {
             .await
             .map_err(Error::from)?;
         Ok(())
+    }
+
+    async fn lock_reclaimable_blob(&mut self, blob_id: Uuid) -> Result<Option<Blob>> {
+        use schema::workspace_blobs::{self, dsl};
+
+        workspace_blobs::table
+            .filter(dsl::id.eq(blob_id))
+            .filter(dsl::ref_count.eq(0))
+            .filter(dsl::purged_at.is_null())
+            .select(Blob::as_select())
+            .for_update()
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)
     }
 }
 
@@ -297,6 +337,52 @@ mod tests {
         conn.mark_blob_purged(expired.id).await?;
         let pending = conn.blobs_pending_purge(50).await?;
         assert!(!pending.iter().any(|b| b.id == expired.id));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_purged_blob_cannot_be_resurrected_or_relocked() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let blob = conn
+            .find_or_create_blob(NewBlob::test(seeded.workspace_id))
+            .await?;
+        conn.decrement_ref(blob.id).await?;
+        conn.mark_blob_purged(blob.id).await?;
+
+        // increment_ref must not raise a purged blob's count back above zero.
+        conn.increment_ref(blob.id).await?;
+        let after = conn.find_blob_by_id(blob.id).await?.expect("blob present");
+        assert_eq!(after.ref_count, 0, "a purged blob is never re-referenced");
+
+        // A purged blob is not lockable for reclamation (its object is already gone).
+        assert!(
+            conn.lock_reclaimable_blob(blob.id).await?.is_none(),
+            "a purged blob is not reclaimable"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_or_create_reuses_a_referenced_blob_after_a_sibling_is_purged()
+    -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // Two documents share one blob; its dedup key is unique over live blobs.
+        let new_blob = NewBlob::test(seeded.workspace_id);
+        let first = conn.find_or_create_blob(new_blob.clone()).await?;
+        let second = conn.find_or_create_blob(new_blob.clone()).await?;
+        assert_eq!(second.id, first.id);
+        assert_eq!(second.ref_count, 2);
+
+        // Identical content still deduplicates through the ON CONFLICT path.
+        let third = conn.find_or_create_blob(new_blob).await?;
+        assert_eq!(third.id, first.id);
+        assert_eq!(third.ref_count, 3);
         Ok(())
     }
 }

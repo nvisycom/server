@@ -11,9 +11,7 @@ use std::str::FromStr;
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use nvisy_postgres::model::{Blob, WorkspaceConnection, WorkspaceDocument};
-use nvisy_postgres::query::{
-    DocumentWithBlob, WorkspaceBlobRepository, WorkspaceDocumentRepository,
-};
+use nvisy_postgres::query::{DocumentWithBlob, WorkspaceDocumentRepository};
 use nvisy_s3::DocumentKey;
 use tokio::io::AsyncRead;
 use tokio_util::io::ReaderStream;
@@ -72,25 +70,16 @@ impl Exporter {
 
         let files = {
             let mut conn = self.infra.postgres.get_connection().await?;
-            let mut files = Vec::with_capacity(file_ids.len());
-            for file_id in file_ids {
-                let document = conn
-                    .find_document_in_workspace(connection.workspace_id, file_id)
-                    .await?;
-                let Some(document) = document else {
-                    tracing::warn!(
-                        target: TRACING_TARGET,
-                        %file_id, "Skipping export of file not found in workspace",
-                    );
-                    continue;
-                };
-                match conn.find_blob_by_id(document.blob_id).await? {
-                    Some(blob) => files.push(DocumentWithBlob { document, blob }),
-                    None => tracing::warn!(
-                        target: TRACING_TARGET,
-                        %file_id, "Skipping export of file whose content is gone",
-                    ),
-                }
+            let files = conn
+                .find_documents_with_blobs(connection.workspace_id, &file_ids)
+                .await?;
+            if files.len() != file_ids.len() {
+                tracing::warn!(
+                    target: TRACING_TARGET,
+                    requested = file_ids.len(),
+                    resolved = files.len(),
+                    "Skipping export of files not found in the workspace or with reclaimed content",
+                );
             }
             files
         };
@@ -122,21 +111,8 @@ impl Exporter {
 
         let pending = {
             let mut conn = self.infra.postgres.get_connection().await?;
-            let documents = conn
-                .redacted_documents_not_exported(connection.workspace_id, connection.id)
-                .await?;
-            let mut pending = Vec::with_capacity(documents.len());
-            for document in documents {
-                match conn.find_blob_by_id(document.blob_id).await? {
-                    Some(blob) => pending.push(DocumentWithBlob { document, blob }),
-                    None => tracing::warn!(
-                        target: TRACING_TARGET,
-                        document_id = %document.id,
-                        "Skipping redacted export whose content is gone",
-                    ),
-                }
-            }
-            pending
+            conn.redacted_documents_not_exported(connection.workspace_id, connection.id)
+                .await?
         };
         let exported = self
             .export_files(connection, config, pending, EXPORT_PREFIX_REDACTED)

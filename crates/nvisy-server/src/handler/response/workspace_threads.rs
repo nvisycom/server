@@ -13,11 +13,11 @@ use super::{AccountRef, Comment, Page};
 
 /// Response type for a thread.
 ///
-/// A thread is either a free-form workspace discussion (no `fileId`, opened and
-/// closed by members) or a file's review (`fileId` set, one live thread per
-/// file, auto-created on the file's first detection). A file thread carries a
-/// derived `reviewStatus` and an optional `assignee`; a workspace thread carries
-/// neither. Its stream is a [`ThreadEntry`] timeline.
+/// A thread is either a free-form workspace discussion (no `documentId`, opened
+/// and closed by members) or a document's review (`documentId` set, one live
+/// thread per document, auto-created on the document's first detection). A
+/// document thread carries a derived `reviewStatus` and an optional `assignee`; a
+/// workspace thread carries neither. Its stream is a [`ThreadEntry`] timeline.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Thread {
@@ -31,12 +31,12 @@ pub struct Thread {
     pub display_name: Option<String>,
     /// Account that opened the thread.
     pub author: AccountRef,
-    /// The file review's current status, derived from the review timeline;
+    /// The document review's current status, derived from the review timeline;
     /// `None` for a workspace thread.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub review_status: Option<ReviewStatus>,
-    /// Account the file review is assigned to; `None` for a workspace thread or
-    /// an unassigned file review.
+    /// Account the document review is assigned to; `None` for a workspace thread
+    /// or an unassigned document review.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assignee: Option<AccountRef>,
     /// Whether the thread is closed.
@@ -116,7 +116,7 @@ pub type TimelinePage = Page<ThreadEntry>;
 impl Thread {
     /// Creates a thread response from the database model, the resolved author
     /// reference, and the resolved assignee reference (absent for a workspace
-    /// thread or an unassigned file review).
+    /// thread or an unassigned document review).
     pub fn from_model(
         thread: ThreadModel,
         author: AccountRef,

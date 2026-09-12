@@ -135,12 +135,22 @@ pub trait WorkspaceDocumentRepository {
     ) -> impl Future<Output = Result<()>> + Send;
 
     /// Returns the live redacted documents in `connection`'s workspace that have
-    /// not yet been exported to that connection. Backs scheduled export.
+    /// not yet been exported to that connection, each with its backing blob. Backs
+    /// scheduled export.
     fn redacted_documents_not_exported(
         &mut self,
         workspace_id: Uuid,
         connection_id: Uuid,
-    ) -> impl Future<Output = Result<Vec<WorkspaceDocument>>> + Send;
+    ) -> impl Future<Output = Result<Vec<DocumentWithBlob>>> + Send;
+
+    /// Returns the live documents in a workspace for a set of ids, each with its
+    /// backing blob, in one query. Unknown or soft-deleted ids are absent; a
+    /// document whose blob is gone is also absent. Backs batch export.
+    fn find_documents_with_blobs(
+        &mut self,
+        workspace_id: Uuid,
+        document_ids: &[Uuid],
+    ) -> impl Future<Output = Result<Vec<DocumentWithBlob>>> + Send;
 
     /// Returns each live document imported from a connection, for deletion
     /// reconciliation (a source key absent from the remote listing identifies a
@@ -380,25 +390,57 @@ impl WorkspaceDocumentRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         connection_id: Uuid,
-    ) -> Result<Vec<WorkspaceDocument>> {
-        use schema::workspace_document_exports;
-        use schema::workspace_documents::{self, dsl};
+    ) -> Result<Vec<DocumentWithBlob>> {
+        use schema::workspace_documents::dsl;
+        use schema::{workspace_blobs, workspace_document_exports, workspace_documents};
 
         let exported = workspace_document_exports::table
             .filter(workspace_document_exports::connection_id.eq(connection_id))
             .select(workspace_document_exports::document_id);
 
-        let documents = workspace_documents::table
+        let rows = workspace_documents::table
+            .inner_join(workspace_blobs::table)
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::kind.eq(DocumentKind::Redacted))
             .filter(dsl::deleted_at.is_null())
             .filter(dsl::id.ne_all(exported))
-            .select(WorkspaceDocument::as_select())
-            .load(self)
+            .select((WorkspaceDocument::as_select(), Blob::as_select()))
+            .load::<(WorkspaceDocument, Blob)>(self)
             .await
             .map_err(Error::from)?;
 
-        Ok(documents)
+        Ok(rows
+            .into_iter()
+            .map(|(document, blob)| DocumentWithBlob { document, blob })
+            .collect())
+    }
+
+    async fn find_documents_with_blobs(
+        &mut self,
+        workspace_id: Uuid,
+        document_ids: &[Uuid],
+    ) -> Result<Vec<DocumentWithBlob>> {
+        use schema::workspace_documents::dsl;
+        use schema::{workspace_blobs, workspace_documents};
+
+        if document_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let rows = workspace_documents::table
+            .inner_join(workspace_blobs::table)
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::id.eq_any(document_ids))
+            .filter(dsl::deleted_at.is_null())
+            .select((WorkspaceDocument::as_select(), Blob::as_select()))
+            .load::<(WorkspaceDocument, Blob)>(self)
+            .await
+            .map_err(Error::from)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(document, blob)| DocumentWithBlob { document, blob })
+            .collect())
     }
 
     async fn imported_documents_for_connection(

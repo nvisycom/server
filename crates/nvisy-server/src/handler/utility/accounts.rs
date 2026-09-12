@@ -5,7 +5,7 @@
 //! id they already hold.
 
 use nvisy_postgres::PgConn;
-use nvisy_postgres::query::AccountRepository;
+use nvisy_postgres::query::{AccountRepository, WorkspaceMemberRepository};
 use nvisy_postgres::types::Handle;
 use uuid::Uuid;
 
@@ -72,6 +72,29 @@ pub async fn resolve_account_ref_opt(
         .find_account_by_id(account_id)
         .await?
         .map(|account| AccountRef::new(account.username, account.display_name, account.avatar_url)))
+}
+
+/// Resolves an optional assignee id to a public reference, scoped to a
+/// workspace's membership.
+///
+/// `None` in yields `None` out. A set id is resolved only through workspace
+/// membership, so an account that is not a member of `workspace_id` also yields
+/// `None` — a review can only be assigned to a member, and a non-member's
+/// identity is never exposed cross-workspace.
+pub async fn resolve_workspace_member_ref(
+    conn: &mut PgConn,
+    workspace_id: Uuid,
+    account_id: Option<Uuid>,
+) -> Result<Option<AccountRef>> {
+    let Some(account_id) = account_id else {
+        return Ok(None);
+    };
+    Ok(conn
+        .find_workspace_member_with_account(workspace_id, account_id)
+        .await?
+        .map(|(_, account)| {
+            AccountRef::new(account.username, account.display_name, account.avatar_url)
+        }))
 }
 
 /// Builds the list of user-specific inputs a password is checked against for

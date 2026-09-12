@@ -65,7 +65,7 @@ impl Worker for BlobReaper {
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => break,
-                _ = ticker.tick() => self.tick().await,
+                _ = ticker.tick() => self.tick(&cancel).await,
             }
         }
 
@@ -86,14 +86,14 @@ impl BlobReaper {
     /// byproduct blob it unreferences becomes reclaimable within the same tick;
     /// Reconcile runs last so it also catches any object a failed expiry left
     /// behind.
-    async fn tick(&self) {
-        if let Err(err) = self.release_expired_referrers().await {
+    async fn tick(&self, cancel: &CancellationToken) {
+        if let Err(err) = self.release_expired_referrers(cancel).await {
             tracing::error!(target: TRACING_TARGET, error = %err, "Referrer cleanup failed");
         }
-        if let Err(err) = self.sweep(Sweep::Expire).await {
+        if let Err(err) = self.sweep(Sweep::Expire, cancel).await {
             tracing::error!(target: TRACING_TARGET, error = %err, "Expiry sweep failed");
         }
-        if let Err(err) = self.sweep(Sweep::Reconcile).await {
+        if let Err(err) = self.sweep(Sweep::Reconcile, cancel).await {
             tracing::error!(target: TRACING_TARGET, error = %err, "Reconcile sweep failed");
         }
     }
@@ -102,9 +102,12 @@ impl BlobReaper {
     /// retention: deletes expired audit rows and nulls expired detection
     /// intermediates, each dropping one blob reference. Pages through both until a
     /// pass clears nothing, so the following Expire sweep sees the now-unreferenced
-    /// blobs.
-    async fn release_expired_referrers(&self) -> Result<()> {
+    /// blobs. Stops early on cancellation so shutdown is not held up by a backlog.
+    async fn release_expired_referrers(&self, cancel: &CancellationToken) -> Result<()> {
         loop {
+            if cancel.is_cancelled() {
+                break;
+            }
             let mut conn = self.infra.postgres.get_connection().await?;
             let audits = conn.delete_expired_audits(SWEEP_BATCH).await?;
             let intermediates = conn.clear_expired_intermediates(SWEEP_BATCH).await?;
@@ -122,8 +125,11 @@ impl BlobReaper {
     /// *successful* purges rather than rows fetched: it stops once a page is short
     /// (nothing more due) or a full page made no progress (every blob in it
     /// failed), logging a stuck batch once per tick instead of spinning on it.
-    async fn sweep(&self, sweep: Sweep) -> Result<()> {
+    async fn sweep(&self, sweep: Sweep, cancel: &CancellationToken) -> Result<()> {
         loop {
+            if cancel.is_cancelled() {
+                break;
+            }
             let batch = {
                 let mut conn = self.infra.postgres.get_connection().await?;
                 match sweep {

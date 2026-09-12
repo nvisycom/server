@@ -243,8 +243,11 @@ impl WorkspaceThreadRepository for PgConnection {
             }
 
             // First detection on this document: create its review thread at
-            // `NeedsReview` and record the detection-created event.
-            let thread = diesel::insert_into(workspace_threads::table)
+            // `NeedsReview` and record the detection-created event. A concurrent
+            // detection that raced past the lookup above hits the live-thread unique
+            // index; `on_conflict_do_nothing` yields no row, and the existing thread
+            // is re-read and returned rather than surfacing a unique violation.
+            let created = diesel::insert_into(workspace_threads::table)
                 .values(&NewWorkspaceThread {
                     workspace_id,
                     document_id: Some(document_id),
@@ -252,10 +255,23 @@ impl WorkspaceThreadRepository for PgConnection {
                     display_name: None,
                     review_status: Some(ReviewStatus::NeedsReview),
                 })
+                .on_conflict_do_nothing()
                 .returning(WorkspaceThread::as_returning())
                 .get_result(conn)
                 .await
+                .optional()
                 .map_err(Error::from)?;
+
+            let Some(thread) = created else {
+                return workspace_threads::table
+                    .filter(dsl::document_id.eq(document_id))
+                    .filter(dsl::workspace_id.eq(workspace_id))
+                    .filter(dsl::deleted_at.is_null())
+                    .select(WorkspaceThread::as_select())
+                    .first(conn)
+                    .await
+                    .map_err(Error::from);
+            };
 
             record_event(
                 conn,
@@ -540,6 +556,7 @@ impl WorkspaceThreadRepository for PgConnection {
                 None => workspace_threads::table
                     .filter(dsl::id.eq(thread_id))
                     .filter(dsl::deleted_at.is_null())
+                    .filter(dsl::document_id.is_not_null())
                     .select(WorkspaceThread::as_select())
                     .first(conn)
                     .await
@@ -603,6 +620,7 @@ impl WorkspaceThreadRepository for PgConnection {
                 None => workspace_threads::table
                     .filter(dsl::id.eq(thread_id))
                     .filter(dsl::deleted_at.is_null())
+                    .filter(dsl::document_id.is_not_null())
                     .select(WorkspaceThread::as_select())
                     .first(conn)
                     .await
@@ -1188,6 +1206,33 @@ mod tests {
             }
         }
         assert_eq!(paged, all);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_or_create_document_thread_is_idempotent() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_pipeline_and_document().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // The first call creates the document's review thread; a second call for the
+        // same document returns that same thread rather than a second one or a
+        // unique-violation error.
+        let first = conn
+            .find_or_create_document_thread(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            )
+            .await?;
+        let second = conn
+            .find_or_create_document_thread(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            )
+            .await?;
+        assert_eq!(second.id, first.id, "one live review thread per document");
         Ok(())
     }
 }

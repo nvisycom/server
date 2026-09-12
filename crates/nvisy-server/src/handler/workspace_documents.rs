@@ -298,14 +298,20 @@ impl DocumentUploadContext {
     /// the rare storage-error case, not worth failing the response over.
     async fn discard_staged(&self, staged: &[StagedDocument]) {
         for document in staged {
-            if let Err(err) = self.blobs.delete(&document.key).await {
-                tracing::warn!(
-                    target: TRACING_TARGET,
-                    error = %err,
-                    object_id = %document.key.object_id,
-                    "Failed to remove staged object after an aborted upload",
-                );
-            }
+            self.discard_staged_object(&document.key).await;
+        }
+    }
+
+    /// Removes one staged object best-effort, logging a failure rather than
+    /// failing the response.
+    async fn discard_staged_object(&self, key: &DocumentKey) {
+        if let Err(err) = self.blobs.delete(key).await {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                error = %err,
+                object_id = %key.object_id,
+                "Failed to remove staged object",
+            );
         }
     }
 }
@@ -425,6 +431,15 @@ async fn upload_document(
             return Err(err);
         }
     };
+
+    // A document whose content deduplicated onto an existing blob is pointed at
+    // that blob's stored object, orphaning the object staged for it here. Remove
+    // the redundant staged object best-effort now that the batch has committed.
+    for (staged_document, entry) in staged.iter().zip(&created) {
+        if entry.blob.storage_path != staged_document.blob.storage_path {
+            ctx.discard_staged_object(&staged_document.key).await;
+        }
+    }
 
     let mut uploaded_documents: Documents = Vec::with_capacity(created.len());
     for entry in created {
@@ -751,7 +766,7 @@ async fn delete_document(
 
 fn delete_document_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete document")
-        .description("Deletes a document: the record is retired and its stored content is removed. This is permanent — the document's content cannot be recovered.")
+        .description("Deletes a document: the record is retired and its blob reference dropped. The stored content is reclaimed later, once no other document references it and its retention window has passed. This is permanent — the document cannot be restored.")
         .response::<204, ()>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()

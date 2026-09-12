@@ -20,9 +20,9 @@ pub struct ThreadPathParams {
 
 /// Request payload to open a workspace discussion thread with its first message.
 ///
-/// A workspace thread is free-form discussion pinned to no file; file reviews
-/// are auto-created on detection, not opened by hand. `@username` mentions in
-/// the opening body notify those members.
+/// A workspace thread is free-form discussion pinned to no document; document
+/// reviews are auto-created on detection, not opened by hand. `@username`
+/// mentions in the opening body notify those members.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -37,7 +37,7 @@ pub struct OpenThread {
     pub body: String,
 }
 
-/// Request payload to assign or unassign a file review.
+/// Request payload to assign or unassign a document review.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -73,7 +73,7 @@ pub struct WorkspaceThreadsQuery {
     pub author: Option<Uuid>,
     /// Filter by open/closed state: `true` = closed only, `false` = open only.
     pub closed: Option<bool>,
-    /// Filter file reviews by their derived review status.
+    /// Filter document reviews by their derived review status.
     pub review_status: Option<ReviewStatus>,
 }
 

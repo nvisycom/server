@@ -24,21 +24,38 @@ pub(super) fn object_extension(key: &str) -> Option<String> {
 
 /// The remote key an exported document is written under.
 ///
-/// The base name is the document's display name. For an object store the key is
-/// namespaced under `object_prefix` (e.g. `redacted/`) so exports never overwrite
-/// imported originals, and under the document's id so two documents that share a
-/// display name do not overwrite each other at the same path. A file service
-/// creates a new file from the base name directly, since it never overwrites.
+/// The base name is the document's display name carrying the document's
+/// extension, so an exported object is never left without its type. For an object
+/// store the key is namespaced under `object_prefix` (e.g. `redacted/`) so exports
+/// never overwrite imported originals, and under the document's id so two
+/// documents that share a display name do not overwrite each other at the same
+/// path. A file service creates a new file from the base name directly, since it
+/// never overwrites.
 pub(super) fn export_key(
     document: &WorkspaceDocument,
     object_store: bool,
     object_prefix: &str,
 ) -> String {
-    let name = object_basename(&document.display_name);
+    let name = export_basename(&document.display_name, &document.file_extension);
     if object_store {
         format!("{object_prefix}{}/{name}", document.id)
     } else {
         name
+    }
+}
+
+/// A display name with `extension` appended when the name does not already carry
+/// it (case-insensitively), so an exported object is never left extensionless.
+fn export_basename(display_name: &str, extension: &str) -> String {
+    let name = object_basename(display_name);
+    if extension.is_empty()
+        || name
+            .rsplit_once('.')
+            .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case(extension))
+    {
+        name
+    } else {
+        format!("{name}.{extension}")
     }
 }
 
@@ -54,7 +71,7 @@ pub(super) fn mime_from_extension(extension: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{object_basename, object_extension};
+    use super::{export_basename, object_basename, object_extension};
 
     #[test]
     fn basename_and_extension() {
@@ -65,5 +82,15 @@ mod tests {
         );
         assert_eq!(object_basename("flat"), "flat");
         assert_eq!(object_extension("flat"), None);
+    }
+
+    #[test]
+    fn export_basename_carries_the_extension() {
+        // A display name without the extension gains it.
+        assert_eq!(export_basename("report", "pdf"), "report.pdf");
+        // A name that already ends in the extension (any case) is left as-is.
+        assert_eq!(export_basename("report.PDF", "pdf"), "report.PDF");
+        // No extension to append leaves the name untouched.
+        assert_eq!(export_basename("report", ""), "report");
     }
 }
