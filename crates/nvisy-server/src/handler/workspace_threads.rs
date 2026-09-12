@@ -47,11 +47,8 @@ use crate::handler::utility::{
     resolve_account_ref, resolve_account_ref_opt, resolve_workspace_member_ref,
 };
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{
-    AssistantJob, AssistantQueue, EventEmitter, EventOrigin, ReviewAssigned, ReviewUnassigned,
-    ReviewVerified, ServiceState, ThreadClosed, ThreadDeleted, ThreadOpened, ThreadRenamed,
-    ThreadReopened, WorkspaceEvent,
-};
+use crate::service::event::EventEmitter;
+use crate::service::{AssistantJob, AssistantQueue, ServiceState, event};
 
 /// Tracing target for comment operations.
 pub(crate) const TRACING_TARGET: &str = "nvisy_server::handler::comments";
@@ -145,7 +142,7 @@ async fn open_thread(
             emit_thread_event(
                 conn,
                 workspace_origin(workspace_id, author_id, security),
-                WorkspaceEvent::ThreadOpened(ThreadOpened {
+                event::WorkspaceEvent::ThreadOpened(event::ThreadOpened {
                     thread_id: thread.id,
                     opening_comment_id: opening.id,
                     document_id: thread.document_id,
@@ -284,7 +281,7 @@ async fn delete_thread(
         emit_thread_event(
             conn,
             workspace_origin(workspace.id, authz.account_id, &security),
-            WorkspaceEvent::ThreadDeleted(ThreadDeleted {
+            event::WorkspaceEvent::ThreadDeleted(event::ThreadDeleted {
                 thread_id: thread.id,
                 document_id: thread.document_id,
             }),
@@ -343,7 +340,7 @@ async fn close_thread(
             emit_thread_event(
                 conn,
                 workspace_origin(workspace.id, authz.account_id, &security),
-                WorkspaceEvent::ThreadClosed(ThreadClosed {
+                event::WorkspaceEvent::ThreadClosed(event::ThreadClosed {
                     thread_id: thread.id,
                     document_id: thread.document_id,
                 }),
@@ -403,7 +400,7 @@ async fn reopen_thread(
             emit_thread_event(
                 conn,
                 workspace_origin(workspace.id, authz.account_id, &security),
-                WorkspaceEvent::ThreadReopened(ThreadReopened {
+                event::WorkspaceEvent::ThreadReopened(event::ThreadReopened {
                     thread_id: thread.id,
                     document_id: thread.document_id,
                 }),
@@ -468,7 +465,7 @@ async fn rename_thread(
             emit_thread_event(
                 conn,
                 workspace_origin(workspace.id, authz.account_id, &security),
-                WorkspaceEvent::ThreadRenamed(ThreadRenamed {
+                event::WorkspaceEvent::ThreadRenamed(event::ThreadRenamed {
                     thread_id: thread.id,
                     document_id: thread.document_id,
                 }),
@@ -615,7 +612,7 @@ async fn verify_review(
             emit_thread_event(
                 conn,
                 workspace_origin(workspace.id, authz.account_id, &security),
-                WorkspaceEvent::ReviewVerified(ReviewVerified {
+                event::WorkspaceEvent::ReviewVerified(event::ReviewVerified {
                     thread_id: thread.id,
                     document_id: document.id,
                     document_name: document.display_name.clone(),
@@ -696,7 +693,7 @@ async fn assign_review(
                 .await?;
             let event = match (request.assignee, &assignee_ref) {
                 (Some(assignee), Some(assignee_ref)) => {
-                    WorkspaceEvent::ReviewAssigned(ReviewAssigned {
+                    event::WorkspaceEvent::ReviewAssigned(event::ReviewAssigned {
                         thread_id: thread.id,
                         document_id: document.id,
                         document_name: document.display_name.clone(),
@@ -705,7 +702,7 @@ async fn assign_review(
                         notify: (assignee != authz.account_id).then_some(assignee),
                     })
                 }
-                _ => WorkspaceEvent::ReviewUnassigned(ReviewUnassigned {
+                _ => event::WorkspaceEvent::ReviewUnassigned(event::ReviewUnassigned {
                     thread_id: thread.id,
                     document_id: document.id,
                     document_name: Some(document.display_name.clone()),
@@ -903,8 +900,8 @@ pub(crate) fn workspace_origin<'a>(
     workspace_id: Uuid,
     account_id: Uuid,
     security: &'a SecurityContext,
-) -> EventOrigin<'a> {
-    EventOrigin {
+) -> event::EventOrigin<'a> {
+    event::EventOrigin {
         workspace_id,
         account_id,
         security,
@@ -915,8 +912,8 @@ pub(crate) fn workspace_origin<'a>(
 /// transition, or a new comment) onto the outbox.
 pub(crate) async fn emit_thread_event(
     conn: &mut PgConn,
-    origin: EventOrigin<'_>,
-    event: WorkspaceEvent,
+    origin: event::EventOrigin<'_>,
+    event: event::WorkspaceEvent,
 ) -> Result<()> {
     conn.emit_event(origin, event).await?;
     Ok(())

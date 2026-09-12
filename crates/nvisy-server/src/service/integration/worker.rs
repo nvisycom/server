@@ -33,7 +33,7 @@ use uuid::Uuid;
 
 use super::{ConnectionSyncService, StandardCronSchedule, TransferKind, TransferRequest};
 use crate::response::{ErrorKind, Result};
-use crate::service::{ConnectionConfig, Infra, Worker};
+use crate::service::{ConnectionConfig, CryptoService, Infra, Worker};
 
 /// Tracing target for the connection sync worker.
 const TRACING_TARGET: &str = "nvisy_server::worker::connection_sync";
@@ -84,6 +84,7 @@ type JobSubscriber = EventSubscriber<SyncStream>;
 /// Background worker driving scheduled connection syncs.
 pub struct ConnectionSyncWorker {
     infra: Infra,
+    crypto: CryptoService,
     sync: ConnectionSyncService,
 }
 
@@ -114,8 +115,12 @@ impl Worker for ConnectionSyncWorker {
 
 impl ConnectionSyncWorker {
     /// Creates a new [`ConnectionSyncWorker`].
-    pub fn new(infra: Infra, sync: ConnectionSyncService) -> Self {
-        Self { infra, sync }
+    pub fn new(infra: Infra, crypto: CryptoService, sync: ConnectionSyncService) -> Self {
+        Self {
+            infra,
+            crypto,
+            sync,
+        }
     }
 
     /// Reaps stale runs, then drives the scheduler tick and the job consumer
@@ -445,7 +450,7 @@ impl ConnectionSyncWorker {
         connection: WorkspaceConnection,
         attempt: i32,
     ) -> Result<Option<TransferRequest>> {
-        let config = self.infra.crypto.decrypt_json::<ConnectionConfig>(
+        let config = self.crypto.decrypt_json::<ConnectionConfig>(
             connection.workspace_id,
             &connection.encrypted_data,
         )?;

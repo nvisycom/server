@@ -29,10 +29,8 @@ use crate::handler::response::{
 };
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{
-    CryptoService, EventEmitter, EventOrigin, ProviderConfig, ProviderCreated, ProviderDeleted,
-    ProviderUpdated, ServiceState, WorkspaceEvent,
-};
+use crate::service::event::EventEmitter;
+use crate::service::{CryptoService, ProviderConfig, ServiceState, event};
 
 /// Tracing target for workspace provider operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::providers";
@@ -93,12 +91,12 @@ async fn create_provider(
         .transaction(async |conn| {
             let created = conn.create_workspace_provider(new_provider).await?;
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id: workspace.id,
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::ProviderCreated(ProviderCreated {
+                event::WorkspaceEvent::ProviderCreated(event::ProviderCreated {
                     provider_id: created.id,
                     provider_name: created.display_name.clone(),
                 }),
@@ -312,12 +310,12 @@ async fn update_provider(
         conn.update_workspace_provider(provider_id, update_data)
             .await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::ProviderUpdated(ProviderUpdated {
+            event::WorkspaceEvent::ProviderUpdated(event::ProviderUpdated {
                 provider_id,
                 provider_name,
             }),
@@ -381,12 +379,12 @@ async fn delete_provider(
     conn.transaction(async |conn| {
         conn.delete_workspace_provider(existing.id).await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::ProviderDeleted(ProviderDeleted {
+            event::WorkspaceEvent::ProviderDeleted(event::ProviderDeleted {
                 provider_id: existing.id,
                 provider_name: existing.display_name.clone(),
             }),

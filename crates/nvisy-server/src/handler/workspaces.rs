@@ -27,10 +27,8 @@ use crate::handler::response::{
 use crate::handler::utility::resolve_account_ref;
 use crate::middleware::UploadConfig;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{
-    AvatarService, EventEmitter, EventOrigin, MAX_AVATAR_UPLOAD_BYTES, ServiceState,
-    WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
-};
+use crate::service::event::EventEmitter;
+use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState, event};
 
 /// Tracing target for workspace operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspaces";
@@ -62,12 +60,12 @@ async fn create_workspace(
             let new_member = NewWorkspaceMember::new_owner(workspace.id, creator_id);
             let member = conn.add_workspace_member(new_member).await?;
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id: workspace.id,
                     account_id: creator_id,
                     security: &security,
                 },
-                WorkspaceEvent::WorkspaceCreated(WorkspaceCreated {
+                event::WorkspaceEvent::WorkspaceCreated(event::WorkspaceCreated {
                     workspace_id: workspace.id,
                     workspace_slug: workspace.slug.clone(),
                 }),
@@ -218,12 +216,12 @@ async fn update_workspace(
         .transaction(async |conn| {
             let updated = conn.update_workspace(workspace_id, update_data).await?;
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id,
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::WorkspaceUpdated(WorkspaceUpdated {
+                event::WorkspaceEvent::WorkspaceUpdated(event::WorkspaceUpdated {
                     workspace_id: updated.id,
                     workspace_slug: updated.slug.clone(),
                 }),
@@ -281,12 +279,12 @@ async fn delete_workspace(
     conn.transaction(async |conn| {
         conn.delete_workspace(workspace.id).await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::WorkspaceDeleted(WorkspaceDeleted {
+            event::WorkspaceEvent::WorkspaceDeleted(event::WorkspaceDeleted {
                 workspace_id: workspace.id,
                 workspace_slug: workspace.slug.clone(),
             }),

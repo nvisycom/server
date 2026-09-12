@@ -29,10 +29,8 @@ use crate::handler::response::{
 };
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{
-    CryptoService, EventEmitter, EventOrigin, ServiceState, WebhookCreated as WebhookCreatedEvent,
-    WebhookDeleted as WebhookDeletedEvent, WebhookUpdated as WebhookUpdatedEvent, WorkspaceEvent,
-};
+use crate::service::event::EventEmitter;
+use crate::service::{CryptoService, ServiceState, event};
 
 /// Tracing target for workspace webhook operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::webhooks";
@@ -75,12 +73,12 @@ async fn create_webhook(
         .transaction(async |conn| {
             let webhook = conn.create_workspace_webhook(new_webhook).await?;
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id: workspace.id,
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::WebhookCreated(WebhookCreatedEvent {
+                event::WorkspaceEvent::WebhookCreated(event::WebhookCreated {
                     webhook_id: webhook.id,
                     webhook_name: webhook.display_name.clone(),
                 }),
@@ -260,12 +258,12 @@ async fn update_webhook(
         conn.update_workspace_webhook(existing.id, update_data)
             .await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::WebhookUpdated(WebhookUpdatedEvent {
+            event::WorkspaceEvent::WebhookUpdated(event::WebhookUpdated {
                 webhook_id: existing.id,
                 webhook_name,
             }),
@@ -331,12 +329,12 @@ async fn delete_webhook(
     conn.transaction(async |conn| {
         conn.delete_workspace_webhook(existing.id).await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::WebhookDeleted(WebhookDeletedEvent {
+            event::WorkspaceEvent::WebhookDeleted(event::WebhookDeleted {
                 webhook_id: existing.id,
                 webhook_name: existing.display_name.clone(),
             }),

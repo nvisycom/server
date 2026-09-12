@@ -22,10 +22,8 @@ use crate::handler::request::{
 use crate::handler::response::{AccountRef, Page, WorkspacePipeline, WorkspacePipelineSummary};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{
-    EventEmitter, EventOrigin, PipelineCreated, PipelineDeleted, PipelineUpdated, ServiceState,
-    WorkspaceEvent,
-};
+use crate::service::event::EventEmitter;
+use crate::service::{ServiceState, event};
 
 /// Tracing target for pipeline operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::pipelines";
@@ -64,12 +62,12 @@ async fn create_pipeline(
             let pipeline = conn.create_workspace_pipeline(new_pipeline).await?;
             replace_references(conn, &pipeline, &policy_ids).await?;
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id: workspace.id,
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::PipelineCreated(PipelineCreated {
+                event::WorkspaceEvent::PipelineCreated(event::PipelineCreated {
                     pipeline_id: pipeline.id,
                     pipeline_slug: pipeline.slug.clone(),
                 }),
@@ -251,12 +249,12 @@ async fn update_pipeline(
                 replace_references(conn, &pipeline, policy_ids).await?;
             }
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id: workspace.id,
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::PipelineUpdated(PipelineUpdated {
+                event::WorkspaceEvent::PipelineUpdated(event::PipelineUpdated {
                     pipeline_id,
                     pipeline_slug: pipeline.slug.clone(),
                 }),
@@ -330,12 +328,12 @@ async fn delete_pipeline(
     conn.transaction(async |conn| {
         conn.delete_workspace_pipeline(pipeline_id).await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::PipelineDeleted(PipelineDeleted {
+            event::WorkspaceEvent::PipelineDeleted(event::PipelineDeleted {
                 pipeline_id,
                 pipeline_slug,
             }),

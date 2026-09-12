@@ -26,10 +26,7 @@ use uuid::Uuid;
 use super::job::{AssistantJob, AssistantStream};
 use crate::extract::SecurityContext;
 use crate::response::{Error, ErrorKind, Result};
-use crate::service::{
-    EventOrigin, Infra, ProviderConfig, ThreadCommentCreated, Worker, WorkspaceEvent,
-    event_outbox_row,
-};
+use crate::service::{CryptoService, Infra, ProviderConfig, Worker, event};
 
 /// Tracing target for assistant worker operations.
 const TRACING_TARGET: &str = "nvisy_server::worker::assistant";
@@ -57,6 +54,7 @@ const INFERENCE_TIMEOUT: Duration = Duration::from_secs(120);
 #[derive(Clone)]
 pub struct AssistantWorker {
     infra: Infra,
+    crypto: CryptoService,
     /// Bounds how many assistant turns run at once. Inference is I/O-bound on the
     /// model provider, but the bound keeps a burst of mentions from opening an
     /// unbounded number of concurrent provider requests.
@@ -88,12 +86,13 @@ impl Worker for AssistantWorker {
 
 impl AssistantWorker {
     /// Creates a new `AssistantWorker`.
-    pub fn new(infra: Infra) -> Self {
+    pub fn new(infra: Infra, crypto: CryptoService) -> Self {
         let concurrency = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(DEFAULT_ASSISTANT_CONCURRENCY);
         Self {
             infra,
+            crypto,
             concurrency: Arc::new(Semaphore::new(concurrency)),
         }
     }
@@ -333,7 +332,6 @@ impl AssistantWorker {
             })?;
 
         let config: ProviderConfig = self
-            .infra
             .crypto
             .decrypt_json(workspace_id, &provider.encrypted_data)?;
 
@@ -380,7 +378,7 @@ impl AssistantWorker {
             // The assistant is the author, so there are no mentions to notify and
             // no @assistant self-trigger (the enqueue path only fires for a human
             // author addressing the assistant).
-            let event = WorkspaceEvent::ThreadCommentCreated(ThreadCommentCreated {
+            let event = event::WorkspaceEvent::ThreadCommentCreated(event::ThreadCommentCreated {
                 comment_id: comment.id,
                 thread_id: thread.id,
                 document_id: thread.document_id,
@@ -389,8 +387,8 @@ impl AssistantWorker {
                 })?,
                 mentioned: Vec::new(),
             });
-            let row = event_outbox_row(
-                EventOrigin {
+            let row = event::event_outbox_row(
+                event::EventOrigin {
                     workspace_id: thread.workspace_id,
                     account_id: ASSISTANT_ACCOUNT_ID,
                     security: &SecurityContext::default(),

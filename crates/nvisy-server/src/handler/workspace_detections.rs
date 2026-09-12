@@ -41,10 +41,10 @@ use crate::handler::response::{
 };
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, SseResponse};
+use crate::service::event::EventEmitter;
 use crate::service::{
-    DetectionJob, DetectionQueue, DetectionStarted, DetectionStatusEvent, EngineService,
-    EventEmitter, EventOrigin, RedactionCreated, RunBlobStore, ServiceState, WorkspaceEvent,
-    resolve_pinned_policies,
+    DetectionJob, DetectionQueue, DetectionStatusEvent, EngineService, RunBlobStore, ServiceState,
+    event, resolve_pinned_policies,
 };
 
 /// Tracing target for detection operations.
@@ -160,12 +160,12 @@ async fn create_detection(
         .transaction(async |conn| {
             let detection_row = conn.create_workspace_detection(new_detection).await?;
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id: workspace.id,
                     account_id: authz.account_id,
                     security: &security,
                 },
-                WorkspaceEvent::DetectionStarted(DetectionStarted {
+                event::WorkspaceEvent::DetectionStarted(event::DetectionStarted {
                     detection_id: detection_row.id,
                     pipeline_slug: pipeline.slug.clone(),
                 }),
@@ -797,12 +797,12 @@ async fn redact_detection(
                 )
                 .await?;
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id: workspace.id,
                     account_id: authz.account_id,
                     security: &security,
                 },
-                WorkspaceEvent::RedactionCreated(RedactionCreated {
+                event::WorkspaceEvent::RedactionCreated(event::RedactionCreated {
                     detection_id: inputs.detection.id,
                     pipeline_slug: inputs.pipeline.slug.clone(),
                     redaction_id: redaction.id,

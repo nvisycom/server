@@ -22,7 +22,7 @@ use crate::handler::request::{
 use crate::handler::response::{PoliciesPage, WorkspacePolicy, WorkspacePolicySummary};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{ErrorResponse, Result};
-use crate::service::{EventOrigin, PolicyService, ResolvedPolicy, ServiceState};
+use crate::service::{PolicyService, ResolvedPolicy, ServiceState, event};
 
 /// Tracing target for workspace policy operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::policies";
@@ -52,7 +52,7 @@ async fn create_policy(
     let account_id = authz.account_id;
     let mut conn = pg_client.get_connection().await?;
 
-    let origin = EventOrigin {
+    let origin = event::EventOrigin {
         workspace_id: workspace.id,
         account_id,
         security: &security,
@@ -200,7 +200,7 @@ async fn update_policy(
     tracing::debug!(target: TRACING_TARGET, "Updating workspace policy");
 
     let workspace = authz.workspace;
-    let origin = EventOrigin {
+    let origin = event::EventOrigin {
         workspace_id: workspace.id,
         account_id: authz.account_id,
         security: &security,
@@ -246,7 +246,7 @@ async fn delete_policy(
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace policy");
 
     let workspace = authz.workspace;
-    let origin = EventOrigin {
+    let origin = event::EventOrigin {
         workspace_id: workspace.id,
         account_id: authz.account_id,
         security: &security,
@@ -292,7 +292,7 @@ async fn promote_policy(
     tracing::debug!(target: TRACING_TARGET, "Promoting workspace policy");
 
     let workspace = authz.workspace;
-    let origin = EventOrigin {
+    let origin = event::EventOrigin {
         workspace_id: workspace.id,
         account_id: authz.account_id,
         security: &security,

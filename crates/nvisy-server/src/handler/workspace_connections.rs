@@ -45,10 +45,10 @@ use crate::handler::response::{
 };
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
+use crate::service::event::EventEmitter;
 use crate::service::{
-    ConnectionConfig, ConnectionCreated, ConnectionDeleted, ConnectionUpdated, CryptoService,
-    EventEmitter, EventOrigin, ExternalObjectStore, ServiceState, StandardCronSchedule,
-    WorkspaceEvent, persist_refreshed_tokens,
+    ConnectionConfig, CryptoService, ExternalObjectStore, ServiceState, StandardCronSchedule,
+    event, persist_refreshed_tokens,
 };
 
 /// Tracing target for workspace connection operations.
@@ -134,12 +134,12 @@ async fn create_connection(
                 None => None,
             };
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id: workspace.id,
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::ConnectionCreated(ConnectionCreated {
+                event::WorkspaceEvent::ConnectionCreated(event::ConnectionCreated {
                     connection_id: connection.id,
                     connection_name: connection.display_name.clone(),
                 }),
@@ -439,12 +439,12 @@ async fn update_connection(
             .await?;
         }
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::ConnectionUpdated(ConnectionUpdated {
+            event::WorkspaceEvent::ConnectionUpdated(event::ConnectionUpdated {
                 connection_id,
                 connection_name,
             }),
@@ -517,12 +517,12 @@ async fn delete_connection(
     conn.transaction(async |conn| {
         conn.delete_workspace_connection(existing.id).await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::ConnectionDeleted(ConnectionDeleted {
+            event::WorkspaceEvent::ConnectionDeleted(event::ConnectionDeleted {
                 connection_id: existing.id,
                 connection_name: existing.display_name.clone(),
             }),

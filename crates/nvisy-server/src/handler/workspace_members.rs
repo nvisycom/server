@@ -23,9 +23,8 @@ use crate::handler::request::{
 };
 use crate::handler::response::{Page, WorkspaceMember, WorkspaceMembersPage};
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{
-    EventEmitter, EventOrigin, MemberDeleted, MemberUpdated, ServiceState, WorkspaceEvent,
-};
+use crate::service::event::EventEmitter;
+use crate::service::{ServiceState, event};
 
 /// Tracing target for workspace member operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::members";
@@ -192,12 +191,12 @@ async fn delete_member(
         conn.remove_workspace_member(workspace.id, member_account_id)
             .await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::MemberDeleted(MemberDeleted {
+            event::WorkspaceEvent::MemberDeleted(event::MemberDeleted {
                 member_id: member_account_id,
                 member_username: path_params.username.clone(),
             }),
@@ -281,12 +280,12 @@ async fn update_member(
         conn.update_workspace_member(workspace.id, member_account_id, request.into_model())
             .await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::MemberUpdated(MemberUpdated {
+            event::WorkspaceEvent::MemberUpdated(event::MemberUpdated {
                 member_id: member_account_id,
                 member_username: path_params.username.clone(),
             }),
@@ -379,12 +378,12 @@ async fn leave_workspace(
         conn.remove_workspace_member(workspace.id, auth_state.account_id)
             .await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id: auth_state.account_id,
                 security: &security,
             },
-            WorkspaceEvent::MemberDeleted(MemberDeleted {
+            event::WorkspaceEvent::MemberDeleted(event::MemberDeleted {
                 member_id: auth_state.account_id,
                 member_username: account.username.clone(),
             }),

@@ -18,10 +18,8 @@ use uuid::Uuid;
 
 use crate::handler::request::{CreateWorkspacePolicy, PolicyBody, UpdateWorkspacePolicy};
 use crate::response::{Error, ErrorKind, Result};
-use crate::service::{
-    EventEmitter, EventOrigin, PolicyCreated, PolicyDeleted, PolicyPromoted, PolicyUpdated,
-    WorkspaceEvent,
-};
+use crate::service::event;
+use crate::service::event::EventEmitter;
 
 /// Tracing target for policy domain operations.
 const TRACING_TARGET: &str = "nvisy_server::service::policy";
@@ -57,7 +55,7 @@ impl PolicyService {
     pub async fn create(
         &self,
         conn: &mut PgConn,
-        origin: EventOrigin<'_>,
+        origin: event::EventOrigin<'_>,
         request: CreateWorkspacePolicy,
     ) -> Result<ResolvedPolicy> {
         match request.body.oneshot_content_hash() {
@@ -75,7 +73,7 @@ impl PolicyService {
     async fn create_authored(
         &self,
         conn: &mut PgConn,
-        origin: EventOrigin<'_>,
+        origin: event::EventOrigin<'_>,
         request: CreateWorkspacePolicy,
     ) -> Result<ResolvedPolicy> {
         let slug = request.slug.ok_or_else(|| {
@@ -107,7 +105,7 @@ impl PolicyService {
                 let created = conn.create_workspace_policy(new_policy, body, None).await?;
                 conn.emit_event(
                     origin,
-                    WorkspaceEvent::PolicyCreated(PolicyCreated {
+                    event::WorkspaceEvent::PolicyCreated(event::PolicyCreated {
                         policy_id: created.policy.id,
                         policy_slug: created.policy.slug.clone(),
                     }),
@@ -132,7 +130,7 @@ impl PolicyService {
     async fn create_oneshot(
         &self,
         conn: &mut PgConn,
-        origin: EventOrigin<'_>,
+        origin: event::EventOrigin<'_>,
         body: PolicyBody,
         content_hash: Vec<u8>,
     ) -> Result<ResolvedPolicy> {
@@ -165,7 +163,7 @@ impl PolicyService {
                 if resolved.created {
                     conn.emit_event(
                         origin,
-                        WorkspaceEvent::PolicyCreated(PolicyCreated {
+                        event::WorkspaceEvent::PolicyCreated(event::PolicyCreated {
                             policy_id: resolved.policy.policy.id,
                             policy_slug: resolved.policy.policy.slug.clone(),
                         }),
@@ -221,7 +219,7 @@ impl PolicyService {
     pub async fn update(
         &self,
         conn: &mut PgConn,
-        origin: EventOrigin<'_>,
+        origin: event::EventOrigin<'_>,
         policy_slug: &str,
         request: UpdateWorkspacePolicy,
     ) -> Result<(WithAccountRef<WorkspacePolicy>, WorkspacePolicyVersion)> {
@@ -274,7 +272,7 @@ impl PolicyService {
             .await?;
             conn.emit_event(
                 origin,
-                WorkspaceEvent::PolicyUpdated(PolicyUpdated {
+                event::WorkspaceEvent::PolicyUpdated(event::PolicyUpdated {
                     policy_id,
                     policy_slug: event_slug,
                 }),
@@ -296,7 +294,7 @@ impl PolicyService {
     pub async fn promote(
         &self,
         conn: &mut PgConn,
-        origin: EventOrigin<'_>,
+        origin: event::EventOrigin<'_>,
         policy_slug: &str,
     ) -> Result<(WithAccountRef<WorkspacePolicy>, WorkspacePolicyVersion)> {
         let found = find_policy(conn, origin.workspace_id, policy_slug).await?;
@@ -321,7 +319,7 @@ impl PolicyService {
             .await?;
             conn.emit_event(
                 origin,
-                WorkspaceEvent::PolicyPromoted(PolicyPromoted {
+                event::WorkspaceEvent::PolicyPromoted(event::PolicyPromoted {
                     policy_id,
                     policy_slug: policy_slug_owned,
                 }),
@@ -339,7 +337,7 @@ impl PolicyService {
     pub async fn delete(
         &self,
         conn: &mut PgConn,
-        origin: EventOrigin<'_>,
+        origin: event::EventOrigin<'_>,
         policy_slug: &str,
     ) -> Result<()> {
         let existing = find_policy(conn, origin.workspace_id, policy_slug)
@@ -352,7 +350,7 @@ impl PolicyService {
             conn.delete_workspace_policy(policy_id).await?;
             conn.emit_event(
                 origin,
-                WorkspaceEvent::PolicyDeleted(PolicyDeleted {
+                event::WorkspaceEvent::PolicyDeleted(event::PolicyDeleted {
                     policy_id,
                     policy_slug,
                 }),
@@ -484,7 +482,7 @@ mod tests {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
-        let origin = EventOrigin {
+        let origin = event::EventOrigin {
             workspace_id: seeded.workspace_id,
             account_id: seeded.account_id,
             security: &security(),
@@ -506,7 +504,7 @@ mod tests {
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
         let security = security();
-        let origin = || EventOrigin {
+        let origin = || event::EventOrigin {
             workspace_id: seeded.workspace_id,
             account_id: seeded.account_id,
             security: &security,
@@ -534,7 +532,7 @@ mod tests {
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
         let security = security();
-        let origin = || EventOrigin {
+        let origin = || event::EventOrigin {
             workspace_id: seeded.workspace_id,
             account_id: seeded.account_id,
             security: &security,
@@ -558,7 +556,7 @@ mod tests {
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
         let security = security();
-        let origin = || EventOrigin {
+        let origin = || event::EventOrigin {
             workspace_id: seeded.workspace_id,
             account_id: seeded.account_id,
             security: &security,
@@ -582,7 +580,7 @@ mod tests {
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
         let security = security();
-        let origin = || EventOrigin {
+        let origin = || event::EventOrigin {
             workspace_id: seeded.workspace_id,
             account_id: seeded.account_id,
             security: &security,
@@ -613,7 +611,7 @@ mod tests {
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
         let security = security();
-        let origin = || EventOrigin {
+        let origin = || event::EventOrigin {
             workspace_id: seeded.workspace_id,
             account_id: seeded.account_id,
             security: &security,

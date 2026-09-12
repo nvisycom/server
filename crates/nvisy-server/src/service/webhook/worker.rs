@@ -17,7 +17,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{WebhookJob, WebhookStream};
-use crate::service::{Infra, Worker};
+use crate::service::{CryptoService, Infra, Worker};
 use crate::{Error, Result};
 
 /// Type alias for webhook subscriber.
@@ -83,7 +83,8 @@ impl DeliveryOutcome {
 /// webhook payloads to external endpoints with HMAC-SHA256 signatures.
 pub struct WebhookDeliveryWorker {
     infra: Infra,
-    webhook_service: WebhookService,
+    crypto: CryptoService,
+    webhook: WebhookService,
 }
 
 impl Worker for WebhookDeliveryWorker {
@@ -128,10 +129,11 @@ impl Worker for WebhookDeliveryWorker {
 
 impl WebhookDeliveryWorker {
     /// Create a new webhook worker.
-    pub fn new(infra: Infra, webhook_service: WebhookService) -> Self {
+    pub fn new(infra: Infra, crypto: CryptoService, webhook: WebhookService) -> Self {
         Self {
             infra,
-            webhook_service,
+            crypto,
+            webhook,
         }
     }
 
@@ -308,7 +310,7 @@ impl WebhookDeliveryWorker {
 
         // A transport error (connection refused, timeout, SSRF rejection) is a
         // failure worth retrying.
-        let response = match self.webhook_service.deliver(&request).await {
+        let response = match self.webhook.deliver(&request).await {
             Ok(response) => response,
             Err(err) => {
                 let err = Error::external("webhook", format!("Delivery failed: {err}"));
@@ -448,7 +450,6 @@ impl WebhookDeliveryWorker {
     /// Decrypts a webhook's stored signing secret under the workspace key.
     fn decrypt_secret(&self, webhook: &WorkspaceWebhook, workspace_id: Uuid) -> Result<String> {
         let plaintext = self
-            .infra
             .crypto
             .decrypt(workspace_id, &webhook.encrypted_secret)?;
         String::from_utf8(plaintext).map_err(|err| {

@@ -32,10 +32,8 @@ use crate::handler::response::{
     WorkspaceMember,
 };
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{
-    EventEmitter, EventOrigin, InviteAccepted, InviteCanceled, InviteCreated, InviteDeclined,
-    MemberAdded, ServiceState, WorkspaceEvent,
-};
+use crate::service::event::EventEmitter;
+use crate::service::{ServiceState, event};
 
 /// Tracing target for workspace invite operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::invites";
@@ -122,12 +120,12 @@ pub async fn create_invite(
             let invite = conn.create_workspace_invite(new_invite).await?;
 
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id,
                     account_id: actor_id,
                     security,
                 },
-                WorkspaceEvent::InviteCreated(InviteCreated {
+                event::WorkspaceEvent::InviteCreated(event::InviteCreated {
                     invite_id: invite.id,
                     email: Some(request.invitee_email.clone()),
                 }),
@@ -286,12 +284,12 @@ async fn cancel_invite(
         conn.cancel_workspace_invite(path_params.invite_id, account_id)
             .await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::InviteCanceled(InviteCanceled {
+            event::WorkspaceEvent::InviteCanceled(event::InviteCanceled {
                 invite_id: invite.id,
                 email: invite.invitee_email,
             }),
@@ -372,12 +370,12 @@ async fn reply_to_invite(
             conn.reject_workspace_invite(path_params.invite_id, auth_state.account_id)
                 .await?;
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id: workspace.id,
                     account_id: auth_state.account_id,
                     security: &security,
                 },
-                WorkspaceEvent::InviteDeclined(InviteDeclined {
+                event::WorkspaceEvent::InviteDeclined(event::InviteDeclined {
                     invite_id: invite.id,
                     email: invite.invitee_email.clone(),
                 }),
@@ -579,12 +577,12 @@ async fn reply_to_invite_code(
             conn.reject_workspace_invite(invite.id, auth_state.account_id)
                 .await?;
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id,
                     account_id: auth_state.account_id,
                     security: &security,
                 },
-                WorkspaceEvent::InviteDeclined(InviteDeclined {
+                event::WorkspaceEvent::InviteDeclined(event::InviteDeclined {
                     invite_id: invite.id,
                     email: invite.invitee_email.clone(),
                 }),
@@ -677,19 +675,19 @@ async fn accept_invite_as_member(
                 .ok_or_else(|| PgError::Unexpected("Workspace not found for invite".into()))?
                 .slug;
 
-            let origin = EventOrigin {
+            let origin = event::EventOrigin {
                 workspace_id,
                 account_id,
                 security,
             };
             conn.emit_event(
                 origin,
-                WorkspaceEvent::InviteAccepted(InviteAccepted { invite_id, email }),
+                event::WorkspaceEvent::InviteAccepted(event::InviteAccepted { invite_id, email }),
             )
             .await?;
             conn.emit_event(
                 origin,
-                WorkspaceEvent::MemberAdded(MemberAdded {
+                event::WorkspaceEvent::MemberAdded(event::MemberAdded {
                     member_id: account_id,
                     member_username: account.username.clone(),
                     workspace_slug,

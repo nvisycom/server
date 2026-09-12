@@ -13,7 +13,8 @@ use uuid::Uuid;
 use super::service::DetectionQueue;
 use crate::extract::SecurityContext;
 use crate::response::{ErrorKind, Result};
-use crate::service::{DetectionFailed, EventEmitter, EventOrigin, WorkspaceEvent};
+use crate::service::event;
+use crate::service::event::EventEmitter;
 
 /// Tracing target for shared detection operations.
 const TRACING_TARGET: &str = "nvisy_server::service::detection";
@@ -198,12 +199,12 @@ pub(crate) async fn fail_detection(
 
     if let Err(err) = conn
         .emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id,
                 account_id: triggered_by,
                 security: &SecurityContext::default(),
             },
-            WorkspaceEvent::DetectionFailed(DetectionFailed {
+            event::WorkspaceEvent::DetectionFailed(event::DetectionFailed {
                 detection_id,
                 pipeline_slug,
                 input_document_name: None,

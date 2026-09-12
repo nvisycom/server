@@ -24,7 +24,7 @@ use crate::handler::workspace_threads::{
     find_comment, find_thread, resolve_mentions, workspace_origin,
 };
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{AssistantQueue, ServiceState, ThreadCommentCreated, WorkspaceEvent};
+use crate::service::{AssistantQueue, ServiceState, event};
 
 /// Posts a comment (message) in a thread.
 ///
@@ -93,7 +93,7 @@ async fn create_comment(
             emit_thread_event(
                 conn,
                 workspace_origin(workspace.id, authz.account_id, &security),
-                WorkspaceEvent::ThreadCommentCreated(ThreadCommentCreated {
+                event::WorkspaceEvent::ThreadCommentCreated(event::ThreadCommentCreated {
                     comment_id: comment.id,
                     thread_id: thread.id,
                     document_id: thread.document_id,

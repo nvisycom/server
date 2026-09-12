@@ -38,9 +38,9 @@ use crate::handler::response::{
 use crate::handler::utility::{DownloadDocs, resolve_account_ref};
 use crate::middleware::UploadConfig;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, attachment_headers};
+use crate::service::event::EventEmitter;
 use crate::service::{
-    CryptoService, DocumentCreated, DocumentDeleted, DocumentUpdated, EngineService, EventEmitter,
-    EventOrigin, HashingReader, LimitedReader, ServiceState, WorkspaceEvent,
+    CryptoService, EngineService, HashingReader, LimitedReader, ServiceState, event,
 };
 
 /// Tracing target for workspace document operations.
@@ -387,7 +387,7 @@ async fn upload_document(
     // Re-acquire a connection only for the final commit, so the pool is free
     // during the streaming above.
     let mut conn = pg_client.get_connection().await?;
-    let origin = EventOrigin {
+    let origin = event::EventOrigin {
         workspace_id: workspace.id,
         account_id: authz.account_id,
         security: &security,
@@ -412,7 +412,7 @@ async fn upload_document(
                     })?;
                 conn.emit_event(
                     origin,
-                    WorkspaceEvent::DocumentCreated(DocumentCreated {
+                    event::WorkspaceEvent::DocumentCreated(event::DocumentCreated {
                         document_id: document.id,
                         document_name: document.display_name.clone(),
                         document_size_bytes: blob.file_size_bytes,
@@ -554,12 +554,12 @@ async fn update_document(
                 ErrorKind::InternalServerError.with_message("Failed to update document")
             })?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id: authz.account_id,
                 security: &security,
             },
-            WorkspaceEvent::DocumentUpdated(DocumentUpdated {
+            event::WorkspaceEvent::DocumentUpdated(event::DocumentUpdated {
                 document_id: path_params.document_id,
                 document_name: updated_document.display_name.clone(),
             }),
@@ -748,12 +748,12 @@ async fn delete_document(
     conn.transaction(async |conn| {
         conn.delete_workspace_document(document.id).await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id: authz.account_id,
                 security: &security,
             },
-            WorkspaceEvent::DocumentDeleted(DocumentDeleted {
+            event::WorkspaceEvent::DocumentDeleted(event::DocumentDeleted {
                 document_id: path_params.document_id,
                 document_name: document.display_name.clone(),
             }),
@@ -817,12 +817,12 @@ async fn bulk_delete_documents(
                 .await?;
             for document in &documents {
                 conn.emit_event(
-                    EventOrigin {
+                    event::EventOrigin {
                         workspace_id: workspace.id,
                         account_id: authz.account_id,
                         security: &security,
                     },
-                    WorkspaceEvent::DocumentDeleted(DocumentDeleted {
+                    event::WorkspaceEvent::DocumentDeleted(event::DocumentDeleted {
                         document_id: document.id,
                         document_name: document.display_name.clone(),
                     }),
