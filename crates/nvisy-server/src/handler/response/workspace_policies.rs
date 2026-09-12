@@ -3,7 +3,7 @@
 use elide_pipeline::policy::PolicyDefinition;
 use jiff::Timestamp;
 use nvisy_postgres::model::{WorkspacePolicy, WorkspacePolicyVersion};
-use nvisy_postgres::types::Handle;
+use nvisy_postgres::types::{Handle, PolicyKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +29,9 @@ pub struct Policy {
     pub definition: PolicyDefinition,
     /// The current version number of the policy's definition.
     pub version_number: i32,
+    /// How the policy came to exist. A one-shot policy (minted from labels) is
+    /// hidden from the list and not pipeline-attachable until promoted.
+    pub kind: PolicyKind,
     /// When the policy was created.
     pub created_at: Timestamp,
     /// When the policy was last updated.
@@ -104,6 +107,7 @@ impl Policy {
             description: policy.description,
             definition,
             version_number: version.version_number,
+            kind: policy.kind,
             created_at: policy.created_at.into(),
             updated_at: policy.updated_at.into(),
         })

@@ -84,6 +84,8 @@ db_enum! {
         PolicyUpdated = "policy.updated",
         /// Policy was deleted.
         PolicyDeleted = "policy.deleted",
+        /// A temporary policy was promoted to permanent.
+        PolicyPromoted = "policy.promoted",
         /// A thread was opened.
         ThreadOpened = "thread.opened",
         /// A thread was closed.

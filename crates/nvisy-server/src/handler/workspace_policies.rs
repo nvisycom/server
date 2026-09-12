@@ -15,18 +15,20 @@ use nvisy_postgres::model::{
     NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy, WorkspacePolicyVersion,
 };
 use nvisy_postgres::query::{WorkspacePolicyRepository, WorkspacePolicyVersionRepository};
-use nvisy_postgres::types::WithAccountRef;
+use nvisy_postgres::types::{Handle, PolicyKind, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
-use crate::handler::request::{CreatePolicy, CursorPagination, PolicyPathParams, UpdatePolicy};
+use crate::handler::request::{
+    CreatePolicy, CursorPagination, PolicyBody, PolicyPathParams, UpdatePolicy,
+};
 use crate::handler::response::{PoliciesPage, Policy, PolicySummary};
 use crate::handler::utility::resolve_account_ref;
-use crate::response::{Error, ErrorResponse, Result};
+use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
-    CryptoService, EventEmitter, EventOrigin, PolicyCreated, PolicyDeleted, PolicyUpdated,
-    ServiceState, WorkspaceEvent,
+    CryptoService, EventEmitter, EventOrigin, PolicyCreated, PolicyDeleted, PolicyPromoted,
+    PolicyUpdated, ServiceState, WorkspaceEvent,
 };
 
 /// Tracing target for workspace policy operations.
@@ -57,30 +59,93 @@ async fn create_policy(
     let account_id = authz.account_id;
     let mut conn = pg_client.get_connection().await?;
 
-    // Resolve the body (inline or a built-in template). `into_definition` mints a
-    // fresh id and stamps the template origin (server-owned).
-    let definition = request.body.into_definition();
+    // A one-shot (labels) body is content-addressed: it mints (or reuses) a
+    // temporary policy with a server-generated, hash-derived slug and name. A
+    // template or inline body is a normal, permanent policy the caller names.
+    let (policy, version, status) = match request.body.oneshot_content_hash() {
+        Some(content_hash) => {
+            create_oneshot(
+                &mut conn,
+                &crypto,
+                &security,
+                workspace.id,
+                account_id,
+                request.body,
+                content_hash,
+            )
+            .await?
+        }
+        None => {
+            create_authored(
+                &mut conn,
+                &crypto,
+                &security,
+                workspace.id,
+                account_id,
+                request,
+            )
+            .await?
+        }
+    };
 
+    // The creator is the authenticated caller; resolve their handle directly.
+    let creator = resolve_account_ref(&mut conn, account_id).await?;
+
+    let response = Policy::from_model(policy, version, workspace.slug, creator, &crypto)?;
+
+    Ok((status, Json(response)))
+}
+
+fn create_policy_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Create policy")
+        .description(
+            "Creates a structured redaction policy for the workspace. A labels body \
+             creates (or reuses) a temporary one-shot policy and returns 200 when an \
+             identical one already exists; a template or inline body always creates a \
+             new policy and returns 201.",
+        )
+        .response::<201, Json<Policy>>()
+        .response::<200, Json<Policy>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+}
+
+/// Creates an authored (template or inline) policy: a new permanent row with a
+/// caller-supplied slug, its first version, and a creation event, in one
+/// transaction. Returns `201`.
+async fn create_authored(
+    conn: &mut PgConn,
+    crypto: &CryptoService,
+    security: &SecurityContext,
+    workspace_id: Uuid,
+    account_id: Uuid,
+    request: CreatePolicy,
+) -> Result<(WorkspacePolicy, WorkspacePolicyVersion, StatusCode)> {
+    let slug = request.slug.ok_or_else(|| {
+        ErrorKind::BadRequest.with_message("A slug is required for this policy body")
+    })?;
+
+    let definition = request.body.into_definition("");
     let display_name = request
         .display_name
         .unwrap_or_else(|| definition.name.to_string());
     let description = request
         .description
         .or_else(|| definition.description.clone().map(Into::into));
-    let encrypted = crypto.encrypt_json(workspace.id, &definition)?;
+    let encrypted = crypto.encrypt_json(workspace_id, &definition)?;
 
     let new_policy = NewWorkspacePolicy {
-        workspace_id: workspace.id,
+        workspace_id,
         account_id,
-        slug: request.slug,
+        slug,
         display_name,
         description,
+        kind: PolicyKind::Authored,
+        content_hash: None,
         metadata: None,
     };
 
-    // Insert the policy with its first version and record the outbox event
-    // atomically, so the event is never lost, nor recorded for an insert that
-    // rolled back.
     let created = conn
         .transaction(async |conn| {
             let created = conn
@@ -88,9 +153,9 @@ async fn create_policy(
                 .await?;
             conn.emit_event(
                 EventOrigin {
-                    workspace_id: workspace.id,
+                    workspace_id,
                     account_id,
-                    security: &security,
+                    security,
                 },
                 WorkspaceEvent::PolicyCreated(PolicyCreated {
                     policy_id: created.policy.id,
@@ -103,28 +168,70 @@ async fn create_policy(
         .await?;
 
     tracing::info!(target: TRACING_TARGET, policy_slug = %created.policy.slug, "Policy created");
-
-    // The creator is the authenticated caller; resolve their handle directly.
-    let creator = resolve_account_ref(&mut conn, account_id).await?;
-
-    let response = Policy::from_model(
-        created.policy,
-        created.version,
-        workspace.slug,
-        creator,
-        &crypto,
-    )?;
-
-    Ok((StatusCode::CREATED, Json(response)))
+    Ok((created.policy, created.version, StatusCode::CREATED))
 }
 
-fn create_policy_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Create policy")
-        .description("Creates a structured redaction policy for the workspace.")
-        .response::<201, Json<Policy>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
+/// Creates or reuses a one-shot policy from a labels body. The policy is
+/// content-addressed by `content_hash`, so an identical live one-shot is reused
+/// (returned `200`) rather than duplicated; a fresh one is created (`201`) with a
+/// hash-derived slug and name and a creation event.
+async fn create_oneshot(
+    conn: &mut PgConn,
+    crypto: &CryptoService,
+    security: &SecurityContext,
+    workspace_id: Uuid,
+    account_id: Uuid,
+    body: PolicyBody,
+    content_hash: Vec<u8>,
+) -> Result<(WorkspacePolicy, WorkspacePolicyVersion, StatusCode)> {
+    let slug = Handle::parse(oneshot_slug(&content_hash)).map_err(|err| {
+        ErrorKind::InternalServerError
+            .with_message("Failed to generate a one-shot policy slug")
+            .with_context(err.to_string())
+    })?;
+    let display_name = oneshot_display_name(&content_hash);
+
+    let definition = body.into_definition(&display_name);
+    let encrypted = crypto.encrypt_json(workspace_id, &definition)?;
+
+    let new_policy = NewWorkspacePolicy {
+        workspace_id,
+        account_id,
+        slug,
+        display_name,
+        description: None,
+        kind: PolicyKind::Oneshot,
+        content_hash: Some(content_hash.clone()),
+        metadata: None,
+    };
+
+    let resolved = conn
+        .find_or_create_oneshot_policy(new_policy, content_hash, encrypted, None)
+        .await?;
+
+    // Only a fresh row is a creation: reusing an existing one-shot records no event.
+    if resolved.created {
+        conn.emit_event(
+            EventOrigin {
+                workspace_id,
+                account_id,
+                security,
+            },
+            WorkspaceEvent::PolicyCreated(PolicyCreated {
+                policy_id: resolved.policy.policy.id,
+                policy_slug: resolved.policy.policy.slug.clone(),
+            }),
+        )
+        .await?;
+        tracing::info!(target: TRACING_TARGET, policy_slug = %resolved.policy.policy.slug, "One-shot policy created");
+    }
+
+    let status = if resolved.created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((resolved.policy.policy, resolved.policy.version, status))
 }
 
 /// Lists all policies for a workspace.
@@ -389,6 +496,93 @@ fn delete_policy_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
+/// Promotes a one-shot policy to an authored one.
+///
+/// Makes the policy authored and clears its dedup hash, so it appears in the
+/// default list and can be attached to a pipeline. A no-op on an already-authored
+/// policy. Requires `ManagePolicies` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
+        policy_slug = %path_params.policy_slug,
+    )
+)]
+async fn promote_policy(
+    State(pg_client): State<PgClient>,
+    State(crypto): State<CryptoService>,
+    authz: Authorized<markers::ManagePolicies>,
+    Path(path_params): Path<PolicyPathParams>,
+    security: SecurityContext,
+) -> Result<(StatusCode, Json<Policy>)> {
+    tracing::debug!(target: TRACING_TARGET, "Promoting workspace policy");
+
+    let workspace = authz.workspace;
+    let account_id = authz.account_id;
+    let mut conn = pg_client.get_connection().await?;
+
+    let existing = find_policy(&mut conn, workspace.id, &path_params.policy_slug)
+        .await?
+        .item;
+    let policy_id = existing.id;
+    let policy_slug = existing.slug.clone();
+
+    // Make it authored (clearing the dedup hash) and record the event atomically.
+    conn.transaction(async |conn| {
+        conn.update_workspace_policy(
+            policy_id,
+            UpdateWorkspacePolicy {
+                kind: Some(PolicyKind::Authored),
+                content_hash: Some(None),
+                ..Default::default()
+            },
+        )
+        .await?;
+        conn.emit_event(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id,
+                security: &security,
+            },
+            WorkspaceEvent::PolicyPromoted(PolicyPromoted {
+                policy_id,
+                policy_slug,
+            }),
+        )
+        .await?;
+        Ok::<(), Error>(())
+    })
+    .await?;
+
+    let found = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
+    let version = current_version(&mut conn, workspace.id, &found.item).await?;
+
+    let response = Policy::from_model(
+        found.item,
+        version,
+        workspace.slug,
+        found.account.into(),
+        &crypto,
+    )?;
+
+    tracing::info!(target: TRACING_TARGET, "Policy promoted");
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+fn promote_policy_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Promote policy")
+        .description(
+            "Promotes a temporary (one-shot) policy to a permanent one, so it \
+             appears in the list and can be attached to a pipeline.",
+        )
+        .response::<200, Json<Policy>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Finds a policy within a workspace by slug, with its creator, or returns a
 /// NotFound error.
 async fn find_policy(
@@ -416,6 +610,34 @@ async fn current_version(
         .ok_or_else(|| Error::not_found("policy_version"))
 }
 
+/// The slug for a one-shot policy, e.g. `oneshot-1f0a3c8b9d2e`.
+///
+/// Derived from the content hash, so the same one-shot always maps to the same
+/// slug and dedup reuses its row rather than colliding. The 12-hex prefix of the
+/// hash satisfies the slug format (lowercase alphanumeric with single internal
+/// dashes) and length (3-32).
+fn oneshot_slug(content_hash: &[u8]) -> String {
+    format!("oneshot-{}", hex_prefix(content_hash, 6))
+}
+
+/// The display name for a one-shot policy, e.g. `Quick redaction 1f0a3c8b9d2e`.
+///
+/// Derived from the content hash (distinct hashes give distinct names), so it
+/// never violates the per-workspace display-name uniqueness invariant while dedup
+/// keeps one row per distinct content.
+fn oneshot_display_name(content_hash: &[u8]) -> String {
+    format!("Quick redaction {}", hex_prefix(content_hash, 6))
+}
+
+/// Lowercase hex of the first `bytes` bytes of `content_hash`.
+fn hex_prefix(content_hash: &[u8], bytes: usize) -> String {
+    content_hash
+        .iter()
+        .take(bytes)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 /// Returns routes for workspace policy management.
 pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::*;
@@ -431,6 +653,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
             get_with(read_policy, read_policy_docs)
                 .patch_with(update_policy, update_policy_docs)
                 .delete_with(delete_policy, delete_policy_docs),
+        )
+        .api_route(
+            "/workspaces/{workspaceSlug}/policies/{policySlug}/promote/",
+            post_with(promote_policy, promote_policy_docs),
         )
         .with_path_items(|item| item.tag("Policies"))
 }

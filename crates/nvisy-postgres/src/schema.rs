@@ -46,6 +46,10 @@ pub mod sql_types {
     pub struct PipelineTriggerType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "policy_kind"))]
+    pub struct PolicyKind;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "provider_type"))]
     pub struct ProviderType;
 
@@ -468,6 +472,7 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+    use super::sql_types::PolicyKind;
 
     workspace_policies (id) {
         id -> Uuid,
@@ -477,6 +482,8 @@ diesel::table! {
         display_name -> Text,
         description -> Nullable<Text>,
         current_version_id -> Nullable<Uuid>,
+        kind -> PolicyKind,
+        content_hash -> Nullable<Bytea>,
         metadata -> Jsonb,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,

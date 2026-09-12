@@ -5,6 +5,14 @@
 -- live version. Editing the definition mints a new immutable version; a detection
 -- pins the exact version it ran (see the detections migration).
 
+-- How a policy came to exist.
+CREATE TYPE POLICY_KIND AS ENUM (
+    'authored',     -- A normal, permanent policy (template or inline definition)
+    'oneshot'       -- A one-shot policy minted from labels, temporary until promoted
+);
+
+COMMENT ON TYPE POLICY_KIND IS 'How a policy came to exist: authored (permanent) or oneshot (content-addressed, temporary).';
+
 -- Workspace policies table: the logical policy (stable identity), pointing at its
 -- current version.
 CREATE TABLE workspace_policies (
@@ -37,6 +45,18 @@ CREATE TABLE workspace_policies (
     -- foreign key to workspace_policy_versions is added by ALTER below, once that
     -- table exists.
     current_version_id UUID         DEFAULT NULL,
+
+    -- How the policy came to exist. A oneshot policy is minted inline from a label
+    -- list (the ad-hoc redact flow): hidden from the default list and not
+    -- attachable to pipelines; promoting one makes it authored.
+    kind            POLICY_KIND     NOT NULL DEFAULT 'authored',
+
+    -- Deduplication key for a one-shot policy: a hash over its semantic content
+    -- (the sorted label ids plus the blanket action), so re-creating the same
+    -- one-shot in a workspace reuses the existing row. NULL for authored policies;
+    -- set exactly when kind = 'oneshot'.
+    content_hash    BYTEA           DEFAULT NULL,
+    CONSTRAINT workspace_policies_oneshot_hash CHECK ((kind = 'oneshot') = (content_hash IS NOT NULL)),
 
     -- Metadata (for filtering/display).
     metadata        JSONB           NOT NULL DEFAULT '{}',
@@ -73,6 +93,12 @@ CREATE UNIQUE INDEX workspace_policies_display_name_unique_idx
     ON workspace_policies (workspace_id, lower(trim(display_name)))
     WHERE deleted_at IS NULL;
 
+-- One live one-shot policy per (workspace, content) so an identical one-shot is
+-- reused rather than duplicated.
+CREATE UNIQUE INDEX workspace_policies_oneshot_dedup_idx
+    ON workspace_policies (workspace_id, content_hash)
+    WHERE kind = 'oneshot' AND deleted_at IS NULL;
+
 COMMENT ON TABLE workspace_policies IS 'Structured redaction policies (nvisy_schema Policy) consumed by the engine.';
 COMMENT ON COLUMN workspace_policies.id IS 'Unique policy identifier';
 COMMENT ON COLUMN workspace_policies.workspace_id IS 'Parent workspace reference';
@@ -81,6 +107,8 @@ COMMENT ON COLUMN workspace_policies.slug IS 'URL identity, unique within the wo
 COMMENT ON COLUMN workspace_policies.display_name IS 'Human-readable policy display name (1-255 chars)';
 COMMENT ON COLUMN workspace_policies.description IS 'Policy description (up to 4096 chars)';
 COMMENT ON COLUMN workspace_policies.current_version_id IS 'The live version whose definition the engine consumes';
+COMMENT ON COLUMN workspace_policies.kind IS 'How the policy came to exist: authored (permanent) or oneshot (temporary, content-addressed, promotable)';
+COMMENT ON COLUMN workspace_policies.content_hash IS 'Dedup hash of a one-shot policy''s semantic content (labels + action); NULL for authored policies';
 COMMENT ON COLUMN workspace_policies.metadata IS 'Metadata for filtering/display';
 COMMENT ON COLUMN workspace_policies.created_at IS 'Creation timestamp';
 COMMENT ON COLUMN workspace_policies.updated_at IS 'Last modification timestamp';
@@ -158,7 +186,9 @@ ALTER TABLE workspace_policies
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'policy.created';
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'policy.updated';
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'policy.deleted';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'policy.promoted';
 
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'policy.created';
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'policy.updated';
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'policy.deleted';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'policy.promoted';

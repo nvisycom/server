@@ -6,7 +6,7 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::schema::workspace_policies;
-use crate::types::Handle;
+use crate::types::{Handle, PolicyKind};
 
 /// Workspace policy: the logical identity of a redaction governance policy.
 ///
@@ -33,6 +33,13 @@ pub struct WorkspacePolicy {
     pub description: Option<String>,
     /// The live version whose definition the engine consumes.
     pub current_version_id: Option<Uuid>,
+    /// How the policy came to exist. A one-shot policy is minted from a label
+    /// list: hidden from the default list, not attachable to pipelines, and
+    /// promotable to an authored policy.
+    pub kind: PolicyKind,
+    /// Dedup hash of a one-shot policy's semantic content (labels + action).
+    /// `Some` exactly when `kind` is `Oneshot`; `None` for an authored policy.
+    pub content_hash: Option<Vec<u8>>,
     /// Metadata for filtering/display.
     pub metadata: JsonValue,
     /// Timestamp when the policy was created.
@@ -64,6 +71,11 @@ pub struct NewWorkspacePolicy {
     pub display_name: String,
     /// Policy description.
     pub description: Option<String>,
+    /// How the policy came to exist (authored or one-shot).
+    pub kind: PolicyKind,
+    /// Dedup hash of a one-shot policy's content. Must be `Some` when `kind` is
+    /// `Oneshot` and `None` when `Authored` (enforced by a table constraint).
+    pub content_hash: Option<Vec<u8>>,
     /// Metadata for filtering/display.
     pub metadata: Option<JsonValue>,
 }
@@ -84,6 +96,8 @@ impl NewWorkspacePolicy {
             slug: Handle::test(),
             display_name: format!("Test Policy {suffix}"),
             description: None,
+            kind: PolicyKind::Authored,
+            content_hash: None,
             metadata: None,
         }
     }
@@ -105,6 +119,11 @@ pub struct UpdateWorkspacePolicy {
     pub display_name: Option<String>,
     /// Policy description.
     pub description: Option<Option<String>>,
+    /// Policy kind. Promotion sets it to `Some(PolicyKind::Authored)`.
+    pub kind: Option<PolicyKind>,
+    /// Dedup hash. Promotion clears it (`Some(None)`), since an authored policy
+    /// carries none.
+    pub content_hash: Option<Option<Vec<u8>>>,
     /// Metadata for filtering/display.
     pub metadata: Option<JsonValue>,
     /// Soft delete timestamp.

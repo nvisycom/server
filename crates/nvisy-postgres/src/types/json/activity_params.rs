@@ -309,6 +309,9 @@ pub enum ActivityPayload {
     /// A policy was deleted.
     #[serde(rename = "policy.deleted")]
     PolicyDeleted(PolicyActivityParams),
+    /// A temporary policy was promoted to permanent.
+    #[serde(rename = "policy.promoted")]
+    PolicyPromoted(PolicyActivityParams),
 
     /// A thread was opened.
     #[serde(rename = "thread.opened")]
@@ -373,6 +376,7 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(_) => ActivityType::PolicyCreated,
             ActivityPayload::PolicyUpdated(_) => ActivityType::PolicyUpdated,
             ActivityPayload::PolicyDeleted(_) => ActivityType::PolicyDeleted,
+            ActivityPayload::PolicyPromoted(_) => ActivityType::PolicyPromoted,
             ActivityPayload::ThreadOpened(_) => ActivityType::ThreadOpened,
             ActivityPayload::ThreadClosed(_) => ActivityType::ThreadClosed,
             ActivityPayload::ThreadReopened(_) => ActivityType::ThreadReopened,
@@ -429,6 +433,7 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(_) => W::PolicyCreated,
             ActivityPayload::PolicyUpdated(_) => W::PolicyUpdated,
             ActivityPayload::PolicyDeleted(_) => W::PolicyDeleted,
+            ActivityPayload::PolicyPromoted(_) => W::PolicyPromoted,
             ActivityPayload::ThreadOpened(_) => W::ThreadOpened,
             ActivityPayload::ThreadClosed(_) => W::ThreadClosed,
             ActivityPayload::ThreadReopened(_) => W::ThreadReopened,
@@ -481,7 +486,8 @@ impl ActivityPayload {
 
             ActivityPayload::PolicyCreated(p)
             | ActivityPayload::PolicyUpdated(p)
-            | ActivityPayload::PolicyDeleted(p) => Some(p.policy_id.to_string()),
+            | ActivityPayload::PolicyDeleted(p)
+            | ActivityPayload::PolicyPromoted(p) => Some(p.policy_id.to_string()),
 
             ActivityPayload::ThreadOpened(p)
             | ActivityPayload::ThreadClosed(p)
@@ -558,7 +564,8 @@ impl ActivityPayload {
 
             ActivityPayload::PolicyCreated(p)
             | ActivityPayload::PolicyUpdated(p)
-            | ActivityPayload::PolicyDeleted(p) => Some(p.policy_slug.to_string()),
+            | ActivityPayload::PolicyDeleted(p)
+            | ActivityPayload::PolicyPromoted(p) => Some(p.policy_slug.to_string()),
 
             // A thread/comment has no human-readable name; addressed by id only.
             ActivityPayload::ThreadOpened(_)

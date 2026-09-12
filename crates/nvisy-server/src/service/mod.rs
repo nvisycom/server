@@ -57,11 +57,12 @@ pub use crate::service::event::{
     DetectionStarted, DocumentCreated, DocumentDeleted, DocumentUpdated, EventEmitter, EventKind,
     EventOrigin, EventOutboxDrainer, InviteAccepted, InviteCanceled, InviteCreated, InviteDeclined,
     MemberAdded, MemberDeleted, MemberUpdated, Notification, NotifyTarget, PipelineCreated,
-    PipelineDeleted, PipelineUpdated, PolicyCreated, PolicyDeleted, PolicyUpdated, ProviderCreated,
-    ProviderDeleted, ProviderUpdated, RedactionCreated, ReviewAssigned, ReviewUnassigned,
-    ReviewVerified, ThreadClosed, ThreadCommentCreated, ThreadDeleted, ThreadOpened, ThreadRenamed,
-    ThreadReopened, WebhookCreated, WebhookDeleted, WebhookDelivery, WebhookUpdated,
-    WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated, event_outbox_row,
+    PipelineDeleted, PipelineUpdated, PolicyCreated, PolicyDeleted, PolicyPromoted, PolicyUpdated,
+    ProviderCreated, ProviderDeleted, ProviderUpdated, RedactionCreated, ReviewAssigned,
+    ReviewUnassigned, ReviewVerified, ThreadClosed, ThreadCommentCreated, ThreadDeleted,
+    ThreadOpened, ThreadRenamed, ThreadReopened, WebhookCreated, WebhookDeleted, WebhookDelivery,
+    WebhookUpdated, WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
+    event_outbox_row,
 };
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::infra::Infra;
