@@ -110,6 +110,11 @@ CREATE TABLE workspace_policy_versions (
     CONSTRAINT workspace_policy_versions_number_positive CHECK (version_number >= 1),
     CONSTRAINT workspace_policy_versions_policy_version_key UNIQUE (policy_id, version_number),
 
+    -- Composite unique targets so referrers can enforce workspace scope (and, for
+    -- current_version_id, same-policy ownership) through composite foreign keys.
+    CONSTRAINT workspace_policy_versions_workspace_id_id_key UNIQUE (workspace_id, id),
+    CONSTRAINT workspace_policy_versions_workspace_policy_id_key UNIQUE (workspace_id, policy_id, id),
+
     -- Policy body (nvisy_schema::policy::PolicyDefinition as JSON: rules, labels,
     -- fallback, retention, `when` predicate). Stored XChaCha20-Poly1305 encrypted
     -- with the workspace-derived key.
@@ -138,11 +143,16 @@ COMMENT ON COLUMN workspace_policy_versions.definition IS 'Encrypted policy body
 COMMENT ON COLUMN workspace_policy_versions.metadata IS 'Definition-scoped metadata that versions with the content';
 COMMENT ON COLUMN workspace_policy_versions.created_at IS 'When this version was created';
 
--- Now that the version table exists, point current_version_id at it. A version is
--- never deleted, so this never cascades; the default (NO ACTION) is correct.
+-- Now that the version table exists, point current_version_id at it with a
+-- composite key so the live version must belong to this same policy (and
+-- workspace), not merely be some existing version. current_version_id is
+-- nullable, and MATCH SIMPLE skips the check while it is NULL (during create,
+-- before the first version exists). A version is never deleted, so this never
+-- cascades; the default (NO ACTION) is correct.
 ALTER TABLE workspace_policies
     ADD CONSTRAINT workspace_policies_current_version_fkey
-    FOREIGN KEY (current_version_id) REFERENCES workspace_policy_versions (id);
+    FOREIGN KEY (workspace_id, id, current_version_id)
+    REFERENCES workspace_policy_versions (workspace_id, policy_id, id);
 
 -- Policy lifecycle events feed the activity log and webhooks.
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'policy.created';

@@ -294,11 +294,15 @@ CREATE TABLE workspace_detection_policy_versions (
     -- its detection.
     detection_id        UUID        NOT NULL REFERENCES workspace_detections (id) ON DELETE CASCADE,
 
-    -- The policy version the analysis consumed.
-    policy_version_id   UUID        NOT NULL REFERENCES workspace_policy_versions (id) ON DELETE RESTRICT,
+    -- The policy version the analysis consumed. The composite key pins it to this
+    -- pin's workspace, so a caller cannot record a version from another workspace.
+    policy_version_id   UUID        NOT NULL,
 
     -- Denormalized workspace scope.
     workspace_id        UUID        NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+    CONSTRAINT workspace_detection_policy_versions_version_fkey
+        FOREIGN KEY (workspace_id, policy_version_id)
+        REFERENCES workspace_policy_versions (workspace_id, id) ON DELETE RESTRICT,
 
     PRIMARY KEY (detection_id, policy_version_id)
 );

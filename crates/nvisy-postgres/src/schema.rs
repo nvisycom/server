@@ -216,6 +216,7 @@ diesel::table! {
         created_at -> Timestamptz,
         expires_at -> Nullable<Timestamptz>,
         purged_at -> Nullable<Timestamptz>,
+        reclaimed_at -> Nullable<Timestamptz>,
     }
 }
 
@@ -642,7 +643,6 @@ diesel::joinable!(workspace_connections -> accounts (account_id));
 diesel::joinable!(workspace_connections -> workspaces (workspace_id));
 diesel::joinable!(workspace_detection_jobs -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detection_policy_versions -> workspace_detections (detection_id));
-diesel::joinable!(workspace_detection_policy_versions -> workspace_policy_versions (policy_version_id));
 diesel::joinable!(workspace_detection_policy_versions -> workspaces (workspace_id));
 diesel::joinable!(workspace_detection_usage -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detections -> accounts (account_id));

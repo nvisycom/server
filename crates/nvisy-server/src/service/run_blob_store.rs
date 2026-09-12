@@ -39,14 +39,15 @@ use crate::service::Infra;
 /// Tracing target for blob-store operations.
 const TRACING_TARGET: &str = "nvisy_server::service::run_blob_store";
 
-/// Whether [`RunBlobStore::purge_blob`] reclaimed a blob's backing object.
+/// Whether a reclaim step removed a blob's backing object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[must_use = "a Pending purge is not reclamation progress and must not be counted as one"]
+#[must_use = "a Pending reclaim is not progress and must not be counted as one"]
 pub enum PurgeOutcome {
-    /// The object was removed and `purged_at` was stamped.
+    /// The object was removed and `reclaimed_at` was stamped.
     Purged,
-    /// The object was not reclaimed (store failure, bad key, or unknown bucket);
-    /// the blob stays with `purged_at` NULL for the reaper to retry.
+    /// The object was not reclaimed — the blob gained a reference before it could
+    /// be claimed, or the delete failed (store failure, bad key, or unknown
+    /// bucket). A claimed-but-not-reclaimed blob is retried by the reconcile sweep.
     Pending,
 }
 
@@ -78,57 +79,63 @@ impl RunBlobStore {
         Self { infra }
     }
 
-    /// Reclaims a blob's backing object: marks it purged only on a confirmed
-    /// removal, otherwise leaves it for the reaper's reconcile sweep to retry.
+    /// Claims a due blob and reclaims its object.
     ///
-    /// Removal is best-effort — an object-store failure, an unparseable key, or
-    /// an unknown bucket all leave `purged_at` NULL and return
-    /// [`PurgeOutcome::Pending`]; `purged_at` is stamped only on a confirmed
-    /// removal ([`PurgeOutcome::Purged`]). A blob reaches this sweep only after
-    /// its last reference is gone (`ref_count = 0`), so a document that still
-    /// references identical bytes keeps them alive.
-    ///
-    /// Shared by the reaper (expiring/reconciling blobs) so every purge path
-    /// reclaims storage identically.
+    /// The claim (`purged_at`) is committed *before* the object is deleted, so the
+    /// blob leaves the dedup set the instant it is claimed: `find_or_create_blob`
+    /// can never hand out a reference to bytes that are about to be — or already —
+    /// gone. If a reference was acquired since the sweep read the blob, the claim
+    /// matches no row and the blob is skipped ([`PurgeOutcome::Pending`]). A claim
+    /// whose object delete then fails stays claimed for the reconcile sweep to
+    /// retry, so a transient store outage self-heals without ever resurrecting the
+    /// bytes.
     pub async fn purge_blob(
         &self,
         conn: &mut PgConn,
         blob: &ReclaimableBlob,
     ) -> Result<PurgeOutcome> {
-        use nvisy_postgres::AsyncConnection;
-
-        // Re-check the blob under a row lock before deleting its object: a reference
-        // acquired since the sweep read it makes the blob no longer reclaimable, and
-        // deleting the object would strand a live reference. Holding the lock across
-        // the object delete keeps the mark_blob_purged consistent with the removal.
-        let outcome = conn
-            .transaction(async |conn| {
-                let Some(_locked) = conn.lock_reclaimable_blob(blob.id).await? else {
-                    return Ok(PurgeOutcome::Pending);
-                };
-
-                self.delete_object(&blob.storage_bucket, &blob.storage_path)
-                    .await?;
-
-                conn.mark_blob_purged(blob.id).await?;
-                Ok::<_, Error>(PurgeOutcome::Purged)
-            })
-            .await;
-
-        // A failed object delete (or lost lock) rolls the transaction back, leaving
-        // `purged_at` NULL so the reconcile sweep retries.
-        match outcome {
-            Ok(outcome) => Ok(outcome),
-            Err(err) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    blob_id = %blob.id,
-                    error = %err,
-                    "Failed to purge blob object; left for the reaper to retry",
-                );
-                Ok(PurgeOutcome::Pending)
-            }
+        // Claim first, in its own committed step: once purged_at is set the blob no
+        // longer deduplicates, so deleting its object next cannot strand a live
+        // reference even if this process crashes before the delete.
+        if conn.claim_blob_for_purge(blob.id).await?.is_none() {
+            return Ok(PurgeOutcome::Pending);
         }
+        Ok(self.reclaim_claimed_object(conn, blob).await)
+    }
+
+    /// Reclaims the object of a blob already claimed for purge (`purged_at` set),
+    /// stamping `reclaimed_at` on success. Backs the reconcile sweep's retries.
+    ///
+    /// A failed delete leaves `reclaimed_at` NULL so the blob is retried; the blob
+    /// is already out of the dedup set, so its bytes are never reused meanwhile.
+    pub async fn reclaim_claimed_object(
+        &self,
+        conn: &mut PgConn,
+        blob: &ReclaimableBlob,
+    ) -> PurgeOutcome {
+        if let Err(err) = self
+            .delete_object(&blob.storage_bucket, &blob.storage_path)
+            .await
+        {
+            tracing::error!(
+                target: TRACING_TARGET,
+                blob_id = %blob.id,
+                error = %err,
+                "Failed to delete claimed blob object; left for the reaper to retry",
+            );
+            return PurgeOutcome::Pending;
+        }
+
+        if let Err(err) = conn.mark_blob_reclaimed(blob.id).await {
+            tracing::error!(
+                target: TRACING_TARGET,
+                blob_id = %blob.id,
+                error = %err,
+                "Deleted blob object but failed to mark it reclaimed; will retry",
+            );
+            return PurgeOutcome::Pending;
+        }
+        PurgeOutcome::Purged
     }
 
     /// Removes an object from whichever store its blob names. An unparseable

@@ -15,19 +15,21 @@
 //!   intermediate pointer) and drops the reference, so an expired byproduct blob
 //!   becomes reclaimable by the Expire sweep.
 //! - **Expire**: unreferenced blobs whose retention window has elapsed
-//!   (`ref_count = 0 AND expires_at < now()`, from the per-blob retention rule),
-//!   ending in the shared [`RunBlobStore::purge_blob`] teardown (delete the
-//!   object, stamp `purged_at`).
-//! - **Reconcile**: unreferenced blobs whose object was never reclaimed
-//!   (`ref_count = 0 AND purged_at IS NULL`) — a best-effort purge that failed,
-//!   or a delete path that could not reach the object store. Retried until
-//!   `purged_at` is stamped, so a transient object-store outage self-heals.
+//!   (`ref_count = 0 AND expires_at < now()`, from the per-blob retention rule).
+//!   Each is claimed ([`purged_at`], committed before any object delete, so it
+//!   leaves the dedup set atomically) and then its object is reclaimed.
+//! - **Reconcile**: blobs claimed for purge whose object delete was never
+//!   confirmed (`purged_at IS NOT NULL AND reclaimed_at IS NULL`) — a delete that
+//!   failed or a crash between claim and delete. The object delete is retried
+//!   (idempotent) until `reclaimed_at` is stamped, so a transient object-store
+//!   outage self-heals and a claimed blob's bytes are never reused meanwhile.
+//!
+//! [`purged_at`]: nvisy_postgres::model::Blob::purged_at
 
 use std::time::Duration;
 
 use nvisy_postgres::query::{
-    ReclaimableBlob, WorkspaceAuditRepository, WorkspaceBlobRepository,
-    WorkspaceDetectionRepository,
+    WorkspaceAuditRepository, WorkspaceBlobRepository, WorkspaceDetectionRepository,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -118,13 +120,14 @@ impl BlobReaper {
         Ok(())
     }
 
-    /// Purges a sweep's blobs in `SWEEP_BATCH`-sized pages.
+    /// Reclaims a sweep's blobs in `SWEEP_BATCH`-sized pages.
     ///
-    /// A successful [`purge_blob`](RunBlobStore::purge_blob) takes the blob out of
-    /// the sweep's result set (stamping `purged_at`), so the loop advances on
-    /// *successful* purges rather than rows fetched: it stops once a page is short
-    /// (nothing more due) or a full page made no progress (every blob in it
-    /// failed), logging a stuck batch once per tick instead of spinning on it.
+    /// A confirmed reclaim takes the blob out of the sweep's result set (the
+    /// Expire sweep by claiming it, the Reconcile sweep by stamping
+    /// `reclaimed_at`), so the loop advances on *confirmed* reclaims rather than
+    /// rows fetched: it stops once a page is short (nothing more due) or a full
+    /// page made no progress (every blob in it failed), logging a stuck batch once
+    /// per tick instead of spinning on it.
     async fn sweep(&self, sweep: Sweep, cancel: &CancellationToken) -> Result<()> {
         loop {
             if cancel.is_cancelled() {
@@ -134,31 +137,38 @@ impl BlobReaper {
                 let mut conn = self.infra.postgres.get_connection().await?;
                 match sweep {
                     Sweep::Expire => conn.blobs_due_for_purge(SWEEP_BATCH).await?,
-                    Sweep::Reconcile => conn.blobs_pending_purge(SWEEP_BATCH).await?,
+                    Sweep::Reconcile => conn.blobs_pending_reclaim(SWEEP_BATCH).await?,
                 }
             };
 
             let fetched = batch.len() as i64;
-            let mut purged = 0i64;
+            let mut reclaimed = 0i64;
             for blob in batch {
-                match self.purge_blob(&blob).await {
-                    // Only a confirmed reclamation is progress. A pending purge
-                    // leaves the blob in the sweep's set, so counting it would
-                    // re-fetch the same batch forever.
-                    Ok(PurgeOutcome::Purged) => purged += 1,
+                let mut conn = self.infra.postgres.get_connection().await?;
+                let outcome = match sweep {
+                    Sweep::Expire => self.blob.purge_blob(&mut conn, &blob).await,
+                    Sweep::Reconcile => {
+                        Ok(self.blob.reclaim_claimed_object(&mut conn, &blob).await)
+                    }
+                };
+                match outcome {
+                    // Only a confirmed reclaim is progress. A pending one leaves the
+                    // blob in the sweep's set, so counting it would re-fetch the same
+                    // batch forever.
+                    Ok(PurgeOutcome::Purged) => reclaimed += 1,
                     Ok(PurgeOutcome::Pending) => {}
                     Err(err) => tracing::error!(
                         target: TRACING_TARGET,
                         sweep = sweep.label(),
                         blob_id = %blob.id,
                         error = %err,
-                        "Failed to purge blob",
+                        "Failed to reclaim blob",
                     ),
                 }
             }
 
-            if fetched < SWEEP_BATCH || purged == 0 {
-                if purged == 0 && fetched == SWEEP_BATCH {
+            if fetched < SWEEP_BATCH || reclaimed == 0 {
+                if reclaimed == 0 && fetched == SWEEP_BATCH {
                     tracing::warn!(
                         target: TRACING_TARGET,
                         sweep = sweep.label(),
@@ -171,14 +181,6 @@ impl BlobReaper {
         }
         Ok(())
     }
-
-    /// Runs the shared teardown for one blob: purge its object and stamp
-    /// `purged_at`. Reports whether the object was actually reclaimed. A blob
-    /// reaches this only with `ref_count = 0`, so its bytes are unreferenced.
-    async fn purge_blob(&self, blob: &ReclaimableBlob) -> Result<PurgeOutcome> {
-        let mut conn = self.infra.postgres.get_connection().await?;
-        self.blob.purge_blob(&mut conn, blob).await
-    }
 }
 
 /// Which set of blobs a sweep reclaims.
@@ -186,7 +188,7 @@ impl BlobReaper {
 enum Sweep {
     /// Unreferenced blobs past their retention window.
     Expire,
-    /// Unreferenced blobs whose object was never reclaimed.
+    /// Blobs claimed for purge whose object delete was never confirmed.
     Reconcile,
 }
 

@@ -785,17 +785,18 @@ async fn redact_detection(
             // The review audit records its lineage: the redaction that produced it
             // and the base audit it was edited from. Creating it resolves and
             // references its blob in this same transaction.
-            conn.create_audit(
-                NewWorkspaceAudit::review(
-                    workspace.id,
-                    Uuid::nil(),
-                    inputs.detection.id,
-                    redaction.id,
-                    inputs.base_audit_id,
-                ),
-                staged_review.clone(),
-            )
-            .await?;
+            let review_audit = conn
+                .create_audit(
+                    NewWorkspaceAudit::review(
+                        workspace.id,
+                        Uuid::nil(),
+                        inputs.detection.id,
+                        redaction.id,
+                        inputs.base_audit_id,
+                    ),
+                    staged_review.clone(),
+                )
+                .await?;
             conn.emit_event(
                 EventOrigin {
                     workspace_id: workspace.id,
@@ -821,12 +822,22 @@ async fn redact_detection(
                 .await?;
             conn.mark_review_in_review(thread.id, authz.account_id)
                 .await?;
-            Ok::<_, Error>(redaction)
+            // The resolved storage paths, so an object staged for content that
+            // deduplicated onto an existing blob can be reclaimed after commit.
+            let output_path = conn
+                .find_blob_by_id(output_document.blob_id)
+                .await?
+                .map(|blob| blob.storage_path);
+            let review_path = conn
+                .find_blob_by_id(review_audit.blob_id)
+                .await?
+                .map(|blob| blob.storage_path);
+            Ok::<_, Error>((redaction, output_path, review_path))
         })
         .await;
 
-    let redaction = match redaction {
-        Ok(redaction) => redaction,
+    let (redaction, output_path, review_path) = match redaction {
+        Ok(committed) => committed,
         Err(err) => {
             // The rows rolled back, so their staged objects are orphans: reclaim
             // both (best effort — a failure only leaves them for a later sweep).
@@ -835,6 +846,16 @@ async fn redact_detection(
             return Err(err);
         }
     };
+
+    // A committed blob whose content deduplicated onto an existing object leaves
+    // the object staged for it orphaned (no row references it). Reclaim each
+    // redundant staged object; best effort, a failure only defers it to a sweep.
+    if output_path.as_deref() != Some(staged_output.0.storage_path.as_str()) {
+        blob.discard_staged_object(&staged_output.0).await.ok();
+    }
+    if review_path.as_deref() != Some(staged_review.storage_path.as_str()) {
+        blob.discard_staged_object(&staged_review).await.ok();
+    }
 
     tracing::info!(
         target: TRACING_TARGET,

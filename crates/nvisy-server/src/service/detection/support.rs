@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use super::service::DetectionQueue;
 use crate::extract::SecurityContext;
-use crate::response::Result;
+use crate::response::{ErrorKind, Result};
 use crate::service::{CryptoService, DetectionFailed, EventEmitter, EventOrigin, WorkspaceEvent};
 
 /// Tracing target for shared detection operations.
@@ -257,14 +257,23 @@ pub(crate) async fn resolve_policies(
     let ids = conn.list_pipeline_policy_ids(pipeline_id).await?;
     let mut policies = Vec::with_capacity(ids.len());
     for id in ids {
-        if let Some(found) = conn.find_policy_with_version(workspace_id, id).await? {
-            let definition =
-                crypto.decrypt_json::<PolicyDefinition>(workspace_id, &found.version.definition)?;
-            policies.push(ResolvedPolicy {
-                version_id: found.version.id,
-                definition,
-            });
-        }
+        // Every referenced policy must resolve: a policy soft-deleted between
+        // listing and lookup would otherwise silently shrink the policy set and
+        // under-redact the document. Fail the run instead.
+        let found = conn
+            .find_policy_with_version(workspace_id, id)
+            .await?
+            .ok_or_else(|| {
+                ErrorKind::InternalServerError
+                    .with_message("Referenced policy is no longer available")
+                    .with_context(format!("policy_id: {id}"))
+            })?;
+        let definition =
+            crypto.decrypt_json::<PolicyDefinition>(workspace_id, &found.version.definition)?;
+        policies.push(ResolvedPolicy {
+            version_id: found.version.id,
+            definition,
+        });
     }
     Ok(policies)
 }

@@ -33,26 +33,43 @@ CREATE TABLE workspace_blobs (
     ref_count               INTEGER          NOT NULL DEFAULT 0,
     CONSTRAINT blobs_ref_count_min CHECK (ref_count >= 0),
 
-    -- Lifecycle: created, retention window, and object reclamation.
+    -- Lifecycle: created, retention window, and object reclamation. Reclamation is
+    -- two-phase: purged_at claims the blob (committed before the object delete, so
+    -- it stops deduplicating onto missing content), reclaimed_at confirms the
+    -- object was removed. A claimed-but-not-reclaimed blob is retried by reconcile.
     created_at              TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     expires_at              TIMESTAMPTZ      DEFAULT NULL,
     purged_at               TIMESTAMPTZ      DEFAULT NULL,
+    reclaimed_at            TIMESTAMPTZ      DEFAULT NULL,
     CONSTRAINT blobs_expires_after_created CHECK (expires_at IS NULL OR expires_at >= created_at),
-    CONSTRAINT blobs_purged_after_created CHECK (purged_at IS NULL OR purged_at >= created_at)
+    CONSTRAINT blobs_purged_after_created CHECK (purged_at IS NULL OR purged_at >= created_at),
+    CONSTRAINT blobs_reclaimed_after_purged CHECK (reclaimed_at IS NULL OR purged_at IS NOT NULL),
+
+    -- Composite unique target so a referrer's (workspace_id, id) foreign key can
+    -- enforce that a referenced blob belongs to the referrer's workspace.
+    CONSTRAINT workspace_blobs_workspace_id_id_key UNIQUE (workspace_id, id)
 );
 
 -- Deduplication lookup: an incoming blob reuses a live match on this key. Unique
--- over live blobs so concurrent identical uploads converge on one row via
--- ON CONFLICT rather than inserting duplicates.
+-- over unclaimed blobs so concurrent identical uploads converge on one row via
+-- ON CONFLICT rather than inserting duplicates. storage_bucket is part of the
+-- identity so byte-identical content in different buckets stays distinct (each
+-- bucket's objects are read with a different key type).
 CREATE UNIQUE INDEX blobs_dedup_idx
-    ON workspace_blobs (workspace_id, content_hash, file_size_bytes)
+    ON workspace_blobs (workspace_id, content_hash, file_size_bytes, storage_bucket)
     WHERE purged_at IS NULL;
 
 -- Data-retention sweep: the reclaimable set — unreferenced, expired, not yet
--- purged.
+-- claimed.
 CREATE INDEX blobs_reclaimable_idx
     ON workspace_blobs (expires_at)
     WHERE ref_count = 0 AND expires_at IS NOT NULL AND purged_at IS NULL;
+
+-- Reconcile sweep: blobs claimed for purge whose object delete has not been
+-- confirmed, retried until reclaimed_at is stamped.
+CREATE INDEX blobs_pending_reclaim_idx
+    ON workspace_blobs (purged_at)
+    WHERE purged_at IS NOT NULL AND reclaimed_at IS NULL;
 
 COMMENT ON TABLE workspace_blobs IS 'Content-addressed, ref-counted raw bytes shared across documents, audits, and intermediates; owns the data-retention window.';
 COMMENT ON COLUMN workspace_blobs.id IS 'Unique blob identifier';
@@ -64,7 +81,8 @@ COMMENT ON COLUMN workspace_blobs.storage_bucket IS 'Storage bucket/container';
 COMMENT ON COLUMN workspace_blobs.ref_count IS 'Number of live rows referencing this blob; reclaimed at zero';
 COMMENT ON COLUMN workspace_blobs.created_at IS 'Creation timestamp';
 COMMENT ON COLUMN workspace_blobs.expires_at IS 'Data-retention expiry (NULL = keep indefinitely)';
-COMMENT ON COLUMN workspace_blobs.purged_at IS 'When the backing object was reclaimed; NULL means still stored';
+COMMENT ON COLUMN workspace_blobs.purged_at IS 'When the blob was claimed for purge (excluded from dedup); NULL means still live';
+COMMENT ON COLUMN workspace_blobs.reclaimed_at IS 'When the backing object was confirmed removed; NULL means the delete is still pending';
 
 -- Kind of a document: the source a user uploaded, or a redacted output.
 CREATE TYPE DOCUMENT_KIND AS ENUM (

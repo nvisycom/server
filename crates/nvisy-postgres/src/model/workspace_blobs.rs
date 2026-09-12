@@ -36,9 +36,13 @@ pub struct Blob {
     pub created_at: Timestamp,
     /// Data-retention expiry (`None` = keep indefinitely).
     pub expires_at: Option<Timestamp>,
-    /// When the backing object was reclaimed from the store. `None` means the
-    /// object is still present (either live, or awaiting the reaper).
+    /// When the blob was claimed for purge. Once set the blob no longer
+    /// deduplicates, so a claim can be committed before its object is deleted.
+    /// `None` means the blob is still live.
     pub purged_at: Option<Timestamp>,
+    /// When the backing object was confirmed removed from the store. `None` on a
+    /// claimed blob means the delete is still pending and reconcile will retry it.
+    pub reclaimed_at: Option<Timestamp>,
 }
 
 /// Data for creating a new blob.
