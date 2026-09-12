@@ -4,7 +4,8 @@
 use elide_pipeline::policy::PolicyDefinition;
 use nvisy_postgres::model::{NewWorkspaceDetectionUsage, UpdateWorkspaceDetection};
 use nvisy_postgres::query::{
-    PipelineReferenceRepository, WorkspaceDetectionRepository, WorkspacePolicyRepository,
+    DetectionPolicyVersionRepository, PipelineReferenceRepository, WorkspaceDetectionRepository,
+    WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
 };
 use nvisy_postgres::types::{DetectionMetadata, DetectionStatus, Handle, Json};
 use uuid::Uuid;
@@ -274,6 +275,39 @@ pub(crate) async fn resolve_policies(
             version_id: found.version.id,
             definition,
         });
+    }
+    Ok(policies)
+}
+
+/// Loads the exact policy definitions a detection was analyzed with, from the
+/// versions pinned when it ran, decrypting each.
+///
+/// Redaction derives from a detection's base audit, so it must reproduce the
+/// policy versions that produced that audit rather than the policies' current
+/// versions — a policy edited since the detection ran would otherwise redact
+/// against a definition inconsistent with the analysis. A pinned version resolves
+/// even after its policy is soft-deleted, so a historical detection can always be
+/// re-redacted.
+pub(crate) async fn resolve_pinned_policies(
+    conn: &mut nvisy_postgres::PgConn,
+    crypto: &CryptoService,
+    workspace_id: Uuid,
+    detection_id: Uuid,
+) -> Result<Vec<PolicyDefinition>> {
+    let version_ids = conn.list_detection_policy_versions(detection_id).await?;
+    let mut policies = Vec::with_capacity(version_ids.len());
+    for version_id in version_ids {
+        let version = conn
+            .find_policy_version(workspace_id, version_id)
+            .await?
+            .ok_or_else(|| {
+                ErrorKind::InternalServerError
+                    .with_message("A pinned policy version is no longer available")
+                    .with_context(format!("policy_version_id: {version_id}"))
+            })?;
+        let definition =
+            crypto.decrypt_json::<PolicyDefinition>(workspace_id, &version.definition)?;
+        policies.push(definition);
     }
     Ok(policies)
 }

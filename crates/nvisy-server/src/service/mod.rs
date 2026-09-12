@@ -45,7 +45,7 @@ pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_
 pub use crate::service::blob_reaper::BlobReaper;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
-pub(crate) use crate::service::detection::resolve_policies;
+pub(crate) use crate::service::detection::resolve_pinned_policies;
 pub use crate::service::detection::{
     DetectionCoordinator, DetectionJob, DetectionOutboxDrainer, DetectionQueue,
     DetectionStatusEvent, DetectionWorker, detection_subject,

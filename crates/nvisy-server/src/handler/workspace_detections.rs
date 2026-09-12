@@ -40,7 +40,7 @@ use crate::response::{Error, ErrorKind, ErrorResponse, Result, SseResponse};
 use crate::service::{
     CryptoService, DetectionJob, DetectionQueue, DetectionStarted, DetectionStatusEvent,
     EngineService, EventEmitter, EventOrigin, RedactionCreated, RunBlobStore, ServiceState,
-    WorkspaceEvent, resolve_policies,
+    WorkspaceEvent, resolve_pinned_policies,
 };
 
 /// Tracing target for detection operations.
@@ -673,14 +673,11 @@ async fn redact_detection(
                     .with_message("The analysis for this detection has been deleted")
                     .with_resource("detection")
             })?;
-        // Redaction reuses the pipeline's current policies for the anonymize
-        // codec; it operates on an existing detection, which already pinned the
-        // versions it ran, so only the definitions are needed here.
-        let policies = resolve_policies(&mut conn, &crypto, workspace.id, pipeline.id)
-            .await?
-            .into_iter()
-            .map(|policy| policy.definition)
-            .collect();
+        // Redaction derives from this detection's base audit, so it re-redacts
+        // with the exact policy versions the detection pinned when it ran, not the
+        // policies' current versions.
+        let policies =
+            resolve_pinned_policies(&mut conn, &crypto, workspace.id, detection.id).await?;
 
         RedactInputs {
             detection,
