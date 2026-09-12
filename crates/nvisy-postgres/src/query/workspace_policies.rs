@@ -1010,8 +1010,7 @@ mod tests {
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
-        let mut new_oneshot =
-            NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        let mut new_oneshot = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
         new_oneshot.kind = PolicyKind::Oneshot;
         new_oneshot.content_hash = Some(vec![1, 2, 3]);
         let oneshot = conn

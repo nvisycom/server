@@ -258,18 +258,22 @@ impl PolicyService {
                     .await?;
             }
             // Promote conditionally so the Oneshot -> Authored transition is atomic
-            // and emits PolicyPromoted only when this call is the one that flips it;
-            // the field write below carries the label edits either way.
+            // and emits PolicyPromoted only when this call is the one that flips it.
             let promoted = promote && conn.promote_policy_to_authored(policy_id).await?;
-            conn.update_workspace_policy(
-                policy_id,
-                model::UpdateWorkspacePolicy {
-                    display_name: request.display_name,
-                    description: request.description,
-                    ..Default::default()
-                },
-            )
-            .await?;
+            // Only touch the logical row when there is a label field to change:
+            // a definition-only edit mints a version (and may promote) but leaves
+            // the row's own columns alone, so an empty changeset is never issued.
+            if request.display_name.is_some() || request.description.is_some() {
+                conn.update_workspace_policy(
+                    policy_id,
+                    model::UpdateWorkspacePolicy {
+                        display_name: request.display_name,
+                        description: request.description,
+                        ..Default::default()
+                    },
+                )
+                .await?;
+            }
             conn.emit_event(
                 origin,
                 event::WorkspaceEvent::PolicyUpdated(event::PolicyUpdated {
