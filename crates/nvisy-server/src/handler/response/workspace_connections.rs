@@ -1,7 +1,9 @@
 //! Connection response types.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::{WorkspaceConnection, WorkspaceConnectionSchedule};
+use nvisy_postgres::model::{
+    WorkspaceConnection as WorkspaceConnectionModel, WorkspaceConnectionSchedule,
+};
 use nvisy_postgres::types::{ConnectionId, ConnectionType, Handle, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -11,11 +13,11 @@ use super::{AccountRef, Page};
 /// A connection's scheduled-sync configuration (its cron config), present only
 /// for connections that sync on a timer. A connection can transfer on demand
 /// without this — it is purely the schedule, not a capability marker. When the
-/// connection last synced is on [`Connection`] itself, since a connection with no
+/// connection last synced is on [`WorkspaceConnection`] itself, since a connection with no
 /// schedule still syncs.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct SyncSchedule {
+pub struct WorkspaceSyncSchedule {
     /// Whether the connection imports data in or exports data out.
     pub sync_mode: SyncMode,
     /// Cron expression for scheduled imports, if configured.
@@ -31,7 +33,7 @@ pub struct SyncSchedule {
 /// Only metadata about the connection is returned.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Connection {
+pub struct WorkspaceConnection {
     /// Opaque identifier of the connection.
     pub id: ConnectionId,
     /// Handle of the workspace this connection belongs to.
@@ -50,7 +52,7 @@ pub struct Connection {
     /// timer. Its absence does not mean the connection cannot sync — a file
     /// service and an unscheduled object store both transfer on demand.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sync: Option<SyncSchedule>,
+    pub sync: Option<WorkspaceSyncSchedule>,
     /// When the connection last synced successfully, if ever. Independent of
     /// `sync`: a connection with no schedule still records its on-demand syncs.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -62,12 +64,12 @@ pub struct Connection {
 }
 
 /// Paginated list of connections.
-pub type ConnectionsPage = Page<Connection>;
+pub type WorkspaceConnectionsPage = Page<WorkspaceConnection>;
 
 /// Result of a connection reachability check.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ConnectionVerification {
+pub struct WorkspaceConnectionVerification {
     /// Whether the backing store was reachable with the stored credentials.
     pub reachable: bool,
     /// Failure reason when not reachable; omitted on success.
@@ -75,7 +77,7 @@ pub struct ConnectionVerification {
     pub error: Option<String>,
 }
 
-impl ConnectionVerification {
+impl WorkspaceConnectionVerification {
     /// A successful verification.
     pub fn reachable() -> Self {
         Self {
@@ -101,7 +103,7 @@ impl ConnectionVerification {
 /// browser holds a narrow, expiring credential rather than a durable one.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct PickerToken {
+pub struct WorkspacePickerToken {
     /// The provider OAuth access token to hand to the browser picker.
     pub access_token: String,
     /// Unix seconds at which the access token expires, if the provider reports
@@ -110,16 +112,16 @@ pub struct PickerToken {
     pub expires_at: Option<i64>,
 }
 
-impl Connection {
+impl WorkspaceConnection {
     /// Creates a response from a database model and its creator.
     pub fn from_model(
-        connection: WorkspaceConnection,
+        connection: WorkspaceConnectionModel,
         workspace_slug: Handle,
         created_by: AccountRef,
         schedule: Option<WorkspaceConnectionSchedule>,
         last_synced_at: Option<Timestamp>,
     ) -> Self {
-        let sync = schedule.map(|schedule| SyncSchedule {
+        let sync = schedule.map(|schedule| WorkspaceSyncSchedule {
             sync_mode: schedule.sync_mode,
             schedule_cron: schedule.schedule_cron,
             deletion_policy: schedule.deletion_policy,

@@ -14,7 +14,7 @@ use uuid::Uuid;
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct CreateInvite {
+pub struct CreateWorkspaceInvite {
     /// Email address of the person to invite.
     #[garde(email, length(chars, min = 5, max = 254))]
     pub invitee_email: String,
@@ -24,7 +24,7 @@ pub struct CreateInvite {
     pub expires_in: InviteExpiration,
 }
 
-impl CreateInvite {
+impl CreateWorkspaceInvite {
     /// The invitee email, normalized (trimmed and lowercased) so lookups and the
     /// stored value are consistent regardless of how the caller cased it.
     pub fn normalized_email(&self) -> String {
@@ -50,7 +50,7 @@ impl CreateInvite {
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct ReplyInvite {
+pub struct ReplyWorkspaceInvite {
     /// Whether to accept or decline the invitation.
     pub accept_invite: bool,
 }
@@ -94,14 +94,14 @@ impl InviteExpiration {
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct GenerateInviteCode {
+pub struct GenerateWorkspaceInviteCode {
     /// Role to assign when someone joins via this invite code.
     pub invited_role: WorkspaceRole,
     /// When the invite code expires.
     pub expires_in: InviteExpiration,
 }
 
-impl GenerateInviteCode {
+impl GenerateWorkspaceInviteCode {
     /// Converts to database model.
     pub fn into_model(self, workspace_id: Uuid, created_by: Uuid) -> NewWorkspaceInvite {
         NewWorkspaceInvite {
@@ -120,7 +120,7 @@ impl GenerateInviteCode {
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ListInvites {
+pub struct ListWorkspaceInvites {
     /// Filter by invited role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<WorkspaceRole>,
@@ -132,7 +132,7 @@ pub struct ListInvites {
     pub order: Option<Direction>,
 }
 
-impl ListInvites {
+impl ListWorkspaceInvites {
     /// Converts to filter model.
     pub fn to_filter(&self) -> InviteFilter {
         InviteFilter { role: self.role }
@@ -151,13 +151,13 @@ mod create_invite_tests {
     use nvisy_postgres::types::WorkspaceRole;
     use uuid::Uuid;
 
-    use super::{CreateInvite, InviteExpiration};
+    use super::{CreateWorkspaceInvite, InviteExpiration};
 
     #[test]
     fn to_model_carries_email_and_actor_without_consuming_request() {
         let workspace_id = Uuid::now_v7();
         let actor_id = Uuid::now_v7();
-        let request = CreateInvite {
+        let request = CreateWorkspaceInvite {
             invitee_email: "invitee@example.com".to_owned(),
             invited_role: WorkspaceRole::Editor,
             expires_in: InviteExpiration::In7Days,

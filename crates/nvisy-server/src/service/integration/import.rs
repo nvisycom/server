@@ -27,7 +27,7 @@ use super::connector::Connector;
 use super::file_source::{FileSource, SourceEntry};
 use super::naming::{object_basename, object_extension};
 use crate::response::Result;
-use crate::service::{ConnectionConfig, HashingReader, Infra, Measurements};
+use crate::service::{ConnectionConfig, CryptoService, HashingReader, Infra, Measurements};
 
 /// Tracing target for connection sync operations.
 const TRACING_TARGET: &str = "nvisy_server::service::sync";
@@ -36,15 +36,22 @@ const TRACING_TARGET: &str = "nvisy_server::service::sync";
 #[derive(Clone)]
 pub(super) struct Importer {
     infra: Infra,
+    crypto: CryptoService,
     connector: Connector,
     /// Maximum objects imported concurrently within a single sync.
     import_concurrency: usize,
 }
 
 impl Importer {
-    pub(super) fn new(infra: Infra, connector: Connector, import_concurrency: usize) -> Self {
+    pub(super) fn new(
+        infra: Infra,
+        crypto: CryptoService,
+        connector: Connector,
+        import_concurrency: usize,
+    ) -> Self {
         Self {
             infra,
+            crypto,
             connector,
             import_concurrency: import_concurrency.max(1),
         }
@@ -287,8 +294,7 @@ impl Importer {
         let bytes = source.get_stream(&entry.key).await?;
         let (measured, measurements) = HashingReader::new(stream_to_reader(bytes));
         let ciphertext = Box::pin(
-            self.infra
-                .crypto
+            self.crypto
                 .encrypt_reader(connection.workspace_id, measured),
         );
 

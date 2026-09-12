@@ -1,7 +1,7 @@
 //! Shared detection helpers used by both the create-detection handler and the
 //! worker.
 
-use elide_pipeline::policy::PolicyDefinition;
+use elide_pipeline::governance::policy::Policy;
 use nvisy_postgres::model::{NewWorkspaceDetectionUsage, UpdateWorkspaceDetection};
 use nvisy_postgres::query::{
     DetectionPolicyVersionRepository, PipelineReferenceRepository, WorkspaceDetectionRepository,
@@ -13,7 +13,8 @@ use uuid::Uuid;
 use super::service::DetectionQueue;
 use crate::extract::SecurityContext;
 use crate::response::{ErrorKind, Result};
-use crate::service::{CryptoService, DetectionFailed, EventEmitter, EventOrigin, WorkspaceEvent};
+use crate::service::event;
+use crate::service::event::EventEmitter;
 
 /// Tracing target for shared detection operations.
 const TRACING_TARGET: &str = "nvisy_server::service::detection";
@@ -198,12 +199,12 @@ pub(crate) async fn fail_detection(
 
     if let Err(err) = conn
         .emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id,
                 account_id: triggered_by,
                 security: &SecurityContext::default(),
             },
-            WorkspaceEvent::DetectionFailed(DetectionFailed {
+            event::WorkspaceEvent::DetectionFailed(event::DetectionFailed {
                 detection_id,
                 pipeline_slug,
                 input_document_name: None,
@@ -235,23 +236,31 @@ pub(crate) enum FailOutcome {
     PersistFailed,
 }
 
-/// A policy resolved for a detection run: its decrypted definition and the id of
-/// the version that definition came from, so the run can pin what it consumed.
+/// A policy resolved for a detection run: its definition and the id of the
+/// version that definition came from, so the run can pin what it consumed.
 pub(crate) struct ResolvedPolicy {
     /// The version the definition was resolved from.
     pub version_id: Uuid,
-    /// The decrypted policy the engine consumes.
-    pub definition: PolicyDefinition,
+    /// The policy the engine consumes.
+    pub definition: Policy,
 }
 
-/// Resolves a pipeline's live policy references to their current versions,
-/// decrypting each version's definition.
+/// Deserializes a stored policy definition (plaintext JSONB) into an engine
+/// [`Policy`], failing the run if the stored body is malformed.
+fn parse_definition(version_id: Uuid, definition: serde_json::Value) -> Result<Policy> {
+    serde_json::from_value(definition).map_err(|err| {
+        ErrorKind::InternalServerError
+            .with_message("Stored policy definition is malformed")
+            .with_context(format!("policy_version_id: {version_id}: {err}"))
+    })
+}
+
+/// Resolves a pipeline's live policy references to their current versions.
 ///
 /// Each resolved policy carries the version id it came from, so the caller can
 /// pin the exact versions the detection ran against.
 pub(crate) async fn resolve_policies(
     conn: &mut nvisy_postgres::PgConn,
-    crypto: &CryptoService,
     workspace_id: Uuid,
     pipeline_id: Uuid,
 ) -> Result<Vec<ResolvedPolicy>> {
@@ -269,8 +278,7 @@ pub(crate) async fn resolve_policies(
                     .with_message("Referenced policy is no longer available")
                     .with_context(format!("policy_id: {id}"))
             })?;
-        let definition =
-            crypto.decrypt_json::<PolicyDefinition>(workspace_id, &found.version.definition)?;
+        let definition = parse_definition(found.version.id, found.version.definition)?;
         policies.push(ResolvedPolicy {
             version_id: found.version.id,
             definition,
@@ -280,7 +288,7 @@ pub(crate) async fn resolve_policies(
 }
 
 /// Loads the exact policy definitions a detection was analyzed with, from the
-/// versions pinned when it ran, decrypting each.
+/// versions pinned when it ran.
 ///
 /// Redaction derives from a detection's base audit, so it must reproduce the
 /// policy versions that produced that audit rather than the policies' current
@@ -290,10 +298,9 @@ pub(crate) async fn resolve_policies(
 /// re-redacted.
 pub(crate) async fn resolve_pinned_policies(
     conn: &mut nvisy_postgres::PgConn,
-    crypto: &CryptoService,
     workspace_id: Uuid,
     detection_id: Uuid,
-) -> Result<Vec<PolicyDefinition>> {
+) -> Result<Vec<Policy>> {
     let version_ids = conn.list_detection_policy_versions(detection_id).await?;
     let mut policies = Vec::with_capacity(version_ids.len());
     for version_id in version_ids {
@@ -305,9 +312,7 @@ pub(crate) async fn resolve_pinned_policies(
                     .with_message("A pinned policy version is no longer available")
                     .with_context(format!("policy_version_id: {version_id}"))
             })?;
-        let definition =
-            crypto.decrypt_json::<PolicyDefinition>(workspace_id, &version.definition)?;
-        policies.push(definition);
+        policies.push(parse_definition(version.id, version.definition)?);
     }
     Ok(policies)
 }

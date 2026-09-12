@@ -23,7 +23,7 @@ pub struct WorkspaceSyncsQuery {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ConnectionSyncPathParams {
+pub struct WorkspaceConnectionSyncPathParams {
     /// Opaque identifier of the connection.
     pub connection_id: ConnectionId,
     /// Unique identifier of the sync run.
@@ -48,7 +48,7 @@ pub struct PickedFile {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct ImportFiles {
+pub struct ImportWorkspaceFiles {
     /// The files to import. Already-imported files are skipped.
     #[garde(length(min = 1, max = 500), dive)]
     pub files: Vec<PickedFile>,
@@ -56,11 +56,11 @@ pub struct ImportFiles {
 
 /// Request payload to export a caller-selected set of workspace files to a
 /// connection. Each is written as a new provider file, never overwriting a
-/// source. Mirrors [`ImportFiles`] on the export side.
+/// source. Mirrors [`ImportWorkspaceFiles`] on the export side.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct ExportFiles {
+pub struct ExportWorkspaceFiles {
     /// The workspace files to export, by id. Files already exported to the
     /// connection are exported again (a fresh copy).
     #[garde(length(min = 1, max = 500))]

@@ -107,14 +107,14 @@ mod tests {
         let first = conn
             .create_workspace_policy(
                 NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id),
-                vec![1],
+                serde_json::json!({ "v": 1 }),
                 None,
             )
             .await?;
         let second = conn
             .create_workspace_policy(
                 NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id),
-                vec![2],
+                serde_json::json!({ "v": 2 }),
                 None,
             )
             .await?;

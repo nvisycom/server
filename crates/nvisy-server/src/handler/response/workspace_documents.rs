@@ -13,7 +13,7 @@ use super::{AccountRef, Page};
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Document {
+pub struct WorkspaceDocument {
     /// Unique document identifier.
     pub id: Uuid,
     /// Handle of the workspace this document belongs to.
@@ -39,7 +39,7 @@ pub struct Document {
     pub updated_at: Timestamp,
 }
 
-impl Document {
+impl WorkspaceDocument {
     /// Builds the response from a document and its backing blob (which carries the
     /// content-addressed fields: size, hash).
     pub fn from_model(
@@ -73,7 +73,7 @@ impl Document {
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DeletedDocuments {
+pub struct WorkspaceDeletedDocuments {
     /// Ids that were deleted.
     pub deleted: Vec<Uuid>,
     /// Requested ids that were skipped: unknown, already deleted, in another
@@ -82,7 +82,7 @@ pub struct DeletedDocuments {
 }
 
 /// Response for document uploads (simple list without pagination).
-pub type Documents = Vec<Document>;
+pub type WorkspaceDocuments = Vec<WorkspaceDocument>;
 
 /// Paginated response for document listing.
-pub type DocumentsPage = Page<Document>;
+pub type WorkspaceDocumentsPage = Page<WorkspaceDocument>;

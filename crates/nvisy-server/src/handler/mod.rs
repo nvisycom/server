@@ -308,7 +308,7 @@ mod test {
         use aide::axum::routing::get_with;
 
         use crate::extract::Json;
-        use crate::handler::response::InviteSent;
+        use crate::handler::response::WorkspaceInviteSent;
 
         // A custom private route mounted via `add_private_routes`. It must be
         // covered by the auth layers just like the built-in private routes: the
@@ -317,7 +317,7 @@ mod test {
         let custom = ApiRouter::new().api_route(
             "/custom/private/",
             get_with(
-                || async { Json(InviteSent::new()) },
+                || async { Json(WorkspaceInviteSent::new()) },
                 |op| op.summary("custom private route"),
             ),
         );

@@ -11,7 +11,7 @@ use crate::extract::validators::validate_non_blank;
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct CommentPathParams {
+pub struct WorkspaceCommentPathParams {
     /// Unique identifier of the comment.
     pub comment_id: Uuid,
 }
@@ -22,7 +22,7 @@ pub struct CommentPathParams {
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateComment {
+pub struct CreateWorkspaceComment {
     /// The comment text (1-10000 characters).
     #[garde(length(chars, min = 1, max = 10_000), custom(validate_non_blank))]
     pub body: String,
@@ -32,7 +32,7 @@ pub struct CreateComment {
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateComment {
+pub struct UpdateWorkspaceComment {
     /// The new comment text (1-10000 characters).
     #[garde(length(chars, min = 1, max = 10_000), custom(validate_non_blank))]
     pub body: String,

@@ -18,8 +18,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::extract::{AuthState, Json, Path, Query};
-use crate::handler::request::{CursorPagination, NotificationPathParams};
-use crate::handler::response::{MarkedReadStatus, Notification, NotificationsPage, UnreadStatus};
+use crate::handler::request::{AccountNotificationPathParams, CursorPagination};
+use crate::handler::response::{
+    AccountMarkedReadStatus, AccountNotification, AccountNotificationsPage, AccountUnreadStatus,
+};
 use crate::response::{Error, ErrorResponse, Result, SseResponse};
 use crate::service::{NotificationEmitter, ServiceState, UnreadCountEvent};
 
@@ -39,7 +41,7 @@ async fn list_notifications(
     State(pg_client): State<PgClient>,
     auth_state: AuthState,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<NotificationsPage>)> {
+) -> Result<(StatusCode, Json<AccountNotificationsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing notifications");
 
     let mut conn = pg_client.get_connection().await?;
@@ -48,7 +50,8 @@ async fn list_notifications(
         .cursor_list_account_notifications(auth_state.account_id, pagination.into_cursor())
         .await?;
 
-    let response = NotificationsPage::from_cursor_page(page, Notification::from_model);
+    let response =
+        AccountNotificationsPage::from_cursor_page(page, AccountNotification::from_model);
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -66,7 +69,7 @@ fn list_notifications_docs(op: TransformOperation) -> TransformOperation {
              first. Read-only — use POST /notifications/read/ or \
              POST /notifications/{notificationId}/read/ to mark them read.",
         )
-        .response::<200, Json<NotificationsPage>>()
+        .response::<200, Json<AccountNotificationsPage>>()
         .response::<401, Json<ErrorResponse>>()
 }
 
@@ -78,7 +81,7 @@ fn list_notifications_docs(op: TransformOperation) -> TransformOperation {
 async fn get_unread_status(
     State(pg_client): State<PgClient>,
     auth_state: AuthState,
-) -> Result<(StatusCode, Json<UnreadStatus>)> {
+) -> Result<(StatusCode, Json<AccountUnreadStatus>)> {
     tracing::debug!(target: TRACING_TARGET, "Checking unread notifications count");
 
     let mut conn = pg_client.get_connection().await?;
@@ -93,13 +96,13 @@ async fn get_unread_status(
         "Unread notifications count retrieved"
     );
 
-    Ok((StatusCode::OK, Json(UnreadStatus { unread_count })))
+    Ok((StatusCode::OK, Json(AccountUnreadStatus { unread_count })))
 }
 
 fn get_unread_status_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get unread notifications count")
         .description("Returns the number of unread notifications for the authenticated account.")
-        .response::<200, Json<UnreadStatus>>()
+        .response::<200, Json<AccountUnreadStatus>>()
         .response::<401, Json<ErrorResponse>>()
 }
 
@@ -231,7 +234,7 @@ async fn mark_all_notifications_read(
     State(pg_client): State<PgClient>,
     State(notification_emitter): State<NotificationEmitter>,
     auth_state: AuthState,
-) -> Result<(StatusCode, Json<MarkedReadStatus>)> {
+) -> Result<(StatusCode, Json<AccountMarkedReadStatus>)> {
     tracing::debug!(target: TRACING_TARGET, "Marking all notifications as read");
 
     let mut conn = pg_client.get_connection().await?;
@@ -249,7 +252,10 @@ async fn mark_all_notifications_read(
             .await;
     }
 
-    Ok((StatusCode::OK, Json(MarkedReadStatus { marked_read })))
+    Ok((
+        StatusCode::OK,
+        Json(AccountMarkedReadStatus { marked_read }),
+    ))
 }
 
 fn mark_all_notifications_read_docs(op: TransformOperation) -> TransformOperation {
@@ -258,7 +264,7 @@ fn mark_all_notifications_read_docs(op: TransformOperation) -> TransformOperatio
             "Marks every unread notification for the authenticated account as \
              read and returns how many it marked.",
         )
-        .response::<200, Json<MarkedReadStatus>>()
+        .response::<200, Json<AccountMarkedReadStatus>>()
         .response::<401, Json<ErrorResponse>>()
 }
 
@@ -277,7 +283,7 @@ async fn mark_notification_read(
     State(pg_client): State<PgClient>,
     State(notification_emitter): State<NotificationEmitter>,
     auth_state: AuthState,
-    Path(path_params): Path<NotificationPathParams>,
+    Path(path_params): Path<AccountNotificationPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Marking notification as read");
 

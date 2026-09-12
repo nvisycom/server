@@ -1,7 +1,7 @@
 //! Account notification response types.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::AccountNotification;
+use nvisy_postgres::model::AccountNotification as AccountNotificationModel;
 use nvisy_postgres::types::NotificationPayload;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -15,7 +15,7 @@ use super::Page;
 /// `{ id, payload: { notifyType, <params...> }, readAt, ... }`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Notification {
+pub struct AccountNotification {
     /// Unique notification identifier.
     pub id: Uuid,
     /// The notification type and its typed params, absent when the stored params
@@ -33,12 +33,12 @@ pub struct Notification {
 }
 
 /// Paginated list of notifications.
-pub type NotificationsPage = Page<Notification>;
+pub type AccountNotificationsPage = Page<AccountNotification>;
 
 /// Response type for unread notifications status.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct UnreadStatus {
+pub struct AccountUnreadStatus {
     /// Number of unread notifications.
     pub unread_count: i64,
 }
@@ -46,12 +46,12 @@ pub struct UnreadStatus {
 /// Response type for a mark-all-read action.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct MarkedReadStatus {
+pub struct AccountMarkedReadStatus {
     /// Number of notifications the request marked as read.
     pub marked_read: i64,
 }
 
-impl Notification {
+impl AccountNotification {
     /// Builds the response from a stored notification, reconstructing the typed
     /// payload from `notify_type` and the stored params.
     ///
@@ -59,7 +59,7 @@ impl Notification {
     /// `notify_type` still appears, with `payload` absent rather than the row
     /// dropped. Dropping it would let the list silently disagree with the unread
     /// count.
-    pub fn from_model(notification: AccountNotification) -> Self {
+    pub fn from_model(notification: AccountNotificationModel) -> Self {
         Self {
             id: notification.id,
             payload: notification.params.optional(),

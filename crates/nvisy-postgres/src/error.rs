@@ -123,6 +123,20 @@ impl Error {
         matches!(self, Error::Query(DieselError::NotFound))
     }
 
+    /// Returns whether this error is a unique-constraint violation.
+    ///
+    /// Lets a find-or-create path treat a losing concurrent insert as "already
+    /// exists" and read the winner back, rather than surfacing a 500.
+    pub fn is_unique_violation(&self) -> bool {
+        matches!(
+            self,
+            Error::Query(DieselError::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _
+            ))
+        )
+    }
+
     /// Returns whether this error indicates a transient failure that might succeed on retry.
     ///
     /// Transient errors include timeouts and certain connection issues that may

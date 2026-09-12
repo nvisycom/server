@@ -77,6 +77,7 @@ workspace_events! {
     PolicyCreated           => "policy.created",
     PolicyUpdated           => "policy.updated",
     PolicyDeleted           => "policy.deleted",
+    PolicyPromoted          => "policy.promoted",
 
     ThreadOpened         => "thread.opened",
     ThreadClosed         => "thread.closed",
@@ -761,6 +762,8 @@ crud_events! {
     PolicyUpdated => "policy.updated",
     /// A policy was deleted.
     PolicyDeleted => "policy.deleted",
+    /// A temporary policy was promoted to permanent.
+    PolicyPromoted => "policy.promoted",
 }
 
 /// Builds the shared policy activity params.

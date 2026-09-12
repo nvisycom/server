@@ -13,15 +13,18 @@ use nvisy_postgres::query::{WorkspaceThreadCommentRepository, WorkspaceThreadRep
 use nvisy_postgres::{AsyncConnection, PgClient};
 
 use crate::extract::{Authorized, Json, Path, SecurityContext, ValidateJson, markers};
-use crate::handler::request::{CommentPathParams, CreateComment, ThreadPathParams, UpdateComment};
-use crate::handler::response::Comment;
+use crate::handler::request::{
+    CreateWorkspaceComment, UpdateWorkspaceComment, WorkspaceCommentPathParams,
+    WorkspaceThreadPathParams,
+};
+use crate::handler::response::WorkspaceComment;
 use crate::handler::utility::resolve_account_ref;
 use crate::handler::workspace_threads::{
     MentionOutcome, TRACING_TARGET, emit_thread_event, enqueue_assistant_if_addressed,
     find_comment, find_thread, resolve_mentions, workspace_origin,
 };
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{AssistantQueue, ServiceState, ThreadCommentCreated, WorkspaceEvent};
+use crate::service::{AssistantQueue, ServiceState, event};
 
 /// Posts a comment (message) in a thread.
 ///
@@ -39,10 +42,10 @@ async fn create_comment(
     State(pg_client): State<PgClient>,
     State(assistant): State<AssistantQueue>,
     authz: Authorized<markers::Review>,
-    Path(path_params): Path<ThreadPathParams>,
+    Path(path_params): Path<WorkspaceThreadPathParams>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<CreateComment>,
-) -> Result<(StatusCode, Json<Comment>)> {
+    ValidateJson(request): ValidateJson<CreateWorkspaceComment>,
+) -> Result<(StatusCode, Json<WorkspaceComment>)> {
     tracing::debug!(target: TRACING_TARGET, "Posting comment");
 
     let workspace = authz.workspace;
@@ -90,7 +93,7 @@ async fn create_comment(
             emit_thread_event(
                 conn,
                 workspace_origin(workspace.id, authz.account_id, &security),
-                WorkspaceEvent::ThreadCommentCreated(ThreadCommentCreated {
+                event::WorkspaceEvent::ThreadCommentCreated(event::ThreadCommentCreated {
                     comment_id: comment.id,
                     thread_id: thread.id,
                     document_id: thread.document_id,
@@ -119,11 +122,11 @@ async fn create_comment(
 
     let author = resolve_account_ref(&mut conn, comment.author_account_id).await?;
 
-    tracing::info!(target: TRACING_TARGET, comment_id = %comment.id, "Comment posted");
+    tracing::info!(target: TRACING_TARGET, comment_id = %comment.id, "WorkspaceComment posted");
 
     Ok((
         StatusCode::CREATED,
-        Json(Comment::from_model(comment, author)),
+        Json(WorkspaceComment::from_model(comment, author)),
     ))
 }
 
@@ -134,7 +137,7 @@ fn create_comment_docs(op: TransformOperation) -> TransformOperation {
              members. Requires the Review permission. Returns 409 if the thread is \
              closed.",
         )
-        .response::<201, Json<Comment>>()
+        .response::<201, Json<WorkspaceComment>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -154,9 +157,9 @@ fn create_comment_docs(op: TransformOperation) -> TransformOperation {
 async fn update_comment(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::Review>,
-    Path(path_params): Path<CommentPathParams>,
-    ValidateJson(request): ValidateJson<UpdateComment>,
-) -> Result<(StatusCode, Json<Comment>)> {
+    Path(path_params): Path<WorkspaceCommentPathParams>,
+    ValidateJson(request): ValidateJson<UpdateWorkspaceComment>,
+) -> Result<(StatusCode, Json<WorkspaceComment>)> {
     tracing::debug!(target: TRACING_TARGET, "Editing comment");
 
     let workspace = authz.workspace;
@@ -182,15 +185,18 @@ async fn update_comment(
 
     let author = resolve_account_ref(&mut conn, updated.author_account_id).await?;
 
-    tracing::info!(target: TRACING_TARGET, "Comment edited");
+    tracing::info!(target: TRACING_TARGET, "WorkspaceComment edited");
 
-    Ok((StatusCode::OK, Json(Comment::from_model(updated, author))))
+    Ok((
+        StatusCode::OK,
+        Json(WorkspaceComment::from_model(updated, author)),
+    ))
 }
 
 fn update_comment_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Edit a comment")
         .description("Edits a comment's body. Only the author may edit their own comment.")
-        .response::<200, Json<Comment>>()
+        .response::<200, Json<WorkspaceComment>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -209,7 +215,7 @@ fn update_comment_docs(op: TransformOperation) -> TransformOperation {
 async fn delete_comment(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::Review>,
-    Path(path_params): Path<CommentPathParams>,
+    Path(path_params): Path<WorkspaceCommentPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting comment");
 
@@ -227,7 +233,7 @@ async fn delete_comment(
 
     conn.delete_comment(comment.id).await?;
 
-    tracing::info!(target: TRACING_TARGET, "Comment deleted");
+    tracing::info!(target: TRACING_TARGET, "WorkspaceComment deleted");
 
     Ok(StatusCode::OK)
 }

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopToken {
+pub struct AccountDesktopToken {
     /// The signed `app` JWT to send as a Bearer token.
     pub api_token: String,
     /// The desktop deep-link the token should be delivered on, echoed back.

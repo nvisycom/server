@@ -34,7 +34,7 @@ use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
 use crate::response::{Error, ErrorKind, Result};
-use crate::service::Infra;
+use crate::service::{CryptoService, Infra};
 
 /// Tracing target for blob-store operations.
 const TRACING_TARGET: &str = "nvisy_server::service::run_blob_store";
@@ -71,12 +71,13 @@ fn invalid_key(err: impl std::fmt::Display) -> Error<'static> {
 #[must_use = "service does nothing unless you use it"]
 pub struct RunBlobStore {
     infra: Infra,
+    crypto: CryptoService,
 }
 
 impl RunBlobStore {
     /// Creates a new [`RunBlobStore`] over the internal object store and crypto.
-    pub fn new(infra: Infra) -> Self {
-        Self { infra }
+    pub fn new(infra: Infra, crypto: CryptoService) -> Self {
+        Self { infra, crypto }
     }
 
     /// Claims a due blob and reclaims its object.
@@ -209,7 +210,6 @@ impl RunBlobStore {
         })?;
 
         let bytes = self
-            .infra
             .crypto
             .decrypt(document.workspace_id, &ciphertext)
             .map_err(|err| {
@@ -285,7 +285,6 @@ impl RunBlobStore {
         let hash = Sha256::digest(&plaintext).to_vec();
         let size = plaintext.len() as i64;
         let ciphertext = self
-            .infra
             .crypto
             .encrypt(workspace_id, &plaintext)
             .map_err(|err| {
@@ -333,7 +332,6 @@ impl RunBlobStore {
         let hash = Sha256::digest(&plaintext).to_vec();
         let size = plaintext.len() as i64;
         let ciphertext = self
-            .infra
             .crypto
             .encrypt(workspace_id, &plaintext)
             .map_err(|err| {
@@ -381,15 +379,11 @@ impl RunBlobStore {
         let workspace_id = source_document.workspace_id;
         let plaintext_size = bytes.len() as i64;
         let plaintext_hash = Sha256::digest(&bytes).to_vec();
-        let ciphertext = self
-            .infra
-            .crypto
-            .encrypt(workspace_id, &bytes)
-            .map_err(|err| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to encrypt redacted document")
-                    .with_context(err.to_string())
-            })?;
+        let ciphertext = self.crypto.encrypt(workspace_id, &bytes).map_err(|err| {
+            ErrorKind::InternalServerError
+                .with_message("Failed to encrypt redacted document")
+                .with_context(err.to_string())
+        })?;
 
         let key = DocumentKey::generate(workspace_id);
         self.infra.blobs.put(&key, Cursor::new(ciphertext)).await?;
@@ -486,7 +480,6 @@ impl RunBlobStore {
         })?;
 
         let plaintext = self
-            .infra
             .crypto
             .decrypt(workspace_id, &ciphertext)
             .map_err(|err| {
@@ -560,7 +553,6 @@ impl RunBlobStore {
         })?;
 
         let plaintext = self
-            .infra
             .crypto
             .decrypt(workspace_id, &ciphertext)
             .map_err(|err| {

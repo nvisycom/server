@@ -64,6 +64,8 @@ db_enum! {
         PolicyUpdated = "policy.updated",
         /// A policy was deleted.
         PolicyDeleted = "policy.deleted",
+        /// A temporary policy was promoted to permanent.
+        PolicyPromoted = "policy.promoted",
         /// A thread was opened.
         ThreadOpened = "thread.opened",
         /// A thread was closed.
@@ -106,7 +108,8 @@ impl WebhookEvent {
             | WebhookEvent::RedactionCreated => "pipeline",
             WebhookEvent::PolicyCreated
             | WebhookEvent::PolicyUpdated
-            | WebhookEvent::PolicyDeleted => "policy",
+            | WebhookEvent::PolicyDeleted
+            | WebhookEvent::PolicyPromoted => "policy",
             WebhookEvent::ThreadOpened
             | WebhookEvent::ThreadClosed
             | WebhookEvent::ThreadReopened

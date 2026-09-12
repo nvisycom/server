@@ -12,7 +12,7 @@
 
 use std::path::Path;
 
-use elide_pipeline::ProviderConfig;
+use elide_pipeline::provider::ProviderConfig;
 
 use crate::{Error, Result};
 

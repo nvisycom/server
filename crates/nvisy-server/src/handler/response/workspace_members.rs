@@ -1,7 +1,7 @@
 //! Workspace member response types.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::{Account, WorkspaceMember};
+use nvisy_postgres::model::{Account, WorkspaceMember as WorkspaceMemberModel};
 use nvisy_postgres::types::{Handle, WorkspaceRole};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use super::Page;
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Member {
+pub struct WorkspaceMember {
     /// Handle of the member's account.
     pub username: Handle,
     /// Email address of the member.
@@ -29,9 +29,9 @@ pub struct Member {
     pub created_at: Timestamp,
 }
 
-impl Member {
+impl WorkspaceMember {
     /// Creates a Member response from database models.
-    pub fn from_model(member: WorkspaceMember, account: Account) -> Self {
+    pub fn from_model(member: WorkspaceMemberModel, account: Account) -> Self {
         Self {
             username: account.username,
             email_address: account.email_address,
@@ -43,7 +43,7 @@ impl Member {
     }
 
     /// Creates a list of Member responses from database models.
-    pub fn from_models(models: Vec<(WorkspaceMember, Account)>) -> Vec<Self> {
+    pub fn from_models(models: Vec<(WorkspaceMemberModel, Account)>) -> Vec<Self> {
         models
             .into_iter()
             .map(|(member, account)| Self::from_model(member, account))
@@ -52,4 +52,4 @@ impl Member {
 }
 
 /// Paginated response for workspace members.
-pub type MembersPage = Page<Member>;
+pub type WorkspaceMembersPage = Page<WorkspaceMember>;

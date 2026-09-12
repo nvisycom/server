@@ -12,8 +12,7 @@ use crate::schema::workspace_policy_versions;
 /// Editing a policy's definition inserts a new version and repoints the policy's
 /// `current_version_id`; a version is never updated or deleted, so a detection
 /// that pinned it can always reproduce the exact definition it ran. The
-/// `definition` holds the engine's `PolicyDefinition`, stored XChaCha20-Poly1305
-/// encrypted with the workspace-derived key.
+/// `definition` holds the engine's `Policy` as plaintext JSONB.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_policy_versions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -28,8 +27,8 @@ pub struct WorkspacePolicyVersion {
     pub account_id: Uuid,
     /// Monotonic per-policy version number (1..N).
     pub version_number: i32,
-    /// Encrypted policy body (the engine's `PolicyDefinition` as JSON).
-    pub definition: Vec<u8>,
+    /// Policy body (the engine's `Policy`) as plaintext JSONB.
+    pub definition: JsonValue,
     /// Definition-scoped metadata that versions with the content.
     pub metadata: JsonValue,
     /// Timestamp when the version was created.
@@ -50,8 +49,8 @@ pub struct NewWorkspacePolicyVersion {
     pub account_id: Uuid,
     /// Monotonic per-policy version number (1..N).
     pub version_number: i32,
-    /// Encrypted policy body (the engine's `PolicyDefinition` as JSON).
-    pub definition: Vec<u8>,
+    /// Policy body (the engine's `Policy`) as plaintext JSONB.
+    pub definition: JsonValue,
     /// Definition-scoped metadata that versions with the content.
     pub metadata: Option<JsonValue>,
 }

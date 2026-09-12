@@ -8,7 +8,9 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
-use nvisy_postgres::model::{NewWorkspaceMember, Workspace as WorkspaceModel, WorkspaceMember};
+use nvisy_postgres::model::{
+    NewWorkspaceMember, Workspace as WorkspaceModel, WorkspaceMember as WorkspaceMemberModel,
+};
 use nvisy_postgres::query::{WorkspaceMemberRepository, WorkspaceRepository};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 
@@ -17,16 +19,16 @@ use crate::extract::{
     WorkspaceContext, markers,
 };
 use crate::handler::request::{
-    CreateWorkspace, CursorPagination, UpdateNotificationSettings, UpdateWorkspace,
+    CreateWorkspace, CursorPagination, UpdateWorkspace, UpdateWorkspaceNotificationSettings,
 };
-use crate::handler::response::{AccountRef, NotificationSettings, Page, Workspace, WorkspacesPage};
+use crate::handler::response::{
+    AccountRef, Page, Workspace, WorkspaceNotificationSettings, WorkspacesPage,
+};
 use crate::handler::utility::resolve_account_ref;
 use crate::middleware::UploadConfig;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{
-    AvatarService, EventEmitter, EventOrigin, MAX_AVATAR_UPLOAD_BYTES, ServiceState,
-    WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
-};
+use crate::service::event::EventEmitter;
+use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState, event};
 
 /// Tracing target for workspace operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspaces";
@@ -58,18 +60,18 @@ async fn create_workspace(
             let new_member = NewWorkspaceMember::new_owner(workspace.id, creator_id);
             let member = conn.add_workspace_member(new_member).await?;
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id: workspace.id,
                     account_id: creator_id,
                     security: &security,
                 },
-                WorkspaceEvent::WorkspaceCreated(WorkspaceCreated {
+                event::WorkspaceEvent::WorkspaceCreated(event::WorkspaceCreated {
                     workspace_id: workspace.id,
                     workspace_slug: workspace.slug.clone(),
                 }),
             )
             .await?;
-            Ok::<(WorkspaceModel, WorkspaceMember), Error>((workspace, member))
+            Ok::<(WorkspaceModel, WorkspaceMemberModel), Error>((workspace, member))
         })
         .await?;
 
@@ -214,12 +216,12 @@ async fn update_workspace(
         .transaction(async |conn| {
             let updated = conn.update_workspace(workspace_id, update_data).await?;
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id,
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::WorkspaceUpdated(WorkspaceUpdated {
+                event::WorkspaceEvent::WorkspaceUpdated(event::WorkspaceUpdated {
                     workspace_id: updated.id,
                     workspace_slug: updated.slug.clone(),
                 }),
@@ -277,12 +279,12 @@ async fn delete_workspace(
     conn.transaction(async |conn| {
         conn.delete_workspace(workspace.id).await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::WorkspaceDeleted(WorkspaceDeleted {
+            event::WorkspaceEvent::WorkspaceDeleted(event::WorkspaceDeleted {
                 workspace_id: workspace.id,
                 workspace_slug: workspace.slug.clone(),
             }),
@@ -318,7 +320,7 @@ async fn get_notification_settings(
     State(pg_client): State<PgClient>,
     auth_state: AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
-) -> Result<(StatusCode, Json<NotificationSettings>)> {
+) -> Result<(StatusCode, Json<WorkspaceNotificationSettings>)> {
     let mut conn = pg_client.get_connection().await?;
     let Some(member) = conn
         .find_workspace_member(workspace.id, auth_state.account_id)
@@ -333,14 +335,14 @@ async fn get_notification_settings(
 
     Ok((
         StatusCode::OK,
-        Json(NotificationSettings::from_member(&member)),
+        Json(WorkspaceNotificationSettings::from_member(&member)),
     ))
 }
 
 fn get_notification_settings_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get notification settings")
         .description("Returns the notification settings for the authenticated user in a workspace.")
-        .response::<200, Json<NotificationSettings>>()
+        .response::<200, Json<WorkspaceNotificationSettings>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
@@ -357,8 +359,8 @@ async fn update_notification_settings(
     State(pg_client): State<PgClient>,
     auth_state: AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
-    ValidateJson(request): ValidateJson<UpdateNotificationSettings>,
-) -> Result<(StatusCode, Json<NotificationSettings>)> {
+    ValidateJson(request): ValidateJson<UpdateWorkspaceNotificationSettings>,
+) -> Result<(StatusCode, Json<WorkspaceNotificationSettings>)> {
     let mut conn = pg_client.get_connection().await?;
 
     // Verify membership exists
@@ -381,14 +383,14 @@ async fn update_notification_settings(
 
     Ok((
         StatusCode::OK,
-        Json(NotificationSettings::from_member(&member)),
+        Json(WorkspaceNotificationSettings::from_member(&member)),
     ))
 }
 
 fn update_notification_settings_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update notification settings")
         .description("Updates the notification settings for the authenticated user in a workspace.")
-        .response::<200, Json<NotificationSettings>>()
+        .response::<200, Json<WorkspaceNotificationSettings>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()

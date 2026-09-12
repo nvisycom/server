@@ -16,12 +16,12 @@ use super::{AccountRef, Page};
 /// the normal file endpoints) and a review audit recording what was redacted and
 /// why (fetched from the redaction's `review` endpoint).
 ///
-/// Named `RedactionResult` rather than `Redaction` because the engine's audit
+/// Named `WorkspaceRedactionResult` rather than `Redaction` because the engine's audit
 /// schema already carries a `Redaction` (an audit event), and the two must not
 /// collide in the generated OpenAPI.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct RedactionResult {
+pub struct WorkspaceRedactionResult {
     /// Opaque identifier of the redaction.
     pub id: RedactionId,
     /// The detection this redaction was produced from.
@@ -39,9 +39,9 @@ pub struct RedactionResult {
 }
 
 /// Paginated response for redactions.
-pub type RedactionsPage = Page<RedactionResult>;
+pub type WorkspaceRedactionsPage = Page<WorkspaceRedactionResult>;
 
-impl RedactionResult {
+impl WorkspaceRedactionResult {
     /// Creates a redaction response from the database model, the owning
     /// workspace slug, and the requesting account.
     pub fn from_model(

@@ -27,10 +27,8 @@ use super::file_source::SourceEntry;
 use super::import::Importer;
 use crate::extract::SecurityContext;
 use crate::response::{ErrorKind, Result};
-use crate::service::{
-    ConnectionConfig, ConnectionSyncCompleted, ConnectionSyncFailed, ConnectionSyncStarted,
-    EventEmitter, EventOrigin, ExternalObjectStore, Infra, WorkspaceEvent,
-};
+use crate::service::event::EventEmitter;
+use crate::service::{ConnectionConfig, CryptoService, ExternalObjectStore, Infra, event};
 
 /// Tracing target for connection sync operations.
 const TRACING_TARGET: &str = "nvisy_server::service::sync";
@@ -109,14 +107,20 @@ impl ConnectionSyncService {
     /// [`IntegrationConfig`](crate::service::IntegrationConfig)).
     pub fn new(
         infra: Infra,
+        crypto: CryptoService,
         object: ExternalObjectStore,
         cloud: FileService,
         import_concurrency: usize,
         export_concurrency: usize,
     ) -> Self {
-        let connector = Connector::new(infra.clone(), object, cloud);
-        let importer = Importer::new(infra.clone(), connector.clone(), import_concurrency);
-        let exporter = Exporter::new(infra.clone(), connector, export_concurrency);
+        let connector = Connector::new(infra.clone(), crypto.clone(), object, cloud);
+        let importer = Importer::new(
+            infra.clone(),
+            crypto.clone(),
+            connector.clone(),
+            import_concurrency,
+        );
+        let exporter = Exporter::new(infra.clone(), crypto, connector, export_concurrency);
         Self {
             infra,
             importer,
@@ -135,12 +139,12 @@ impl ConnectionSyncService {
         new_run: NewWorkspaceConnectionSync,
         connection: &WorkspaceConnection,
     ) -> Result<WorkspaceConnectionSync> {
-        let origin = EventOrigin {
+        let origin = event::EventOrigin {
             workspace_id: connection.workspace_id,
             account_id: new_run.account_id,
             security: &SecurityContext::default(),
         };
-        let started = WorkspaceEvent::ConnectionSyncStarted(ConnectionSyncStarted {
+        let started = event::WorkspaceEvent::ConnectionSyncStarted(event::ConnectionSyncStarted {
             connection_id: connection.id,
             connection_name: connection.display_name.clone(),
         });
@@ -257,7 +261,7 @@ impl ConnectionSyncService {
 
         match outcome {
             Outcome::Finished(result) => {
-                let origin = EventOrigin {
+                let origin = event::EventOrigin {
                     workspace_id,
                     account_id,
                     security: &SecurityContext::default(),
@@ -280,7 +284,7 @@ impl ConnectionSyncService {
     async fn finish_run(
         &self,
         run_id: Uuid,
-        origin: EventOrigin<'_>,
+        origin: event::EventOrigin<'_>,
         connection_id: Uuid,
         connection_name: &str,
         result: Result<u64>,
@@ -289,7 +293,7 @@ impl ConnectionSyncService {
         // the account the run is attributed to (the origin's).
         let event = match &result {
             Ok(records_synced) => {
-                WorkspaceEvent::ConnectionSyncCompleted(ConnectionSyncCompleted {
+                event::WorkspaceEvent::ConnectionSyncCompleted(event::ConnectionSyncCompleted {
                     connection_id,
                     connection_name: connection_name.to_owned(),
                     records_synced: Some(*records_synced as i64),
@@ -300,7 +304,7 @@ impl ConnectionSyncService {
                 // Log the full error (may include backend URLs/details) but record
                 // only the safe summary; the stored message is exposed to clients.
                 tracing::warn!(target: TRACING_TARGET, %run_id, error = %err, "Sync failed");
-                WorkspaceEvent::ConnectionSyncFailed(ConnectionSyncFailed {
+                event::WorkspaceEvent::ConnectionSyncFailed(event::ConnectionSyncFailed {
                     connection_id,
                     connection_name: connection_name.to_owned(),
                     error: Some(err.message.as_deref().unwrap_or("Sync failed").to_owned()),
@@ -329,7 +333,7 @@ impl ConnectionSyncService {
                         .is_some(),
                     Err(_) => {
                         let safe_message = match &event {
-                            WorkspaceEvent::ConnectionSyncFailed(e) => {
+                            event::WorkspaceEvent::ConnectionSyncFailed(e) => {
                                 e.error.clone().unwrap_or_else(|| "Sync failed".to_owned())
                             }
                             _ => "Sync failed".to_owned(),

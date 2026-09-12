@@ -1,4 +1,4 @@
-//! Pipeline response types.
+//! WorkspacePipeline response types.
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
@@ -9,23 +9,23 @@ use serde::{Deserialize, Serialize};
 use super::{AccountRef, Page};
 use crate::handler::request::PipelineDefinition;
 
-/// Pipeline response.
+/// WorkspacePipeline response.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Pipeline {
+pub struct WorkspacePipeline {
     /// URL slug of the pipeline, unique within its workspace.
     pub slug: Handle,
     /// Handle of the workspace this pipeline belongs to.
     pub workspace_slug: Handle,
     /// Account that created this pipeline.
     pub created_by: AccountRef,
-    /// Pipeline display name.
+    /// WorkspacePipeline display name.
     pub display_name: String,
-    /// Pipeline description.
+    /// WorkspacePipeline description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Pipeline lifecycle status.
+    /// WorkspacePipeline lifecycle status.
     pub status: PipelineStatus,
     /// Detection + redaction configuration.
     pub definition: PipelineDefinition,
@@ -38,7 +38,7 @@ pub struct Pipeline {
     pub updated_at: Timestamp,
 }
 
-impl Pipeline {
+impl WorkspacePipeline {
     /// Creates a response from the database model and its reference slugs.
     ///
     /// The `policy_slugs` come from the join table and are merged with the stored
@@ -68,25 +68,25 @@ impl Pipeline {
 }
 
 /// Paginated list of pipelines.
-pub type PipelinesPage = Page<Pipeline>;
+pub type WorkspacePipelinesPage = Page<WorkspacePipeline>;
 
 /// Summary response for pipeline (used in lists).
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct PipelineSummary {
+pub struct WorkspacePipelineSummary {
     /// URL slug of the pipeline, unique within its workspace.
     pub slug: Handle,
     /// Handle of the workspace this pipeline belongs to.
     pub workspace_slug: Handle,
     /// Account that created this pipeline.
     pub created_by: AccountRef,
-    /// Pipeline display name.
+    /// WorkspacePipeline display name.
     pub display_name: String,
-    /// Pipeline description.
+    /// WorkspacePipeline description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Pipeline lifecycle status.
+    /// WorkspacePipeline lifecycle status.
     pub status: PipelineStatus,
     /// Timestamp when the pipeline was created.
     pub created_at: Timestamp,
@@ -94,8 +94,8 @@ pub struct PipelineSummary {
     pub updated_at: Timestamp,
 }
 
-impl PipelineSummary {
-    /// Creates a new instance of [`PipelineSummary`] from the database model and
+impl WorkspacePipelineSummary {
+    /// Creates a new instance of [`WorkspacePipelineSummary`] from the database model and
     /// its creator.
     pub fn from_model(
         pipeline: model::WorkspacePipeline,
@@ -116,4 +116,4 @@ impl PipelineSummary {
 }
 
 /// Paginated list of pipeline summaries.
-pub type PipelineSummariesPage = Page<PipelineSummary>;
+pub type WorkspacePipelineSummariesPage = Page<WorkspacePipelineSummary>;

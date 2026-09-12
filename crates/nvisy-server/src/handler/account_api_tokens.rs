@@ -8,14 +8,16 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::{AccountApiToken, UpdateAccountApiToken};
+use nvisy_postgres::model::AccountApiToken as AccountApiTokenModel;
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
 use nvisy_postgres::types::ApiTokenType;
-use nvisy_postgres::{PgClient, PgConn};
+use nvisy_postgres::{PgClient, PgConn, model};
 use uuid::Uuid;
 
-use super::request::{CreateApiToken, CursorPagination, TokenPathParams, UpdateApiToken};
-use super::response::{ApiToken, ApiTokenWithJWT, ApiTokensPage};
+use super::request::{
+    AccountApiTokenPathParams, CreateAccountApiToken, CursorPagination, UpdateAccountApiToken,
+};
+use super::response::{AccountApiToken, AccountApiTokenWithJwt, AccountApiTokensPage};
 use crate::extract::{AuthState, Json, Path, Query, SecurityContext, ValidateJson};
 use crate::response::{ErrorKind, ErrorResponse, Result};
 use crate::service::{AuthIssuer, ServiceState};
@@ -33,8 +35,8 @@ async fn create_api_token(
     State(issuer): State<AuthIssuer>,
     auth_state: AuthState,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<CreateApiToken>,
-) -> Result<(StatusCode, Json<ApiTokenWithJWT>)> {
+    ValidateJson(request): ValidateJson<CreateAccountApiToken>,
+) -> Result<(StatusCode, Json<AccountApiTokenWithJwt>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating API token");
 
     let mut conn = pg_client.get_connection().await?;
@@ -55,7 +57,7 @@ async fn create_api_token(
     // Sign the JWT for the new token through the shared issuer.
     let jwt_token = issuer.sign(&account, &api_token)?;
 
-    let response = ApiToken::from_model(api_token.clone()).with_jwt(jwt_token);
+    let response = AccountApiToken::from_model(api_token.clone()).with_jwt(jwt_token);
 
     tracing::info!(
         target: TRACING_TARGET,
@@ -69,7 +71,7 @@ async fn create_api_token(
 fn create_api_token_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Create API token")
         .description("Creates a new API token. The JWT token is only shown once upon creation.")
-        .response::<201, Json<ApiTokenWithJWT>>()
+        .response::<201, Json<AccountApiTokenWithJwt>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
 }
@@ -80,7 +82,7 @@ async fn list_api_tokens(
     State(pg_client): State<PgClient>,
     auth_state: AuthState,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<ApiTokensPage>)> {
+) -> Result<(StatusCode, Json<AccountApiTokensPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing API tokens");
 
     let mut conn = pg_client.get_connection().await?;
@@ -98,9 +100,9 @@ async fn list_api_tokens(
     // Flag the token this request authenticated with so the client can single
     // out the current session.
     let current_token_id = auth_state.token_id;
-    let response = ApiTokensPage::from_cursor_page(page, |token| {
+    let response = AccountApiTokensPage::from_cursor_page(page, |token| {
         let is_current = token.id == current_token_id;
-        ApiToken::from_model(token).with_current(is_current)
+        AccountApiToken::from_model(token).with_current(is_current)
     });
 
     Ok((StatusCode::OK, Json(response)))
@@ -109,7 +111,7 @@ async fn list_api_tokens(
 fn list_api_tokens_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List API tokens")
         .description("Returns all API tokens for the authenticated account.")
-        .response::<200, Json<ApiTokensPage>>()
+        .response::<200, Json<AccountApiTokensPage>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
 }
@@ -119,8 +121,8 @@ fn list_api_tokens_docs(op: TransformOperation) -> TransformOperation {
 async fn read_api_token(
     State(pg_client): State<PgClient>,
     auth_state: AuthState,
-    Path(path): Path<TokenPathParams>,
-) -> Result<(StatusCode, Json<ApiToken>)> {
+    Path(path): Path<AccountApiTokenPathParams>,
+) -> Result<(StatusCode, Json<AccountApiToken>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading API token");
 
     let mut conn = pg_client.get_connection().await?;
@@ -132,14 +134,14 @@ async fn read_api_token(
     let is_current = token.id == auth_state.token_id;
     Ok((
         StatusCode::OK,
-        Json(ApiToken::from_model(token).with_current(is_current)),
+        Json(AccountApiToken::from_model(token).with_current(is_current)),
     ))
 }
 
 fn read_api_token_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get API token")
         .description("Returns details for a specific API token.")
-        .response::<200, Json<ApiToken>>()
+        .response::<200, Json<AccountApiToken>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
@@ -149,9 +151,9 @@ fn read_api_token_docs(op: TransformOperation) -> TransformOperation {
 async fn update_api_token(
     State(pg_client): State<PgClient>,
     auth_state: AuthState,
-    Path(path): Path<TokenPathParams>,
-    ValidateJson(request): ValidateJson<UpdateApiToken>,
-) -> Result<(StatusCode, Json<ApiToken>)> {
+    Path(path): Path<AccountApiTokenPathParams>,
+    ValidateJson(request): ValidateJson<UpdateAccountApiToken>,
+) -> Result<(StatusCode, Json<AccountApiToken>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating API token");
 
     let mut conn = pg_client.get_connection().await?;
@@ -166,7 +168,7 @@ async fn update_api_token(
             .with_message("Only API tokens can be renamed"));
     }
 
-    let update_token = UpdateAccountApiToken {
+    let update_token = model::UpdateAccountApiToken {
         display_name: request.display_name,
         ..Default::default()
     };
@@ -180,14 +182,14 @@ async fn update_api_token(
     let is_current = updated_token.id == auth_state.token_id;
     Ok((
         StatusCode::OK,
-        Json(ApiToken::from_model(updated_token).with_current(is_current)),
+        Json(AccountApiToken::from_model(updated_token).with_current(is_current)),
     ))
 }
 
 fn update_api_token_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update API token")
         .description("Updates an existing API token's name.")
-        .response::<200, Json<ApiToken>>()
+        .response::<200, Json<AccountApiToken>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -199,7 +201,7 @@ fn update_api_token_docs(op: TransformOperation) -> TransformOperation {
 async fn revoke_api_token(
     State(pg_client): State<PgClient>,
     auth_state: AuthState,
-    Path(path): Path<TokenPathParams>,
+    Path(path): Path<AccountApiTokenPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Revoking API token");
 
@@ -235,7 +237,7 @@ async fn find_account_token(
     conn: &mut PgConn,
     account_id: Uuid,
     token_id: Uuid,
-) -> Result<AccountApiToken> {
+) -> Result<AccountApiTokenModel> {
     let Some(token) = conn.find_account_api_token_by_id(token_id).await? else {
         return Err(ErrorKind::NotFound
             .with_resource("api_token")

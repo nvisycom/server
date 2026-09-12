@@ -1,4 +1,4 @@
-//! Comment response type: one message within a thread.
+//! WorkspaceComment response type: one message within a thread.
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceThreadComment as CommentModel;
@@ -11,7 +11,7 @@ use super::AccountRef;
 /// Response type for a comment: one message within a thread.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Comment {
+pub struct WorkspaceComment {
     /// Unique identifier of the comment.
     pub id: Uuid,
     /// Thread this message belongs to.
@@ -26,7 +26,7 @@ pub struct Comment {
     pub updated_at: Timestamp,
 }
 
-impl Comment {
+impl WorkspaceComment {
     /// Creates a comment response from the database model and the resolved author
     /// reference.
     pub fn from_model(comment: CommentModel, author: AccountRef) -> Self {

@@ -71,7 +71,7 @@ impl TokenExpiration {
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct CreateApiToken {
+pub struct CreateAccountApiToken {
     /// Human-readable display name for the API token (1-100 characters).
     #[garde(length(chars, min = 1, max = 100))]
     pub display_name: String,
@@ -80,7 +80,7 @@ pub struct CreateApiToken {
     pub expires_in: TokenExpiration,
 }
 
-impl CreateApiToken {
+impl CreateAccountApiToken {
     /// Converts this request into a [`NewAccountApiToken`] model, recording the
     /// caller's IP and user agent from `security` on the token row.
     ///
@@ -116,7 +116,7 @@ impl CreateApiToken {
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct UpdateApiToken {
+pub struct UpdateAccountApiToken {
     /// Updated display name for the API token (1-100 characters).
     #[garde(length(chars, min = 1, max = 100))]
     pub display_name: Option<String>,

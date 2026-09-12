@@ -21,7 +21,7 @@ pub use constraint::{
 };
 pub use enums::{
     ActivityType, ApiTokenType, ConnectionType, DetectionStatus, DocumentKind, IdentityProvider,
-    InviteStatus, NotificationEvent, OutboxStatus, PipelineStatus, PipelineTriggerType,
+    InviteStatus, NotificationEvent, OutboxStatus, PipelineStatus, PipelineTriggerType, PolicyKind,
     ProviderType, ReviewStatus, SyncDeletionPolicy, SyncMode, SyncStatus, SyncTriggerType,
     ThreadEventKind, WebhookEvent, WebhookStatus, WorkspaceRole,
 };

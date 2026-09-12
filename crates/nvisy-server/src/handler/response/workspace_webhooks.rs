@@ -14,7 +14,7 @@ use super::{AccountRef, Page};
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Webhook {
+pub struct WorkspaceWebhook {
     /// Opaque identifier of the webhook.
     pub id: WebhookId,
     /// Handle of the workspace this webhook belongs to.
@@ -47,7 +47,7 @@ pub struct Webhook {
     pub updated_at: Timestamp,
 }
 
-impl Webhook {
+impl WorkspaceWebhook {
     pub fn from_model(
         webhook: model::WorkspaceWebhook,
         workspace_slug: Handle,
@@ -83,10 +83,10 @@ impl Webhook {
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct WebhookCreated {
+pub struct WorkspaceWebhookCreated {
     /// The created webhook details.
     #[serde(flatten)]
-    pub webhook: Webhook,
+    pub webhook: WorkspaceWebhook,
     /// HMAC-SHA256 signing secret for webhook verification.
     ///
     /// **Important**: This is the only time the secret will be shown.
@@ -94,7 +94,7 @@ pub struct WebhookCreated {
     pub secret: String,
 }
 
-impl WebhookCreated {
+impl WorkspaceWebhookCreated {
     pub fn from_model(
         webhook: model::WorkspaceWebhook,
         workspace_slug: Handle,
@@ -102,27 +102,27 @@ impl WebhookCreated {
         secret: String,
     ) -> Self {
         Self {
-            webhook: Webhook::from_model(webhook, workspace_slug, created_by),
+            webhook: WorkspaceWebhook::from_model(webhook, workspace_slug, created_by),
             secret,
         }
     }
 }
 
 /// Paginated response for workspace webhooks.
-pub type WebhooksPage = Page<Webhook>;
+pub type WorkspaceWebhooksPage = Page<WorkspaceWebhook>;
 
 /// Result of a webhook delivery attempt.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct WebhookResult {
+pub struct WorkspaceWebhookResult {
     /// HTTP status code returned by the webhook endpoint.
     pub status_code: u16,
     /// Time taken to receive a response in milliseconds.
     pub response_time_ms: i64,
 }
 
-impl WebhookResult {
+impl WorkspaceWebhookResult {
     /// Creates a WebhookResult from the core webhook response.
     pub fn from_response(response: nvisy_webhook::provider::WebhookResponse) -> Self {
         let duration_ms = response

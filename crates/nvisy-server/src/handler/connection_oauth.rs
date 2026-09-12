@@ -39,10 +39,8 @@ use uuid::Uuid;
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{OAuthCallbackQuery, OAuthStartPathParams, StartFileServiceOAuth};
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, connection_result_redirect};
-use crate::service::{
-    ConnectionConfig, ConnectionCreated, CryptoService, EventEmitter, EventOrigin,
-    FileServiceRedirect, ServiceState, WorkspaceEvent,
-};
+use crate::service::event::EventEmitter;
+use crate::service::{ConnectionConfig, CryptoService, FileServiceRedirect, ServiceState, event};
 
 /// Tracing target for connection OAuth operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::connection_oauth";
@@ -249,12 +247,12 @@ async fn complete_callback(
         .transaction(async |conn| {
             let connection = conn.create_workspace_connection(new_connection).await?;
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id: flow.workspace_id,
                     account_id: flow.account_id,
                     security,
                 },
-                WorkspaceEvent::ConnectionCreated(ConnectionCreated {
+                event::WorkspaceEvent::ConnectionCreated(event::ConnectionCreated {
                     connection_id: connection.id,
                     connection_name: connection.display_name.clone(),
                 }),

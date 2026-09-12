@@ -20,7 +20,7 @@ use nvisy_postgres::PgClient;
 
 use super::workspace_detections::find_detection;
 use crate::extract::{Authorized, Json, Path, Query, markers};
-use crate::handler::request::{DetectionPathParams, ExportFormat, ExportQuery};
+use crate::handler::request::{ExportFormat, ExportQuery, WorkspaceDetectionPathParams};
 use crate::handler::utility::DownloadDocs;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, attachment_headers};
 use crate::service::{EngineService, RunBlobStore, ServiceState};
@@ -45,7 +45,7 @@ async fn get_detection_analysis(
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadAudit>,
-    Path(path_params): Path<DetectionPathParams>,
+    Path(path_params): Path<WorkspaceDetectionPathParams>,
 ) -> Result<(StatusCode, Json<Audit>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting detection analysis");
 
@@ -103,7 +103,7 @@ async fn get_detection_intermediates(
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadOriginalDocuments>,
-    Path(path_params): Path<DetectionPathParams>,
+    Path(path_params): Path<WorkspaceDetectionPathParams>,
 ) -> Result<(StatusCode, Json<ArtifactSet>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting detection intermediates");
 
@@ -166,7 +166,7 @@ async fn download_detection_audit(
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadAudit>,
-    Path(path_params): Path<DetectionPathParams>,
+    Path(path_params): Path<WorkspaceDetectionPathParams>,
     Query(query): Query<ExportQuery>,
 ) -> Result<(StatusCode, HeaderMap, Body)> {
     tracing::debug!(target: TRACING_TARGET, "Downloading detection audit");

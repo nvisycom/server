@@ -13,7 +13,7 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::WorkspaceActivity;
+use nvisy_postgres::model::WorkspaceActivity as WorkspaceActivityModel;
 use nvisy_postgres::query::WorkspaceActivityRepository;
 use nvisy_postgres::types::WithAccountRef;
 use serde::Serialize;
@@ -21,10 +21,10 @@ use serde::Serialize;
 use crate::extract::{Authorized, Json, Query, markers};
 use crate::handler::ServiceState;
 use crate::handler::request::{
-    ActivityExportOptions, ActivityFilterQuery, CursorPagination, DateWindow, ExportFormat,
-    MAX_EXPORT_ROWS,
+    CursorPagination, DateWindow, ExportFormat, MAX_EXPORT_ROWS, WorkspaceActivityExportOptions,
+    WorkspaceActivityFilterQuery,
 };
-use crate::handler::response::{ActivitiesPage, Activity};
+use crate::handler::response::{WorkspaceActivitiesPage, WorkspaceActivity};
 use crate::handler::utility::{ActorFilter, DownloadDocs, resolve_actor};
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, attachment_headers};
 
@@ -61,7 +61,7 @@ struct ActivityExportRow {
 impl ActivityExportRow {
     /// Builds a row from a joined activity, deriving the split columns from the
     /// activity type and its typed params.
-    fn from_activity(row: WithAccountRef<WorkspaceActivity>) -> Self {
+    fn from_activity(row: WithAccountRef<WorkspaceActivityModel>) -> Self {
         let WithAccountRef { item, account } = row;
         let payload = item.params.optional();
         let actor = account
@@ -113,10 +113,10 @@ impl ActivityExportRow {
 async fn list_activities(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewActivity>,
-    Query(filter_query): Query<ActivityFilterQuery>,
+    Query(filter_query): Query<WorkspaceActivityFilterQuery>,
     Query(window): Query<DateWindow>,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<ActivitiesPage>)> {
+) -> Result<(StatusCode, Json<WorkspaceActivitiesPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace activities");
 
     let workspace = authz.workspace;
@@ -133,15 +133,15 @@ async fn list_activities(
     };
     let filter = filter_query.to_filter(actor_id, &window)?;
     if actor == ActorFilter::Unknown {
-        return Ok((StatusCode::OK, Json(ActivitiesPage::empty())));
+        return Ok((StatusCode::OK, Json(WorkspaceActivitiesPage::empty())));
     }
 
     let page = conn
         .cursor_list_workspace_activity(workspace.id, filter, pagination.into_cursor())
         .await?;
 
-    let response = ActivitiesPage::from_cursor_page(page, |wc| {
-        Activity::from_model(wc.item, workspace.slug.clone(), wc.account.into())
+    let response = WorkspaceActivitiesPage::from_cursor_page(page, |wc| {
+        WorkspaceActivity::from_model(wc.item, workspace.slug.clone(), wc.account.into())
     });
 
     tracing::debug!(
@@ -161,7 +161,7 @@ fn list_activities_docs(op: TransformOperation) -> TransformOperation {
              and a `from`/`to` day range (each bound narrows only when given; the feed is \
              otherwise all-time).",
         )
-        .response::<200, Json<ActivitiesPage>>()
+        .response::<200, Json<WorkspaceActivitiesPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
 }
@@ -177,9 +177,9 @@ fn list_activities_docs(op: TransformOperation) -> TransformOperation {
 async fn export_activities(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewActivity>,
-    Query(filter_query): Query<ActivityFilterQuery>,
+    Query(filter_query): Query<WorkspaceActivityFilterQuery>,
     Query(window_query): Query<DateWindow>,
-    Query(export_query): Query<ActivityExportOptions>,
+    Query(export_query): Query<WorkspaceActivityExportOptions>,
 ) -> Result<(StatusCode, HeaderMap, Body)> {
     tracing::debug!(target: TRACING_TARGET, "Exporting workspace activities");
 
@@ -214,7 +214,7 @@ async fn export_activities(
         tracing::warn!(
             target: TRACING_TARGET,
             cap = MAX_EXPORT_ROWS,
-            "Activity export hit the row cap; the newest rows in the window were dropped"
+            "WorkspaceActivity export hit the row cap; the newest rows in the window were dropped"
         );
     }
 

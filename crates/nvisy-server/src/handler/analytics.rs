@@ -11,7 +11,7 @@ use nvisy_postgres::query::WorkspaceAnalyticsRepository;
 use crate::extract::{Authorized, Json, Query, markers};
 use crate::handler::ServiceState;
 use crate::handler::request::DateWindow;
-use crate::handler::response::{DetectionTimeSeries, WorkspaceAnalytics};
+use crate::handler::response::{WorkspaceAnalytics, WorkspaceDetectionTimeSeries};
 use crate::response::{ErrorResponse, Result};
 
 /// Tracing target for workspace analytics operations.
@@ -63,7 +63,7 @@ async fn get_detection_timeseries(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewAnalytics>,
     Query(window): Query<DateWindow>,
-) -> Result<(StatusCode, Json<DetectionTimeSeries>)> {
+) -> Result<(StatusCode, Json<WorkspaceDetectionTimeSeries>)> {
     tracing::debug!(target: TRACING_TARGET, "Computing detection time series");
 
     let window = window.resolve()?;
@@ -77,7 +77,7 @@ async fn get_detection_timeseries(
             window.to_timestamp()?,
         )
         .await?;
-    let series = DetectionTimeSeries::from_window(window.from, window.to, points);
+    let series = WorkspaceDetectionTimeSeries::from_window(window.from, window.to, points);
 
     Ok((StatusCode::OK, Json(series)))
 }
@@ -87,7 +87,7 @@ fn get_detection_timeseries_docs(op: TransformOperation) -> TransformOperation {
         .description(
             "Returns a workspace's daily detection activity over a date window: detections per day, plus each day's error rate and durations. Every day in the window is present (quiet days report detections: 0), so the series plots as a continuous line or a contribution-style calendar. The window is `from`/`to` (inclusive, YYYY-MM-DD); it defaults to the last 30 days and is capped at 366 days.",
         )
-        .response::<200, Json<DetectionTimeSeries>>()
+        .response::<200, Json<WorkspaceDetectionTimeSeries>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()

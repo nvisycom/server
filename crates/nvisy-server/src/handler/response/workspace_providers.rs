@@ -1,7 +1,7 @@
 //! Provider response types.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::WorkspaceProvider;
+use nvisy_postgres::model::WorkspaceProvider as WorkspaceProviderModel;
 use nvisy_postgres::types::{Handle, ProviderId, ProviderType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use super::{AccountRef, Page};
 /// metadata about the provider is returned.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Provider {
+pub struct WorkspaceProvider {
     /// Opaque identifier of the provider.
     pub id: ProviderId,
     /// Handle of the workspace this provider belongs to.
@@ -36,12 +36,12 @@ pub struct Provider {
 }
 
 /// Paginated list of providers.
-pub type ProvidersPage = Page<Provider>;
+pub type WorkspaceProvidersPage = Page<WorkspaceProvider>;
 
-impl Provider {
+impl WorkspaceProvider {
     /// Creates a response from a database model and its creator.
     pub fn from_model(
-        provider: WorkspaceProvider,
+        provider: WorkspaceProviderModel,
         workspace_slug: Handle,
         created_by: AccountRef,
     ) -> Self {

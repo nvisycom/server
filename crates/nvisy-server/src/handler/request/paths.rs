@@ -9,7 +9,7 @@ use uuid::Uuid;
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct MemberPathParams {
+pub struct WorkspaceMemberPathParams {
     /// Public handle of the member's account.
     pub username: Handle,
 }
@@ -18,7 +18,7 @@ pub struct MemberPathParams {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct InvitePathParams {
+pub struct WorkspaceInvitePathParams {
     /// Unique identifier of the invite.
     pub invite_id: Uuid,
 }
@@ -45,7 +45,7 @@ pub struct WorkspaceDocumentPathParams {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct WebhookPathParams {
+pub struct WorkspaceWebhookPathParams {
     /// Opaque identifier of the webhook.
     pub webhook_id: WebhookId,
 }
@@ -57,7 +57,7 @@ pub struct WebhookPathParams {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct TokenPathParams {
+pub struct AccountApiTokenPathParams {
     /// Unique identifier of the API token.
     pub token_id: Uuid,
 }
@@ -78,7 +78,7 @@ pub struct AccountPathParams {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct PipelinePathParams {
+pub struct WorkspacePipelinePathParams {
     /// URL slug of the pipeline, unique within its workspace.
     pub pipeline_slug: String,
 }
@@ -87,7 +87,7 @@ pub struct PipelinePathParams {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DetectionPathParams {
+pub struct WorkspaceDetectionPathParams {
     /// Opaque identifier of the detection.
     pub detection_id: DetectionId,
 }
@@ -99,7 +99,7 @@ pub struct DetectionPathParams {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct RedactionPathParams {
+pub struct WorkspaceRedactionPathParams {
     /// Opaque identifier of the redaction.
     pub redaction_id: RedactionId,
 }
@@ -111,7 +111,7 @@ pub struct RedactionPathParams {
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct NotificationPathParams {
+pub struct AccountNotificationPathParams {
     /// Unique identifier of the notification.
     pub notification_id: Uuid,
 }

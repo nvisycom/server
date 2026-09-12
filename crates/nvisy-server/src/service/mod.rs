@@ -8,13 +8,14 @@ mod blob_reaper;
 mod crypto;
 mod detection;
 mod engine;
-mod event;
+pub mod event;
 mod health;
 mod infra;
 mod integration;
 mod notification;
 mod oidc;
 mod password;
+mod policy;
 mod run_blob_store;
 mod session_keys;
 mod user_agent;
@@ -28,12 +29,13 @@ use nvisy_core::net::EndpointPolicy;
 use nvisy_file_service::FileService;
 use nvisy_nats::{NatsClient, NatsConfig};
 pub use nvisy_object_store::client::ExternalObjectStore;
-use nvisy_postgres::{PgClient, PgClientMigrationExt, PgConfig};
+use nvisy_postgres::{PgClient, PgConfig};
 use nvisy_s3::BlobStore;
 pub use nvisy_s3::S3Config;
 use nvisy_webhook::WebhookService;
 use tokio_util::sync::CancellationToken;
 
+use crate::Result;
 use crate::middleware::UploadConfig;
 use crate::response::CookieConfig;
 pub use crate::service::account_provisioner::AccountProvisioner;
@@ -51,18 +53,6 @@ pub use crate::service::detection::{
     DetectionStatusEvent, DetectionWorker, detection_subject,
 };
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
-pub use crate::service::event::{
-    ConnectionCreated, ConnectionDeleted, ConnectionSyncCompleted, ConnectionSyncFailed,
-    ConnectionSyncStarted, ConnectionUpdated, DetectionCompleted, DetectionFailed,
-    DetectionStarted, DocumentCreated, DocumentDeleted, DocumentUpdated, EventEmitter, EventKind,
-    EventOrigin, EventOutboxDrainer, InviteAccepted, InviteCanceled, InviteCreated, InviteDeclined,
-    MemberAdded, MemberDeleted, MemberUpdated, Notification, NotifyTarget, PipelineCreated,
-    PipelineDeleted, PipelineUpdated, PolicyCreated, PolicyDeleted, PolicyUpdated, ProviderCreated,
-    ProviderDeleted, ProviderUpdated, RedactionCreated, ReviewAssigned, ReviewUnassigned,
-    ReviewVerified, ThreadClosed, ThreadCommentCreated, ThreadDeleted, ThreadOpened, ThreadRenamed,
-    ThreadReopened, WebhookCreated, WebhookDeleted, WebhookDelivery, WebhookUpdated,
-    WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated, event_outbox_row,
-};
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::infra::Infra;
 pub use crate::service::integration::{
@@ -75,12 +65,12 @@ pub use crate::service::oidc::{
     OidcAuthorization, OidcConfig, OidcError, OidcIdentity, OidcService, RedirectKind,
 };
 pub use crate::service::password::PasswordService;
+pub use crate::service::policy::{PolicyService, ResolvedPolicy};
 pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
 pub use crate::service::user_agent::UserAgentParser;
 pub use crate::service::webhook::{WebhookDeliveryWorker, WebhookEmitter};
 pub use crate::service::worker::{Worker, WorkerSet};
-use crate::{Error, Result};
 
 /// Tracing target for service-state initialization.
 const TRACING_TARGET: &str = "nvisy_server::service";
@@ -103,8 +93,11 @@ const TRACING_TARGET: &str = "nvisy_server::service";
 #[derive(Clone)]
 #[must_use = "state does nothing unless you use it"]
 pub struct ServiceState {
-    // Shared infrastructure (Postgres, NATS, crypto):
+    // Shared infrastructure (Postgres, NATS, blob store):
     pub infra: Infra,
+
+    // Encryption service (master key + per-workspace derivation).
+    pub crypto: CryptoService,
 
     // Integrations: external connectors and the sync engine that drives them.
     pub file_service: FileService,
@@ -164,13 +157,9 @@ impl ServiceState {
         cookie_config: CookieConfig,
         s3_config: S3Config,
     ) -> Result<Self> {
-        let postgres_client = connect_postgres(postgres_config).await?;
-        let nats_client = connect_nats(nats_config).await?;
-        let blobs = connect_blobs(s3_config).await?;
+        let infra = Infra::from_config(postgres_config, nats_config, s3_config).await?;
 
         let crypto = CryptoService::from_config(&crypto_config).await?;
-        let infra = Infra::new(postgres_client, nats_client, crypto, blobs);
-
         let engine = EngineService::from_config(engine_config).await?;
         let session_keys = SessionKeys::from_config(&session_config).await?;
         let oidc = OidcService::from_config(&oidc_config)?;
@@ -203,6 +192,7 @@ impl ServiceState {
         let endpoint_policy = integration_config.endpoint_policy;
         let connection_sync = ConnectionSyncService::new(
             infra.clone(),
+            crypto.clone(),
             ExternalObjectStore::new(endpoint_policy),
             file_service.clone(),
             integration_config.import_concurrency,
@@ -211,6 +201,7 @@ impl ServiceState {
 
         let service_state = Self {
             infra,
+            crypto,
             file_service,
             file_service_redirect,
             connection_sync,
@@ -248,14 +239,16 @@ impl ServiceState {
         let mut workers = WorkerSet::with_token(self.shutdown.clone());
         workers.spawn(WebhookDeliveryWorker::new(
             self.infra.clone(),
+            self.crypto.clone(),
             self.webhook.clone(),
         ));
         workers.spawn(ConnectionSyncWorker::new(
             self.infra.clone(),
+            self.crypto.clone(),
             self.connection_sync.clone(),
         ));
-        workers.spawn(BlobReaper::new(self.infra.clone()));
-        workers.spawn(EventOutboxDrainer::new(self.infra.clone()));
+        workers.spawn(BlobReaper::new(self.infra.clone(), self.crypto.clone()));
+        workers.spawn(event::EventOutboxDrainer::new(self.infra.clone()));
         workers.spawn(DetectionOutboxDrainer::new(
             self.infra.clone(),
             self.detection.clone(),
@@ -270,48 +263,12 @@ impl ServiceState {
             self.infra.clone(),
             self.assistant.clone(),
         ));
-        workers.spawn(AssistantWorker::new(self.infra.clone()));
+        workers.spawn(AssistantWorker::new(
+            self.infra.clone(),
+            self.crypto.clone(),
+        ));
         workers
     }
-}
-
-/// Connects to Postgres and applies pending migrations.
-async fn connect_postgres(config: PgConfig) -> Result<PgClient> {
-    let pg_client = PgClient::new(config).map_err(|e| {
-        Error::external("postgres", "Failed to create database client").with_source(e)
-    })?;
-
-    pg_client.run_pending_migrations().await.map_err(|e| {
-        Error::external("postgres", "Failed to apply database migrations").with_source(e)
-    })?;
-
-    Ok(pg_client)
-}
-
-/// Connects to the NATS server.
-async fn connect_nats(config: NatsConfig) -> Result<NatsClient> {
-    NatsClient::connect(config)
-        .await
-        .map_err(|e| Error::external("NATS", "Failed to connect to NATS").with_source(e))
-}
-
-/// Connects to the S3-compatible blob store and verifies it is reachable.
-///
-/// The AWS SDK builds its client lazily, so [`BlobStore::connect`] alone never
-/// touches the network. A follow-up [`ping`](BlobStore::ping) makes a bad
-/// endpoint, wrong credentials, or missing bucket fail at startup — matching the
-/// fail-fast contract of the Postgres and NATS connectors — rather than at the
-/// first upload.
-async fn connect_blobs(config: S3Config) -> Result<BlobStore> {
-    let blobs = BlobStore::connect(&config)
-        .await
-        .map_err(|e| Error::external("S3", "Failed to connect to the blob store").with_source(e))?;
-
-    blobs.ping().await.map_err(|e| {
-        Error::external("S3", "Blob store is unreachable or its bucket is missing").with_source(e)
-    })?;
-
-    Ok(blobs)
 }
 
 /// Derives [`FromRef`] by cloning a stored [`ServiceState`] field.
@@ -342,6 +299,20 @@ macro_rules! impl_di_compose {
     )+};
 }
 
+/// Derives [`FromRef`] for a stateless unit service that holds nothing and
+/// operates entirely on the connection passed to each of its methods.
+///
+/// [`FromRef`]: axum::extract::FromRef
+macro_rules! impl_di_unit {
+    ($($t:ident),+ $(,)?) => {$(
+        impl axum::extract::FromRef<ServiceState> for $t {
+            fn from_ref(_state: &ServiceState) -> Self {
+                $t
+            }
+        }
+    )+};
+}
+
 /// Derives [`FromRef`] for a single ambient client by cloning it out of the
 /// shared [`Infra`].
 ///
@@ -360,14 +331,14 @@ macro_rules! impl_di_infra {
 impl_di_infra!(
     postgres: PgClient,
     nats: NatsClient,
-    crypto: CryptoService,
     blobs: BlobStore,
 );
 
-// Stored fields, in the struct's domain order (infra, integrations, engine,
-// operational, security, limits):
+// Stored fields, in the struct's domain order (infra, crypto, integrations,
+// engine, operational, security, limits):
 impl_di_field!(
     infra: Infra,
+    crypto: CryptoService,
     file_service: FileService,
     file_service_redirect: FileServiceRedirect,
     connection_sync: ConnectionSyncService,
@@ -389,10 +360,17 @@ impl_di_field!(
 // Stateless services, composed from `Infra` on extraction:
 impl_di_compose!(
     AvatarService => AvatarService::new,
-    RunBlobStore => RunBlobStore::new,
     WebhookEmitter => WebhookEmitter::new,
     NotificationEmitter => NotificationEmitter::new,
 );
+
+// `RunBlobStore` composes from `Infra` and the crypto service (it encrypts and
+// decrypts blob content), so it needs a hand-written `FromRef`.
+impl axum::extract::FromRef<ServiceState> for RunBlobStore {
+    fn from_ref(state: &ServiceState) -> Self {
+        RunBlobStore::new(state.infra.clone(), state.crypto.clone())
+    }
+}
 
 // `DetectionQueue` composes from two singletons — `Infra` and the shared
 // `DetectionCoordinator` — so it needs a hand-written `FromRef` rather than the
@@ -426,10 +404,6 @@ impl axum::extract::FromRef<ServiceState> for AuthIssuer {
     }
 }
 
-// `AccountProvisioner` is stateless; it operates entirely on the connection
-// passed to each method.
-impl axum::extract::FromRef<ServiceState> for AccountProvisioner {
-    fn from_ref(_state: &ServiceState) -> Self {
-        AccountProvisioner
-    }
-}
+// Stateless unit services, holding nothing and acting on the connection passed to
+// each method:
+impl_di_unit!(AccountProvisioner, PolicyService);

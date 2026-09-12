@@ -17,8 +17,10 @@ use uuid::Uuid;
 use super::workspace_detections::find_detection;
 use crate::extract::{Authorized, Json, Path, Query, markers};
 use crate::handler::ServiceState;
-use crate::handler::request::{CursorPagination, DetectionPathParams, RedactionPathParams};
-use crate::handler::response::{RedactionResult, RedactionsPage};
+use crate::handler::request::{
+    CursorPagination, WorkspaceDetectionPathParams, WorkspaceRedactionPathParams,
+};
+use crate::handler::response::{WorkspaceRedactionResult, WorkspaceRedactionsPage};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{ErrorKind, ErrorResponse, Result};
 use crate::service::{EngineService, RunBlobStore};
@@ -38,9 +40,9 @@ const TRACING_TARGET: &str = "nvisy_server::handler::redactions";
 async fn list_detection_redactions(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewDetections>,
-    Path(path_params): Path<DetectionPathParams>,
+    Path(path_params): Path<WorkspaceDetectionPathParams>,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<RedactionsPage>)> {
+) -> Result<(StatusCode, Json<WorkspaceRedactionsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing detection redactions");
 
     let workspace = authz.workspace;
@@ -60,13 +62,13 @@ async fn list_detection_redactions(
     let mut items = Vec::with_capacity(page.items.len());
     for redaction in page.items {
         let requested_by = resolve_account_ref(&mut conn, redaction.account_id).await?;
-        items.push(RedactionResult::from_model(
+        items.push(WorkspaceRedactionResult::from_model(
             redaction,
             workspace.slug.clone(),
             requested_by,
         ));
     }
-    let response = RedactionsPage::new(items, page.total, page.next_cursor);
+    let response = WorkspaceRedactionsPage::new(items, page.total, page.next_cursor);
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -78,7 +80,7 @@ fn list_detection_redactions_docs(op: TransformOperation) -> TransformOperation 
              redaction is one redact pass with its own reviewer edits, output document, and \
              review audit.",
         )
-        .response::<200, Json<RedactionsPage>>()
+        .response::<200, Json<WorkspaceRedactionsPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -99,7 +101,7 @@ async fn get_redaction_review(
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadAudit>,
-    Path(path_params): Path<RedactionPathParams>,
+    Path(path_params): Path<WorkspaceRedactionPathParams>,
 ) -> Result<(StatusCode, Json<Audit>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting redaction review audit");
 

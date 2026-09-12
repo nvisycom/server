@@ -13,23 +13,24 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_core::net::EndpointPolicy;
-use nvisy_postgres::model::{NewWorkspaceProvider, UpdateWorkspaceProvider};
+use nvisy_postgres::model::NewWorkspaceProvider;
 use nvisy_postgres::query::WorkspaceProviderRepository;
 use nvisy_postgres::types::ProviderId;
-use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn, model};
 use uuid::Uuid;
 
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
-    CreateProvider, CursorPagination, ProviderPathParams, ProvidersQuery, UpdateProvider,
+    CreateWorkspaceProvider, CursorPagination, UpdateWorkspaceProvider,
+    WorkspaceProviderPathParams, WorkspaceProvidersQuery,
 };
-use crate::handler::response::{ConnectionVerification, Provider, ProvidersPage};
+use crate::handler::response::{
+    WorkspaceConnectionVerification, WorkspaceProvider, WorkspaceProvidersPage,
+};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{
-    CryptoService, EventEmitter, EventOrigin, ProviderConfig, ProviderCreated, ProviderDeleted,
-    ProviderUpdated, ServiceState, WorkspaceEvent,
-};
+use crate::service::event::EventEmitter;
+use crate::service::{CryptoService, ProviderConfig, ServiceState, event};
 
 /// Tracing target for workspace provider operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::providers";
@@ -55,8 +56,8 @@ async fn create_provider(
     State(endpoint_policy): State<EndpointPolicy>,
     authz: Authorized<markers::ManageProviders>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<CreateProvider>,
-) -> Result<(StatusCode, Json<Provider>)> {
+    ValidateJson(request): ValidateJson<CreateWorkspaceProvider>,
+) -> Result<(StatusCode, Json<WorkspaceProvider>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace provider");
 
     let account_id = authz.account_id;
@@ -90,12 +91,12 @@ async fn create_provider(
         .transaction(async |conn| {
             let created = conn.create_workspace_provider(new_provider).await?;
             conn.emit_event(
-                EventOrigin {
+                event::EventOrigin {
                     workspace_id: workspace.id,
                     account_id,
                     security: &security,
                 },
-                WorkspaceEvent::ProviderCreated(ProviderCreated {
+                event::WorkspaceEvent::ProviderCreated(event::ProviderCreated {
                     provider_id: created.id,
                     provider_name: created.display_name.clone(),
                 }),
@@ -109,25 +110,29 @@ async fn create_provider(
         target: TRACING_TARGET,
         provider_id = %ProviderId::from_uuid(created.id),
         provider = %created.provider,
-        "Provider created",
+        "WorkspaceProvider created",
     );
 
     let creator = resolve_account_ref(&mut conn, account_id).await?;
 
     Ok((
         StatusCode::CREATED,
-        Json(Provider::from_model(created, workspace.slug, creator)),
+        Json(WorkspaceProvider::from_model(
+            created,
+            workspace.slug,
+            creator,
+        )),
     ))
 }
 
 fn create_provider_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Create provider")
         .description(
-            "Creates a new inference provider for the workspace. Provider data is encrypted and \
+            "Creates a new inference provider for the workspace. WorkspaceProvider data is encrypted and \
              stored securely. The response includes provider metadata but never exposes the \
              encrypted credentials.",
         )
-        .response::<201, Json<Provider>>()
+        .response::<201, Json<WorkspaceProvider>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -148,8 +153,8 @@ async fn list_providers(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewProviders>,
     Query(pagination): Query<CursorPagination>,
-    Query(query): Query<ProvidersQuery>,
-) -> Result<(StatusCode, Json<ProvidersPage>)> {
+    Query(query): Query<WorkspaceProvidersQuery>,
+) -> Result<(StatusCode, Json<WorkspaceProvidersPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace providers");
 
     let workspace = authz.workspace;
@@ -167,8 +172,8 @@ async fn list_providers(
 
     Ok((
         StatusCode::OK,
-        Json(ProvidersPage::from_cursor_page(page, |wp| {
-            Provider::from_model(wp.item, workspace.slug.clone(), wp.account.into())
+        Json(WorkspaceProvidersPage::from_cursor_page(page, |wp| {
+            WorkspaceProvider::from_model(wp.item, workspace.slug.clone(), wp.account.into())
         })),
     ))
 }
@@ -179,7 +184,7 @@ fn list_providers_docs(op: TransformOperation) -> TransformOperation {
             "Returns all configured inference providers for the workspace. Only metadata is \
              returned; encrypted credentials are never exposed.",
         )
-        .response::<200, Json<ProvidersPage>>()
+        .response::<200, Json<WorkspaceProvidersPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
 }
@@ -199,8 +204,8 @@ fn list_providers_docs(op: TransformOperation) -> TransformOperation {
 async fn read_provider(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewProviders>,
-    Path(path_params): Path<ProviderPathParams>,
-) -> Result<(StatusCode, Json<Provider>)> {
+    Path(path_params): Path<WorkspaceProviderPathParams>,
+) -> Result<(StatusCode, Json<WorkspaceProvider>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace provider");
 
     let workspace = authz.workspace;
@@ -212,7 +217,7 @@ async fn read_provider(
 
     Ok((
         StatusCode::OK,
-        Json(Provider::from_model(
+        Json(WorkspaceProvider::from_model(
             found.item,
             workspace.slug,
             found.account.into(),
@@ -223,7 +228,7 @@ async fn read_provider(
 fn read_provider_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get provider")
         .description("Returns provider metadata without encrypted credentials.")
-        .response::<200, Json<Provider>>()
+        .response::<200, Json<WorkspaceProvider>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -245,10 +250,10 @@ async fn update_provider(
     State(crypto): State<CryptoService>,
     State(endpoint_policy): State<EndpointPolicy>,
     authz: Authorized<markers::ManageProviders>,
-    Path(path_params): Path<ProviderPathParams>,
+    Path(path_params): Path<WorkspaceProviderPathParams>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<UpdateProvider>,
-) -> Result<(StatusCode, Json<Provider>)> {
+    ValidateJson(request): ValidateJson<UpdateWorkspaceProvider>,
+) -> Result<(StatusCode, Json<WorkspaceProvider>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace provider");
 
     let account_id = authz.account_id;
@@ -295,7 +300,7 @@ async fn update_provider(
             None => (None, None),
         };
 
-        let update_data = UpdateWorkspaceProvider {
+        let update_data = model::UpdateWorkspaceProvider {
             display_name: request.display_name,
             provider,
             is_active: request.is_active,
@@ -305,12 +310,12 @@ async fn update_provider(
         conn.update_workspace_provider(provider_id, update_data)
             .await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::ProviderUpdated(ProviderUpdated {
+            event::WorkspaceEvent::ProviderUpdated(event::ProviderUpdated {
                 provider_id,
                 provider_name,
             }),
@@ -322,11 +327,11 @@ async fn update_provider(
 
     let found = find_provider(&mut conn, workspace.id, path_params.provider_id).await?;
 
-    tracing::info!(target: TRACING_TARGET, "Provider updated");
+    tracing::info!(target: TRACING_TARGET, "WorkspaceProvider updated");
 
     Ok((
         StatusCode::OK,
-        Json(Provider::from_model(
+        Json(WorkspaceProvider::from_model(
             found.item,
             workspace.slug,
             found.account.into(),
@@ -337,7 +342,7 @@ async fn update_provider(
 fn update_provider_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update provider")
         .description("Updates provider name or encrypted data.")
-        .response::<200, Json<Provider>>()
+        .response::<200, Json<WorkspaceProvider>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -358,7 +363,7 @@ fn update_provider_docs(op: TransformOperation) -> TransformOperation {
 async fn delete_provider(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ManageProviders>,
-    Path(path_params): Path<ProviderPathParams>,
+    Path(path_params): Path<WorkspaceProviderPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace provider");
@@ -374,12 +379,12 @@ async fn delete_provider(
     conn.transaction(async |conn| {
         conn.delete_workspace_provider(existing.id).await?;
         conn.emit_event(
-            EventOrigin {
+            event::EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            WorkspaceEvent::ProviderDeleted(ProviderDeleted {
+            event::WorkspaceEvent::ProviderDeleted(event::ProviderDeleted {
                 provider_id: existing.id,
                 provider_name: existing.display_name.clone(),
             }),
@@ -389,7 +394,7 @@ async fn delete_provider(
     })
     .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Provider deleted");
+    tracing::info!(target: TRACING_TARGET, "WorkspaceProvider deleted");
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -422,8 +427,8 @@ async fn verify_provider(
     State(pg_client): State<PgClient>,
     State(crypto): State<CryptoService>,
     authz: Authorized<markers::ViewProviders>,
-    Path(path_params): Path<ProviderPathParams>,
-) -> Result<(StatusCode, Json<ConnectionVerification>)> {
+    Path(path_params): Path<WorkspaceProviderPathParams>,
+) -> Result<(StatusCode, Json<WorkspaceConnectionVerification>)> {
     tracing::debug!(target: TRACING_TARGET, "Verifying workspace provider");
 
     let workspace = authz.workspace;
@@ -441,18 +446,20 @@ async fn verify_provider(
 
     let verification = match tokio::time::timeout(VERIFY_TIMEOUT, config.validate()).await {
         Ok(Ok(())) => {
-            tracing::info!(target: TRACING_TARGET, "Provider verified");
-            ConnectionVerification::reachable()
+            tracing::info!(target: TRACING_TARGET, "WorkspaceProvider verified");
+            WorkspaceConnectionVerification::reachable()
         }
         Ok(Err(err)) => {
             // Log the full error, but return only a safe reason so provider
             // endpoints/keys are not echoed to the client.
-            tracing::warn!(target: TRACING_TARGET, error = %err, "Provider verification failed");
-            ConnectionVerification::unreachable("credentials rejected or provider unreachable")
+            tracing::warn!(target: TRACING_TARGET, error = %err, "WorkspaceProvider verification failed");
+            WorkspaceConnectionVerification::unreachable(
+                "credentials rejected or provider unreachable",
+            )
         }
         Err(_elapsed) => {
-            tracing::warn!(target: TRACING_TARGET, "Provider verification timed out");
-            ConnectionVerification::unreachable("provider did not respond in time")
+            tracing::warn!(target: TRACING_TARGET, "WorkspaceProvider verification timed out");
+            WorkspaceConnectionVerification::unreachable("provider did not respond in time")
         }
     };
 
@@ -462,7 +469,7 @@ async fn verify_provider(
 fn verify_provider_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Verify provider")
         .description("Checks whether the provider is reachable with its stored credentials.")
-        .response::<200, Json<ConnectionVerification>>()
+        .response::<200, Json<WorkspaceConnectionVerification>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()

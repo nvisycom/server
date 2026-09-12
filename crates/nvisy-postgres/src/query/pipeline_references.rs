@@ -12,7 +12,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::PipelinePolicy;
-use crate::types::Handle;
+use crate::types::{Handle, PolicyKind};
 use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for pipeline reference join tables.
@@ -138,10 +138,14 @@ impl PipelineReferenceRepository for PgConnection {
             return Ok(Some(Vec::new()));
         }
 
+        // One-shot policies are not attachable to a pipeline: a pipeline references
+        // authored policies only. Excluding them here means a one-shot slug resolves
+        // as unknown, so attachment rejects it.
         let wanted: Vec<String> = slugs.iter().map(|slug| slug.as_str().to_owned()).collect();
         let found: Vec<(Handle, Uuid)> = workspace_policies::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
+            .filter(dsl::kind.eq(PolicyKind::Authored))
             .filter(dsl::slug.eq_any(&wanted))
             .select((dsl::slug, dsl::id))
             .load(self)
@@ -177,7 +181,7 @@ mod tests {
         PipelineReferenceRepository, WorkspacePipelineRepository, WorkspacePolicyRepository,
     };
     use crate::test_util::TestDatabase;
-    use crate::types::Handle;
+    use crate::types::{Handle, PolicyKind};
 
     /// Seeds a pipeline plus `count` policies, returning `(workspace_id,
     /// pipeline_id, policy_ids)`.
@@ -306,6 +310,51 @@ mod tests {
             conn.resolve_policy_slugs(Uuid::now_v7(), std::slice::from_ref(&alpha.slug))
                 .await?,
             None
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn resolve_policy_slugs_ignores_oneshot_policies() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let mut new_oneshot = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        new_oneshot.kind = PolicyKind::Oneshot;
+        new_oneshot.content_hash = Some(vec![3, 3, 3]);
+        let oneshot = conn
+            .find_or_create_oneshot_policy(
+                new_oneshot,
+                vec![3, 3, 3],
+                serde_json::json!({"v":1}),
+                None,
+            )
+            .await?;
+        let slug = oneshot.policy.policy.slug.clone();
+
+        // A one-shot policy's slug does not resolve for pipeline attachment, so the
+        // set is rejected as if the slug were unknown.
+        assert_eq!(
+            conn.resolve_policy_slugs(seeded.workspace_id, std::slice::from_ref(&slug))
+                .await?,
+            None
+        );
+
+        // Once promoted (authored, hash cleared), it resolves.
+        conn.update_workspace_policy(
+            oneshot.policy.policy.id,
+            crate::model::UpdateWorkspacePolicy {
+                kind: Some(PolicyKind::Authored),
+                content_hash: Some(None),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(
+            conn.resolve_policy_slugs(seeded.workspace_id, std::slice::from_ref(&slug))
+                .await?,
+            Some(vec![oneshot.policy.policy.id])
         );
         Ok(())
     }

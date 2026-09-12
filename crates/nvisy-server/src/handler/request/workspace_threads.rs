@@ -13,7 +13,7 @@ use crate::extract::validators::validate_non_blank;
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ThreadPathParams {
+pub struct WorkspaceThreadPathParams {
     /// Unique identifier of the thread.
     pub thread_id: Uuid,
 }
@@ -26,7 +26,7 @@ pub struct ThreadPathParams {
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct OpenThread {
+pub struct OpenWorkspaceThread {
     /// Optional title for the thread (1-255 characters). Omit for an untitled
     /// thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -41,7 +41,7 @@ pub struct OpenThread {
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct AssignReview {
+pub struct AssignWorkspaceReview {
     /// Account to assign the review to, or `null` to clear the current assignee.
     #[garde(skip)]
     pub assignee: Option<Uuid>,
@@ -51,7 +51,7 @@ pub struct AssignReview {
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct RenameThread {
+pub struct RenameWorkspaceThread {
     /// The new title (1-255 characters), or `null` to clear it. Omitting the
     /// field leaves the current title unchanged; only an explicit `null` clears
     /// it. The outer `Option` distinguishes "absent" (`None`) from "explicit

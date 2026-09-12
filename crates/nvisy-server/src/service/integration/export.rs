@@ -21,7 +21,7 @@ use super::connector::Connector;
 use super::file_source::{ByteStream, FileSource, FileUpload};
 use super::naming::{export_key, mime_from_extension};
 use crate::response::{ErrorKind, Result};
-use crate::service::{ConnectionConfig, Infra};
+use crate::service::{ConnectionConfig, CryptoService, Infra};
 
 /// Tracing target for connection sync operations.
 const TRACING_TARGET: &str = "nvisy_server::service::sync";
@@ -37,15 +37,22 @@ const EXPORT_PREFIX_SELECTED: &str = "exports/";
 #[derive(Clone)]
 pub(super) struct Exporter {
     infra: Infra,
+    crypto: CryptoService,
     connector: Connector,
     /// Maximum files uploaded concurrently within a single export batch.
     export_concurrency: usize,
 }
 
 impl Exporter {
-    pub(super) fn new(infra: Infra, connector: Connector, export_concurrency: usize) -> Self {
+    pub(super) fn new(
+        infra: Infra,
+        crypto: CryptoService,
+        connector: Connector,
+        export_concurrency: usize,
+    ) -> Self {
         Self {
             infra,
+            crypto,
             connector,
             // At least one, so a misconfigured zero never stalls the pipeline.
             export_concurrency: export_concurrency.max(1),
@@ -207,8 +214,7 @@ impl Exporter {
 
         // Stored ciphertext reader -> decrypt -> external streaming upload.
         let plaintext = Box::pin(
-            self.infra
-                .crypto
+            self.crypto
                 .decrypt_reader(connection.workspace_id, stored.into_reader()),
         );
         let body: ByteStream = Box::pin(reader_to_stream(plaintext).map_err(|err| {

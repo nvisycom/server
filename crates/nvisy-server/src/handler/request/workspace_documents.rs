@@ -20,7 +20,7 @@ use crate::service::{EngineService, UnknownFormatToken};
 #[derive(Debug, Default, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct UpdateDocument {
+pub struct UpdateWorkspaceDocument {
     /// New display name for the document.
     #[garde(length(chars, min = 1, max = 255))]
     pub display_name: Option<String>,
@@ -28,7 +28,7 @@ pub struct UpdateDocument {
     pub metadata: Option<serde_json::Value>,
 }
 
-impl UpdateDocument {
+impl UpdateWorkspaceDocument {
     pub fn into_model(self) -> UpdateDocumentModel {
         UpdateDocumentModel {
             display_name: self.display_name,
@@ -46,7 +46,7 @@ impl UpdateDocument {
 #[derive(Debug, Default, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct DeleteDocuments {
+pub struct DeleteWorkspaceDocuments {
     /// Ids of the documents to delete. Ids that are unknown, already deleted, or
     /// in another workspace are skipped rather than failing the request.
     #[garde(length(min = 1, max = 100))]
@@ -106,7 +106,7 @@ registry_token!(
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ListDocuments {
+pub struct ListWorkspaceDocuments {
     /// Search by document name (case-insensitive, partial match).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search: Option<String>,
@@ -124,7 +124,7 @@ pub struct ListDocuments {
     pub hash: Option<DocumentHash>,
 }
 
-impl ListDocuments {
+impl ListWorkspaceDocuments {
     /// Converts to the DB filter, resolving format and modality tokens to file
     /// extensions against the engine's codec registry.
     ///

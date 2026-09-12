@@ -1,7 +1,7 @@
 //! Response structures for API token operations.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::AccountApiToken;
+use nvisy_postgres::model::AccountApiToken as AccountApiTokenModel;
 use nvisy_postgres::types::ApiTokenType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use super::Page;
 /// API token response structure.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiToken {
+pub struct AccountApiToken {
     /// Unique identifier for the token.
     pub id: Uuid,
     /// Human-readable display name for the API token.
@@ -34,8 +34,8 @@ pub struct ApiToken {
     pub current: bool,
 }
 
-impl ApiToken {
-    pub fn from_model(token: AccountApiToken) -> Self {
+impl AccountApiToken {
+    pub fn from_model(token: AccountApiTokenModel) -> Self {
         Self {
             id: token.id,
             display_name: token.display_name,
@@ -55,10 +55,10 @@ impl ApiToken {
     }
 }
 
-impl ApiToken {
+impl AccountApiToken {
     /// Creates an `ApiTokenWithJWT` by adding a JWT token string.
-    pub fn with_jwt(self, jwt: String) -> ApiTokenWithJWT {
-        ApiTokenWithJWT {
+    pub fn with_jwt(self, jwt: String) -> AccountApiTokenWithJwt {
+        AccountApiTokenWithJwt {
             id: self.id,
             display_name: self.display_name,
             session_type: self.session_type,
@@ -70,12 +70,12 @@ impl ApiToken {
 }
 
 /// Paginated response for API tokens.
-pub type ApiTokensPage = Page<ApiToken>;
+pub type AccountApiTokensPage = Page<AccountApiToken>;
 
 /// API token with JWT token string (only returned on creation).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiTokenWithJWT {
+pub struct AccountApiTokenWithJwt {
     /// Unique identifier for the token.
     pub id: Uuid,
     /// Human-readable display name for the API token.

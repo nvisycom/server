@@ -12,7 +12,9 @@ use crate::model::{
     NewWorkspacePolicy, NewWorkspacePolicyVersion, UpdateWorkspacePolicy, WorkspacePolicy,
     WorkspacePolicyVersion,
 };
-use crate::types::{AccountRefRow, CursorPage, CursorPagination, WithAccountRef, keyset};
+use crate::types::{
+    AccountRefRow, CursorPage, CursorPagination, PolicyKind, WithAccountRef, keyset,
+};
 use crate::{Error, PgConnection, Result, schema};
 
 /// A logical policy paired with its current version's definition.
@@ -22,6 +24,16 @@ pub struct PolicyWithVersion {
     pub policy: WorkspacePolicy,
     /// The live version whose definition the engine consumes.
     pub version: WorkspacePolicyVersion,
+}
+
+/// A resolved one-shot policy, and whether this call created it.
+#[derive(Debug, Clone)]
+pub struct OneshotPolicy {
+    /// The policy and its current version.
+    pub policy: PolicyWithVersion,
+    /// `true` when a fresh row was inserted, `false` when an identical live
+    /// one-shot was reused.
+    pub created: bool,
 }
 
 /// Keyset for paginating a workspace's policies: newest first by `created_at`,
@@ -41,9 +53,26 @@ pub trait WorkspacePolicyRepository {
     fn create_workspace_policy(
         &mut self,
         new_policy: NewWorkspacePolicy,
-        definition: Vec<u8>,
+        definition: serde_json::Value,
         version_metadata: Option<serde_json::Value>,
     ) -> impl Future<Output = Result<PolicyWithVersion>> + Send;
+
+    /// Returns the live one-shot policy with the same content in this workspace,
+    /// creating it if absent.
+    ///
+    /// One-shot policies are content-addressed by `content_hash` (a hash of the
+    /// labels plus action): an identical one-shot is reused rather than duplicated,
+    /// so re-redacting the same label set does not accumulate rows. A fresh policy
+    /// is created with its first version; a reused one keeps its existing current
+    /// version (no new version is minted). `new_policy.kind` must be `Oneshot` and
+    /// `new_policy.content_hash` must match `content_hash`.
+    fn find_or_create_oneshot_policy(
+        &mut self,
+        new_policy: NewWorkspacePolicy,
+        content_hash: Vec<u8>,
+        definition: serde_json::Value,
+        version_metadata: Option<serde_json::Value>,
+    ) -> impl Future<Output = Result<OneshotPolicy>> + Send;
 
     /// Creates a logical policy with a placeholder definition version, returning
     /// just the logical policy — a convenience for tests that do not exercise the
@@ -58,7 +87,7 @@ pub trait WorkspacePolicyRepository {
     {
         async move {
             let created = self
-                .create_workspace_policy(new_policy, vec![1, 2, 3], None)
+                .create_workspace_policy(new_policy, serde_json::json!({ "test": true }), None)
                 .await?;
             Ok(created.policy)
         }
@@ -73,7 +102,7 @@ pub trait WorkspacePolicyRepository {
         workspace_id: Uuid,
         policy_id: Uuid,
         account_id: Uuid,
-        definition: Vec<u8>,
+        definition: serde_json::Value,
         version_metadata: Option<serde_json::Value>,
     ) -> impl Future<Output = Result<WorkspacePolicyVersion>> + Send;
 
@@ -114,6 +143,15 @@ pub trait WorkspacePolicyRepository {
         updates: UpdateWorkspacePolicy,
     ) -> impl Future<Output = Result<WorkspacePolicy>> + Send;
 
+    /// Promotes a one-shot policy to authored, clearing its dedup hash, only while
+    /// it is still a live one-shot. Returns whether the transition changed a row,
+    /// so a concurrent promotion (or an already-authored policy) is a no-op rather
+    /// than a duplicate.
+    fn promote_policy_to_authored(
+        &mut self,
+        policy_id: Uuid,
+    ) -> impl Future<Output = Result<bool>> + Send;
+
     /// Soft deletes a policy by setting the deletion timestamp.
     fn delete_workspace_policy(
         &mut self,
@@ -125,7 +163,7 @@ impl WorkspacePolicyRepository for PgConnection {
     async fn create_workspace_policy(
         &mut self,
         new_policy: NewWorkspacePolicy,
-        definition: Vec<u8>,
+        definition: serde_json::Value,
         version_metadata: Option<serde_json::Value>,
     ) -> Result<PolicyWithVersion> {
         use diesel_async::AsyncConnection;
@@ -167,12 +205,61 @@ impl WorkspacePolicyRepository for PgConnection {
         .await
     }
 
+    async fn find_or_create_oneshot_policy(
+        &mut self,
+        new_policy: NewWorkspacePolicy,
+        content_hash: Vec<u8>,
+        definition: serde_json::Value,
+        version_metadata: Option<serde_json::Value>,
+    ) -> Result<OneshotPolicy> {
+        if new_policy.kind != PolicyKind::Oneshot
+            || new_policy.content_hash.as_deref() != Some(content_hash.as_slice())
+        {
+            return Err(Error::unexpected(
+                "one-shot policy kind and content hash do not match",
+            ));
+        }
+
+        let workspace_id = new_policy.workspace_id;
+
+        // Reuse an identical live one-shot if one already exists.
+        if let Some(existing) = find_live_oneshot(self, workspace_id, &content_hash).await? {
+            return Ok(OneshotPolicy {
+                policy: existing,
+                created: false,
+            });
+        }
+
+        // Otherwise create it. A concurrent creator may have inserted the same
+        // content between the lookup and here; the partial unique dedup index turns
+        // that into a unique violation, at which point the existing row is read back.
+        match self
+            .create_workspace_policy(new_policy, definition, version_metadata)
+            .await
+        {
+            Ok(policy) => Ok(OneshotPolicy {
+                policy,
+                created: true,
+            }),
+            Err(err) if err.is_unique_violation() => {
+                let existing = find_live_oneshot(self, workspace_id, &content_hash)
+                    .await?
+                    .ok_or(err)?;
+                Ok(OneshotPolicy {
+                    policy: existing,
+                    created: false,
+                })
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     async fn create_policy_version(
         &mut self,
         workspace_id: Uuid,
         policy_id: Uuid,
         account_id: Uuid,
-        definition: Vec<u8>,
+        definition: serde_json::Value,
         version_metadata: Option<serde_json::Value>,
     ) -> Result<WorkspacePolicyVersion> {
         use diesel::dsl::max;
@@ -313,11 +400,14 @@ impl WorkspacePolicyRepository for PgConnection {
         use schema::workspace_policies::dsl;
         use schema::{accounts, workspace_policies};
 
+        // One-shot policies are excluded: the default list shows only authored,
+        // permanent policies. A promoted policy (now authored) appears here.
         let total = if pagination.include_count {
             Some(
                 workspace_policies::table
                     .filter(dsl::workspace_id.eq(workspace_id))
                     .filter(dsl::deleted_at.is_null())
+                    .filter(dsl::kind.eq(PolicyKind::Authored))
                     .count()
                     .get_result::<i64>(self)
                     .await
@@ -331,6 +421,7 @@ impl WorkspacePolicyRepository for PgConnection {
             .inner_join(accounts::table)
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
+            .filter(dsl::kind.eq(PolicyKind::Authored))
             .into_boxed();
 
         let after = pagination
@@ -387,6 +478,29 @@ impl WorkspacePolicyRepository for PgConnection {
         Ok(policy)
     }
 
+    async fn promote_policy_to_authored(&mut self, policy_id: Uuid) -> Result<bool> {
+        use schema::workspace_policies::{self, dsl};
+
+        // Conditional on the row still being a live one-shot, so the transition is
+        // atomic: a concurrent promotion updates zero rows and the caller emits no
+        // duplicate event.
+        let affected = diesel::update(
+            workspace_policies::table
+                .filter(dsl::id.eq(policy_id))
+                .filter(dsl::deleted_at.is_null())
+                .filter(dsl::kind.eq(PolicyKind::Oneshot)),
+        )
+        .set((
+            dsl::kind.eq(PolicyKind::Authored),
+            dsl::content_hash.eq(None::<Vec<u8>>),
+        ))
+        .execute(self)
+        .await
+        .map_err(Error::from)?;
+
+        Ok(affected == 1)
+    }
+
     async fn delete_workspace_policy(&mut self, policy_id: Uuid) -> Result<()> {
         use diesel::dsl::now;
         use schema::workspace_policies::{self, dsl};
@@ -398,6 +512,32 @@ impl WorkspacePolicyRepository for PgConnection {
             .map_err(Error::from)?;
 
         Ok(())
+    }
+}
+
+/// Finds the live one-shot policy with `content_hash` in a workspace, paired with
+/// its current version. Only `kind = Oneshot` rows carry a content hash, so this
+/// never matches an authored policy.
+async fn find_live_oneshot(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    content_hash: &[u8],
+) -> Result<Option<PolicyWithVersion>> {
+    use schema::workspace_policies::{self, dsl};
+
+    let policy_id = workspace_policies::table
+        .filter(dsl::workspace_id.eq(workspace_id))
+        .filter(dsl::content_hash.eq(content_hash))
+        .filter(dsl::deleted_at.is_null())
+        .select(dsl::id)
+        .first::<Uuid>(conn)
+        .await
+        .optional()
+        .map_err(Error::from)?;
+
+    match policy_id {
+        Some(id) => conn.find_policy_with_version(workspace_id, id).await,
+        None => Ok(None),
     }
 }
 
@@ -520,13 +660,13 @@ mod tests {
         let created = conn
             .create_workspace_policy(
                 NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id),
-                vec![1, 2, 3],
+                serde_json::json!({ "v": 1 }),
                 None,
             )
             .await?;
         assert_eq!(created.version.version_number, 1);
         assert_eq!(created.policy.current_version_id, Some(created.version.id));
-        assert_eq!(created.version.definition, vec![1, 2, 3]);
+        assert_eq!(created.version.definition, serde_json::json!({ "v": 1 }));
 
         let found = conn
             .find_policy_with_version(seeded.workspace_id, created.policy.id)
@@ -545,7 +685,7 @@ mod tests {
         let created = conn
             .create_workspace_policy(
                 NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id),
-                vec![1],
+                serde_json::json!({ "v": 1 }),
                 None,
             )
             .await?;
@@ -555,7 +695,7 @@ mod tests {
                 seeded.workspace_id,
                 created.policy.id,
                 seeded.account_id,
-                vec![2],
+                serde_json::json!({ "v": 2 }),
                 None,
             )
             .await?;
@@ -567,13 +707,13 @@ mod tests {
             .await?
             .expect("policy present");
         assert_eq!(current.version.id, v2.id);
-        assert_eq!(current.version.definition, vec![2]);
+        assert_eq!(current.version.definition, serde_json::json!({ "v": 2 }));
 
         let v1 = conn
             .find_policy_version(seeded.workspace_id, created.version.id)
             .await?
             .expect("v1 still resolvable");
-        assert_eq!(v1.definition, vec![1]);
+        assert_eq!(v1.definition, serde_json::json!({ "v": 1 }));
 
         // A further edit continues the sequence: next_number is max + 1 under the
         // parent-policy lock, so versions stay dense and monotonic.
@@ -582,7 +722,7 @@ mod tests {
                 seeded.workspace_id,
                 created.policy.id,
                 seeded.account_id,
-                vec![3],
+                serde_json::json!({ "v": 3 }),
                 None,
             )
             .await?;
@@ -608,7 +748,7 @@ mod tests {
         let created = conn
             .create_workspace_policy(
                 NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id),
-                vec![1],
+                serde_json::json!({ "v": 1 }),
                 None,
             )
             .await?;
@@ -635,6 +775,206 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oneshot_policy_is_excluded_from_the_list_until_promoted() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let mut new_oneshot = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        new_oneshot.kind = PolicyKind::Oneshot;
+        new_oneshot.content_hash = Some(vec![9, 9, 9]);
+        let oneshot = conn
+            .find_or_create_oneshot_policy(
+                new_oneshot,
+                vec![9, 9, 9],
+                serde_json::json!({"v":1}),
+                None,
+            )
+            .await?;
+        assert!(oneshot.created);
+        assert_eq!(oneshot.policy.policy.kind, PolicyKind::Oneshot);
+
+        let permanent = conn
+            .create_test_policy(NewWorkspacePolicy::test(
+                seeded.workspace_id,
+                seeded.account_id,
+            ))
+            .await?;
+
+        // The default list shows the authored policy but hides the one-shot.
+        let page = conn
+            .cursor_list_workspace_policies(seeded.workspace_id, CursorPagination::new(50))
+            .await?;
+        let listed: Vec<Uuid> = page.items.iter().map(|p| p.item.id).collect();
+        assert!(listed.contains(&permanent.id));
+        assert!(!listed.contains(&oneshot.policy.policy.id));
+
+        // Promoting (authored, hash cleared) makes it appear.
+        conn.update_workspace_policy(
+            oneshot.policy.policy.id,
+            UpdateWorkspacePolicy {
+                kind: Some(PolicyKind::Authored),
+                content_hash: Some(None),
+                ..Default::default()
+            },
+        )
+        .await?;
+        let page = conn
+            .cursor_list_workspace_policies(seeded.workspace_id, CursorPagination::new(50))
+            .await?;
+        assert!(
+            page.items
+                .iter()
+                .any(|p| p.item.id == oneshot.policy.policy.id)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn oneshot_dedups_identical_content_and_distinguishes_different() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let mut first_new = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        first_new.kind = PolicyKind::Oneshot;
+        first_new.content_hash = Some(vec![1, 1, 1]);
+        let first = conn
+            .find_or_create_oneshot_policy(
+                first_new,
+                vec![1, 1, 1],
+                serde_json::json!({"v":7}),
+                None,
+            )
+            .await?;
+        assert!(first.created);
+
+        // Same content reuses the same row and mints no new version.
+        let mut again_new = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        again_new.kind = PolicyKind::Oneshot;
+        again_new.content_hash = Some(vec![1, 1, 1]);
+        let again = conn
+            .find_or_create_oneshot_policy(
+                again_new,
+                vec![1, 1, 1],
+                serde_json::json!({"v":7}),
+                None,
+            )
+            .await?;
+        assert!(!again.created, "identical content is reused");
+        assert_eq!(again.policy.policy.id, first.policy.policy.id);
+        assert_eq!(
+            conn.list_policy_versions(first.policy.policy.id)
+                .await?
+                .len(),
+            1,
+            "reuse mints no new version"
+        );
+
+        // Different content creates a distinct row.
+        let mut other_new = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        other_new.kind = PolicyKind::Oneshot;
+        other_new.content_hash = Some(vec![2, 2, 2]);
+        let other = conn
+            .find_or_create_oneshot_policy(
+                other_new,
+                vec![2, 2, 2],
+                serde_json::json!({"v":8}),
+                None,
+            )
+            .await?;
+        assert!(other.created);
+        assert_ne!(other.policy.policy.id, first.policy.policy.id);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_or_create_oneshot_rejects_mismatched_kind_or_hash() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // An authored kind is not a one-shot: rejected before any write.
+        let mut wrong_kind = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        wrong_kind.kind = PolicyKind::Authored;
+        wrong_kind.content_hash = Some(vec![9, 9, 9]);
+        assert!(
+            conn.find_or_create_oneshot_policy(
+                wrong_kind,
+                vec![9, 9, 9],
+                serde_json::json!({"v":1}),
+                None,
+            )
+            .await
+            .is_err(),
+            "authored kind is rejected"
+        );
+
+        // A content hash that disagrees with the lookup key is rejected.
+        let mut wrong_hash = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        wrong_hash.kind = PolicyKind::Oneshot;
+        wrong_hash.content_hash = Some(vec![1, 1, 1]);
+        assert!(
+            conn.find_or_create_oneshot_policy(
+                wrong_hash,
+                vec![2, 2, 2],
+                serde_json::json!({"v":1}),
+                None,
+            )
+            .await
+            .is_err(),
+            "mismatched content hash is rejected"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_promoted_oneshot_no_longer_dedups() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let mut new_oneshot = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        new_oneshot.kind = PolicyKind::Oneshot;
+        new_oneshot.content_hash = Some(vec![5, 5, 5]);
+        let oneshot = conn
+            .find_or_create_oneshot_policy(
+                new_oneshot,
+                vec![5, 5, 5],
+                serde_json::json!({"v":1}),
+                None,
+            )
+            .await?;
+
+        // Promotion clears the hash, so the content leaves the dedup set.
+        conn.update_workspace_policy(
+            oneshot.policy.policy.id,
+            UpdateWorkspacePolicy {
+                kind: Some(PolicyKind::Authored),
+                content_hash: Some(None),
+                ..Default::default()
+            },
+        )
+        .await?;
+
+        // A new one-shot with the same content now creates a fresh row.
+        let mut again_new = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        again_new.kind = PolicyKind::Oneshot;
+        again_new.content_hash = Some(vec![5, 5, 5]);
+        let again = conn
+            .find_or_create_oneshot_policy(
+                again_new,
+                vec![5, 5, 5],
+                serde_json::json!({"v":1}),
+                None,
+            )
+            .await?;
+        assert!(again.created);
+        assert_ne!(again.policy.policy.id, oneshot.policy.policy.id);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn versions_resolve_after_the_policy_is_soft_deleted() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
@@ -643,7 +983,7 @@ mod tests {
         let created = conn
             .create_workspace_policy(
                 NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id),
-                vec![1],
+                serde_json::json!({ "v": 1 }),
                 None,
             )
             .await?;
@@ -661,6 +1001,39 @@ mod tests {
                 .await?
                 .is_some()
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn promote_to_authored_transitions_once() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let mut new_oneshot = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        new_oneshot.kind = PolicyKind::Oneshot;
+        new_oneshot.content_hash = Some(vec![1, 2, 3]);
+        let oneshot = conn
+            .find_or_create_oneshot_policy(
+                new_oneshot,
+                vec![1, 2, 3],
+                serde_json::json!({ "test": true }),
+                None,
+            )
+            .await?;
+        let policy_id = oneshot.policy.policy.id;
+
+        // The first promotion flips the row; a second is a no-op, so a concurrent
+        // caller cannot double-promote or emit a duplicate event.
+        assert!(conn.promote_policy_to_authored(policy_id).await?);
+        assert!(!conn.promote_policy_to_authored(policy_id).await?);
+
+        let promoted = conn
+            .find_policy_in_workspace(seeded.workspace_id, policy_id)
+            .await?
+            .expect("policy present");
+        assert_eq!(promoted.kind, PolicyKind::Authored);
+        assert!(promoted.content_hash.is_none());
         Ok(())
     }
 }

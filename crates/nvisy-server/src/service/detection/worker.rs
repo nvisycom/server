@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use elide_pipeline::RasterMode;
+use elide_pipeline::primitive::RasterMode;
 use nvisy_postgres::model::{
     NewBlob, NewWorkspaceAudit, UpdateWorkspaceDetection, WorkspaceDetection, WorkspacePipeline,
 };
@@ -34,10 +34,7 @@ use super::support::{
 use crate::extract::SecurityContext;
 use crate::handler::request::PipelineDefinition;
 use crate::response::{ErrorKind, Result};
-use crate::service::{
-    DetectionCompleted, EngineService, EventOrigin, Infra, RunBlobStore, Worker, WorkspaceEvent,
-    event_outbox_row,
-};
+use crate::service::{EngineService, Infra, RunBlobStore, Worker, event};
 
 /// Tracing target for detection worker operations.
 const TRACING_TARGET: &str = "nvisy_server::worker::detection";
@@ -425,9 +422,7 @@ impl DetectionWorker {
                 raster_mode_of(&settings),
             );
 
-            let resolved =
-                resolve_policies(&mut conn, &self.infra.crypto, job.workspace_id, pipeline.id)
-                    .await?;
+            let resolved = resolve_policies(&mut conn, job.workspace_id, pipeline.id).await?;
             if resolved.is_empty() {
                 return Err(ErrorKind::BadRequest
                     .with_message("Pipeline has no policies")
@@ -510,14 +505,15 @@ impl DetectionWorker {
         // transaction is `PgError`-typed for its rollback sentinel, and insert it
         // alongside the finalize so the `Complete` event commits atomically with
         // the detection.
-        let completed_event = WorkspaceEvent::DetectionCompleted(DetectionCompleted {
-            detection_id: detection.id,
-            pipeline_slug: pipeline.slug.clone(),
-            input_document_name: Some(document.display_name.clone()),
-            notify: detection.account_id,
-        });
-        let outbox_row = event_outbox_row(
-            EventOrigin {
+        let completed_event =
+            event::WorkspaceEvent::DetectionCompleted(event::DetectionCompleted {
+                detection_id: detection.id,
+                pipeline_slug: pipeline.slug.clone(),
+                input_document_name: Some(document.display_name.clone()),
+                notify: detection.account_id,
+            });
+        let outbox_row = event::event_outbox_row(
+            event::EventOrigin {
                 workspace_id: job.workspace_id,
                 account_id: detection.account_id,
                 security: &SecurityContext::default(),

@@ -13,7 +13,9 @@ use nvisy_postgres::model::WorkspaceConnection;
 
 use super::file_source::{FileServiceSource, FileSource, ObjectStoreSource};
 use crate::response::{ErrorKind, Result};
-use crate::service::{ConnectionConfig, ExternalObjectStore, Infra, persist_refreshed_tokens};
+use crate::service::{
+    ConnectionConfig, CryptoService, ExternalObjectStore, Infra, persist_refreshed_tokens,
+};
 
 /// Tracing target for connection sync operations.
 const TRACING_TARGET: &str = "nvisy_server::service::sync";
@@ -22,14 +24,21 @@ const TRACING_TARGET: &str = "nvisy_server::service::sync";
 #[derive(Clone)]
 pub(super) struct Connector {
     infra: Infra,
+    crypto: CryptoService,
     object: ExternalObjectStore,
     cloud: FileService,
 }
 
 impl Connector {
-    pub(super) fn new(infra: Infra, object: ExternalObjectStore, cloud: FileService) -> Self {
+    pub(super) fn new(
+        infra: Infra,
+        crypto: CryptoService,
+        object: ExternalObjectStore,
+        cloud: FileService,
+    ) -> Self {
         Self {
             infra,
+            crypto,
             object,
             cloud,
         }
@@ -91,7 +100,7 @@ impl Connector {
         let mut conn = self.infra.postgres.get_connection().await?;
         persist_refreshed_tokens(
             &mut conn,
-            &self.infra.crypto,
+            &self.crypto,
             connection.workspace_id,
             connection.id,
             new_tokens,

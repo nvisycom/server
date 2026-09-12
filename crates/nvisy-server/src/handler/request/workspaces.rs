@@ -111,7 +111,7 @@ impl UpdateWorkspace {
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct UpdateNotificationSettings {
+pub struct UpdateWorkspaceNotificationSettings {
     /// Whether to send email notifications.
     pub notify_via_email: Option<bool>,
     /// Notification events to receive in-app.
@@ -120,7 +120,7 @@ pub struct UpdateNotificationSettings {
     pub notification_events_email: Option<Vec<NotificationEvent>>,
 }
 
-impl UpdateNotificationSettings {
+impl UpdateWorkspaceNotificationSettings {
     pub fn into_model(self) -> UpdateWorkspaceMember {
         UpdateWorkspaceMember {
             notify_via_email: self.notify_via_email,
