@@ -1,7 +1,7 @@
 //! Workspace activity response types.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::WorkspaceActivity;
+use nvisy_postgres::model::WorkspaceActivity as WorkspaceActivityModel;
 use nvisy_postgres::types::{ActivityPayload, Handle};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -15,7 +15,7 @@ use super::{AccountRef, Page};
 /// `{ id, workspaceSlug, performedBy, payload: { activityType, <params...> }, createdAt }`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Activity {
+pub struct WorkspaceActivity {
     /// Unique activity identifier.
     pub id: Uuid,
     /// Handle of the workspace this activity belongs to.
@@ -31,11 +31,11 @@ pub struct Activity {
 }
 
 /// Paginated list of activities.
-pub type ActivitiesPage = Page<Activity>;
+pub type WorkspaceActivitiesPage = Page<WorkspaceActivity>;
 
-impl Activity {
+impl WorkspaceActivity {
     pub fn from_model(
-        activity: WorkspaceActivity,
+        activity: WorkspaceActivityModel,
         workspace_slug: Handle,
         performed_by: AccountRef,
     ) -> Self {

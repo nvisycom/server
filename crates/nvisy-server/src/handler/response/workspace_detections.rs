@@ -1,4 +1,4 @@
-//! Detection response types.
+//! WorkspaceDetection response types.
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceDetection as DetectionModel;
@@ -20,7 +20,7 @@ use super::{AccountRef, Page};
 /// endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Detection {
+pub struct WorkspaceDetection {
     /// Opaque identifier of the detection.
     pub id: DetectionId,
     /// Handle of the pipeline this detection belongs to.
@@ -55,9 +55,9 @@ pub struct Detection {
 }
 
 /// Paginated response for detections.
-pub type DetectionsPage = Page<Detection>;
+pub type WorkspaceDetectionsPage = Page<WorkspaceDetection>;
 
-impl Detection {
+impl WorkspaceDetection {
     /// Creates a detection response from the database model, the slugs of its
     /// owning pipeline and workspace, the triggering account, and the resolved
     /// input file display name.

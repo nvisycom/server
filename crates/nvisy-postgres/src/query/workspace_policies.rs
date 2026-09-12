@@ -53,7 +53,7 @@ pub trait WorkspacePolicyRepository {
     fn create_workspace_policy(
         &mut self,
         new_policy: NewWorkspacePolicy,
-        definition: Vec<u8>,
+        definition: serde_json::Value,
         version_metadata: Option<serde_json::Value>,
     ) -> impl Future<Output = Result<PolicyWithVersion>> + Send;
 
@@ -70,7 +70,7 @@ pub trait WorkspacePolicyRepository {
         &mut self,
         new_policy: NewWorkspacePolicy,
         content_hash: Vec<u8>,
-        definition: Vec<u8>,
+        definition: serde_json::Value,
         version_metadata: Option<serde_json::Value>,
     ) -> impl Future<Output = Result<OneshotPolicy>> + Send;
 
@@ -87,7 +87,7 @@ pub trait WorkspacePolicyRepository {
     {
         async move {
             let created = self
-                .create_workspace_policy(new_policy, vec![1, 2, 3], None)
+                .create_workspace_policy(new_policy, serde_json::json!({ "test": true }), None)
                 .await?;
             Ok(created.policy)
         }
@@ -102,7 +102,7 @@ pub trait WorkspacePolicyRepository {
         workspace_id: Uuid,
         policy_id: Uuid,
         account_id: Uuid,
-        definition: Vec<u8>,
+        definition: serde_json::Value,
         version_metadata: Option<serde_json::Value>,
     ) -> impl Future<Output = Result<WorkspacePolicyVersion>> + Send;
 
@@ -154,7 +154,7 @@ impl WorkspacePolicyRepository for PgConnection {
     async fn create_workspace_policy(
         &mut self,
         new_policy: NewWorkspacePolicy,
-        definition: Vec<u8>,
+        definition: serde_json::Value,
         version_metadata: Option<serde_json::Value>,
     ) -> Result<PolicyWithVersion> {
         use diesel_async::AsyncConnection;
@@ -200,7 +200,7 @@ impl WorkspacePolicyRepository for PgConnection {
         &mut self,
         new_policy: NewWorkspacePolicy,
         content_hash: Vec<u8>,
-        definition: Vec<u8>,
+        definition: serde_json::Value,
         version_metadata: Option<serde_json::Value>,
     ) -> Result<OneshotPolicy> {
         let workspace_id = new_policy.workspace_id;
@@ -242,7 +242,7 @@ impl WorkspacePolicyRepository for PgConnection {
         workspace_id: Uuid,
         policy_id: Uuid,
         account_id: Uuid,
-        definition: Vec<u8>,
+        definition: serde_json::Value,
         version_metadata: Option<serde_json::Value>,
     ) -> Result<WorkspacePolicyVersion> {
         use diesel::dsl::max;
@@ -620,13 +620,13 @@ mod tests {
         let created = conn
             .create_workspace_policy(
                 NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id),
-                vec![1, 2, 3],
+                serde_json::json!({ "v": 1 }),
                 None,
             )
             .await?;
         assert_eq!(created.version.version_number, 1);
         assert_eq!(created.policy.current_version_id, Some(created.version.id));
-        assert_eq!(created.version.definition, vec![1, 2, 3]);
+        assert_eq!(created.version.definition, serde_json::json!({ "v": 1 }));
 
         let found = conn
             .find_policy_with_version(seeded.workspace_id, created.policy.id)
@@ -645,7 +645,7 @@ mod tests {
         let created = conn
             .create_workspace_policy(
                 NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id),
-                vec![1],
+                serde_json::json!({ "v": 1 }),
                 None,
             )
             .await?;
@@ -655,7 +655,7 @@ mod tests {
                 seeded.workspace_id,
                 created.policy.id,
                 seeded.account_id,
-                vec![2],
+                serde_json::json!({ "v": 2 }),
                 None,
             )
             .await?;
@@ -667,13 +667,13 @@ mod tests {
             .await?
             .expect("policy present");
         assert_eq!(current.version.id, v2.id);
-        assert_eq!(current.version.definition, vec![2]);
+        assert_eq!(current.version.definition, serde_json::json!({ "v": 2 }));
 
         let v1 = conn
             .find_policy_version(seeded.workspace_id, created.version.id)
             .await?
             .expect("v1 still resolvable");
-        assert_eq!(v1.definition, vec![1]);
+        assert_eq!(v1.definition, serde_json::json!({ "v": 1 }));
 
         // A further edit continues the sequence: next_number is max + 1 under the
         // parent-policy lock, so versions stay dense and monotonic.
@@ -682,7 +682,7 @@ mod tests {
                 seeded.workspace_id,
                 created.policy.id,
                 seeded.account_id,
-                vec![3],
+                serde_json::json!({ "v": 3 }),
                 None,
             )
             .await?;
@@ -708,7 +708,7 @@ mod tests {
         let created = conn
             .create_workspace_policy(
                 NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id),
-                vec![1],
+                serde_json::json!({ "v": 1 }),
                 None,
             )
             .await?;
@@ -744,7 +744,12 @@ mod tests {
         new_oneshot.kind = PolicyKind::Oneshot;
         new_oneshot.content_hash = Some(vec![9, 9, 9]);
         let oneshot = conn
-            .find_or_create_oneshot_policy(new_oneshot, vec![9, 9, 9], vec![1, 2, 3], None)
+            .find_or_create_oneshot_policy(
+                new_oneshot,
+                vec![9, 9, 9],
+                serde_json::json!({"v":1}),
+                None,
+            )
             .await?;
         assert!(oneshot.created);
         assert_eq!(oneshot.policy.policy.kind, PolicyKind::Oneshot);
@@ -795,7 +800,12 @@ mod tests {
         first_new.kind = PolicyKind::Oneshot;
         first_new.content_hash = Some(vec![1, 1, 1]);
         let first = conn
-            .find_or_create_oneshot_policy(first_new, vec![1, 1, 1], vec![7], None)
+            .find_or_create_oneshot_policy(
+                first_new,
+                vec![1, 1, 1],
+                serde_json::json!({"v":7}),
+                None,
+            )
             .await?;
         assert!(first.created);
 
@@ -804,7 +814,12 @@ mod tests {
         again_new.kind = PolicyKind::Oneshot;
         again_new.content_hash = Some(vec![1, 1, 1]);
         let again = conn
-            .find_or_create_oneshot_policy(again_new, vec![1, 1, 1], vec![7], None)
+            .find_or_create_oneshot_policy(
+                again_new,
+                vec![1, 1, 1],
+                serde_json::json!({"v":7}),
+                None,
+            )
             .await?;
         assert!(!again.created, "identical content is reused");
         assert_eq!(again.policy.policy.id, first.policy.policy.id);
@@ -821,7 +836,12 @@ mod tests {
         other_new.kind = PolicyKind::Oneshot;
         other_new.content_hash = Some(vec![2, 2, 2]);
         let other = conn
-            .find_or_create_oneshot_policy(other_new, vec![2, 2, 2], vec![8], None)
+            .find_or_create_oneshot_policy(
+                other_new,
+                vec![2, 2, 2],
+                serde_json::json!({"v":8}),
+                None,
+            )
             .await?;
         assert!(other.created);
         assert_ne!(other.policy.policy.id, first.policy.policy.id);
@@ -838,7 +858,12 @@ mod tests {
         new_oneshot.kind = PolicyKind::Oneshot;
         new_oneshot.content_hash = Some(vec![5, 5, 5]);
         let oneshot = conn
-            .find_or_create_oneshot_policy(new_oneshot, vec![5, 5, 5], vec![1], None)
+            .find_or_create_oneshot_policy(
+                new_oneshot,
+                vec![5, 5, 5],
+                serde_json::json!({"v":1}),
+                None,
+            )
             .await?;
 
         // Promotion clears the hash, so the content leaves the dedup set.
@@ -857,7 +882,12 @@ mod tests {
         again_new.kind = PolicyKind::Oneshot;
         again_new.content_hash = Some(vec![5, 5, 5]);
         let again = conn
-            .find_or_create_oneshot_policy(again_new, vec![5, 5, 5], vec![1], None)
+            .find_or_create_oneshot_policy(
+                again_new,
+                vec![5, 5, 5],
+                serde_json::json!({"v":1}),
+                None,
+            )
             .await?;
         assert!(again.created);
         assert_ne!(again.policy.policy.id, oneshot.policy.policy.id);
@@ -873,7 +903,7 @@ mod tests {
         let created = conn
             .create_workspace_policy(
                 NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id),
-                vec![1],
+                serde_json::json!({ "v": 1 }),
                 None,
             )
             .await?;

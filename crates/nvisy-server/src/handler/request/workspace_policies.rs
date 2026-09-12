@@ -1,10 +1,8 @@
 //! Policy request types.
 
-use elide_pipeline::entity::{Label, LabelRef};
-use elide_pipeline::policy::redaction::{ModalityRedactions, TextRedaction};
-use elide_pipeline::policy::{
-    CustomMatcher, LabelScope, PolicyDefinition, PolicyRule, TemplateOrigin,
-};
+use elide_pipeline::entity::LabelRef;
+use elide_pipeline::governance::policy::{LabelScope, Policy, PolicyRule, TemplateOrigin};
+use elide_pipeline::governance::redaction::{ModalityRedactions, TextRedaction};
 use elide_pipeline::template::PolicyTemplate;
 use garde::Validate;
 use nvisy_postgres::types::Handle;
@@ -22,7 +20,7 @@ use uuid::Uuid;
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct PolicyPathParams {
+pub struct WorkspacePolicyPathParams {
     /// URL slug of the policy, unique within its workspace.
     pub policy_slug: String,
 }
@@ -30,11 +28,11 @@ pub struct PolicyPathParams {
 /// A client-authored policy body: the parts of a policy definition a caller may
 /// set, without the fields the server owns.
 ///
-/// The engine's `PolicyDefinition` also carries an `id` and a `template` origin.
-/// Both are server-owned — the `id` is minted at creation and the `template`
-/// records which built-in a policy was seeded from (provenance). Neither is
-/// representable here, so a client cannot mint ids or forge provenance; the
-/// server stamps them in [`into_definition`](PolicyDraft::into_definition).
+/// The engine's `Policy` also carries an `id` and a `template` origin. Both are
+/// server-owned — the `id` is minted at creation and the `template` records which
+/// built-in a policy was seeded from (provenance). Neither is representable here,
+/// so a client cannot mint ids or forge provenance; the server stamps them in
+/// [`into_definition`](PolicyDraft::into_definition).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PolicyDraft {
@@ -46,13 +44,6 @@ pub struct PolicyDraft {
     /// What this policy detects: named, attributed label sets.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scopes: Vec<LabelScope>,
-    /// Caller-authored custom label schemas this policy introduces.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub custom: Vec<Label>,
-    /// How to detect the custom labels this policy introduces. A custom label
-    /// without a matcher is declared but never found.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub matchers: Vec<CustomMatcher>,
     /// Ordered rules. First match wins within this policy.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<PolicyRule>,
@@ -62,19 +53,16 @@ pub struct PolicyDraft {
 }
 
 impl PolicyDraft {
-    /// Builds a full engine [`PolicyDefinition`] from this draft, stamping the
-    /// server-owned fields: a fresh `id`, and the given `template` origin
-    /// (`None` for a hand-authored body, the built-in's origin when seeded from
-    /// a template).
-    pub fn into_definition(self, template: Option<TemplateOrigin>) -> PolicyDefinition {
-        PolicyDefinition {
+    /// Builds a full engine [`Policy`] from this draft, stamping the server-owned
+    /// fields: a fresh `id`, and the given `template` origin (`None` for a
+    /// hand-authored body, the built-in's origin when seeded from a template).
+    pub fn into_definition(self, template: Option<TemplateOrigin>) -> Policy {
+        Policy {
             id: Uuid::now_v7(),
             name: self.name.into(),
             description: self.description.map(Into::into),
             template,
             scopes: self.scopes,
-            custom: self.custom,
-            matchers: self.matchers,
             rules: self.rules,
             fallback: self.fallback,
         }
@@ -192,10 +180,10 @@ impl PolicyBody {
     /// template body keeps the template's own origin (stamped by `build`). A
     /// labels body builds a degenerate definition — one scope over the picked
     /// labels plus a blanket fallback action — under the given generated name.
-    pub fn into_definition(self, generated_name: &str) -> PolicyDefinition {
+    pub fn into_definition(self, generated_name: &str) -> Policy {
         match self {
             PolicyBody::Inline { definition } => definition.into_definition(None),
-            PolicyBody::Template { template } => PolicyDefinition {
+            PolicyBody::Template { template } => Policy {
                 // `build()` bakes a stable constant id; re-mint so each created
                 // policy is distinct.
                 id: Uuid::now_v7(),
@@ -203,14 +191,12 @@ impl PolicyBody {
             },
             PolicyBody::Labels { labels, action } => {
                 let refs = labels.into_iter().map(LabelRef::new);
-                PolicyDefinition {
+                Policy {
                     id: Uuid::now_v7(),
                     name: generated_name.into(),
                     description: None,
                     template: None,
                     scopes: vec![LabelScope::new(generated_name.to_owned(), refs)],
-                    custom: Vec::new(),
-                    matchers: Vec::new(),
                     rules: Vec::new(),
                     fallback: Some(ModalityRedactions::text(action.text_redaction())),
                 }
@@ -227,7 +213,7 @@ impl PolicyBody {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct CreatePolicy {
+pub struct CreateWorkspacePolicy {
     /// Optional display name override. Defaults to the policy's own name. Ignored
     /// for a one-shot (labels) body, whose name is generated.
     #[garde(length(chars, min = 1, max = 255))]
@@ -267,7 +253,7 @@ fn validate_body(body: &PolicyBody, _: &()) -> garde::Result {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct UpdatePolicy {
+pub struct UpdateWorkspacePolicy {
     /// Human-readable policy display name.
     #[garde(length(chars, min = 1, max = 255))]
     pub display_name: Option<String>,
@@ -293,7 +279,6 @@ mod tests {
         let definition = body.into_definition("Quick redaction abc123");
         assert_eq!(&*definition.name, "Quick redaction abc123");
         assert!(definition.rules.is_empty());
-        assert!(definition.custom.is_empty());
         assert_eq!(definition.scopes.len(), 1);
         let labels: Vec<&str> = definition.scopes[0]
             .labels
@@ -330,8 +315,6 @@ mod tests {
                 name: "Custom".to_owned(),
                 description: None,
                 scopes: Vec::new(),
-                custom: Vec::new(),
-                matchers: Vec::new(),
                 rules: Vec::new(),
                 fallback: None,
             }),
@@ -362,8 +345,6 @@ mod tests {
                 name: "Custom".to_owned(),
                 description: None,
                 scopes: Vec::new(),
-                custom: Vec::new(),
-                matchers: Vec::new(),
                 rules: Vec::new(),
                 fallback: None,
             }),

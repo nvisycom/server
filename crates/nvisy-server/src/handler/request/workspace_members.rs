@@ -1,7 +1,7 @@
 //! Workspace member request types.
 
 use garde::Validate;
-use nvisy_postgres::model::UpdateWorkspaceMember;
+use nvisy_postgres::model;
 use nvisy_postgres::types::{
     Direction, MemberFilter, MemberSortBy, MemberSortField, WorkspaceRole,
 };
@@ -13,14 +13,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize, Validate, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct UpdateMember {
+pub struct UpdateWorkspaceMember {
     /// New role for the member.
     pub role: WorkspaceRole,
 }
 
-impl UpdateMember {
-    pub fn into_model(self) -> UpdateWorkspaceMember {
-        UpdateWorkspaceMember {
+impl UpdateWorkspaceMember {
+    pub fn into_model(self) -> model::UpdateWorkspaceMember {
+        model::UpdateWorkspaceMember {
             member_role: Some(self.role),
             ..Default::default()
         }
@@ -31,7 +31,7 @@ impl UpdateMember {
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ListMembers {
+pub struct ListWorkspaceMembers {
     /// Filter by workspace role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<WorkspaceRole>,
@@ -43,7 +43,7 @@ pub struct ListMembers {
     pub order: Option<Direction>,
 }
 
-impl ListMembers {
+impl ListWorkspaceMembers {
     /// Converts to filter model.
     pub fn to_filter(&self) -> MemberFilter {
         MemberFilter { role: self.role }

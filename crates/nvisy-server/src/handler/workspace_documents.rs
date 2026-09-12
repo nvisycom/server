@@ -29,10 +29,12 @@ use crate::extract::{
     WorkspaceContext, markers,
 };
 use crate::handler::request::{
-    CursorPagination, DeleteDocuments as DeleteDocumentsRequest, ListDocuments, UpdateDocument,
-    WorkspaceDocumentPathParams,
+    CursorPagination, DeleteWorkspaceDocuments as DeleteDocumentsRequest, ListWorkspaceDocuments,
+    UpdateWorkspaceDocument, WorkspaceDocumentPathParams,
 };
-use crate::handler::response::{self, Document, Documents, DocumentsPage};
+use crate::handler::response::{
+    self, WorkspaceDocument, WorkspaceDocuments, WorkspaceDocumentsPage,
+};
 use crate::handler::utility::{DownloadDocs, resolve_account_ref};
 use crate::middleware::UploadConfig;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, attachment_headers};
@@ -79,9 +81,9 @@ async fn list_documents(
     State(pg_client): State<PgClient>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::ViewDocuments>,
-    Query(documents_query): Query<ListDocuments>,
+    Query(documents_query): Query<ListWorkspaceDocuments>,
     Query(cursor_pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<DocumentsPage>)> {
+) -> Result<(StatusCode, Json<WorkspaceDocumentsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing documents");
 
     let workspace = authz.workspace;
@@ -97,8 +99,8 @@ async fn list_documents(
         .cursor_list_workspace_documents(workspace.id, cursor_pagination.into_cursor(), filter)
         .await?;
 
-    let response = DocumentsPage::from_cursor_page(page, |wc| {
-        Document::from_model(
+    let response = WorkspaceDocumentsPage::from_cursor_page(page, |wc| {
+        WorkspaceDocument::from_model(
             wc.item.document,
             &wc.item.blob,
             workspace.slug.clone(),
@@ -110,7 +112,7 @@ async fn list_documents(
         target: TRACING_TARGET,
         document_count = response.items.len(),
         has_more = response.next_cursor.is_some(),
-        "Documents listed"
+        "WorkspaceDocuments listed"
     );
 
     Ok((StatusCode::OK, Json(response)))
@@ -121,7 +123,7 @@ fn list_documents_docs(op: TransformOperation) -> TransformOperation {
         .description(
             "Lists documents in a workspace with cursor-based pagination. Use the `after` parameter with the `nextCursor` value from the response to fetch subsequent pages. Pass `hash` (a hex SHA-256) to find documents with identical content — a non-empty result means the document already exists, so an upload can be skipped.",
         )
-        .response::<200, Json<DocumentsPage>>()
+        .response::<200, Json<WorkspaceDocumentsPage>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -206,8 +208,9 @@ async fn stage_document(ctx: &DocumentUploadContext, field: Field<'_>) -> Result
         // error; the reader's error is stringified in transit, so consult the
         // shared state instead of inspecting the error.
         if limit_state.is_exceeded() {
-            return Err(ErrorKind::PayloadTooLarge
-                .with_message(format!("Document exceeds the {cap}-byte upload limit")));
+            return Err(ErrorKind::PayloadTooLarge.with_message(format!(
+                "WorkspaceDocument exceeds the {cap}-byte upload limit"
+            )));
         }
         return Err(err.into());
     }
@@ -216,7 +219,7 @@ async fn stage_document(ctx: &DocumentUploadContext, field: Field<'_>) -> Result
         target: TRACING_TARGET,
         object_id = %document_key.object_id,
         size = measurements.bytes(),
-        "Document encrypted and streamed to storage"
+        "WorkspaceDocument encrypted and streamed to storage"
     );
 
     // Step 2: Build the unsaved blob (content-addressed bytes + retention) and the
@@ -333,7 +336,7 @@ async fn upload_document(
     authz: Authorized<markers::UploadDocuments>,
     security: SecurityContext,
     mut multipart: Multipart,
-) -> Result<(StatusCode, Json<Documents>)> {
+) -> Result<(StatusCode, Json<WorkspaceDocuments>)> {
     tracing::info!(target: TRACING_TARGET, "Uploading documents");
 
     let workspace = authz.workspace;
@@ -441,9 +444,9 @@ async fn upload_document(
         }
     }
 
-    let mut uploaded_documents: Documents = Vec::with_capacity(created.len());
+    let mut uploaded_documents: WorkspaceDocuments = Vec::with_capacity(created.len());
     for entry in created {
-        uploaded_documents.push(response::Document::from_model(
+        uploaded_documents.push(response::WorkspaceDocument::from_model(
             entry.document,
             &entry.blob,
             workspace.slug.clone(),
@@ -454,7 +457,7 @@ async fn upload_document(
     tracing::info!(
         target: TRACING_TARGET,
         document_count = uploaded_documents.len(),
-        "Documents uploaded",
+        "WorkspaceDocuments uploaded",
     );
 
     Ok((StatusCode::CREATED, Json(uploaded_documents)))
@@ -463,7 +466,7 @@ async fn upload_document(
 fn upload_document_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Upload documents")
         .description("Uploads one or more documents to a workspace. Each document is encrypted and streamed to storage. The batch is atomic: either every document is recorded, or on any failure none are and the request fails.")
-        .response::<201, Json<Documents>>()
+        .response::<201, Json<WorkspaceDocuments>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -483,7 +486,7 @@ async fn read_document(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewDocuments>,
     Path(path_params): Path<WorkspaceDocumentPathParams>,
-) -> Result<(StatusCode, Json<Document>)> {
+) -> Result<(StatusCode, Json<WorkspaceDocument>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading document metadata");
 
     let workspace = authz.workspace;
@@ -492,11 +495,11 @@ async fn read_document(
     let found =
         find_document_with_creator(&mut conn, workspace.id, path_params.document_id).await?;
 
-    tracing::debug!(target: TRACING_TARGET, "Document metadata retrieved");
+    tracing::debug!(target: TRACING_TARGET, "WorkspaceDocument metadata retrieved");
 
     Ok((
         StatusCode::OK,
-        Json(Document::from_model(
+        Json(WorkspaceDocument::from_model(
             found.item.document,
             &found.item.blob,
             workspace.slug,
@@ -508,7 +511,7 @@ async fn read_document(
 fn read_document_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get document metadata")
         .description("Returns document metadata without downloading the document content.")
-        .response::<200, Json<Document>>()
+        .response::<200, Json<WorkspaceDocument>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -528,8 +531,8 @@ async fn update_document(
     authz: Authorized<markers::UpdateDocuments>,
     Path(path_params): Path<WorkspaceDocumentPathParams>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<UpdateDocument>,
-) -> Result<(StatusCode, Json<Document>)> {
+    ValidateJson(request): ValidateJson<UpdateWorkspaceDocument>,
+) -> Result<(StatusCode, Json<WorkspaceDocument>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating document");
 
     let workspace = authz.workspace;
@@ -570,11 +573,11 @@ async fn update_document(
         find_document_with_creator(&mut conn, workspace.id, path_params.document_id).await?;
     let uploaded_by = found.account;
 
-    tracing::info!(target: TRACING_TARGET, "Document updated");
+    tracing::info!(target: TRACING_TARGET, "WorkspaceDocument updated");
 
     Ok((
         StatusCode::OK,
-        Json(response::Document::from_model(
+        Json(response::WorkspaceDocument::from_model(
             found.item.document,
             &found.item.blob,
             workspace.slug,
@@ -586,7 +589,7 @@ async fn update_document(
 fn update_document_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update document")
         .description("Updates document metadata such as display name, tags, or metadata.")
-        .response::<200, Json<Document>>()
+        .response::<200, Json<WorkspaceDocument>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -629,7 +632,7 @@ async fn download_document(
     let blob = conn
         .find_blob_by_id(document.blob_id)
         .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_message("Document content not found"))?;
+        .ok_or_else(|| ErrorKind::NotFound.with_message("WorkspaceDocument content not found"))?;
 
     let permission = match document.kind {
         DocumentKind::Original => Permission::DownloadOriginalDocuments,
@@ -670,9 +673,9 @@ async fn download_document(
             tracing::warn!(
                 target: TRACING_TARGET,
                 document_id = %path_params.document_id,
-                "Document content not found in storage"
+                "WorkspaceDocument content not found in storage"
             );
-            ErrorKind::NotFound.with_message("Document content not found")
+            ErrorKind::NotFound.with_message("WorkspaceDocument content not found")
         })?;
 
     // `attachment_headers` handles the user-controlled name safely (escapes it,
@@ -760,7 +763,7 @@ async fn delete_document(
     })
     .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Document deleted");
+    tracing::info!(target: TRACING_TARGET, "WorkspaceDocument deleted");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -791,7 +794,7 @@ async fn bulk_delete_documents(
     authz: Authorized<markers::DeleteDocuments>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<DeleteDocumentsRequest>,
-) -> Result<(StatusCode, Json<response::DeletedDocuments>)> {
+) -> Result<(StatusCode, Json<response::WorkspaceDeletedDocuments>)> {
     tracing::debug!(target: TRACING_TARGET, "Bulk-deleting documents");
 
     let workspace = authz.workspace;
@@ -848,19 +851,19 @@ async fn bulk_delete_documents(
         target: TRACING_TARGET,
         deleted = deleted.len(),
         skipped = skipped.len(),
-        "Documents bulk-deleted",
+        "WorkspaceDocuments bulk-deleted",
     );
 
     Ok((
         StatusCode::OK,
-        Json(response::DeletedDocuments { deleted, skipped }),
+        Json(response::WorkspaceDeletedDocuments { deleted, skipped }),
     ))
 }
 
 fn bulk_delete_documents_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete documents")
         .description("Deletes several documents in one call. Idempotent: ids that resolve to live documents in the workspace are removed and returned in `deleted`; ids that are unknown, already deleted, or in another workspace are returned in `skipped`. Deletion is permanent — the documents' content cannot be recovered.")
-        .response::<200, Json<response::DeletedDocuments>>()
+        .response::<200, Json<response::WorkspaceDeletedDocuments>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -897,5 +900,5 @@ pub fn routes(max_file_body_bytes: usize) -> ApiRouter<ServiceState> {
             "/workspaces/{workspaceSlug}/documents/{documentId}/content/",
             get_with(download_document, download_document_docs),
         )
-        .with_path_items(|item| item.tag("Documents"))
+        .with_path_items(|item| item.tag("WorkspaceDocuments"))
 }

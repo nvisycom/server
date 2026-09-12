@@ -11,11 +11,11 @@ use std::path::PathBuf;
 
 use derive_more::Deref;
 use elide_pipeline::file::Document;
-use elide_pipeline::policy::PolicyDefinition;
+use elide_pipeline::governance::policy::Policy;
+use elide_pipeline::primitive::RasterMode;
+use elide_pipeline::provider::{CodecParams, DocumentContext, ProviderConfig, RequestContext};
 use elide_pipeline::{
-    Analyzed, CodecParams, DocumentContext, Engine, Error as EngineError,
-    ErrorKind as EngineErrorKind, ProviderConfig, RasterMode, RequestContext,
-    Result as EngineResult,
+    Analyzed, Engine, Error as EngineError, ErrorKind as EngineErrorKind, Result as EngineResult,
 };
 
 use crate::Result;
@@ -93,7 +93,7 @@ impl EngineService {
     pub async fn analyze_blocking(
         &self,
         document: Document,
-        policies: Vec<PolicyDefinition>,
+        policies: Vec<Policy>,
         request: RequestContext,
     ) -> EngineResult<Analyzed> {
         let engine = self.engine.clone();

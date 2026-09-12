@@ -18,8 +18,10 @@ use crate::extract::{
     AuthState, Authorized, Json, Path, Query, SecurityContext, ValidateJson, WorkspaceContext,
     markers,
 };
-use crate::handler::request::{CursorPagination, ListMembers, MemberPathParams, UpdateMember};
-use crate::handler::response::{Member, MembersPage, Page};
+use crate::handler::request::{
+    CursorPagination, ListWorkspaceMembers, UpdateWorkspaceMember, WorkspaceMemberPathParams,
+};
+use crate::handler::response::{Page, WorkspaceMember, WorkspaceMembersPage};
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
     EventEmitter, EventOrigin, MemberDeleted, MemberUpdated, ServiceState, WorkspaceEvent,
@@ -42,9 +44,9 @@ const TRACING_TARGET: &str = "nvisy_server::handler::members";
 async fn list_members(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewMembers>,
-    Query(query): Query<ListMembers>,
+    Query(query): Query<ListWorkspaceMembers>,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<MembersPage>)> {
+) -> Result<(StatusCode, Json<WorkspaceMembersPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace members");
 
     let workspace = authz.workspace;
@@ -66,7 +68,7 @@ async fn list_members(
     );
 
     let response = Page::from_cursor_page(page, |(member, account)| {
-        Member::from_model(member, account)
+        WorkspaceMember::from_model(member, account)
     });
 
     Ok((StatusCode::OK, Json(response)))
@@ -75,7 +77,7 @@ async fn list_members(
 fn list_members_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List members")
         .description("Returns a paginated list of workspace members with their roles and status.")
-        .response::<200, Json<MembersPage>>()
+        .response::<200, Json<WorkspaceMembersPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -96,8 +98,8 @@ fn list_members_docs(op: TransformOperation) -> TransformOperation {
 async fn get_member(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewMembers>,
-    Path(path_params): Path<MemberPathParams>,
-) -> Result<(StatusCode, Json<Member>)> {
+    Path(path_params): Path<WorkspaceMemberPathParams>,
+) -> Result<(StatusCode, Json<WorkspaceMember>)> {
     tracing::debug!(target: TRACING_TARGET, "Retrieving workspace member details");
 
     let workspace = authz.workspace;
@@ -123,14 +125,14 @@ async fn get_member(
 
     Ok((
         StatusCode::OK,
-        Json(Member::from_model(workspace_member, account)),
+        Json(WorkspaceMember::from_model(workspace_member, account)),
     ))
 }
 
 fn get_member_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get member")
         .description("Returns detailed information about a specific workspace member.")
-        .response::<200, Json<Member>>()
+        .response::<200, Json<WorkspaceMember>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -152,7 +154,7 @@ fn get_member_docs(op: TransformOperation) -> TransformOperation {
 async fn delete_member(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::RemoveMembers>,
-    Path(path_params): Path<MemberPathParams>,
+    Path(path_params): Path<WorkspaceMemberPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Removing workspace member");
@@ -239,10 +241,10 @@ fn delete_member_docs(op: TransformOperation) -> TransformOperation {
 async fn update_member(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ManageRoles>,
-    Path(path_params): Path<MemberPathParams>,
+    Path(path_params): Path<WorkspaceMemberPathParams>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<UpdateMember>,
-) -> Result<(StatusCode, Json<Member>)> {
+    ValidateJson(request): ValidateJson<UpdateWorkspaceMember>,
+) -> Result<(StatusCode, Json<WorkspaceMember>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace member role");
 
     let account_id = authz.account_id;
@@ -304,12 +306,12 @@ async fn update_member(
     tracing::info!(
         target: TRACING_TARGET,
         new_role = ?updated_member.member_role,
-        "Member role updated",
+        "WorkspaceMember role updated",
     );
 
     Ok((
         StatusCode::OK,
-        Json(Member::from_model(updated_member, account)),
+        Json(WorkspaceMember::from_model(updated_member, account)),
     ))
 }
 
@@ -318,7 +320,7 @@ fn update_member_docs(op: TransformOperation) -> TransformOperation {
         .description(
             "Updates a workspace member's role. Cannot update your own role or demote owners.",
         )
-        .response::<200, Json<Member>>()
+        .response::<200, Json<WorkspaceMember>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -343,7 +345,7 @@ async fn leave_workspace(
     WorkspaceContext(workspace): WorkspaceContext,
     security: SecurityContext,
 ) -> Result<StatusCode> {
-    tracing::debug!(target: TRACING_TARGET, "Member leaving workspace");
+    tracing::debug!(target: TRACING_TARGET, "WorkspaceMember leaving workspace");
 
     let mut conn = pg_client.get_connection().await?;
 
@@ -392,7 +394,7 @@ async fn leave_workspace(
     })
     .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Member left workspace");
+    tracing::info!(target: TRACING_TARGET, "WorkspaceMember left workspace");
 
     Ok(StatusCode::OK)
 }

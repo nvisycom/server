@@ -1,34 +1,34 @@
 //! Workspace policy management handlers.
 //!
-//! Policies are structured redaction governance documents (the engine's
-//! Policy type) consumed by the redaction pipeline. The definition is
-//! validated against the schema, then stored encrypted (XChaCha20-Poly1305,
-//! workspace-derived key) as a BYTEA column in PostgreSQL, scoped to a
-//! workspace.
+//! Policies are structured redaction governance documents (the engine's Policy
+//! type) consumed by the redaction pipeline. A policy describes what to redact
+//! and how — plain config, carrying no sensitive content — so the definition is
+//! stored as plaintext JSONB on its version row, scoped to a workspace.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use elide_pipeline::policy::PolicyDefinition;
+use elide_pipeline::governance::policy::Policy;
 use nvisy_postgres::model::{
-    NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy, WorkspacePolicyVersion,
+    NewWorkspacePolicy, WorkspacePolicy as WorkspacePolicyModel, WorkspacePolicyVersion,
 };
 use nvisy_postgres::query::{WorkspacePolicyRepository, WorkspacePolicyVersionRepository};
 use nvisy_postgres::types::{Handle, PolicyKind, WithAccountRef};
-use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn, model};
 use uuid::Uuid;
 
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
-    CreatePolicy, CursorPagination, PolicyBody, PolicyPathParams, UpdatePolicy,
+    CreateWorkspacePolicy, CursorPagination, PolicyBody, UpdateWorkspacePolicy,
+    WorkspacePolicyPathParams,
 };
-use crate::handler::response::{PoliciesPage, Policy, PolicySummary};
+use crate::handler::response::{PoliciesPage, WorkspacePolicy, WorkspacePolicySummary};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
-    CryptoService, EventEmitter, EventOrigin, PolicyCreated, PolicyDeleted, PolicyPromoted,
-    PolicyUpdated, ServiceState, WorkspaceEvent,
+    EventEmitter, EventOrigin, PolicyCreated, PolicyDeleted, PolicyPromoted, PolicyUpdated,
+    ServiceState, WorkspaceEvent,
 };
 
 /// Tracing target for workspace policy operations.
@@ -48,11 +48,10 @@ const TRACING_TARGET: &str = "nvisy_server::handler::policies";
 )]
 async fn create_policy(
     State(pg_client): State<PgClient>,
-    State(crypto): State<CryptoService>,
     authz: Authorized<markers::ManagePolicies>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<CreatePolicy>,
-) -> Result<(StatusCode, Json<Policy>)> {
+    ValidateJson(request): ValidateJson<CreateWorkspacePolicy>,
+) -> Result<(StatusCode, Json<WorkspacePolicy>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace policy");
 
     let workspace = authz.workspace;
@@ -66,7 +65,6 @@ async fn create_policy(
         Some(content_hash) => {
             create_oneshot(
                 &mut conn,
-                &crypto,
                 &security,
                 workspace.id,
                 account_id,
@@ -75,23 +73,13 @@ async fn create_policy(
             )
             .await?
         }
-        None => {
-            create_authored(
-                &mut conn,
-                &crypto,
-                &security,
-                workspace.id,
-                account_id,
-                request,
-            )
-            .await?
-        }
+        None => create_authored(&mut conn, &security, workspace.id, account_id, request).await?,
     };
 
     // The creator is the authenticated caller; resolve their handle directly.
     let creator = resolve_account_ref(&mut conn, account_id).await?;
 
-    let response = Policy::from_model(policy, version, workspace.slug, creator, &crypto)?;
+    let response = WorkspacePolicy::from_model(policy, version, workspace.slug, creator)?;
 
     Ok((status, Json(response)))
 }
@@ -104,11 +92,20 @@ fn create_policy_docs(op: TransformOperation) -> TransformOperation {
              identical one already exists; a template or inline body always creates a \
              new policy and returns 201.",
         )
-        .response::<201, Json<Policy>>()
-        .response::<200, Json<Policy>>()
+        .response::<201, Json<WorkspacePolicy>>()
+        .response::<200, Json<WorkspacePolicy>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
+}
+
+/// Serializes a policy definition to the plaintext JSONB stored on its version.
+fn definition_to_json(definition: &Policy) -> Result<serde_json::Value> {
+    serde_json::to_value(definition).map_err(|err| {
+        ErrorKind::InternalServerError
+            .with_message("Failed to serialize the policy definition")
+            .with_context(err.to_string())
+    })
 }
 
 /// Creates an authored (template or inline) policy: a new permanent row with a
@@ -116,12 +113,11 @@ fn create_policy_docs(op: TransformOperation) -> TransformOperation {
 /// transaction. Returns `201`.
 async fn create_authored(
     conn: &mut PgConn,
-    crypto: &CryptoService,
     security: &SecurityContext,
     workspace_id: Uuid,
     account_id: Uuid,
-    request: CreatePolicy,
-) -> Result<(WorkspacePolicy, WorkspacePolicyVersion, StatusCode)> {
+    request: CreateWorkspacePolicy,
+) -> Result<(WorkspacePolicyModel, WorkspacePolicyVersion, StatusCode)> {
     let slug = request.slug.ok_or_else(|| {
         ErrorKind::BadRequest.with_message("A slug is required for this policy body")
     })?;
@@ -133,7 +129,7 @@ async fn create_authored(
     let description = request
         .description
         .or_else(|| definition.description.clone().map(Into::into));
-    let encrypted = crypto.encrypt_json(workspace_id, &definition)?;
+    let body = definition_to_json(&definition)?;
 
     let new_policy = NewWorkspacePolicy {
         workspace_id,
@@ -148,9 +144,7 @@ async fn create_authored(
 
     let created = conn
         .transaction(async |conn| {
-            let created = conn
-                .create_workspace_policy(new_policy, encrypted, None)
-                .await?;
+            let created = conn.create_workspace_policy(new_policy, body, None).await?;
             conn.emit_event(
                 EventOrigin {
                     workspace_id,
@@ -177,13 +171,12 @@ async fn create_authored(
 /// hash-derived slug and name and a creation event.
 async fn create_oneshot(
     conn: &mut PgConn,
-    crypto: &CryptoService,
     security: &SecurityContext,
     workspace_id: Uuid,
     account_id: Uuid,
     body: PolicyBody,
     content_hash: Vec<u8>,
-) -> Result<(WorkspacePolicy, WorkspacePolicyVersion, StatusCode)> {
+) -> Result<(WorkspacePolicyModel, WorkspacePolicyVersion, StatusCode)> {
     let slug = Handle::parse(oneshot_slug(&content_hash)).map_err(|err| {
         ErrorKind::InternalServerError
             .with_message("Failed to generate a one-shot policy slug")
@@ -192,7 +185,7 @@ async fn create_oneshot(
     let display_name = oneshot_display_name(&content_hash);
 
     let definition = body.into_definition(&display_name);
-    let encrypted = crypto.encrypt_json(workspace_id, &definition)?;
+    let definition_json = definition_to_json(&definition)?;
 
     let new_policy = NewWorkspacePolicy {
         workspace_id,
@@ -206,7 +199,7 @@ async fn create_oneshot(
     };
 
     let resolved = conn
-        .find_or_create_oneshot_policy(new_policy, content_hash, encrypted, None)
+        .find_or_create_oneshot_policy(new_policy, content_hash, definition_json, None)
         .await?;
 
     // Only a fresh row is a creation: reusing an existing one-shot records no event.
@@ -262,10 +255,10 @@ async fn list_policies(
         "Workspace policies listed",
     );
 
-    // The list carries only metadata; the encrypted definition is decrypted only
-    // by the single-policy endpoint, so a page costs no per-item decryption.
+    // The list carries only metadata; the definition is loaded only by the
+    // single-policy endpoint, so a page stays small.
     let page = PoliciesPage::from_cursor_page(page, |wc| {
-        PolicySummary::from_model(wc.item, workspace.slug.clone(), wc.account.into())
+        WorkspacePolicySummary::from_model(wc.item, workspace.slug.clone(), wc.account.into())
     });
 
     Ok((StatusCode::OK, Json(page)))
@@ -290,10 +283,9 @@ fn list_policies_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn read_policy(
     State(pg_client): State<PgClient>,
-    State(crypto): State<CryptoService>,
     authz: Authorized<markers::ViewPolicies>,
-    Path(path_params): Path<PolicyPathParams>,
-) -> Result<(StatusCode, Json<Policy>)> {
+    Path(path_params): Path<WorkspacePolicyPathParams>,
+) -> Result<(StatusCode, Json<WorkspacePolicy>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace policy");
 
     let workspace = authz.workspace;
@@ -306,12 +298,11 @@ async fn read_policy(
 
     Ok((
         StatusCode::OK,
-        Json(Policy::from_model(
+        Json(WorkspacePolicy::from_model(
             found.item,
             version,
             workspace.slug,
             found.account.into(),
-            &crypto,
         )?),
     ))
 }
@@ -319,7 +310,7 @@ async fn read_policy(
 fn read_policy_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get policy")
         .description("Returns a single policy.")
-        .response::<200, Json<Policy>>()
+        .response::<200, Json<WorkspacePolicy>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -339,12 +330,11 @@ fn read_policy_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_policy(
     State(pg_client): State<PgClient>,
-    State(crypto): State<CryptoService>,
     authz: Authorized<markers::ManagePolicies>,
-    Path(path_params): Path<PolicyPathParams>,
+    Path(path_params): Path<WorkspacePolicyPathParams>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<UpdatePolicy>,
-) -> Result<(StatusCode, Json<Policy>)> {
+    ValidateJson(request): ValidateJson<UpdateWorkspacePolicy>,
+) -> Result<(StatusCode, Json<WorkspacePolicy>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace policy");
 
     let workspace = authz.workspace;
@@ -361,13 +351,17 @@ async fn update_policy(
     // A replaced body keeps the policy's server-owned template origin: the caller
     // authored new rules, but where the policy came from is provenance the client
     // cannot set or clear. Carry the current version's origin forward.
-    let encrypted_definition = match request.definition {
+    let new_definition = match request.definition {
         Some(draft) => {
-            let template = crypto
-                .decrypt_json::<PolicyDefinition>(workspace.id, &current.definition)?
+            let template = serde_json::from_value::<Policy>(current.definition)
+                .map_err(|err| {
+                    ErrorKind::InternalServerError
+                        .with_message("Stored policy definition is malformed")
+                        .with_context(err.to_string())
+                })?
                 .template;
             let definition = draft.into_definition(template);
-            Some(crypto.encrypt_json(workspace.id, &definition)?)
+            Some(definition_to_json(&definition)?)
         }
         None => None,
     };
@@ -379,13 +373,13 @@ async fn update_policy(
     // logical row in place. Either way, record the outbox event atomically with
     // the write.
     conn.transaction(async |conn| {
-        if let Some(encrypted) = encrypted_definition {
-            conn.create_policy_version(workspace.id, policy_id, account_id, encrypted, None)
+        if let Some(definition) = new_definition {
+            conn.create_policy_version(workspace.id, policy_id, account_id, definition, None)
                 .await?;
         }
         conn.update_workspace_policy(
             policy_id,
-            UpdateWorkspacePolicy {
+            model::UpdateWorkspacePolicy {
                 display_name: request.display_name,
                 description: request.description,
                 ..Default::default()
@@ -411,13 +405,8 @@ async fn update_policy(
     let found = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
     let version = current_version(&mut conn, workspace.id, &found.item).await?;
 
-    let response = Policy::from_model(
-        found.item,
-        version,
-        workspace.slug,
-        found.account.into(),
-        &crypto,
-    )?;
+    let response =
+        WorkspacePolicy::from_model(found.item, version, workspace.slug, found.account.into())?;
 
     tracing::info!(target: TRACING_TARGET, "Policy updated");
 
@@ -427,7 +416,7 @@ async fn update_policy(
 fn update_policy_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update policy")
         .description("Updates policy fields. Replacing the definition replaces the whole body.")
-        .response::<200, Json<Policy>>()
+        .response::<200, Json<WorkspacePolicy>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -446,7 +435,7 @@ fn update_policy_docs(op: TransformOperation) -> TransformOperation {
 async fn delete_policy(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ManagePolicies>,
-    Path(path_params): Path<PolicyPathParams>,
+    Path(path_params): Path<WorkspacePolicyPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace policy");
@@ -511,11 +500,10 @@ fn delete_policy_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn promote_policy(
     State(pg_client): State<PgClient>,
-    State(crypto): State<CryptoService>,
     authz: Authorized<markers::ManagePolicies>,
-    Path(path_params): Path<PolicyPathParams>,
+    Path(path_params): Path<WorkspacePolicyPathParams>,
     security: SecurityContext,
-) -> Result<(StatusCode, Json<Policy>)> {
+) -> Result<(StatusCode, Json<WorkspacePolicy>)> {
     tracing::debug!(target: TRACING_TARGET, "Promoting workspace policy");
 
     let workspace = authz.workspace;
@@ -532,7 +520,7 @@ async fn promote_policy(
     conn.transaction(async |conn| {
         conn.update_workspace_policy(
             policy_id,
-            UpdateWorkspacePolicy {
+            model::UpdateWorkspacePolicy {
                 kind: Some(PolicyKind::Authored),
                 content_hash: Some(None),
                 ..Default::default()
@@ -558,13 +546,8 @@ async fn promote_policy(
     let found = find_policy(&mut conn, workspace.id, &path_params.policy_slug).await?;
     let version = current_version(&mut conn, workspace.id, &found.item).await?;
 
-    let response = Policy::from_model(
-        found.item,
-        version,
-        workspace.slug,
-        found.account.into(),
-        &crypto,
-    )?;
+    let response =
+        WorkspacePolicy::from_model(found.item, version, workspace.slug, found.account.into())?;
 
     tracing::info!(target: TRACING_TARGET, "Policy promoted");
 
@@ -577,7 +560,7 @@ fn promote_policy_docs(op: TransformOperation) -> TransformOperation {
             "Promotes a temporary (one-shot) policy to a permanent one, so it \
              appears in the list and can be attached to a pipeline.",
         )
-        .response::<200, Json<Policy>>()
+        .response::<200, Json<WorkspacePolicy>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -589,7 +572,7 @@ async fn find_policy(
     conn: &mut PgConn,
     workspace_id: Uuid,
     policy_slug: &str,
-) -> Result<WithAccountRef<WorkspacePolicy>> {
+) -> Result<WithAccountRef<WorkspacePolicyModel>> {
     conn.find_policy_in_workspace_by_slug(workspace_id, policy_slug)
         .await?
         .ok_or_else(|| Error::not_found("policy"))
@@ -600,7 +583,7 @@ async fn find_policy(
 async fn current_version(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    policy: &WorkspacePolicy,
+    policy: &WorkspacePolicyModel,
 ) -> Result<WorkspacePolicyVersion> {
     let version_id = policy
         .current_version_id

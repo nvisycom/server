@@ -24,7 +24,7 @@ pub const MAX_EXPORT_ROWS: usize = 100_000;
 /// a bare `?limit=` — so each concern is extracted on its own.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ActivityFilterQuery {
+pub struct WorkspaceActivityFilterQuery {
     /// Keep only these activity types (e.g. `document.created`). Repeat the `type`
     /// parameter for several; omit for no type constraint.
     // Named `types` because `type` is a reserved word; exposed as `type`.
@@ -37,16 +37,16 @@ pub struct ActivityFilterQuery {
 
 /// The export-only query parameter: the output format. Kept separate from the
 /// shared filter and window so each is extracted on its own (see
-/// [`ActivityFilterQuery`] for why flattening is avoided).
+/// [`WorkspaceActivityFilterQuery`] for why flattening is avoided).
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ActivityExportOptions {
+pub struct WorkspaceActivityExportOptions {
     /// Output format; defaults to `csv`.
     #[serde(default)]
     pub format: ExportFormat,
 }
 
-impl ActivityFilterQuery {
+impl WorkspaceActivityFilterQuery {
     /// Builds the repository filter for the paginated feed, folding in the actor
     /// resolved by the handler and the optional date window.
     ///
@@ -110,7 +110,7 @@ mod tests {
 
     #[tokio::test]
     async fn reads_a_single_repeated_type_key() {
-        let query: ActivityFilterQuery = extract("type=document.created").await;
+        let query: WorkspaceActivityFilterQuery = extract("type=document.created").await;
         assert_eq!(
             query.types,
             Some(vec![ActivityType::DocumentCreated]),
@@ -120,7 +120,7 @@ mod tests {
 
     #[tokio::test]
     async fn reads_several_repeated_type_keys() {
-        let query: ActivityFilterQuery =
+        let query: WorkspaceActivityFilterQuery =
             extract("type=document.created&type=document.deleted").await;
         assert_eq!(
             query.types,
@@ -134,13 +134,13 @@ mod tests {
 
     #[tokio::test]
     async fn absent_type_leaves_the_filter_unconstrained() {
-        let query: ActivityFilterQuery = extract("").await;
+        let query: WorkspaceActivityFilterQuery = extract("").await;
         assert_eq!(query.types, None, "no `type` means no type constraint");
     }
 
     #[tokio::test]
     async fn actor_is_parsed_as_a_username_handle() {
-        let query: ActivityFilterQuery = extract("actor=alice").await;
+        let query: WorkspaceActivityFilterQuery = extract("actor=alice").await;
         assert_eq!(query.actor.map(|h| h.to_string()), Some("alice".to_owned()));
     }
 
@@ -168,7 +168,7 @@ mod tests {
     async fn to_filter_rejects_an_inverted_window() {
         // `to_filter` validates the window, so a `from` after `to` is a 400 the
         // handler surfaces before any actor short-circuit.
-        let filter = ActivityFilterQuery::default();
+        let filter = WorkspaceActivityFilterQuery::default();
         let window: DateWindow = extract("from=2026-02-01&to=2026-01-01").await;
         assert!(
             filter.to_filter(None, &window).is_err(),

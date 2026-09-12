@@ -15,7 +15,9 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::{NewWorkspaceConnectionSync, WorkspaceConnection};
+use nvisy_postgres::model::{
+    NewWorkspaceConnectionSync, WorkspaceConnection as WorkspaceConnectionModel,
+};
 use nvisy_postgres::query::{
     WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
     WorkspaceConnectionSyncRepository,
@@ -28,10 +30,10 @@ use uuid::Uuid;
 
 use crate::extract::{Authorized, Json, Path, Query, ValidateJson, markers};
 use crate::handler::request::{
-    ConnectionPathParams, ConnectionSyncPathParams, CursorPagination, ExportFiles, ImportFiles,
-    WorkspaceSyncsQuery,
+    CursorPagination, ExportWorkspaceFiles, ImportWorkspaceFiles, WorkspaceConnectionPathParams,
+    WorkspaceConnectionSyncPathParams, WorkspaceSyncsQuery,
 };
-use crate::handler::response::{ConnectionSync, ConnectionSyncsPage, Page};
+use crate::handler::response::{Page, WorkspaceConnectionSync, WorkspaceConnectionSyncsPage};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
@@ -61,8 +63,8 @@ async fn sync_connection(
     State(crypto): State<CryptoService>,
     State(connection_sync): State<ConnectionSyncService>,
     authz: Authorized<markers::RunConnectionSyncs>,
-    Path(path_params): Path<ConnectionPathParams>,
-) -> Result<(StatusCode, Json<ConnectionSync>)> {
+    Path(path_params): Path<WorkspaceConnectionPathParams>,
+) -> Result<(StatusCode, Json<WorkspaceConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Triggering connection sync");
 
     let account_id = authz.account_id;
@@ -130,7 +132,7 @@ fn sync_connection_docs(op: TransformOperation) -> TransformOperation {
              or exports every redacted output not yet exported. File services use the picker \
              import and per-file export instead. Returns the created sync; poll it for completion.",
         )
-        .response::<202, Json<ConnectionSync>>()
+        .response::<202, Json<WorkspaceConnectionSync>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -159,9 +161,9 @@ async fn import_files(
     State(crypto): State<CryptoService>,
     State(connection_sync): State<ConnectionSyncService>,
     authz: Authorized<markers::RunConnectionSyncs>,
-    Path(path_params): Path<ConnectionPathParams>,
-    ValidateJson(request): ValidateJson<ImportFiles>,
-) -> Result<(StatusCode, Json<ConnectionSync>)> {
+    Path(path_params): Path<WorkspaceConnectionPathParams>,
+    ValidateJson(request): ValidateJson<ImportWorkspaceFiles>,
+) -> Result<(StatusCode, Json<WorkspaceConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Importing selected files from connection");
 
     let account_id = authz.account_id;
@@ -217,7 +219,7 @@ fn import_files_docs(op: TransformOperation) -> TransformOperation {
             "Imports the files selected in the provider's picker (file services only). \
              Already-imported files are skipped. Returns the created sync; poll it for completion.",
         )
-        .response::<202, Json<ConnectionSync>>()
+        .response::<202, Json<WorkspaceConnectionSync>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -246,9 +248,9 @@ async fn export_files(
     State(crypto): State<CryptoService>,
     State(connection_sync): State<ConnectionSyncService>,
     authz: Authorized<markers::RunConnectionSyncs>,
-    Path(path_params): Path<ConnectionPathParams>,
-    ValidateJson(request): ValidateJson<ExportFiles>,
-) -> Result<(StatusCode, Json<ConnectionSync>)> {
+    Path(path_params): Path<WorkspaceConnectionPathParams>,
+    ValidateJson(request): ValidateJson<ExportWorkspaceFiles>,
+) -> Result<(StatusCode, Json<WorkspaceConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Exporting selected files to connection");
 
     let account_id = authz.account_id;
@@ -294,7 +296,7 @@ fn export_files_docs(op: TransformOperation) -> TransformOperation {
             "Exports the selected workspace files to the connection, each as a new provider \
              file. Returns the created sync; poll it for completion.",
         )
-        .response::<202, Json<ConnectionSync>>()
+        .response::<202, Json<WorkspaceConnectionSync>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -310,10 +312,10 @@ async fn open_run_and_transfer(
     conn: &mut PgConn,
     connection_sync: &ConnectionSyncService,
     account_id: Uuid,
-    connection: WorkspaceConnection,
+    connection: WorkspaceConnectionModel,
     config: ConnectionConfig,
     kind: TransferKind,
-) -> Result<ConnectionSync> {
+) -> Result<WorkspaceConnectionSync> {
     let new_run = NewWorkspaceConnectionSync {
         connection_id: connection.id,
         account_id,
@@ -342,7 +344,7 @@ async fn open_run_and_transfer(
     });
 
     let trigger = resolve_account_ref(conn, run.account_id).await?;
-    Ok(ConnectionSync::from_model(run, trigger))
+    Ok(WorkspaceConnectionSync::from_model(run, trigger))
 }
 
 /// Lists sync runs for a connection, most recent first.
@@ -357,9 +359,9 @@ async fn open_run_and_transfer(
 async fn list_connection_syncs(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewConnections>,
-    Path(path_params): Path<ConnectionPathParams>,
+    Path(path_params): Path<WorkspaceConnectionPathParams>,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<ConnectionSyncsPage>)> {
+) -> Result<(StatusCode, Json<WorkspaceConnectionSyncsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing connection syncs");
 
     let workspace = authz.workspace;
@@ -372,7 +374,7 @@ async fn list_connection_syncs(
         .await?;
 
     let page = Page::from_cursor_page(page, |wc| {
-        ConnectionSync::from_model(wc.item, wc.account.into())
+        WorkspaceConnectionSync::from_model(wc.item, wc.account.into())
     });
 
     Ok((StatusCode::OK, Json(page)))
@@ -381,7 +383,7 @@ async fn list_connection_syncs(
 fn list_connection_syncs_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List connection syncs")
         .description("Returns the connection's sync history, most recent first.")
-        .response::<200, Json<ConnectionSyncsPage>>()
+        .response::<200, Json<WorkspaceConnectionSyncsPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -404,7 +406,7 @@ async fn list_workspace_syncs(
     authz: Authorized<markers::ViewConnections>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<WorkspaceSyncsQuery>,
-) -> Result<(StatusCode, Json<ConnectionSyncsPage>)> {
+) -> Result<(StatusCode, Json<WorkspaceConnectionSyncsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace syncs");
 
     let workspace = authz.workspace;
@@ -420,7 +422,7 @@ async fn list_workspace_syncs(
         .await?;
 
     let page = Page::from_cursor_page(page, |(wc, _connection_id)| {
-        ConnectionSync::from_model(wc.item, wc.account.into())
+        WorkspaceConnectionSync::from_model(wc.item, wc.account.into())
     });
 
     Ok((StatusCode::OK, Json(page)))
@@ -432,7 +434,7 @@ fn list_workspace_syncs_docs(op: TransformOperation) -> TransformOperation {
             "Returns all sync runs across the workspace's connections, most recent first, \
              with optional status and provider filters.",
         )
-        .response::<200, Json<ConnectionSyncsPage>>()
+        .response::<200, Json<WorkspaceConnectionSyncsPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -451,8 +453,8 @@ fn list_workspace_syncs_docs(op: TransformOperation) -> TransformOperation {
 async fn read_connection_sync(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewConnections>,
-    Path(path_params): Path<ConnectionSyncPathParams>,
-) -> Result<(StatusCode, Json<ConnectionSync>)> {
+    Path(path_params): Path<WorkspaceConnectionSyncPathParams>,
+) -> Result<(StatusCode, Json<WorkspaceConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading connection sync");
 
     let workspace = authz.workspace;
@@ -471,14 +473,14 @@ async fn read_connection_sync(
 
     Ok((
         StatusCode::OK,
-        Json(ConnectionSync::from_model(run, trigger)),
+        Json(WorkspaceConnectionSync::from_model(run, trigger)),
     ))
 }
 
 fn read_connection_sync_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get connection sync")
         .description("Returns a single sync run for the connection.")
-        .response::<200, Json<ConnectionSync>>()
+        .response::<200, Json<WorkspaceConnectionSync>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -504,8 +506,8 @@ async fn cancel_connection_sync(
     State(pg_client): State<PgClient>,
     State(connection_sync): State<ConnectionSyncService>,
     authz: Authorized<markers::RunConnectionSyncs>,
-    Path(path_params): Path<ConnectionSyncPathParams>,
-) -> Result<(StatusCode, Json<ConnectionSync>)> {
+    Path(path_params): Path<WorkspaceConnectionSyncPathParams>,
+) -> Result<(StatusCode, Json<WorkspaceConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Cancelling connection sync");
 
     let workspace = authz.workspace;
@@ -536,14 +538,14 @@ async fn cancel_connection_sync(
 
     Ok((
         StatusCode::OK,
-        Json(ConnectionSync::from_model(cancelled, trigger)),
+        Json(WorkspaceConnectionSync::from_model(cancelled, trigger)),
     ))
 }
 
 fn cancel_connection_sync_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Cancel connection sync")
         .description("Cancels an in-progress sync run. A run that already finished returns 409.")
-        .response::<200, Json<ConnectionSync>>()
+        .response::<200, Json<WorkspaceConnectionSync>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -555,7 +557,7 @@ async fn find_connection(
     conn: &mut PgConn,
     workspace_id: Uuid,
     connection_id: ConnectionId,
-) -> Result<WorkspaceConnection> {
+) -> Result<WorkspaceConnectionModel> {
     conn.find_connection_in_workspace(workspace_id, connection_id.as_uuid())
         .await?
         .ok_or_else(|| Error::not_found("connection"))

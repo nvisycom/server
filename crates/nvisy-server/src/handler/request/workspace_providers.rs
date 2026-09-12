@@ -16,7 +16,7 @@ use crate::service::ProviderConfig;
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ProviderPathParams {
+pub struct WorkspaceProviderPathParams {
     /// Opaque identifier of the provider.
     pub provider_id: ProviderId,
 }
@@ -25,7 +25,7 @@ pub struct ProviderPathParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct CreateProvider {
+pub struct CreateWorkspaceProvider {
     /// Human-readable provider display name.
     #[garde(length(min = 1, max = 255, chars))]
     pub display_name: String,
@@ -42,7 +42,7 @@ pub struct CreateProvider {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct UpdateProvider {
+pub struct UpdateWorkspaceProvider {
     /// Human-readable provider display name.
     #[garde(length(min = 1, max = 255, chars))]
     pub display_name: Option<String>,
@@ -56,7 +56,7 @@ pub struct UpdateProvider {
 /// Query parameters for listing providers.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ProvidersQuery {
+pub struct WorkspaceProvidersQuery {
     /// Filter by provider (`openai`, `ollama`, `anthropic`). Repeatable; a
     /// provider matches if it uses any of the given providers. Empty means no
     /// filter.

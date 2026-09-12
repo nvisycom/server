@@ -4,7 +4,7 @@
 //! creation, updates, and filtering. All request types support JSON serialization
 //! and validation.
 
-use elide_pipeline::DocumentContext;
+use elide_pipeline::provider::DocumentContext;
 use garde::Validate;
 use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
 use nvisy_postgres::types::{Handle, Json, PipelineMetadata, PipelineStatus, RetentionOverride};
@@ -85,7 +85,7 @@ impl PipelineDefinition {
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct CreatePipeline {
+pub struct CreateWorkspacePipeline {
     /// Pipeline display name (2-128 characters).
     #[garde(length(chars, min = 2, max = 128))]
     pub display_name: String,
@@ -114,7 +114,7 @@ pub struct PipelineReferences {
     pub policy_slugs: Vec<Handle>,
 }
 
-impl CreatePipeline {
+impl CreateWorkspacePipeline {
     /// Splits this request into the pipeline model and its reference ids.
     ///
     /// The stored model carries only the engine config JSON; the policy
@@ -171,7 +171,7 @@ fn split_definition(
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct UpdatePipeline {
+pub struct UpdateWorkspacePipeline {
     /// New display name for the pipeline (2-128 characters).
     #[garde(length(chars, min = 2, max = 128))]
     pub display_name: Option<String>,
@@ -188,7 +188,7 @@ pub struct UpdatePipeline {
     pub retention: Option<RetentionOverride>,
 }
 
-impl UpdatePipeline {
+impl UpdateWorkspacePipeline {
     /// Splits this request into the update model and its reference ids.
     ///
     /// A missing `definition` leaves both the config column and the reference
@@ -231,7 +231,7 @@ impl UpdatePipeline {
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct PipelineFilter {
+pub struct WorkspacePipelineFilter {
     /// Filter by pipeline status.
     pub status: Option<PipelineStatus>,
     /// Search by pipeline name (trigram similarity).

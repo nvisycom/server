@@ -9,7 +9,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::WorkspaceWebhook;
+use nvisy_postgres::model::WorkspaceWebhook as WorkspaceWebhookModel;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
 use nvisy_postgres::types::{WebhookId, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
@@ -21,10 +21,12 @@ use uuid::Uuid;
 
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
-    CreateWebhook, CursorPagination, TestWebhook, UpdateWebhook as UpdateWebhookRequest,
-    WebhookPathParams,
+    CreateWorkspaceWebhook, CursorPagination, TestWorkspaceWebhook,
+    UpdateWorkspaceWebhook as UpdateWebhookRequest, WorkspaceWebhookPathParams,
 };
-use crate::handler::response::{Webhook, WebhookCreated, WebhookResult, WebhooksPage};
+use crate::handler::response::{
+    WorkspaceWebhook, WorkspaceWebhookCreated, WorkspaceWebhookResult, WorkspaceWebhooksPage,
+};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
@@ -50,8 +52,8 @@ async fn create_webhook(
     State(crypto): State<CryptoService>,
     authz: Authorized<markers::CreateWebhooks>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<CreateWebhook>,
-) -> Result<(StatusCode, Json<WebhookCreated>)> {
+    ValidateJson(request): ValidateJson<CreateWorkspaceWebhook>,
+) -> Result<(StatusCode, Json<WorkspaceWebhookCreated>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace webhook");
 
     let workspace = authz.workspace;
@@ -91,7 +93,7 @@ async fn create_webhook(
     tracing::info!(
         target: TRACING_TARGET,
         webhook_id = %WebhookId::from_uuid(webhook.id),
-        "Webhook created",
+        "WorkspaceWebhook created",
     );
 
     // The creator is the authenticated caller; resolve their handle directly.
@@ -100,7 +102,7 @@ async fn create_webhook(
     // WebhookCreated includes the secret, which is visible only once.
     Ok((
         StatusCode::CREATED,
-        Json(WebhookCreated::from_model(
+        Json(WorkspaceWebhookCreated::from_model(
             webhook,
             workspace.slug,
             creator,
@@ -116,7 +118,7 @@ fn create_webhook_docs(op: TransformOperation) -> TransformOperation {
              which is used for HMAC-SHA256 verification of webhook payloads. **Important**: The \
              secret is only shown once upon creation and cannot be retrieved again.",
         )
-        .response::<201, Json<WebhookCreated>>()
+        .response::<201, Json<WorkspaceWebhookCreated>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -136,7 +138,7 @@ async fn list_webhooks(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewWebhooks>,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<WebhooksPage>)> {
+) -> Result<(StatusCode, Json<WorkspaceWebhooksPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace webhooks");
 
     let workspace = authz.workspace;
@@ -154,8 +156,8 @@ async fn list_webhooks(
 
     Ok((
         StatusCode::OK,
-        Json(WebhooksPage::from_cursor_page(page, |wc| {
-            Webhook::from_model(wc.item, workspace.slug.clone(), wc.account.into())
+        Json(WorkspaceWebhooksPage::from_cursor_page(page, |wc| {
+            WorkspaceWebhook::from_model(wc.item, workspace.slug.clone(), wc.account.into())
         })),
     ))
 }
@@ -163,7 +165,7 @@ async fn list_webhooks(
 fn list_webhooks_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List webhooks")
         .description("Returns all configured webhooks for the workspace without secrets.")
-        .response::<200, Json<WebhooksPage>>()
+        .response::<200, Json<WorkspaceWebhooksPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
 }
@@ -182,8 +184,8 @@ fn list_webhooks_docs(op: TransformOperation) -> TransformOperation {
 async fn read_webhook(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewWebhooks>,
-    Path(path_params): Path<WebhookPathParams>,
-) -> Result<(StatusCode, Json<Webhook>)> {
+    Path(path_params): Path<WorkspaceWebhookPathParams>,
+) -> Result<(StatusCode, Json<WorkspaceWebhook>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace webhook");
 
     let workspace = authz.workspace;
@@ -195,7 +197,7 @@ async fn read_webhook(
 
     Ok((
         StatusCode::OK,
-        Json(Webhook::from_model(
+        Json(WorkspaceWebhook::from_model(
             found.item,
             workspace.slug,
             found.account.into(),
@@ -206,7 +208,7 @@ async fn read_webhook(
 fn read_webhook_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get webhook")
         .description("Returns webhook details without the secret.")
-        .response::<200, Json<Webhook>>()
+        .response::<200, Json<WorkspaceWebhook>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -226,10 +228,10 @@ fn read_webhook_docs(op: TransformOperation) -> TransformOperation {
 async fn update_webhook(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::UpdateWebhooks>,
-    Path(path_params): Path<WebhookPathParams>,
+    Path(path_params): Path<WorkspaceWebhookPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWebhookRequest>,
-) -> Result<(StatusCode, Json<Webhook>)> {
+) -> Result<(StatusCode, Json<WorkspaceWebhook>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace webhook");
 
     let workspace = authz.workspace;
@@ -275,11 +277,11 @@ async fn update_webhook(
 
     let found = find_webhook(&mut conn, workspace.id, path_params.webhook_id.as_uuid()).await?;
 
-    tracing::info!(target: TRACING_TARGET, "Webhook updated");
+    tracing::info!(target: TRACING_TARGET, "WorkspaceWebhook updated");
 
     Ok((
         StatusCode::OK,
-        Json(Webhook::from_model(
+        Json(WorkspaceWebhook::from_model(
             found.item,
             workspace.slug,
             found.account.into(),
@@ -290,7 +292,7 @@ async fn update_webhook(
 fn update_webhook_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update webhook")
         .description("Updates webhook configuration such as URL or event subscriptions.")
-        .response::<200, Json<Webhook>>()
+        .response::<200, Json<WorkspaceWebhook>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -311,7 +313,7 @@ fn update_webhook_docs(op: TransformOperation) -> TransformOperation {
 async fn delete_webhook(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::DeleteWebhooks>,
-    Path(path_params): Path<WebhookPathParams>,
+    Path(path_params): Path<WorkspaceWebhookPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace webhook");
@@ -344,7 +346,7 @@ async fn delete_webhook(
     })
     .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Webhook deleted");
+    tracing::info!(target: TRACING_TARGET, "WorkspaceWebhook deleted");
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -375,9 +377,9 @@ async fn test_webhook(
     State(crypto): State<CryptoService>,
     State(webhook_service): State<WebhookService>,
     authz: Authorized<markers::TestWebhooks>,
-    Path(path_params): Path<WebhookPathParams>,
-    ValidateJson(request): ValidateJson<TestWebhook>,
-) -> Result<(StatusCode, Json<WebhookResult>)> {
+    Path(path_params): Path<WorkspaceWebhookPathParams>,
+    ValidateJson(request): ValidateJson<TestWorkspaceWebhook>,
+) -> Result<(StatusCode, Json<WorkspaceWebhookResult>)> {
     tracing::debug!(target: TRACING_TARGET, "Testing workspace webhook");
 
     let workspace = authz.workspace;
@@ -435,16 +437,19 @@ async fn test_webhook(
         target: TRACING_TARGET,
         success = response.is_success(),
         status_code = ?response.status_code,
-        "Webhook test completed"
+        "WorkspaceWebhook test completed"
     );
 
-    Ok((StatusCode::OK, Json(WebhookResult::from_response(response))))
+    Ok((
+        StatusCode::OK,
+        Json(WorkspaceWebhookResult::from_response(response)),
+    ))
 }
 
 fn test_webhook_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Test webhook")
         .description("Sends a test payload to the webhook endpoint and returns the result.")
-        .response::<200, Json<WebhookResult>>()
+        .response::<200, Json<WorkspaceWebhookResult>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -474,7 +479,7 @@ async fn find_webhook(
     conn: &mut PgConn,
     workspace_id: Uuid,
     webhook_id: Uuid,
-) -> Result<WithAccountRef<WorkspaceWebhook>> {
+) -> Result<WithAccountRef<WorkspaceWebhookModel>> {
     conn.find_webhook_in_workspace_with_creator(workspace_id, webhook_id)
         .await?
         .ok_or_else(|| Error::not_found("webhook"))

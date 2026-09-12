@@ -324,7 +324,12 @@ mod tests {
         new_oneshot.kind = PolicyKind::Oneshot;
         new_oneshot.content_hash = Some(vec![3, 3, 3]);
         let oneshot = conn
-            .find_or_create_oneshot_policy(new_oneshot, vec![3, 3, 3], vec![1, 2, 3], None)
+            .find_or_create_oneshot_policy(
+                new_oneshot,
+                vec![3, 3, 3],
+                serde_json::json!({"v":1}),
+                None,
+            )
             .await?;
         let slug = oneshot.policy.policy.slug.clone();
 

@@ -500,7 +500,7 @@ diesel::table! {
         workspace_id -> Uuid,
         account_id -> Uuid,
         version_number -> Int4,
-        definition -> Bytea,
+        definition -> Jsonb,
         metadata -> Jsonb,
         created_at -> Timestamptz,
     }

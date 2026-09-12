@@ -22,7 +22,8 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::model::{
-    NewWorkspaceAssistantJob, NewWorkspaceThread, WorkspaceThread, WorkspaceThreadComment,
+    NewWorkspaceAssistantJob, NewWorkspaceThread, WorkspaceThread as WorkspaceThreadModel,
+    WorkspaceThreadComment,
 };
 use nvisy_postgres::query::{
     AccountRepository, AssistantJobOutboxRepository, TimelineCursor, WorkspaceDocumentRepository,
@@ -35,11 +36,12 @@ use uuid::Uuid;
 
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
-    AssignReview, CursorPagination, OpenThread, RenameThread, ThreadPathParams,
-    WorkspaceDocumentPathParams, WorkspaceThreadsQuery,
+    AssignWorkspaceReview, CursorPagination, OpenWorkspaceThread, RenameWorkspaceThread,
+    WorkspaceDocumentPathParams, WorkspaceThreadPathParams, WorkspaceThreadsQuery,
 };
 use crate::handler::response::{
-    AccountRef, Comment, Thread, ThreadEntry, ThreadEvent, ThreadsPage, TimelinePage,
+    AccountRef, WorkspaceComment, WorkspaceThread, WorkspaceThreadEntry, WorkspaceThreadEvent,
+    WorkspaceThreadsPage, WorkspaceTimelinePage,
 };
 use crate::handler::utility::{
     resolve_account_ref, resolve_account_ref_opt, resolve_workspace_member_ref,
@@ -72,8 +74,8 @@ async fn open_workspace_thread(
     State(assistant): State<AssistantQueue>,
     authz: Authorized<markers::Review>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<OpenThread>,
-) -> Result<(StatusCode, Json<Thread>)> {
+    ValidateJson(request): ValidateJson<OpenWorkspaceThread>,
+) -> Result<(StatusCode, Json<WorkspaceThread>)> {
     tracing::debug!(target: TRACING_TARGET, "Opening workspace thread");
 
     let workspace = authz.workspace;
@@ -97,7 +99,7 @@ fn open_workspace_thread_docs(op: TransformOperation) -> TransformOperation {
              its first message. @username mentions notify those members. Requires \
              the Review permission.",
         )
-        .response::<201, Json<Thread>>()
+        .response::<201, Json<WorkspaceThread>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -112,8 +114,8 @@ async fn open_thread(
     author_id: Uuid,
     security: &SecurityContext,
     assistant: &AssistantQueue,
-    request: OpenThread,
-) -> Result<(StatusCode, Json<Thread>)> {
+    request: OpenWorkspaceThread,
+) -> Result<(StatusCode, Json<WorkspaceThread>)> {
     // Resolve @-mentions to workspace-member account ids (author excluded,
     // de-duplicated; a non-member handle is ignored) and note whether the
     // assistant was addressed.
@@ -172,7 +174,7 @@ async fn open_thread(
 
     let response = thread_response(conn, thread).await?;
 
-    tracing::info!(target: TRACING_TARGET, thread_id = %response.id, "Thread opened");
+    tracing::info!(target: TRACING_TARGET, thread_id = %response.id, "WorkspaceThread opened");
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -192,7 +194,7 @@ async fn list_threads(
     authz: Authorized<markers::ViewReviews>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<WorkspaceThreadsQuery>,
-) -> Result<(StatusCode, Json<ThreadsPage>)> {
+) -> Result<(StatusCode, Json<WorkspaceThreadsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing threads");
 
     let workspace = authz.workspace;
@@ -230,11 +232,11 @@ async fn list_threads(
                 .item
                 .assignee_account_id
                 .and_then(|id| assignees.get(&id).cloned());
-            Thread::from_model(row.item, row.account.into(), assignee)
+            WorkspaceThread::from_model(row.item, row.account.into(), assignee)
         })
         .collect();
 
-    let response = ThreadsPage {
+    let response = WorkspaceThreadsPage {
         items: threads,
         total: page.total,
         next_cursor: page.next_cursor,
@@ -249,7 +251,7 @@ fn list_threads_docs(op: TransformOperation) -> TransformOperation {
             "Returns the workspace's threads, most recent first, with optional \
              document, author, and closed filters.",
         )
-        .response::<200, Json<ThreadsPage>>()
+        .response::<200, Json<WorkspaceThreadsPage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
 }
@@ -267,7 +269,7 @@ fn list_threads_docs(op: TransformOperation) -> TransformOperation {
 async fn delete_thread(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ManageThreads>,
-    Path(path_params): Path<ThreadPathParams>,
+    Path(path_params): Path<WorkspaceThreadPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting thread");
@@ -292,7 +294,7 @@ async fn delete_thread(
     })
     .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Thread deleted");
+    tracing::info!(target: TRACING_TARGET, "WorkspaceThread deleted");
 
     Ok(StatusCode::OK)
 }
@@ -318,9 +320,9 @@ fn delete_thread_docs(op: TransformOperation) -> TransformOperation {
 async fn close_thread(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ManageThreads>,
-    Path(path_params): Path<ThreadPathParams>,
+    Path(path_params): Path<WorkspaceThreadPathParams>,
     security: SecurityContext,
-) -> Result<(StatusCode, Json<Thread>)> {
+) -> Result<(StatusCode, Json<WorkspaceThread>)> {
     tracing::debug!(target: TRACING_TARGET, "Closing thread");
 
     let workspace = authz.workspace;
@@ -353,7 +355,7 @@ async fn close_thread(
 
     let response = thread_response(&mut conn, closed).await?;
 
-    tracing::info!(target: TRACING_TARGET, "Thread closed");
+    tracing::info!(target: TRACING_TARGET, "WorkspaceThread closed");
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -361,7 +363,7 @@ async fn close_thread(
 fn close_thread_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Close a thread")
         .description("Closes a thread, ending the discussion. Requires ManageThreads.")
-        .response::<200, Json<Thread>>()
+        .response::<200, Json<WorkspaceThread>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -379,9 +381,9 @@ fn close_thread_docs(op: TransformOperation) -> TransformOperation {
 async fn reopen_thread(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ManageThreads>,
-    Path(path_params): Path<ThreadPathParams>,
+    Path(path_params): Path<WorkspaceThreadPathParams>,
     security: SecurityContext,
-) -> Result<(StatusCode, Json<Thread>)> {
+) -> Result<(StatusCode, Json<WorkspaceThread>)> {
     tracing::debug!(target: TRACING_TARGET, "Reopening thread");
 
     let workspace = authz.workspace;
@@ -413,7 +415,7 @@ async fn reopen_thread(
 
     let response = thread_response(&mut conn, reopened).await?;
 
-    tracing::info!(target: TRACING_TARGET, "Thread reopened");
+    tracing::info!(target: TRACING_TARGET, "WorkspaceThread reopened");
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -421,7 +423,7 @@ async fn reopen_thread(
 fn reopen_thread_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Reopen a thread")
         .description("Reopens a closed thread. Requires ManageThreads.")
-        .response::<200, Json<Thread>>()
+        .response::<200, Json<WorkspaceThread>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -439,10 +441,10 @@ fn reopen_thread_docs(op: TransformOperation) -> TransformOperation {
 async fn rename_thread(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ManageThreads>,
-    Path(path_params): Path<ThreadPathParams>,
+    Path(path_params): Path<WorkspaceThreadPathParams>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<RenameThread>,
-) -> Result<(StatusCode, Json<Thread>)> {
+    ValidateJson(request): ValidateJson<RenameWorkspaceThread>,
+) -> Result<(StatusCode, Json<WorkspaceThread>)> {
     tracing::debug!(target: TRACING_TARGET, "Renaming thread");
 
     let workspace = authz.workspace;
@@ -478,7 +480,7 @@ async fn rename_thread(
 
     let response = thread_response(&mut conn, renamed).await?;
 
-    tracing::info!(target: TRACING_TARGET, "Thread renamed");
+    tracing::info!(target: TRACING_TARGET, "WorkspaceThread renamed");
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -486,7 +488,7 @@ async fn rename_thread(
 fn rename_thread_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Rename a thread")
         .description("Sets or clears a thread's title. Requires ManageThreads.")
-        .response::<200, Json<Thread>>()
+        .response::<200, Json<WorkspaceThread>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -506,9 +508,9 @@ fn rename_thread_docs(op: TransformOperation) -> TransformOperation {
 async fn list_thread_timeline(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewReviews>,
-    Path(path_params): Path<ThreadPathParams>,
+    Path(path_params): Path<WorkspaceThreadPathParams>,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<TimelinePage>)> {
+) -> Result<(StatusCode, Json<WorkspaceTimelinePage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing thread timeline");
 
     let workspace = authz.workspace;
@@ -534,21 +536,27 @@ async fn list_thread_timeline(
 
     // Merge the two already-ordered windows into one ascending timeline by
     // (created_at, source, id) — the same total order the cursor encodes.
-    let mut entries: Vec<ThreadEntry> = Vec::with_capacity(comments.len() + events.len());
-    entries.extend(
-        comments
-            .into_iter()
-            .map(|row| ThreadEntry::Comment(Comment::from_model(row.item, row.account.into()))),
-    );
-    entries.extend(events.into_iter().map(|(event, actor)| {
-        ThreadEntry::Event(ThreadEvent::from_model(event, actor.map(Into::into)))
+    let mut entries: Vec<WorkspaceThreadEntry> = Vec::with_capacity(comments.len() + events.len());
+    entries.extend(comments.into_iter().map(|row| {
+        WorkspaceThreadEntry::Comment(WorkspaceComment::from_model(row.item, row.account.into()))
     }));
-    entries.sort_by_key(ThreadEntry::sort_key);
+    entries.extend(events.into_iter().map(|(event, actor)| {
+        WorkspaceThreadEntry::Event(WorkspaceThreadEvent::from_model(
+            event,
+            actor.map(Into::into),
+        ))
+    }));
+    entries.sort_by_key(WorkspaceThreadEntry::sort_key);
 
     // The merged window holds up to 2 * fetch rows; a page is the first `limit`,
     // with a next cursor when a further entry exists beyond them.
-    let response = TimelinePage::from_cursor_page(
-        CursorPage::new(entries, None, pagination.limit, ThreadEntry::cursor),
+    let response = WorkspaceTimelinePage::from_cursor_page(
+        CursorPage::new(
+            entries,
+            None,
+            pagination.limit,
+            WorkspaceThreadEntry::cursor,
+        ),
         |entry| entry,
     );
 
@@ -562,7 +570,7 @@ fn list_thread_timeline_docs(op: TransformOperation) -> TransformOperation {
              closed, reopened, renamed, and review transitions) interleaved, oldest \
              first, with cursor pagination.",
         )
-        .response::<200, Json<TimelinePage>>()
+        .response::<200, Json<WorkspaceTimelinePage>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -586,7 +594,7 @@ async fn verify_review(
     authz: Authorized<markers::Review>,
     Path(path_params): Path<WorkspaceDocumentPathParams>,
     security: SecurityContext,
-) -> Result<(StatusCode, Json<Thread>)> {
+) -> Result<(StatusCode, Json<WorkspaceThread>)> {
     tracing::debug!(target: TRACING_TARGET, "Verifying document review");
 
     let workspace = authz.workspace;
@@ -631,7 +639,7 @@ fn verify_review_docs(op: TransformOperation) -> TransformOperation {
             "Verifies a document's review as a whole, moving it to `resolved`. Requires \
              Review.",
         )
-        .response::<200, Json<Thread>>()
+        .response::<200, Json<WorkspaceThread>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -656,8 +664,8 @@ async fn assign_review(
     authz: Authorized<markers::AssignReviews>,
     Path(path_params): Path<WorkspaceDocumentPathParams>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<AssignReview>,
-) -> Result<(StatusCode, Json<Thread>)> {
+    ValidateJson(request): ValidateJson<AssignWorkspaceReview>,
+) -> Result<(StatusCode, Json<WorkspaceThread>)> {
     tracing::debug!(target: TRACING_TARGET, "Assigning document review");
 
     let workspace = authz.workspace;
@@ -726,7 +734,7 @@ fn assign_review_docs(op: TransformOperation) -> TransformOperation {
             "Assigns a document's review to a workspace member, or clears the assignee \
              with a null `assignee`. Requires AssignReviews.",
         )
-        .response::<200, Json<Thread>>()
+        .response::<200, Json<WorkspaceThread>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -735,10 +743,13 @@ fn assign_review_docs(op: TransformOperation) -> TransformOperation {
 
 /// Builds a full [`Thread`] response for `thread`, resolving its author and (for
 /// a document review) its assignee.
-async fn thread_response(conn: &mut PgConn, thread: WorkspaceThread) -> Result<Thread> {
+async fn thread_response(
+    conn: &mut PgConn,
+    thread: WorkspaceThreadModel,
+) -> Result<WorkspaceThread> {
     let author = resolve_account_ref(conn, thread.author_account_id).await?;
     let assignee = resolve_account_ref_opt(conn, thread.assignee_account_id).await?;
-    Ok(Thread::from_model(thread, author, assignee))
+    Ok(WorkspaceThread::from_model(thread, author, assignee))
 }
 
 /// Finds a live thread in the workspace or returns a 404.
@@ -746,7 +757,7 @@ pub(crate) async fn find_thread(
     conn: &mut PgConn,
     workspace_id: Uuid,
     thread_id: Uuid,
-) -> Result<WorkspaceThread> {
+) -> Result<WorkspaceThreadModel> {
     conn.find_thread_in_workspace(workspace_id, thread_id)
         .await?
         .ok_or_else(|| Error::not_found("workspace_thread"))

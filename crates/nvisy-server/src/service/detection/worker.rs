@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use elide_pipeline::RasterMode;
+use elide_pipeline::primitive::RasterMode;
 use nvisy_postgres::model::{
     NewBlob, NewWorkspaceAudit, UpdateWorkspaceDetection, WorkspaceDetection, WorkspacePipeline,
 };
@@ -425,9 +425,7 @@ impl DetectionWorker {
                 raster_mode_of(&settings),
             );
 
-            let resolved =
-                resolve_policies(&mut conn, &self.infra.crypto, job.workspace_id, pipeline.id)
-                    .await?;
+            let resolved = resolve_policies(&mut conn, job.workspace_id, pipeline.id).await?;
             if resolved.is_empty() {
                 return Err(ErrorKind::BadRequest
                     .with_message("Pipeline has no policies")

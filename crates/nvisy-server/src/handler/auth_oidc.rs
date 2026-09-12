@@ -57,7 +57,7 @@ use uuid::Uuid;
 
 use crate::extract::{AuthState, Json, Path, Query, SecurityContext, ValidateJson};
 use crate::handler::request::{DesktopTokenRequest, IdentityPathParams, OidcCallbackQuery};
-use crate::handler::response::DesktopToken;
+use crate::handler::response::AccountDesktopToken;
 use crate::response::{CookieConfig, ErrorKind, ErrorResponse, RedirectResult, Result, WebSession};
 use crate::service::{
     AccountProvisioner, AuthIssuer, OidcAuthorization, OidcService, RedirectKind, ServiceState,
@@ -315,7 +315,7 @@ async fn mint_desktop_token(
     auth_state: AuthState,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<DesktopTokenRequest>,
-) -> Result<(StatusCode, Json<DesktopToken>)> {
+) -> Result<(StatusCode, Json<AccountDesktopToken>)> {
     tracing::debug!(target: TRACING_TARGET, "Minting desktop app token");
 
     // The target must be an allow-listed desktop scheme. Refuse a web origin (or
@@ -354,7 +354,7 @@ async fn mint_desktop_token(
 
     Ok((
         StatusCode::OK,
-        Json(DesktopToken {
+        Json(AccountDesktopToken {
             api_token,
             redirect_uri: request.redirect_uri,
         }),
@@ -369,7 +369,7 @@ fn mint_desktop_token_docs(op: TransformOperation) -> TransformOperation {
              browser session (the desktop login completes in the browser first). The `redirectUri` \
              must be a configured desktop scheme.",
         )
-        .response::<200, Json<DesktopToken>>()
+        .response::<200, Json<AccountDesktopToken>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
 }

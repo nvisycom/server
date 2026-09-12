@@ -21,7 +21,7 @@ use crate::response::{ErrorKind, Result};
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct CreateWebhook {
+pub struct CreateWorkspaceWebhook {
     /// Human-readable name for the webhook (1-128 characters).
     #[garde(length(chars, min = 1, max = 128))]
     pub display_name: String,
@@ -39,7 +39,7 @@ pub struct CreateWebhook {
     pub status: Option<WebhookStatus>,
 }
 
-impl CreateWebhook {
+impl CreateWorkspaceWebhook {
     /// Converts this request into a [`NewWorkspaceWebhook`] model.
     ///
     /// # Arguments
@@ -97,7 +97,7 @@ fn validate_headers(
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct UpdateWebhook {
+pub struct UpdateWorkspaceWebhook {
     /// Updated human-readable name for the webhook (1-128 characters).
     #[garde(length(chars, min = 1, max = 128))]
     pub display_name: Option<String>,
@@ -116,7 +116,7 @@ pub struct UpdateWebhook {
     pub status: Option<WebhookStatus>,
 }
 
-impl UpdateWebhook {
+impl UpdateWorkspaceWebhook {
     /// Converts this request into an [`UpdateWorkspaceWebhookModel`].
     ///
     /// While `current_status` is `Suspended` (system-set), the status field is
@@ -153,7 +153,7 @@ impl UpdateWebhook {
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct TestWebhook {
+pub struct TestWorkspaceWebhook {
     /// Optional custom payload to send in the test request.
     /// If not provided, a default test payload will be used.
     pub payload: Option<serde_json::Value>,

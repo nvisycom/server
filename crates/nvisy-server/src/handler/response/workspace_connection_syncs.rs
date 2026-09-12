@@ -1,7 +1,7 @@
 //! Connection sync response types.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::WorkspaceConnectionSync;
+use nvisy_postgres::model::WorkspaceConnectionSync as WorkspaceConnectionSyncModel;
 use nvisy_postgres::types::{ConnectionId, SyncStatus, SyncTriggerType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use super::{AccountRef, Page};
 /// A connection sync (import or export).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ConnectionSync {
+pub struct WorkspaceConnectionSync {
     /// Unique sync identifier.
     pub id: Uuid,
     /// The connection this sync belongs to.
@@ -37,9 +37,9 @@ pub struct ConnectionSync {
     pub completed_at: Option<Timestamp>,
 }
 
-impl ConnectionSync {
+impl WorkspaceConnectionSync {
     /// Builds a response from the sync model and the triggering account.
-    pub fn from_model(run: WorkspaceConnectionSync, triggered_by: AccountRef) -> Self {
+    pub fn from_model(run: WorkspaceConnectionSyncModel, triggered_by: AccountRef) -> Self {
         Self {
             id: run.id,
             connection_id: ConnectionId::from_uuid(run.connection_id),
@@ -56,4 +56,4 @@ impl ConnectionSync {
 }
 
 /// Paginated list of connection syncs.
-pub type ConnectionSyncsPage = Page<ConnectionSync>;
+pub type WorkspaceConnectionSyncsPage = Page<WorkspaceConnectionSync>;

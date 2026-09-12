@@ -93,7 +93,7 @@ pub type WorkspacesPage = Page<Workspace>;
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct NotificationSettings {
+pub struct WorkspaceNotificationSettings {
     /// Whether to send email notifications.
     pub notify_via_email: bool,
     /// Notification events to receive in-app.
@@ -102,7 +102,7 @@ pub struct NotificationSettings {
     pub notification_events_email: Vec<NotificationEvent>,
 }
 
-impl NotificationSettings {
+impl WorkspaceNotificationSettings {
     /// Creates a new instance from a workspace member model.
     pub fn from_member(member: &model::WorkspaceMember) -> Self {
         Self {

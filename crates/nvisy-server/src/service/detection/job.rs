@@ -1,6 +1,6 @@
 //! Detection job and detection-status event types.
 
-use elide_pipeline::DocumentContext;
+use elide_pipeline::provider::DocumentContext;
 use nvisy_postgres::types::DetectionStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

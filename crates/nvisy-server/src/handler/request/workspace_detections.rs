@@ -1,7 +1,7 @@
 //! Detection request types (detect and redact).
 
-use elide_pipeline::DocumentContext;
 use elide_pipeline::entity::EditSet;
+use elide_pipeline::provider::DocumentContext;
 use garde::Validate;
 use nvisy_postgres::types::{DetectionFilter, DetectionStatus, PipelineTriggerType};
 use schemars::JsonSchema;
@@ -44,7 +44,7 @@ impl From<WorkspaceDetectionsQuery> for DetectionFilter {
 /// trigger account, and trigger type.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct PipelineDetectionsQuery {
+pub struct WorkspacePipelineDetectionsQuery {
     /// Filter by detection status.
     pub status: Option<DetectionStatus>,
     /// Filter by the source document the detection analyzes.
@@ -55,8 +55,8 @@ pub struct PipelineDetectionsQuery {
     pub trigger_type: Option<PipelineTriggerType>,
 }
 
-impl From<PipelineDetectionsQuery> for DetectionFilter {
-    fn from(query: PipelineDetectionsQuery) -> Self {
+impl From<WorkspacePipelineDetectionsQuery> for DetectionFilter {
+    fn from(query: WorkspacePipelineDetectionsQuery) -> Self {
         DetectionFilter {
             status: query.status,
             input_document_id: query.document_id,
@@ -75,7 +75,7 @@ impl From<PipelineDetectionsQuery> for DetectionFilter {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct CreateDetection {
+pub struct CreateWorkspaceDetection {
     /// The document to analyze.
     pub document_id: Uuid,
     /// Per-document scope (languages, jurisdictions, document labels).
@@ -95,7 +95,7 @@ pub struct CreateDetection {
 #[must_use]
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct RedactDetection {
+pub struct RedactWorkspaceDetection {
     /// Reviewer edits to apply before redaction, grouped by modality. Omit to
     /// redact with the policy decisions exactly as detected.
     #[serde(default, skip_serializing_if = "Option::is_none")]

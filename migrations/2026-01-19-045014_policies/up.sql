@@ -1,6 +1,6 @@
 -- Policies: structured redaction policy definitions (nvisy_schema Policy) the
 -- engine consults. A standalone workspace resource. A policy is a stable logical
--- identity (slug, display name) whose content is versioned: the encrypted
+-- identity (slug, display name) whose content is versioned: the plaintext JSONB
 -- definition lives in workspace_policy_versions, and current_version_id names the
 -- live version. Editing the definition mints a new immutable version; a detection
 -- pins the exact version it ran (see the detections migration).
@@ -143,11 +143,10 @@ CREATE TABLE workspace_policy_versions (
     CONSTRAINT workspace_policy_versions_workspace_id_id_key UNIQUE (workspace_id, id),
     CONSTRAINT workspace_policy_versions_workspace_policy_id_key UNIQUE (workspace_id, policy_id, id),
 
-    -- Policy body (nvisy_schema::policy::PolicyDefinition as JSON: rules, labels,
-    -- fallback, retention, `when` predicate). Stored XChaCha20-Poly1305 encrypted
-    -- with the workspace-derived key.
-    definition      BYTEA           NOT NULL,
-    CONSTRAINT workspace_policy_versions_definition_size CHECK (length(definition) BETWEEN 1 AND 1048576),
+    -- Policy body (the engine's Policy as JSON: scopes, rules, fallback). Plain
+    -- config describing what to redact and how, stored as plaintext JSONB.
+    definition      JSONB           NOT NULL,
+    CONSTRAINT workspace_policy_versions_definition_size CHECK (length(definition::TEXT) BETWEEN 2 AND 1048576),
 
     -- Definition-scoped metadata that versions with the content.
     metadata        JSONB           NOT NULL DEFAULT '{}',
@@ -167,7 +166,7 @@ COMMENT ON COLUMN workspace_policy_versions.policy_id IS 'Logical policy this is
 COMMENT ON COLUMN workspace_policy_versions.workspace_id IS 'Owning workspace';
 COMMENT ON COLUMN workspace_policy_versions.account_id IS 'Account that authored this version';
 COMMENT ON COLUMN workspace_policy_versions.version_number IS 'Monotonic per-policy version number (1..N)';
-COMMENT ON COLUMN workspace_policy_versions.definition IS 'Encrypted policy body (XChaCha20-Poly1305, workspace-derived key)';
+COMMENT ON COLUMN workspace_policy_versions.definition IS 'Policy body (the engine''s Policy) as plaintext JSONB';
 COMMENT ON COLUMN workspace_policy_versions.metadata IS 'Definition-scoped metadata that versions with the content';
 COMMENT ON COLUMN workspace_policy_versions.created_at IS 'When this version was created';
 

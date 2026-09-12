@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{AccountRef, Comment, Page};
+use super::{AccountRef, Page, WorkspaceComment};
 
 /// Response type for a thread.
 ///
@@ -17,10 +17,10 @@ use super::{AccountRef, Comment, Page};
 /// and closed by members) or a document's review (`documentId` set, one live
 /// thread per document, auto-created on the document's first detection). A
 /// document thread carries a derived `reviewStatus` and an optional `assignee`; a
-/// workspace thread carries neither. Its stream is a [`ThreadEntry`] timeline.
+/// workspace thread carries neither. Its stream is a [`WorkspaceThreadEntry`] timeline.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Thread {
+pub struct WorkspaceThread {
     /// Unique identifier of the thread.
     pub id: Uuid,
     /// Document this thread reviews; `None` for a workspace-level thread.
@@ -54,7 +54,7 @@ pub struct Thread {
 /// renamed, or a review transition).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ThreadEvent {
+pub struct WorkspaceThreadEvent {
     /// Unique identifier of the event.
     pub id: Uuid,
     /// What happened.
@@ -73,26 +73,26 @@ pub struct ThreadEvent {
 /// tagged so a client renders them interleaved in order.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ThreadEntry {
+pub enum WorkspaceThreadEntry {
     /// A message posted in the thread.
-    Comment(Comment),
+    Comment(WorkspaceComment),
     /// A lifecycle event (opened, closed, reopened, renamed, or a review
     /// transition).
-    Event(ThreadEvent),
+    Event(WorkspaceThreadEvent),
 }
 
-impl ThreadEntry {
+impl WorkspaceThreadEntry {
     /// The entry's position in the merged timeline: `(created_at, source, id)`.
     /// Comments sort before events at the same instant; `id` breaks a tie within
     /// one stream. This is the total order the timeline is paginated by.
     pub fn cursor(&self) -> TimelineCursor {
         match self {
-            ThreadEntry::Comment(c) => TimelineCursor {
+            WorkspaceThreadEntry::Comment(c) => TimelineCursor {
                 created_at: c.created_at,
                 source: TimelineSource::Comment,
                 id: c.id,
             },
-            ThreadEntry::Event(e) => TimelineCursor {
+            WorkspaceThreadEntry::Event(e) => TimelineCursor {
                 created_at: e.created_at,
                 source: TimelineSource::Event,
                 id: e.id,
@@ -108,12 +108,12 @@ impl ThreadEntry {
 }
 
 /// Paginated response for threads.
-pub type ThreadsPage = Page<Thread>;
+pub type WorkspaceThreadsPage = Page<WorkspaceThread>;
 
 /// Paginated response for a thread's timeline.
-pub type TimelinePage = Page<ThreadEntry>;
+pub type WorkspaceTimelinePage = Page<WorkspaceThreadEntry>;
 
-impl Thread {
+impl WorkspaceThread {
     /// Creates a thread response from the database model, the resolved author
     /// reference, and the resolved assignee reference (absent for a workspace
     /// thread or an unassigned document review).
@@ -137,7 +137,7 @@ impl Thread {
     }
 }
 
-impl ThreadEvent {
+impl WorkspaceThreadEvent {
     /// Creates a thread-event response from the database model and the resolved
     /// actor reference (absent if the actor's account was removed).
     pub fn from_model(event: EventModel, actor: Option<AccountRef>) -> Self {

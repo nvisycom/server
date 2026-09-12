@@ -8,7 +8,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::WorkspacePipeline;
+use nvisy_postgres::model::WorkspacePipeline as WorkspacePipelineModel;
 use nvisy_postgres::query::{PipelineReferenceRepository, WorkspacePipelineRepository};
 use nvisy_postgres::types::{Handle, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, PgConnection, Result as PgResult};
@@ -16,10 +16,10 @@ use uuid::Uuid;
 
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
-    CreatePipeline, CursorPagination, PipelineFilter, PipelinePathParams, PipelineReferences,
-    UpdatePipeline,
+    CreateWorkspacePipeline, CursorPagination, PipelineReferences, UpdateWorkspacePipeline,
+    WorkspacePipelineFilter, WorkspacePipelinePathParams,
 };
-use crate::handler::response::{AccountRef, Page, Pipeline, PipelineSummary};
+use crate::handler::response::{AccountRef, Page, WorkspacePipeline, WorkspacePipelineSummary};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
@@ -45,8 +45,8 @@ async fn create_pipeline(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::CreatePipelines>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<CreatePipeline>,
-) -> Result<(StatusCode, Json<Pipeline>)> {
+    ValidateJson(request): ValidateJson<CreateWorkspacePipeline>,
+) -> Result<(StatusCode, Json<WorkspacePipeline>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating pipeline");
 
     let workspace = authz.workspace;
@@ -75,7 +75,7 @@ async fn create_pipeline(
                 }),
             )
             .await?;
-            Ok::<WorkspacePipeline, Error>(pipeline)
+            Ok::<WorkspacePipelineModel, Error>(pipeline)
         })
         .await?;
 
@@ -84,13 +84,14 @@ async fn create_pipeline(
 
     // The references were just written from the request, so build the response
     // from its slugs directly instead of reading the join table back.
-    let response = Pipeline::from_model(pipeline, workspace.slug, creator, references.policy_slugs)
-        .map_err(serialize_error)?;
+    let response =
+        WorkspacePipeline::from_model(pipeline, workspace.slug, creator, references.policy_slugs)
+            .map_err(serialize_error)?;
 
     tracing::info!(
         target: TRACING_TARGET,
         pipeline_slug = %response.slug,
-        "Pipeline created",
+        "WorkspacePipeline created",
     );
 
     Ok((StatusCode::CREATED, Json(response)))
@@ -99,7 +100,7 @@ async fn create_pipeline(
 fn create_pipeline_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Create pipeline")
         .description("Creates a new pipeline in the workspace. The creator is set as the owner.")
-        .response::<201, Json<Pipeline>>()
+        .response::<201, Json<WorkspacePipeline>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -120,8 +121,8 @@ async fn list_pipelines(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewPipelines>,
     Query(pagination): Query<CursorPagination>,
-    Query(filter): Query<PipelineFilter>,
-) -> Result<(StatusCode, Json<Page<PipelineSummary>>)> {
+    Query(filter): Query<WorkspacePipelineFilter>,
+) -> Result<(StatusCode, Json<Page<WorkspacePipelineSummary>>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing pipelines");
 
     let workspace = authz.workspace;
@@ -137,7 +138,7 @@ async fn list_pipelines(
         .await?;
 
     let response = Page::from_cursor_page(page, |wc| {
-        PipelineSummary::from_model(wc.item, workspace.slug.clone(), wc.account.into())
+        WorkspacePipelineSummary::from_model(wc.item, workspace.slug.clone(), wc.account.into())
     });
 
     tracing::debug!(
@@ -152,7 +153,7 @@ async fn list_pipelines(
 fn list_pipelines_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List pipelines")
         .description("Returns all pipelines in the workspace with optional filtering by status and name search.")
-        .response::<200, Json<Page<PipelineSummary>>>()
+        .response::<200, Json<Page<WorkspacePipelineSummary>>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
 }
@@ -169,8 +170,8 @@ fn list_pipelines_docs(op: TransformOperation) -> TransformOperation {
 async fn get_pipeline(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewPipelines>,
-    Path(path_params): Path<PipelinePathParams>,
-) -> Result<(StatusCode, Json<Pipeline>)> {
+    Path(path_params): Path<WorkspacePipelinePathParams>,
+) -> Result<(StatusCode, Json<WorkspacePipeline>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting pipeline");
 
     let workspace = authz.workspace;
@@ -182,10 +183,10 @@ async fn get_pipeline(
 
     let policy_slugs = conn.list_pipeline_policy_slugs(pipeline.id).await?;
 
-    let response = Pipeline::from_model(pipeline, workspace.slug, creator, policy_slugs)
+    let response = WorkspacePipeline::from_model(pipeline, workspace.slug, creator, policy_slugs)
         .map_err(serialize_error)?;
 
-    tracing::info!(target: TRACING_TARGET, "Pipeline retrieved");
+    tracing::info!(target: TRACING_TARGET, "WorkspacePipeline retrieved");
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -193,7 +194,7 @@ async fn get_pipeline(
 fn get_pipeline_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get pipeline")
         .description("Returns a pipeline by its slug.")
-        .response::<200, Json<Pipeline>>()
+        .response::<200, Json<WorkspacePipeline>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -213,10 +214,10 @@ fn get_pipeline_docs(op: TransformOperation) -> TransformOperation {
 async fn update_pipeline(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::UpdatePipelines>,
-    Path(path_params): Path<PipelinePathParams>,
+    Path(path_params): Path<WorkspacePipelinePathParams>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<UpdatePipeline>,
-) -> Result<(StatusCode, Json<Pipeline>)> {
+    ValidateJson(request): ValidateJson<UpdateWorkspacePipeline>,
+) -> Result<(StatusCode, Json<WorkspacePipeline>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating pipeline");
 
     let workspace = authz.workspace;
@@ -261,21 +262,24 @@ async fn update_pipeline(
                 }),
             )
             .await?;
-            Ok::<WorkspacePipeline, Error>(pipeline)
+            Ok::<WorkspacePipelineModel, Error>(pipeline)
         })
         .await?;
 
     let response = match references {
         // A definition was supplied: the references we just wrote are current.
-        Some(references) => {
-            Pipeline::from_model(pipeline, workspace.slug, creator, references.policy_slugs)
-                .map_err(serialize_error)?
-        }
+        Some(references) => WorkspacePipeline::from_model(
+            pipeline,
+            workspace.slug,
+            creator,
+            references.policy_slugs,
+        )
+        .map_err(serialize_error)?,
         // Partial update left the references untouched: read them back.
         None => build_response(&mut conn, pipeline, workspace.slug, creator).await?,
     };
 
-    tracing::info!(target: TRACING_TARGET, "Pipeline updated");
+    tracing::info!(target: TRACING_TARGET, "WorkspacePipeline updated");
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -283,7 +287,7 @@ async fn update_pipeline(
 fn update_pipeline_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update pipeline")
         .description("Updates an existing pipeline. Only provided fields are updated.")
-        .response::<200, Json<Pipeline>>()
+        .response::<200, Json<WorkspacePipeline>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -305,7 +309,7 @@ fn update_pipeline_docs(op: TransformOperation) -> TransformOperation {
 async fn delete_pipeline(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::DeletePipelines>,
-    Path(path_params): Path<PipelinePathParams>,
+    Path(path_params): Path<WorkspacePipelinePathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting pipeline");
@@ -341,7 +345,7 @@ async fn delete_pipeline(
     })
     .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Pipeline deleted");
+    tracing::info!(target: TRACING_TARGET, "WorkspacePipeline deleted");
 
     Ok(StatusCode::OK)
 }
@@ -361,7 +365,7 @@ async fn find_pipeline(
     conn: &mut PgConn,
     workspace_id: Uuid,
     pipeline_slug: &str,
-) -> Result<WithAccountRef<WorkspacePipeline>> {
+) -> Result<WithAccountRef<WorkspacePipelineModel>> {
     conn.find_pipeline_in_workspace_by_slug(workspace_id, pipeline_slug)
         .await?
         .ok_or_else(|| Error::not_found("pipeline"))
@@ -373,7 +377,7 @@ async fn find_pipeline(
 /// its references stay consistent.
 async fn replace_references(
     conn: &mut PgConnection,
-    pipeline: &WorkspacePipeline,
+    pipeline: &WorkspacePipelineModel,
     policy_ids: &[Uuid],
 ) -> PgResult<()> {
     conn.replace_workspace_pipeline_policies(pipeline.workspace_id, pipeline.id, policy_ids)
@@ -399,12 +403,13 @@ async fn resolve_references(
 /// from the join table. Used when the caller did not just write them.
 async fn build_response(
     conn: &mut PgConnection,
-    pipeline: WorkspacePipeline,
+    pipeline: WorkspacePipelineModel,
     workspace_slug: Handle,
     creator: AccountRef,
-) -> Result<Pipeline> {
+) -> Result<WorkspacePipeline> {
     let policy_slugs = conn.list_pipeline_policy_slugs(pipeline.id).await?;
-    Pipeline::from_model(pipeline, workspace_slug, creator, policy_slugs).map_err(serialize_error)
+    WorkspacePipeline::from_model(pipeline, workspace_slug, creator, policy_slugs)
+        .map_err(serialize_error)
 }
 
 /// Maps a definition (de)serialization failure to an internal error.

@@ -20,17 +20,17 @@ use strum::IntoEnumIterator;
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceAnalytics {
     /// Stored-file totals and their per-kind breakdown.
-    pub storage: StorageAnalytics,
+    pub storage: WorkspaceStorageAnalytics,
     /// Detection health: volume, status mix, and durations.
-    pub detections: DetectionAnalytics,
+    pub detections: WorkspaceDetectionAnalytics,
     /// Inference token usage: workspace totals and a per-model breakdown.
-    pub usage: UsageAnalytics,
+    pub usage: WorkspaceUsageAnalytics,
 }
 
 /// Inference token usage across a workspace's detections.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct UsageAnalytics {
+pub struct WorkspaceUsageAnalytics {
     /// Total input/prompt tokens across all models.
     pub input_tokens: i64,
     /// Total output/completion tokens across all models.
@@ -39,13 +39,13 @@ pub struct UsageAnalytics {
     /// output).
     pub total_tokens: i64,
     /// Per-model breakdown, one entry per model used, in a stable order.
-    pub by_model: Vec<ModelUsageEntry>,
+    pub by_model: Vec<WorkspaceModelUsageEntry>,
 }
 
 /// One model's token usage across a workspace's detections.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ModelUsageEntry {
+pub struct WorkspaceModelUsageEntry {
     /// The model.
     pub model: String,
     /// Input/prompt tokens summed for this model (`0` if never reported).
@@ -59,20 +59,20 @@ pub struct ModelUsageEntry {
 /// Storage totals across a workspace's live files.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct StorageAnalytics {
+pub struct WorkspaceStorageAnalytics {
     /// Total bytes of all live files.
     pub total_bytes: i64,
     /// Number of live files.
     pub file_count: i64,
     /// Per-kind breakdown, one entry per document `kind` (zero-filled), in a
     /// stable order.
-    pub by_kind: Vec<StorageKindEntry>,
+    pub by_kind: Vec<WorkspaceStorageKindEntry>,
 }
 
 /// One document `kind`'s share of a workspace's storage.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct StorageKindEntry {
+pub struct WorkspaceStorageKindEntry {
     /// The document kind.
     pub kind: DocumentKind,
     /// Number of live documents of this kind.
@@ -84,12 +84,12 @@ pub struct StorageKindEntry {
 /// Detection health for a workspace.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DetectionAnalytics {
+pub struct WorkspaceDetectionAnalytics {
     /// Total number of detections.
     pub total: i64,
     /// Per-status breakdown, one entry per detection status (zero-filled), in a
     /// stable order.
-    pub by_status: Vec<DetectionStatusEntry>,
+    pub by_status: Vec<WorkspaceDetectionStatusEntry>,
     /// Failed / (completed + failed). Omitted when no detection has reached a
     /// terminal state (genuinely no signal, not zero).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,7 +107,7 @@ pub struct DetectionAnalytics {
 /// One status's share of a workspace's detections.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DetectionStatusEntry {
+pub struct WorkspaceDetectionStatusEntry {
     /// The detection status.
     pub status: DetectionStatus,
     /// Number of detections in this status.
@@ -124,10 +124,10 @@ impl WorkspaceAnalytics {
             durations,
             usage,
         } = snapshot;
-        let by_kind: Vec<StorageKindEntry> = DocumentKind::iter()
+        let by_kind: Vec<WorkspaceStorageKindEntry> = DocumentKind::iter()
             .map(|kind| {
                 let row = storage.iter().find(|r| r.kind == kind);
-                StorageKindEntry {
+                WorkspaceStorageKindEntry {
                     kind,
                     file_count: row.map_or(0, |r| r.file_count),
                     total_bytes: row.map_or(0, |r| r.total_bytes),
@@ -137,8 +137,8 @@ impl WorkspaceAnalytics {
         let total_bytes = by_kind.iter().map(|e| e.total_bytes).sum();
         let file_count = by_kind.iter().map(|e| e.file_count).sum();
 
-        let by_status: Vec<DetectionStatusEntry> = DetectionStatus::iter()
-            .map(|status| DetectionStatusEntry {
+        let by_status: Vec<WorkspaceDetectionStatusEntry> = DetectionStatus::iter()
+            .map(|status| WorkspaceDetectionStatusEntry {
                 status,
                 count: detections
                     .iter()
@@ -153,16 +153,16 @@ impl WorkspaceAnalytics {
         let terminal = completed + failed;
         let error_rate = (terminal > 0).then(|| failed as f64 / terminal as f64);
 
-        let by_model: Vec<ModelUsageEntry> = usage
+        let by_model: Vec<WorkspaceModelUsageEntry> = usage
             .into_iter()
-            .map(|u| ModelUsageEntry {
+            .map(|u| WorkspaceModelUsageEntry {
                 model: u.model,
                 input_tokens: u.input_tokens.unwrap_or(0),
                 output_tokens: u.output_tokens.unwrap_or(0),
                 total_tokens: u.total_tokens.unwrap_or(0),
             })
             .collect();
-        let usage = UsageAnalytics {
+        let usage = WorkspaceUsageAnalytics {
             input_tokens: by_model.iter().map(|m| m.input_tokens).sum(),
             output_tokens: by_model.iter().map(|m| m.output_tokens).sum(),
             total_tokens: by_model.iter().map(|m| m.total_tokens).sum(),
@@ -170,12 +170,12 @@ impl WorkspaceAnalytics {
         };
 
         Self {
-            storage: StorageAnalytics {
+            storage: WorkspaceStorageAnalytics {
                 total_bytes,
                 file_count,
                 by_kind,
             },
-            detections: DetectionAnalytics {
+            detections: WorkspaceDetectionAnalytics {
                 total,
                 by_status,
                 error_rate,
@@ -192,15 +192,15 @@ impl WorkspaceAnalytics {
 /// series.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DetectionTimeSeries {
+pub struct WorkspaceDetectionTimeSeries {
     /// One entry per day in the requested window, oldest first.
-    pub points: Vec<DetectionDayEntry>,
+    pub points: Vec<WorkspaceDetectionDayEntry>,
 }
 
 /// A single day of detection activity.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DetectionDayEntry {
+pub struct WorkspaceDetectionDayEntry {
     /// The day (`YYYY-MM-DD`, UTC).
     pub date: Date,
     /// Detections started this day (`0` on a quiet day).
@@ -226,7 +226,7 @@ pub struct DetectionDayEntry {
     pub total_tokens: Option<i64>,
 }
 
-impl DetectionTimeSeries {
+impl WorkspaceDetectionTimeSeries {
     /// Builds a dense daily series over `[from, to]` from the sparse per-day rows
     /// the query returns. Every day in the window is emitted in order; a day with
     /// no detections reports `detections: 0` and omits the rate/duration/token
@@ -245,7 +245,7 @@ impl DetectionTimeSeries {
         let mut date = from;
         while date <= to {
             days.push(match by_day.remove(&date) {
-                Some(p) => DetectionDayEntry {
+                Some(p) => WorkspaceDetectionDayEntry {
                     date,
                     detections: p.detections,
                     error_rate: (p.terminal > 0).then(|| p.failed as f64 / p.terminal as f64),
@@ -255,7 +255,7 @@ impl DetectionTimeSeries {
                     output_tokens: p.output_tokens,
                     total_tokens: p.total_tokens,
                 },
-                None => DetectionDayEntry {
+                None => WorkspaceDetectionDayEntry {
                     date,
                     detections: 0,
                     error_rate: None,
@@ -277,7 +277,7 @@ impl DetectionTimeSeries {
 }
 
 /// Looks up a status's count in the assembled breakdown.
-fn count_of(by_status: &[DetectionStatusEntry], status: DetectionStatus) -> i64 {
+fn count_of(by_status: &[WorkspaceDetectionStatusEntry], status: DetectionStatus) -> i64 {
     by_status
         .iter()
         .find(|e| e.status == status)
@@ -393,8 +393,11 @@ mod tests {
             total_tokens: None,
         }];
 
-        let series =
-            DetectionTimeSeries::from_window(date("2026-01-05"), date("2026-01-07"), sparse);
+        let series = WorkspaceDetectionTimeSeries::from_window(
+            date("2026-01-05"),
+            date("2026-01-07"),
+            sparse,
+        );
 
         // Dense: every day in the window present, in order.
         assert_eq!(series.points.len(), 3);

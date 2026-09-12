@@ -1,7 +1,7 @@
 //! Workspace invite response types.
 
 use jiff::Timestamp;
-use nvisy_postgres::model::{self, WorkspaceInvite};
+use nvisy_postgres::model::{self, WorkspaceInvite as WorkspaceInviteModel};
 use nvisy_postgres::types::{Handle, InviteStatus, WorkspaceRole};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ use super::Page;
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Invite {
+pub struct WorkspaceInvite {
     /// Unique identifier of the invitation.
     pub invite_id: Uuid,
     /// Handle of the workspace the invitation is for.
@@ -37,11 +37,11 @@ pub struct Invite {
     pub updated_at: Timestamp,
 }
 
-impl Invite {
+impl WorkspaceInvite {
     /// Builds the invite summary. The invite token is deliberately absent: it is
     /// delivered only by the dedicated generate-invite-code endpoint, never in a
     /// list or detail response.
-    pub fn from_model(invite: WorkspaceInvite, workspace_slug: Handle) -> Self {
+    pub fn from_model(invite: WorkspaceInviteModel, workspace_slug: Handle) -> Self {
         Self {
             invite_id: invite.id,
             workspace_slug,
@@ -56,7 +56,7 @@ impl Invite {
 }
 
 /// Paginated response for workspace invitations.
-pub type InvitesPage = Page<Invite>;
+pub type WorkspaceInvitesPage = Page<WorkspaceInvite>;
 
 /// Acknowledgement returned after sending a workspace invitation.
 ///
@@ -66,12 +66,12 @@ pub type InvitesPage = Page<Invite>;
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct InviteSent {
+pub struct WorkspaceInviteSent {
     /// Human-readable confirmation message.
     pub detail: String,
 }
 
-impl InviteSent {
+impl WorkspaceInviteSent {
     /// Creates the standard invitation acknowledgement.
     pub fn new() -> Self {
         Self {
@@ -80,7 +80,7 @@ impl InviteSent {
     }
 }
 
-impl Default for InviteSent {
+impl Default for WorkspaceInviteSent {
     fn default() -> Self {
         Self::new()
     }
@@ -90,7 +90,7 @@ impl Default for InviteSent {
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct InviteCode {
+pub struct WorkspaceInviteCode {
     /// The generated invite code that can be shared.
     pub invite_code: String,
     /// Handle of the workspace this invite code is for.
@@ -101,7 +101,7 @@ pub struct InviteCode {
     pub expires_at: Timestamp,
 }
 
-impl InviteCode {
+impl WorkspaceInviteCode {
     /// Creates a new invite code response from a workspace invite.
     pub fn from_invite(invite: &model::WorkspaceInvite, workspace_slug: Handle) -> Self {
         Self {

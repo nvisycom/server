@@ -18,7 +18,7 @@ use crate::service::ConnectionConfig;
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ConnectionPathParams {
+pub struct WorkspaceConnectionPathParams {
     /// Opaque identifier of the connection.
     pub connection_id: ConnectionId,
 }
@@ -33,7 +33,7 @@ pub struct ConnectionPathParams {
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct PickerTokenRequest {
+pub struct WorkspacePickerTokenRequest {
     /// The resource the picker asked for (its `authenticate` command's
     /// `resource`), e.g. `https://contoso-my.sharepoint.com`. Optional; when
     /// absent the server uses the connection's default picker resource.
@@ -65,7 +65,7 @@ pub struct SyncScheduleInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct CreateConnection {
+pub struct CreateWorkspaceConnection {
     /// Human-readable connection display name.
     #[garde(length(chars, min = 1, max = 255), custom(validate_non_blank))]
     pub display_name: String,
@@ -131,7 +131,7 @@ pub struct OAuthCallbackQuery {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
-pub struct UpdateConnection {
+pub struct UpdateWorkspaceConnection {
     /// Human-readable connection display name.
     #[garde(length(chars, min = 1, max = 255), custom(validate_non_blank_opt))]
     pub display_name: Option<String>,
@@ -151,7 +151,7 @@ pub struct UpdateConnection {
 /// Query parameters for listing connections.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ConnectionsQuery {
+pub struct WorkspaceConnectionsQuery {
     /// Filter by provider (`s3`, `azure`, `gcs`). Repeatable; a connection
     /// matches if it uses any of the given providers. Empty means no filter.
     #[serde(default)]
