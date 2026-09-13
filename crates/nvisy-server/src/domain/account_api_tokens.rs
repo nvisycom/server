@@ -6,10 +6,10 @@
 //! scopes every read and mutation to the acting account, and the rule that only
 //! API tokens (not sessions) may be renamed.
 
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
 use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository, ApiTokenCursor};
 use nvisy_postgres::types::{ApiTokenType, CursorPage, CursorPagination};
+use nvisy_postgres::{AsyncConnection, PgClient};
 use uuid::Uuid;
 
 use crate::domain::output::CreatedApiToken;
@@ -53,8 +53,17 @@ impl AccountApiTokenService {
             .await?
             .ok_or_else(|| Error::not_found("account"))?;
 
-        let token = conn.create_account_api_token(new_token).await?;
-        let jwt = self.issuer.sign(&account, &token)?;
+        // Insert the row and sign its JWT in one transaction: signing consumes the
+        // persisted token's id/claims, so if it fails the insert is rolled back and
+        // no unusable, un-signed token row is left behind.
+        let issuer = &self.issuer;
+        let (token, jwt) = conn
+            .transaction(async |conn| {
+                let token = conn.create_account_api_token(new_token).await?;
+                let jwt = issuer.sign(&account, &token)?;
+                Ok::<_, Error>((token, jwt))
+            })
+            .await?;
 
         tracing::info!(target: TRACING_TARGET, token_id = %token.id, "API token created");
         Ok(CreatedApiToken { token, jwt })

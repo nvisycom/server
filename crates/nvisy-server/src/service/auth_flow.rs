@@ -142,15 +142,21 @@ impl SignInService {
 
         let mut conn = self.postgres.get_connection().await?;
 
-        // Reject duplicate email or username before insert for a clear error; the
-        // unique indexes remain the race-safe backstop.
-        if conn.email_exists(&request.email_address).await? {
-            tracing::warn!(target: TRACING_TARGET, "Signup failed: email already exists");
-            return Err(ErrorKind::Conflict.with_message("Email is already registered"));
-        }
-        if conn.username_exists(&request.username).await? {
-            tracing::warn!(target: TRACING_TARGET, "Signup failed: username already taken");
-            return Err(ErrorKind::Conflict.with_message("Handle is already taken"));
+        // Reject a duplicate email or username before insert; the unique indexes
+        // remain the race-safe backstop. The response deliberately does not say
+        // *which* field collided: this is the unauthenticated signup path, so a
+        // field-specific message would let a caller probe whether a given email is
+        // registered. The specific field is logged (server-side) for support.
+        let email_taken = conn.email_exists(&request.email_address).await?;
+        let username_taken = conn.username_exists(&request.username).await?;
+        if email_taken || username_taken {
+            tracing::warn!(
+                target: TRACING_TARGET,
+                email_taken,
+                username_taken,
+                "Signup failed: email or handle already in use"
+            );
+            return Err(ErrorKind::Conflict.with_message("That email or handle is already in use"));
         }
 
         let new_account = NewAccount {

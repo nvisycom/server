@@ -108,6 +108,9 @@ impl AccountIdentityService {
                 .with_resource("account"));
         }
 
+        // Release this connection before `write_password` acquires its own, so the
+        // two are never held at once (which under load could deadlock the pool).
+        drop(conn);
         self.write_password(account_id, &account, new_password)
             .await
     }
@@ -139,6 +142,9 @@ impl AccountIdentityService {
                 .with_resource("account"));
         }
 
+        // Release this connection before `write_password` acquires its own, so the
+        // two are never held at once (which under load could deadlock the pool).
+        drop(conn);
         self.write_password(account_id, &account, new_password)
             .await
     }
