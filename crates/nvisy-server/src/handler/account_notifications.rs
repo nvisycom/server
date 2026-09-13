@@ -17,12 +17,13 @@ use nvisy_postgres::query::AccountNotificationRepository;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::domain::AccountNotificationService;
 use crate::extract::{AuthState, Json, Path, Query};
 use crate::handler::request::{AccountNotificationPathParams, CursorPagination};
 use crate::handler::response::{
     AccountMarkedReadStatus, AccountNotification, AccountNotificationsPage, AccountUnreadStatus,
 };
-use crate::response::{Error, ErrorResponse, Result, SseResponse};
+use crate::response::{ErrorResponse, Result, SseResponse};
 use crate::service::{NotificationEmitter, ServiceState, UnreadCountEvent};
 
 /// Tracing target for notification operations.
@@ -38,16 +39,14 @@ const TRACING_TARGET: &str = "nvisy_server::handler::notifications";
     fields(account_id = %auth_state.account_id)
 )]
 async fn list_notifications(
-    State(pg_client): State<PgClient>,
+    State(notifications): State<AccountNotificationService>,
     auth_state: AuthState,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<AccountNotificationsPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing notifications");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    let page = conn
-        .cursor_list_account_notifications(auth_state.account_id, pagination.into_cursor())
+    let page = notifications
+        .list(auth_state.account_id, pagination.into_cursor())
         .await?;
 
     let response =
@@ -79,16 +78,12 @@ fn list_notifications_docs(op: TransformOperation) -> TransformOperation {
     fields(account_id = %auth_state.account_id)
 )]
 async fn get_unread_status(
-    State(pg_client): State<PgClient>,
+    State(notifications): State<AccountNotificationService>,
     auth_state: AuthState,
 ) -> Result<(StatusCode, Json<AccountUnreadStatus>)> {
     tracing::debug!(target: TRACING_TARGET, "Checking unread notifications count");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    let unread_count = conn
-        .count_unread_account_notifications(auth_state.account_id)
-        .await?;
+    let unread_count = notifications.unread_count(auth_state.account_id).await?;
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -231,26 +226,12 @@ fn stream_unread_status_docs(op: TransformOperation) -> TransformOperation {
     fields(account_id = %auth_state.account_id)
 )]
 async fn mark_all_notifications_read(
-    State(pg_client): State<PgClient>,
-    State(notification_emitter): State<NotificationEmitter>,
+    State(notifications): State<AccountNotificationService>,
     auth_state: AuthState,
 ) -> Result<(StatusCode, Json<AccountMarkedReadStatus>)> {
     tracing::debug!(target: TRACING_TARGET, "Marking all notifications as read");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    let marked_read = conn
-        .mark_all_account_notifications_as_read(auth_state.account_id)
-        .await? as i64;
-
-    tracing::debug!(target: TRACING_TARGET, marked_read, "Notifications marked as read");
-
-    // Push the now-zero unread count so a watching badge clears live.
-    if marked_read > 0 {
-        notification_emitter
-            .broadcast_unread(&mut conn, auth_state.account_id)
-            .await;
-    }
+    let marked_read = notifications.mark_all_read(auth_state.account_id).await?;
 
     Ok((
         StatusCode::OK,
@@ -280,27 +261,15 @@ fn mark_all_notifications_read_docs(op: TransformOperation) -> TransformOperatio
     )
 )]
 async fn mark_notification_read(
-    State(pg_client): State<PgClient>,
-    State(notification_emitter): State<NotificationEmitter>,
+    State(notifications): State<AccountNotificationService>,
     auth_state: AuthState,
     Path(path_params): Path<AccountNotificationPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Marking notification as read");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    let marked = conn
-        .mark_account_notification_as_read(auth_state.account_id, path_params.notification_id)
+    notifications
+        .mark_read(auth_state.account_id, path_params.notification_id)
         .await?;
-
-    if !marked {
-        return Err(Error::not_found("notification"));
-    }
-
-    // Push the decremented unread count so a watching badge updates live.
-    notification_emitter
-        .broadcast_unread(&mut conn, auth_state.account_id)
-        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }

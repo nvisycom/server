@@ -2,6 +2,7 @@
 //! Single models and paginated model lists are returned directly, without a
 //! wrapper.
 
+mod account_api_tokens;
 mod workspace_connections;
 mod workspace_detections;
 mod workspace_documents;
@@ -11,6 +12,7 @@ mod workspace_policies;
 mod workspace_webhooks;
 mod workspaces;
 
+pub use account_api_tokens::*;
 pub use workspace_connections::*;
 pub use workspace_detections::*;
 pub use workspace_documents::*;

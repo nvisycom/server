@@ -1,26 +1,22 @@
 //! API token management handlers for user API token operations.
 //!
-//! This module provides comprehensive API token management functionality including
-//! creation, listing, updating, and revoking. All operations follow security best
-//! practices with proper authorization, input validation, and audit logging.
+//! These handlers are thin: they authenticate, parse the request, delegate the
+//! token rules to [`AccountApiTokenService`](crate::domain::AccountApiTokenService),
+//! and map the result to a response.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::AccountApiToken as AccountApiTokenModel;
-use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
-use nvisy_postgres::types::ApiTokenType;
-use nvisy_postgres::{PgClient, PgConn, model};
-use uuid::Uuid;
 
 use super::request::{
     AccountApiTokenPathParams, CreateAccountApiToken, CursorPagination, UpdateAccountApiToken,
 };
 use super::response::{AccountApiToken, AccountApiTokenWithJwt, AccountApiTokensPage};
+use crate::domain::{AccountApiTokenService, output};
 use crate::extract::{AuthState, Json, Path, Query, SecurityContext, ValidateJson};
-use crate::response::{ErrorKind, ErrorResponse, Result};
-use crate::service::{AuthIssuer, ServiceState};
+use crate::response::{ErrorResponse, Result};
+use crate::service::ServiceState;
 
 /// Tracing target for API token operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::tokens";
@@ -31,40 +27,18 @@ const TRACING_TARGET: &str = "nvisy_server::handler::tokens";
 /// The JWT is only shown once upon creation.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn create_api_token(
-    State(pg_client): State<PgClient>,
-    State(issuer): State<AuthIssuer>,
+    State(tokens): State<AccountApiTokenService>,
     auth_state: AuthState,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateAccountApiToken>,
 ) -> Result<(StatusCode, Json<AccountApiTokenWithJwt>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating API token");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    // Fetch the account to generate JWT claims
-    let account = conn
-        .find_account_by_id(auth_state.account_id)
-        .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_resource("account")
-                .with_message("Account not found")
-        })?;
-
     let new_token = request.into_model(auth_state.account_id, security)?;
-    let api_token = conn.create_account_api_token(new_token).await?;
+    let output::CreatedApiToken { token, jwt } =
+        tokens.create(auth_state.account_id, new_token).await?;
 
-    // Sign the JWT for the new token through the shared issuer.
-    let jwt_token = issuer.sign(&account, &api_token)?;
-
-    let response = AccountApiToken::from_model(api_token.clone()).with_jwt(jwt_token);
-
-    tracing::info!(
-        target: TRACING_TARGET,
-        token_id = %api_token.id,
-        "API token created",
-    );
-
+    let response = AccountApiToken::from_model(token).with_jwt(jwt);
     Ok((StatusCode::CREATED, Json(response)))
 }
 
@@ -79,23 +53,15 @@ fn create_api_token_docs(op: TransformOperation) -> TransformOperation {
 /// Lists API tokens for the authenticated account.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn list_api_tokens(
-    State(pg_client): State<PgClient>,
+    State(tokens): State<AccountApiTokenService>,
     auth_state: AuthState,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<AccountApiTokensPage>)> {
     tracing::debug!(target: TRACING_TARGET, "Listing API tokens");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    let page = conn
-        .cursor_list_account_api_tokens(auth_state.account_id, pagination.into_cursor())
+    let page = tokens
+        .list(auth_state.account_id, pagination.into_cursor())
         .await?;
-
-    tracing::debug!(
-        target: TRACING_TARGET,
-        count = page.items.len(),
-        "API tokens listed",
-    );
 
     // Flag the token this request authenticated with so the client can single
     // out the current session.
@@ -119,17 +85,13 @@ fn list_api_tokens_docs(op: TransformOperation) -> TransformOperation {
 /// Gets a specific API token by ID.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn read_api_token(
-    State(pg_client): State<PgClient>,
+    State(tokens): State<AccountApiTokenService>,
     auth_state: AuthState,
     Path(path): Path<AccountApiTokenPathParams>,
 ) -> Result<(StatusCode, Json<AccountApiToken>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading API token");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    let token = find_account_token(&mut conn, auth_state.account_id, path.token_id).await?;
-
-    tracing::debug!(target: TRACING_TARGET, "API token read");
+    let token = tokens.read(auth_state.account_id, path.token_id).await?;
 
     let is_current = token.id == auth_state.token_id;
     Ok((
@@ -149,40 +111,21 @@ fn read_api_token_docs(op: TransformOperation) -> TransformOperation {
 /// Updates an existing API token.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn update_api_token(
-    State(pg_client): State<PgClient>,
+    State(tokens): State<AccountApiTokenService>,
     auth_state: AuthState,
     Path(path): Path<AccountApiTokenPathParams>,
     ValidateJson(request): ValidateJson<UpdateAccountApiToken>,
 ) -> Result<(StatusCode, Json<AccountApiToken>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating API token");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    // Verify the token exists and belongs to the authenticated account
-    let token = find_account_token(&mut conn, auth_state.account_id, path.token_id).await?;
-
-    // Only API tokens can be renamed
-    if token.session_type != ApiTokenType::Api {
-        return Err(ErrorKind::Forbidden
-            .with_resource("api_token")
-            .with_message("Only API tokens can be renamed"));
-    }
-
-    let update_token = model::UpdateAccountApiToken {
-        display_name: request.display_name,
-        ..Default::default()
-    };
-
-    let updated_token = conn
-        .update_account_api_token(token.id, update_token)
+    let updated = tokens
+        .update(auth_state.account_id, path.token_id, request.display_name)
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, "API token updated");
-
-    let is_current = updated_token.id == auth_state.token_id;
+    let is_current = updated.id == auth_state.token_id;
     Ok((
         StatusCode::OK,
-        Json(AccountApiToken::from_model(updated_token).with_current(is_current)),
+        Json(AccountApiToken::from_model(updated).with_current(is_current)),
     ))
 }
 
@@ -199,26 +142,13 @@ fn update_api_token_docs(op: TransformOperation) -> TransformOperation {
 /// Revokes (soft deletes) an API token.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn revoke_api_token(
-    State(pg_client): State<PgClient>,
+    State(tokens): State<AccountApiTokenService>,
     auth_state: AuthState,
     Path(path): Path<AccountApiTokenPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Revoking API token");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    // Verify the token exists and belongs to the authenticated account
-    let token = find_account_token(&mut conn, auth_state.account_id, path.token_id).await?;
-
-    let deleted = conn.delete_account_api_token(token.id).await?;
-
-    if !deleted {
-        return Err(ErrorKind::BadRequest
-            .with_resource("api_token")
-            .with_message("API token is already revoked"));
-    }
-
-    tracing::info!(target: TRACING_TARGET, "API token revoked");
+    tokens.revoke(auth_state.account_id, path.token_id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -230,27 +160,6 @@ fn revoke_api_token_docs(op: TransformOperation) -> TransformOperation {
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
-}
-
-/// Finds an API token by ID and verifies it belongs to the specified account.
-async fn find_account_token(
-    conn: &mut PgConn,
-    account_id: Uuid,
-    token_id: Uuid,
-) -> Result<AccountApiTokenModel> {
-    let Some(token) = conn.find_account_api_token_by_id(token_id).await? else {
-        return Err(ErrorKind::NotFound
-            .with_resource("api_token")
-            .with_message("API token not found"));
-    };
-
-    if token.account_id != account_id {
-        return Err(ErrorKind::NotFound
-            .with_resource("api_token")
-            .with_message("API token not found"));
-    }
-
-    Ok(token)
 }
 
 /// Returns routes for API token management.

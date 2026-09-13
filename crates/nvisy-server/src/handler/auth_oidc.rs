@@ -34,8 +34,6 @@
 //! redirect's fragment (not logged or refereed); a desktop sign-in carries its
 //! `app` token in the custom-scheme deep-link's query (no server hop to leak to).
 
-use std::str::FromStr;
-
 use aide::axum::ApiRouter;
 use aide::axum::routing::{get_with, post_with};
 use aide::transform::TransformOperation;
@@ -43,123 +41,22 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use nvisy_nats::NatsClient;
-use nvisy_nats::kv::{
-    OidcStateBucket as OidcStateKvBucket, OidcStateKey, ReauthProofBucket as ReauthProofKvBucket,
-    ReauthProofKey,
-};
 use nvisy_postgres::PgClient;
-use nvisy_postgres::model::Account;
-use nvisy_postgres::query::{AccountApiTokenRepository, AccountIdentityRepository};
-use nvisy_postgres::types::{ApiTokenType, IdentityProvider};
+use nvisy_postgres::query::AccountApiTokenRepository;
+use nvisy_postgres::types::ApiTokenType;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::extract::{AuthState, Json, Path, Query, SecurityContext, ValidateJson};
 use crate::handler::request::{DesktopTokenRequest, IdentityPathParams, OidcCallbackQuery};
 use crate::handler::response::AccountDesktopToken;
 use crate::response::{CookieConfig, ErrorKind, ErrorResponse, RedirectResult, Result, WebSession};
 use crate::service::{
-    AccountProvisioner, AuthIssuer, OidcAuthorization, OidcService, RedirectKind, ServiceState,
+    AccountProvisioner, AuthIssuer, CallbackOutcome, OidcPurpose, OidcService, RedirectKind,
+    ServiceState,
 };
 
 /// Tracing target for OIDC sign-in operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::auth_oidc";
-
-/// What an in-flight OIDC flow is for. All three share the same authorize +
-/// callback machinery; only the callback's action differs.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-enum OidcPurpose {
-    /// Ordinary sign-in: resolve the identity to an account (provisioning or
-    /// auto-linking as needed) and mint a session.
-    SignIn,
-    /// Link the provider to an already-authenticated account. Requires a fresh
-    /// step-up proof, so the flow carries the account it links to.
-    Link { account_id: Uuid },
-    /// Step-up re-authentication for `account_id`: prove current control of a
-    /// linked provider identity and mint a single-use proof (no session, no
-    /// linking). Gates credential-adding actions against a merely-stolen session.
-    Reauth { account_id: Uuid },
-}
-
-/// The stashed state of an in-flight OIDC flow, held between `start` and
-/// `callback` in the [`OidcStateBucket`]. Keyed by the CSRF state token.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct OidcFlowState {
-    /// The provider the flow is against.
-    provider: IdentityProvider,
-    /// The PKCE verifier to present when exchanging the code.
-    pkce_verifier: String,
-    /// The nonce bound into the ID token, verified on the way back.
-    nonce: String,
-    /// Frontend URL to send the user back to once done, if provided.
-    redirect_uri: Option<String>,
-    /// What the flow is for, and any account it is bound to.
-    purpose: OidcPurpose,
-}
-
-/// The OIDC-state bucket pinned to this server's flow-state value.
-type OidcStateBucket = OidcStateKvBucket<OidcFlowState>;
-
-/// What a step-up re-authentication proof attests: the account it authorizes a
-/// credential-adding action for.
-///
-/// A proof is single-use and short-lived (the bucket TTL), and authorizes exactly
-/// one credential-add for its account — whichever add (set a first password, or
-/// link a provider) presents it first. It is deliberately *not* scoped to a
-/// specific action: the guarantee it carries is "the holder just proved current
-/// control of a provider identity on this account", which is what every
-/// credential-add needs. Single-use + TTL + account-binding keep that from being
-/// a standing capability; consuming it atomically keeps it from being used twice.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ReauthProof {
-    account_id: Uuid,
-}
-
-/// The reauth-proof bucket pinned to this server's proof value.
-type ReauthProofBucket = ReauthProofKvBucket<ReauthProof>;
-
-/// Generates an opaque, unguessable proof/token value (URL-safe base64 of 32
-/// random bytes), suitable for a NATS KV key.
-fn generate_proof_token() -> String {
-    use base64::Engine;
-    use rand::Rng;
-
-    // Security-critical: the proof value is a bearer capability, so its bytes must
-    // come from a cryptographically secure RNG. `rand::rng()` returns the
-    // thread-local CSPRNG (`ThreadRng`); do not swap it for a non-cryptographic
-    // generator.
-    let mut bytes = [0u8; 32];
-    rand::rng().fill_bytes(&mut bytes);
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
-}
-
-/// Consumes a step-up re-authentication proof: verifies it exists and is for
-/// `account_id`, then deletes it (single-use). Returns an error if the proof is
-/// missing, expired, already used, or for a different account.
-///
-/// Required by every credential-adding action so a merely-stolen session (with
-/// no way to complete a fresh provider re-auth) cannot mint a durable credential.
-pub(crate) async fn consume_reauth_proof(
-    nats: &NatsClient,
-    account_id: Uuid,
-    proof: &str,
-) -> Result<()> {
-    let key = ReauthProofKey::from_str(proof)
-        .map_err(|_| ErrorKind::Unauthorized.with_message("Invalid re-authentication proof"))?;
-    let store = nats.kv_store::<ReauthProofBucket>().await?;
-    // Consume single-use and atomically (`take`), so the same proof cannot be
-    // used twice by concurrent requests to add two credentials.
-    let stored = store.take(&key).await?.ok_or_else(|| {
-        ErrorKind::Unauthorized.with_message("Re-authentication required or expired")
-    })?;
-
-    if stored.account_id != account_id {
-        return Err(ErrorKind::Unauthorized
-            .with_message("Re-authentication proof does not match this account"));
-    }
-    Ok(())
-}
 
 /// The response to a successful sign-in start: where to send the user.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -172,20 +69,18 @@ pub struct OidcStartResponse {
 /// Begins an OIDC sign-in and returns the provider authorize URL.
 #[tracing::instrument(skip_all, fields(provider = ?path_params.provider))]
 async fn start_sign_in(
-    State(nats): State<NatsClient>,
     State(oidc): State<OidcService>,
     Path(path_params): Path<IdentityPathParams>,
     Query(query): Query<OidcStartQuery>,
 ) -> Result<(StatusCode, Json<OidcStartResponse>)> {
     tracing::debug!(target: TRACING_TARGET, "Starting OIDC sign-in");
-    let authorize_url = begin_flow(
-        &nats,
-        &oidc,
-        path_params.provider,
-        query.redirect_uri,
-        OidcPurpose::SignIn,
-    )
-    .await?;
+    let authorize_url = oidc
+        .begin_flow(
+            path_params.provider,
+            query.redirect_uri,
+            OidcPurpose::SignIn,
+        )
+        .await?;
     Ok((StatusCode::OK, Json(OidcStartResponse { authorize_url })))
 }
 
@@ -211,7 +106,6 @@ fn start_sign_in_docs(op: TransformOperation) -> TransformOperation {
 /// machinery lives here beside the shared callback.
 #[tracing::instrument(skip_all, fields(provider = ?path_params.provider, account_id = %auth_state.account_id))]
 pub(crate) async fn start_link(
-    State(nats): State<NatsClient>,
     State(oidc): State<OidcService>,
     auth_state: AuthState,
     Path(path_params): Path<IdentityPathParams>,
@@ -228,18 +122,18 @@ pub(crate) async fn start_link(
             .with_message("Re-authentication required to link a provider")
             .with_resource("account")
     })?;
-    consume_reauth_proof(&nats, auth_state.account_id, proof).await?;
+    oidc.consume_reauth_proof(auth_state.account_id, proof)
+        .await?;
 
-    let authorize_url = begin_flow(
-        &nats,
-        &oidc,
-        path_params.provider,
-        query.redirect_uri,
-        OidcPurpose::Link {
-            account_id: auth_state.account_id,
-        },
-    )
-    .await?;
+    let authorize_url = oidc
+        .begin_flow(
+            path_params.provider,
+            query.redirect_uri,
+            OidcPurpose::Link {
+                account_id: auth_state.account_id,
+            },
+        )
+        .await?;
     Ok((StatusCode::OK, Json(OidcStartResponse { authorize_url })))
 }
 
@@ -263,23 +157,21 @@ pub(crate) fn start_link_docs(op: TransformOperation) -> TransformOperation {
 /// than a merely-live session. The callback mints a single-use proof.
 #[tracing::instrument(skip_all, fields(provider = ?path_params.provider, account_id = %auth_state.account_id))]
 async fn start_reauth(
-    State(nats): State<NatsClient>,
     State(oidc): State<OidcService>,
     auth_state: AuthState,
     Path(path_params): Path<IdentityPathParams>,
     Query(query): Query<OidcStartQuery>,
 ) -> Result<(StatusCode, Json<OidcStartResponse>)> {
     tracing::debug!(target: TRACING_TARGET, "Starting OIDC step-up re-authentication");
-    let authorize_url = begin_flow(
-        &nats,
-        &oidc,
-        path_params.provider,
-        query.redirect_uri,
-        OidcPurpose::Reauth {
-            account_id: auth_state.account_id,
-        },
-    )
-    .await?;
+    let authorize_url = oidc
+        .begin_flow(
+            path_params.provider,
+            query.redirect_uri,
+            OidcPurpose::Reauth {
+                account_id: auth_state.account_id,
+            },
+        )
+        .await?;
     Ok((StatusCode::OK, Json(OidcStartResponse { authorize_url })))
 }
 
@@ -346,7 +238,7 @@ async fn mint_desktop_token(
     let account = provisioner
         .load_active(&mut conn, auth_state.account_id)
         .await?;
-    gate_account_status(&account)?;
+    OidcService::gate_account_status(&account)?;
 
     let api_token = issuer
         .issue_app_token(&mut conn, &account, security)
@@ -374,46 +266,6 @@ fn mint_desktop_token_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
 }
 
-/// Begins an authorization (sign-in, link, or reauth) and stashes the flow
-/// state, returning the provider authorize URL.
-async fn begin_flow(
-    nats: &NatsClient,
-    oidc: &OidcService,
-    provider: IdentityProvider,
-    redirect_uri: Option<String>,
-    purpose: OidcPurpose,
-) -> Result<String> {
-    // Reject a redirect target that is not an allow-listed frontend origin before
-    // starting the flow: the callback carries the minted session token (or a
-    // reauth proof), so it must never be sent to a caller-chosen host.
-    if let Some(redirect_uri) = &redirect_uri
-        && !oidc.is_redirect_allowed(redirect_uri)
-    {
-        return Err(ErrorKind::BadRequest
-            .with_message("redirectUri is not an allowed origin")
-            .with_resource("account"));
-    }
-
-    let OidcAuthorization {
-        authorize_url,
-        csrf_state,
-        pkce_verifier,
-        nonce,
-    } = oidc.begin(provider).await?;
-
-    let flow = OidcFlowState {
-        provider,
-        pkce_verifier,
-        nonce,
-        redirect_uri,
-        purpose,
-    };
-    let store = nats.kv_store::<OidcStateBucket>().await?;
-    store.put(&OidcStateKey(csrf_state), &flow).await?;
-
-    Ok(authorize_url)
-}
-
 /// Optional query parameters for starting a sign-in, link, or reauth.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -429,14 +281,11 @@ pub(crate) struct OidcStartQuery {
 
 /// Completes an OIDC flow: the provider redirects here with the code and state.
 /// Serves sign-in, account-link, and step-up re-authentication (the flow's
-/// stashed purpose selects the action).
+/// stashed purpose selects the action). Transport only: it drives the
+/// [`OidcService`] flow and turns its outcome into the browser redirect.
 #[tracing::instrument(skip_all)]
 async fn oidc_callback(
-    State(pg_client): State<PgClient>,
-    State(nats): State<NatsClient>,
     State(oidc): State<OidcService>,
-    State(issuer): State<AuthIssuer>,
-    State(provisioner): State<AccountProvisioner>,
     State(cookie): State<CookieConfig>,
     security: SecurityContext,
     Query(query): Query<OidcCallbackQuery>,
@@ -446,7 +295,7 @@ async fn oidc_callback(
     // Recover the flow first, so the caller's redirect target is known even when
     // the subsequent work fails — a failed sign-in still returns the browser to
     // the frontend with `signin=error` rather than a dead fallback page.
-    let flow = match consume_flow(&nats, &query).await {
+    let flow = match oidc.consume_flow(&query).await {
         Ok(flow) => flow,
         Err(err) => {
             // No flow means no trusted redirect target (an unknown/expired/replayed
@@ -455,23 +304,12 @@ async fn oidc_callback(
             return RedirectResult::Error.into_redirect(None);
         }
     };
-    let redirect_uri = flow.redirect_uri.clone();
+    let redirect_uri = flow.redirect_uri().map(str::to_owned);
 
-    match run_flow(
-        &pg_client,
-        &oidc,
-        &nats,
-        &issuer,
-        &provisioner,
-        security,
-        flow,
-        query,
-    )
-    .await
-    {
+    match oidc.run_flow(security, flow, query).await {
         Ok(outcome) => {
             tracing::info!(target: TRACING_TARGET, kind = outcome.kind(), "OIDC callback succeeded");
-            outcome.into_redirect(redirect_uri.as_deref(), cookie)
+            outcome_into_redirect(outcome, redirect_uri.as_deref(), cookie)
         }
         Err(err) => {
             tracing::warn!(target: TRACING_TARGET, error = %err, "OIDC callback failed");
@@ -480,198 +318,40 @@ async fn oidc_callback(
     }
 }
 
-/// The result of a completed callback, by flow purpose.
-enum CallbackOutcome {
-    /// A web sign-in: the minted session JWT, delivered to the browser as an
-    /// HttpOnly session cookie set on the callback redirect.
-    SignedIn { jwt: String },
-    /// A native-app (desktop) sign-in: the minted `app` token, delivered to the
-    /// app in the callback's deep-link query (`?token=…`), never a cookie.
-    DesktopSignedIn { jwt: String },
-    /// A provider was linked to the account. No token; just an outcome.
-    Linked,
-    /// A step-up re-authentication: the single-use proof is handed back for the
-    /// frontend to present to the credential-adding action.
-    Reauthed { proof: String },
-}
-
-impl CallbackOutcome {
-    /// A short label for logging.
-    fn kind(&self) -> &'static str {
-        match self {
-            Self::SignedIn { .. } => "sign_in",
-            Self::DesktopSignedIn { .. } => "sign_in_desktop",
-            Self::Linked => "link",
-            Self::Reauthed { .. } => "reauth",
+/// Builds the browser response returning to the frontend for a completed flow
+/// outcome. Pure transport: it maps each [`CallbackOutcome`] to its delivery
+/// mechanism (a cookie, a deep-link query, or a fragment). `cookie` supplies the
+/// session-cookie policy for a web sign-in.
+fn outcome_into_redirect(
+    outcome: CallbackOutcome,
+    redirect_uri: Option<&str>,
+    cookie: CookieConfig,
+) -> Response {
+    match outcome {
+        CallbackOutcome::SignedIn { jwt } => {
+            // Web sign-in delivers the session as an HttpOnly cookie (plus its
+            // CSRF cookie) set on the success redirect — never in the URL.
+            let redirect = RedirectResult::Success.into_redirect(redirect_uri);
+            (WebSession::new(jwt, cookie).into_jar(), redirect).into_response()
         }
-    }
-
-    /// Builds the browser response returning to the frontend for this outcome.
-    /// `cookie` supplies the session-cookie policy for a web sign-in.
-    fn into_redirect(self, redirect_uri: Option<&str>, cookie: CookieConfig) -> Response {
-        match self {
-            Self::SignedIn { jwt } => {
-                // Web sign-in delivers the session as an HttpOnly cookie (plus its
-                // CSRF cookie) set on the success redirect — never in the URL.
-                let redirect = RedirectResult::Success.into_redirect(redirect_uri);
-                (WebSession::new(jwt, cookie).into_jar(), redirect).into_response()
+        CallbackOutcome::DesktopSignedIn { jwt } => {
+            // Desktop sign-in hands the app token back in the deep-link's URL
+            // query (`?token=…`) — never a cookie the app's webview can't see.
+            // The target is the allow-listed custom scheme, which has no server
+            // hop, so the query is safe and matches the native OAuth convention.
+            RedirectResult::Query {
+                name: "token",
+                value: &jwt,
             }
-            Self::DesktopSignedIn { jwt } => {
-                // Desktop sign-in hands the app token back in the deep-link's URL
-                // query (`?token=…`) — never a cookie the app's webview can't see.
-                // The target is the allow-listed custom scheme, which has no server
-                // hop, so the query is safe and matches the native OAuth convention.
-                RedirectResult::Query {
-                    name: "token",
-                    value: &jwt,
-                }
-                .into_redirect(redirect_uri)
-            }
-            Self::Linked => RedirectResult::Success.into_redirect(redirect_uri),
-            Self::Reauthed { proof } => RedirectResult::Fragment {
-                name: "reauthProof",
-                value: &proof,
-            }
-            .into_redirect(redirect_uri),
+            .into_redirect(redirect_uri)
         }
-    }
-}
-
-/// Consumes the pending flow state single-use (atomically) and returns it. Split
-/// from the work below so the caller recovers the flow's `redirect_uri` before
-/// any fallible step, and can honor it even when that step fails.
-async fn consume_flow(nats: &NatsClient, query: &OidcCallbackQuery) -> Result<OidcFlowState> {
-    // Validate the state before touching the store so a malformed value maps to a
-    // clean BadRequest rather than a KV error.
-    let key = OidcStateKey::from_str(&query.state)
-        .map_err(|_| ErrorKind::BadRequest.with_message("Invalid authorization state"))?;
-
-    // `take` consumes single-use and atomically, so two concurrent callbacks
-    // carrying the same state cannot both proceed. A missing entry means an
-    // unknown, expired, or already-consumed state.
-    let store = nats.kv_store::<OidcStateBucket>().await?;
-    store
-        .take(&key)
-        .await?
-        .ok_or_else(|| ErrorKind::BadRequest.with_message("Invalid or expired authorization"))
-}
-
-/// Runs a consumed flow's work: exchange and verify the code, then perform the
-/// flow's purpose (sign in, link, or mint a reauth proof). The flow state has
-/// already been consumed by [`consume_flow`], so its `redirect_uri` is the
-/// caller's and is applied by the callback whether this succeeds or fails.
-#[allow(clippy::too_many_arguments)]
-async fn run_flow(
-    pg_client: &PgClient,
-    oidc: &OidcService,
-    nats: &NatsClient,
-    issuer: &AuthIssuer,
-    provisioner: &AccountProvisioner,
-    security: SecurityContext,
-    flow: OidcFlowState,
-    query: OidcCallbackQuery,
-) -> Result<CallbackOutcome> {
-    // A denial (or any provider error) arrives with `error` and no `code`.
-    if let Some(error) = query.error {
-        return Err(ErrorKind::Unauthorized
-            .with_message("Authorization was denied")
-            .with_context(error));
-    }
-    let code = query
-        .code
-        .ok_or_else(|| ErrorKind::BadRequest.with_message("Authorization callback missing code"))?;
-
-    // Exchange the code and verify the ID token (signature, aud, iss, exp, nonce).
-    let identity = oidc
-        .complete(flow.provider, code, flow.pkce_verifier, flow.nonce)
-        .await?;
-
-    let mut conn = pg_client.get_connection().await?;
-
-    match flow.purpose {
-        OidcPurpose::SignIn => {
-            let account = provisioner
-                .resolve(&mut conn, flow.provider, identity)
-                .await?;
-            gate_account_status(&account)?;
-
-            // The redirect target decides how the session is delivered. A desktop
-            // deep-link scheme gets a long-lived `app` token in the callback's URL
-            // query; a web origin gets an HttpOnly session cookie. The target was
-            // already allow-listed at flow start; a `None` here means it is neither
-            // kind (which `begin_flow` would have rejected), so default to the web
-            // cookie path.
-            let kind = flow
-                .redirect_uri
-                .as_deref()
-                .and_then(|uri| oidc.classify_redirect(uri));
-
-            if kind == Some(RedirectKind::DesktopScheme) {
-                let jwt = issuer
-                    .issue_app_token(&mut conn, &account, security)
-                    .await?;
-                Ok(CallbackOutcome::DesktopSignedIn { jwt })
-            } else {
-                // OIDC web sign-in delivers a remembered browser session as an
-                // HttpOnly cookie set on the callback redirect — the token never
-                // appears in the URL.
-                let jwt = issuer
-                    .issue_web_session(&mut conn, &account, true, security)
-                    .await?;
-                Ok(CallbackOutcome::SignedIn { jwt })
-            }
+        CallbackOutcome::Linked => RedirectResult::Success.into_redirect(redirect_uri),
+        CallbackOutcome::Reauthed { proof } => RedirectResult::Fragment {
+            name: "reauthProof",
+            value: &proof,
         }
-        OidcPurpose::Link { account_id } => {
-            provisioner
-                .link(&mut conn, account_id, flow.provider, identity)
-                .await?;
-            Ok(CallbackOutcome::Linked)
-        }
-        OidcPurpose::Reauth { account_id } => {
-            // The verified identity must belong to the account being re-authed:
-            // proving control of *some* provider account is not enough, it must be
-            // one linked here.
-            let matches = conn
-                .find_identity_by_subject(flow.provider, &identity.subject)
-                .await?
-                .is_some_and(|linked| linked.account_id == account_id);
-            if !matches {
-                return Err(ErrorKind::Unauthorized
-                    .with_message("Re-authentication did not match a linked identity")
-                    .with_resource("account"));
-            }
-            let proof = mint_reauth_proof(nats, account_id).await?;
-            Ok(CallbackOutcome::Reauthed { proof })
-        }
+        .into_redirect(redirect_uri),
     }
-}
-
-/// Refuses a sign-in for a suspended or deleted account, before any session token
-/// is minted — mirroring what password login gates on.
-fn gate_account_status(account: &Account) -> Result<()> {
-    if account.is_suspended() {
-        return Err(ErrorKind::Forbidden
-            .with_message("Account is suspended")
-            .with_resource("account"));
-    }
-    if account.is_deleted() {
-        return Err(ErrorKind::Forbidden
-            .with_message("Account has been deleted")
-            .with_resource("account"));
-    }
-    Ok(())
-}
-
-/// Mints and stores a single-use step-up proof for `account_id`, returning its
-/// opaque key. The proof is short-lived (the bucket's TTL) and consumed by the
-/// credential-adding action.
-async fn mint_reauth_proof(nats: &NatsClient, account_id: Uuid) -> Result<String> {
-    let proof = generate_proof_token();
-    let store = nats.kv_store::<ReauthProofBucket>().await?;
-    store
-        .put(&ReauthProofKey(proof.clone()), &ReauthProof { account_id })
-        .await?;
-    Ok(proof)
 }
 
 /// Returns the public OIDC sign-in routes: sign-in start and the provider

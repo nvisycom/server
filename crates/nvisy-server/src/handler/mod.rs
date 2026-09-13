@@ -9,7 +9,6 @@ mod auth_oidc;
 mod authentication;
 mod workspace_activities;
 
-pub(crate) use auth_oidc::consume_reauth_proof;
 mod account_api_tokens;
 mod account_identities;
 mod account_notifications;

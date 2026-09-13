@@ -23,18 +23,14 @@ use aide::axum::routing::{get_with, post_with, put_with};
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_nats::NatsClient;
-use nvisy_postgres::query::{AccountIdentityRepository, AccountRepository, DeleteIdentityOutcome};
 use nvisy_postgres::types::IdentityProvider;
-use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 
-use super::consume_reauth_proof;
+use crate::domain::{AccountIdentityService, ReauthVerified};
 use crate::extract::{AuthState, Json, Path, ValidateJson};
 use crate::handler::request::{IdentityPathParams, SetPassword};
 use crate::handler::response::AccountIdentities;
-use crate::handler::utility::build_password_user_inputs;
-use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{PasswordService, ServiceState};
+use crate::response::{ErrorKind, ErrorResponse, Result};
+use crate::service::{OidcService, ServiceState};
 
 /// Tracing target for identity operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::identities";
@@ -42,14 +38,13 @@ const TRACING_TARGET: &str = "nvisy_server::handler::identities";
 /// Lists the authenticated account's sign-in methods.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn list_identities(
-    State(pg_client): State<PgClient>,
+    State(identities): State<AccountIdentityService>,
     auth_state: AuthState,
 ) -> Result<Json<AccountIdentities>> {
     tracing::debug!(target: TRACING_TARGET, "Listing account identities");
 
-    let mut conn = pg_client.get_connection().await?;
-    let identities = conn
-        .list_account_identities(auth_state.account_id)
+    let identities = identities
+        .list(auth_state.account_id)
         .await?
         .into_iter()
         .collect();
@@ -64,83 +59,46 @@ fn list_identities_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Sets or changes the authenticated account's password.
+///
+/// The authorization differs by case and stays here because it is transport: a
+/// change verifies the current password (owned by the service); a *first*-set
+/// requires a step-up re-authentication proof — consumed single-use against
+/// NATS-KV here — because a merely-live session must not mint a durable new
+/// credential. The service owns strength-checking, hashing, and the write.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn set_password(
-    State(pg_client): State<PgClient>,
-    State(nats): State<NatsClient>,
-    State(password): State<PasswordService>,
+    State(identities): State<AccountIdentityService>,
+    State(oidc): State<OidcService>,
     auth_state: AuthState,
     ValidateJson(request): ValidateJson<SetPassword>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Setting account password");
 
     let account_id = auth_state.account_id;
-    let mut conn = pg_client.get_connection().await?;
-    let account = conn.find_account_by_id(account_id).await?.ok_or_else(|| {
-        ErrorKind::NotFound
-            .with_message("Account not found")
-            .with_resource("account")
-    })?;
 
-    let current_secret = conn
-        .find_account_identity(account_id, IdentityProvider::Password)
-        .await?
-        .and_then(|identity| identity.secret);
-
-    match &current_secret {
-        // Changing an existing password requires the current password, so a
-        // hijacked session or CSRF cannot silently reset it (and lock out the real
-        // owner).
-        Some(secret) => {
-            let verified = request
-                .current_password
-                .as_deref()
-                .is_some_and(|current| password.verify(current, secret).is_ok());
-            if !verified {
-                tracing::warn!(target: TRACING_TARGET, "Password change failed: current password incorrect");
-                return Err(ErrorKind::Unauthorized
-                    .with_message("Current password is incorrect")
-                    .with_resource("account"));
-            }
-        }
-        // Setting a *first* password creates a new, durable credential, so a live
-        // session is not enough — a merely-stolen session could otherwise plant a
-        // backdoor. Require a fresh step-up re-authentication proof (from the OIDC
-        // reauth endpoint), consumed single-use.
-        None => {
-            let proof = request.reauth_proof.as_deref().ok_or_else(|| {
-                ErrorKind::Unauthorized
-                    .with_message("Re-authentication required to set a password")
-                    .with_resource("account")
-            })?;
-            consume_reauth_proof(&nats, account_id, proof).await?;
-        }
+    if identities.has_password(account_id).await? {
+        identities
+            .change_password(
+                account_id,
+                request.current_password.as_deref(),
+                &request.new_password,
+            )
+            .await?;
+    } else {
+        // Setting a first password creates a new, durable credential, so a live
+        // session is not enough. Require a fresh step-up re-authentication proof
+        // (from the OIDC reauth endpoint), consumed single-use here before the
+        // service writes the credential.
+        let proof = request.reauth_proof.as_deref().ok_or_else(|| {
+            ErrorKind::Unauthorized
+                .with_message("Re-authentication required to set a password")
+                .with_resource("account")
+        })?;
+        oidc.consume_reauth_proof(account_id, proof).await?;
+        identities
+            .set_first_password(account_id, &request.new_password, ReauthVerified)
+            .await?;
     }
-
-    // Bind the strength check to the account's own fields so a password derived
-    // from the username/email is rejected.
-    let user_inputs = build_password_user_inputs(
-        account.username.as_str(),
-        account.display_name.as_deref(),
-        &account.email_address,
-    );
-    let secret = password.validate_and_hash(&request.new_password, &user_inputs)?;
-
-    // Upsert the password identity and stamp `password_changed_at` together, so a
-    // partial failure never leaves the two out of sync.
-    conn.transaction(async |conn| {
-        conn.upsert_password_secret(account_id, secret).await?;
-        conn.update_account(
-            account_id,
-            nvisy_postgres::model::UpdateAccount {
-                password_changed_at: Some(jiff::Timestamp::now().into()),
-                ..Default::default()
-            },
-        )
-        .await?;
-        Ok::<_, Error>(())
-    })
-    .await?;
 
     tracing::info!(target: TRACING_TARGET, "Account password set");
     Ok(StatusCode::NO_CONTENT)
@@ -161,12 +119,14 @@ fn set_password_docs(op: TransformOperation) -> TransformOperation {
 /// Removes the authenticated account's password identity.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn delete_password(
-    State(pg_client): State<PgClient>,
+    State(identities): State<AccountIdentityService>,
     auth_state: AuthState,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Removing account password");
-    let mut conn = pg_client.get_connection().await?;
-    remove_identity(&mut conn, auth_state.account_id, IdentityProvider::Password).await
+    identities
+        .remove_identity(auth_state.account_id, IdentityProvider::Password)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn delete_password_docs(op: TransformOperation) -> TransformOperation {
@@ -184,7 +144,7 @@ fn delete_password_docs(op: TransformOperation) -> TransformOperation {
 /// Unlinks a provider from the authenticated account.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id, provider = ?path_params.provider))]
 async fn unlink_provider(
-    State(pg_client): State<PgClient>,
+    State(identities): State<AccountIdentityService>,
     auth_state: AuthState,
     Path(path_params): Path<IdentityPathParams>,
 ) -> Result<StatusCode> {
@@ -198,8 +158,10 @@ async fn unlink_provider(
             .with_resource("account_identity"));
     }
 
-    let mut conn = pg_client.get_connection().await?;
-    remove_identity(&mut conn, auth_state.account_id, path_params.provider).await
+    identities
+        .remove_identity(auth_state.account_id, path_params.provider)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn unlink_provider_docs(op: TransformOperation) -> TransformOperation {
@@ -213,27 +175,6 @@ fn unlink_provider_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
-}
-
-/// Removes an identity, mapping the last-identity and not-found outcomes to
-/// their responses. Shared by the password and provider deletes.
-async fn remove_identity(
-    conn: &mut PgConn,
-    account_id: uuid::Uuid,
-    provider: IdentityProvider,
-) -> Result<StatusCode> {
-    match conn.delete_account_identity(account_id, provider).await? {
-        DeleteIdentityOutcome::Deleted => {
-            tracing::info!(target: TRACING_TARGET, provider = ?provider, "Identity removed");
-            Ok(StatusCode::NO_CONTENT)
-        }
-        DeleteIdentityOutcome::LastIdentityKept => Err(ErrorKind::Conflict
-            .with_message("Cannot remove your only sign-in method; add another first")
-            .with_resource("account_identity")),
-        DeleteIdentityOutcome::NotFound => Err(ErrorKind::NotFound
-            .with_message("No such sign-in method on this account")
-            .with_resource("account_identity")),
-    }
 }
 
 /// Returns the authenticated account-identity routes.
