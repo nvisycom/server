@@ -12,6 +12,7 @@ pub mod handler;
 pub mod middleware;
 pub mod response;
 pub mod service;
+pub mod worker;
 
 pub use crate::args::ServiceArgs;
 pub use crate::error::{BoxedError, Error, ErrorKind, Result};

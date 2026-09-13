@@ -1,23 +1,22 @@
-//! Shared detection helpers used by both the create-detection handler and the
-//! worker.
+//! Detection worker helpers: usage extraction, policy resolution for a run, and
+//! the shared failure path.
 
 use elide_pipeline::governance::policy::Policy;
 use nvisy_postgres::model::{NewWorkspaceDetectionUsage, UpdateWorkspaceDetection};
 use nvisy_postgres::query::{
-    DetectionPolicyVersionRepository, PipelineReferenceRepository, WorkspaceDetectionRepository,
-    WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
+    PipelineReferenceRepository, WorkspaceDetectionRepository, WorkspacePolicyRepository,
 };
 use nvisy_postgres::types::{DetectionMetadata, DetectionStatus, Handle, Json};
 use uuid::Uuid;
 
-use super::service::DetectionQueue;
 use crate::extract::SecurityContext;
 use crate::response::{ErrorKind, Result};
-use crate::service::event;
 use crate::service::event::EventEmitter;
+use crate::service::{Infra, event};
+use crate::worker::detection::broadcast_status;
 
-/// Tracing target for shared detection operations.
-const TRACING_TARGET: &str = "nvisy_server::service::detection";
+/// Tracing target for detection worker helpers.
+const TRACING_TARGET: &str = "nvisy_server::worker::detection";
 
 /// A detection's inference usage, extracted from the engine's [`Audit`]: the
 /// per-model token rows for the usage table and the full report as JSON for the
@@ -124,8 +123,8 @@ pub(crate) struct FailDetection<'a> {
     /// The detection's current metadata, so the failure reason is layered onto it
     /// rather than replacing recorded fields such as tags.
     pub metadata: DetectionMetadata,
-    /// The worker's claim timestamp, guarding the transition; `None` on the
-    /// handler path, which has no claim to fence.
+    /// The worker's claim timestamp, guarding the transition; `None` when there is
+    /// no claim to fence (a job that never reached a worker).
     pub claim: Option<jiff::Timestamp>,
 }
 
@@ -133,18 +132,18 @@ pub(crate) struct FailDetection<'a> {
 /// metadata, broadcasting the terminal status for SSE watchers, and emitting the
 /// `DetectionFailed` event (activity log, webhook, and owner notification).
 ///
-/// Shared by the create-detection handler (enqueue failed) and the worker
-/// (analysis failed) so a failure takes the same steps on every path.
+/// Shared by the worker (analysis failed) and the drainer (a dead-lettered job)
+/// so a failure takes the same steps on every path.
 ///
 /// `params.claim` fences the worker path: when `Some(claimed_at)`, the detection
 /// is failed only while that claim still holds (still `Executing`, `claimed_at`
 /// unchanged), and the broadcast/event fire only if it did — so a worker whose
 /// lease expired mid-analysis cannot fail, or announce the failure of, a
-/// detection another worker now owns. The handler passes `None`: it fails the
-/// detection it just created, with no claim to guard.
+/// detection another worker now owns. `None` guards on `Pending` instead, for a
+/// job that never reached a worker.
 pub(crate) async fn fail_detection(
     conn: &mut nvisy_postgres::PgConn,
-    detection: &DetectionQueue,
+    infra: &Infra,
     params: FailDetection<'_>,
 ) -> FailOutcome {
     let FailDetection {
@@ -172,9 +171,8 @@ pub(crate) async fn fail_detection(
         // Worker path: guard on the claim. A stale claim fails nothing and stays
         // silent — the new owner drives the detection to its own outcome.
         Some(claimed_at) => conn.fail_detection(detection_id, claimed_at, update).await,
-        // Handler path (enqueue failure): guard on `Pending` so this no-ops if a
-        // worker already claimed the detection — enqueue can report an error even
-        // when the job was delivered, and the worker then owns the outcome.
+        // No claim: guard on `Pending` so this no-ops if a worker already claimed
+        // the detection — the worker then owns the outcome.
         None => conn.fail_pending_detection(detection_id, update).await,
     };
     match persisted {
@@ -194,9 +192,7 @@ pub(crate) async fn fail_detection(
         }
     }
 
-    detection
-        .broadcast_status(detection_id, DetectionStatus::Failed)
-        .await;
+    broadcast_status(infra, detection_id, DetectionStatus::Failed).await;
 
     if let Err(err) = conn
         .emit_event(
@@ -324,36 +320,6 @@ pub(crate) async fn resolve_policies_by_slugs(
             version_id: found.version.id,
             definition,
         });
-    }
-    Ok(policies)
-}
-
-/// Loads the exact policy definitions a detection was analyzed with, from the
-/// versions pinned when it ran.
-///
-/// Redaction derives from a detection's base audit, so it must reproduce the
-/// policy versions that produced that audit rather than the policies' current
-/// versions — a policy edited since the detection ran would otherwise redact
-/// against a definition inconsistent with the analysis. A pinned version resolves
-/// even after its policy is soft-deleted, so a historical detection can always be
-/// re-redacted.
-pub(crate) async fn resolve_pinned_policies(
-    conn: &mut nvisy_postgres::PgConn,
-    workspace_id: Uuid,
-    detection_id: Uuid,
-) -> Result<Vec<Policy>> {
-    let version_ids = conn.list_detection_policy_versions(detection_id).await?;
-    let mut policies = Vec::with_capacity(version_ids.len());
-    for version_id in version_ids {
-        let version = conn
-            .find_policy_version(workspace_id, version_id)
-            .await?
-            .ok_or_else(|| {
-                ErrorKind::InternalServerError
-                    .with_message("A pinned policy version is no longer available")
-                    .with_context(format!("policy_version_id: {version_id}"))
-            })?;
-        policies.push(parse_definition(version.id, version.definition)?);
     }
     Ok(policies)
 }

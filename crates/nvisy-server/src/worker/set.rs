@@ -12,7 +12,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 /// Tracing target for worker supervision.
-const TRACING_TARGET: &str = "nvisy_server::service::worker";
+const TRACING_TARGET: &str = "nvisy_server::worker";
 
 /// A background worker: runs until cancelled, logging its own lifecycle.
 ///

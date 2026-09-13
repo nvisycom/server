@@ -26,7 +26,8 @@ use uuid::Uuid;
 
 use crate::response::{Error, Result};
 use crate::service::event::{Notification, NotifyTarget, WorkspaceEvent};
-use crate::service::{Infra, NotificationEmitter, WebhookEmitter, Worker};
+use crate::service::{Infra, NotificationEmitter, WebhookEmitter};
+use crate::worker::Worker;
 
 /// Tracing target for the outbox drainer.
 const TRACING_TARGET: &str = "nvisy_server::service::event::drainer";

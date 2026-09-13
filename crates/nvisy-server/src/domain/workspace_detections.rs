@@ -10,6 +10,7 @@
 //! inference-and-staging (redact) actions stay in the handler, loading a detection
 //! through [`find`](WorkspaceDetectionService::find).
 
+use elide_pipeline::governance::policy::Policy;
 use elide_pipeline::provider::DocumentContext;
 use nvisy_postgres::model::{
     NewWorkspaceDetection, NewWorkspaceDetectionJob, WorkspaceDetection as WorkspaceDetectionModel,
@@ -17,8 +18,9 @@ use nvisy_postgres::model::{
 };
 use nvisy_postgres::query::{
     DetectionCursor, DetectionDocuments, DetectionJobOutboxRepository, DetectionListRow,
-    PipelineReferenceRepository, WorkspaceDetectionRepository, WorkspaceDocumentRepository,
-    WorkspacePipelineRepository, WorkspacePolicyRepository, WorkspaceThreadRepository,
+    DetectionPolicyVersionRepository, PipelineReferenceRepository, WorkspaceDetectionRepository,
+    WorkspaceDocumentRepository, WorkspacePipelineRepository, WorkspacePolicyRepository,
+    WorkspacePolicyVersionRepository, WorkspaceThreadRepository,
 };
 use nvisy_postgres::types::{
     CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Handle, Json,
@@ -32,7 +34,8 @@ use crate::domain::input::{
 use crate::domain::output::CreatedDetection;
 use crate::response::{Error, ErrorKind, Result};
 use crate::service::event::EventEmitter;
-use crate::service::{DetectionJob, DetectionQueue, event};
+use crate::service::{DetectionQueue, event};
+use crate::worker::detection::DetectionJob;
 
 /// Tracing target for detection domain operations.
 const TRACING_TARGET: &str = "nvisy_server::service::detection";
@@ -335,6 +338,37 @@ impl WorkspaceDetectionService {
             .ok_or_else(|| Error::not_found("detection"))
     }
 
+    /// Loads the exact policy definitions a detection was analyzed with, from the
+    /// versions pinned when it ran.
+    ///
+    /// Redaction derives from a detection's base audit, so it must reproduce the
+    /// policy versions that produced that audit rather than the policies' current
+    /// versions — a policy edited since the detection ran would otherwise redact
+    /// against a definition inconsistent with the analysis. A pinned version
+    /// resolves even after its policy is soft-deleted, so a historical detection can
+    /// always be re-redacted.
+    pub async fn resolve_pinned_policies(
+        &self,
+        workspace_id: Uuid,
+        detection_id: Uuid,
+    ) -> Result<Vec<Policy>> {
+        let mut conn = self.postgres.get_connection().await?;
+        let version_ids = conn.list_detection_policy_versions(detection_id).await?;
+        let mut policies = Vec::with_capacity(version_ids.len());
+        for version_id in version_ids {
+            let version = conn
+                .find_policy_version(workspace_id, version_id)
+                .await?
+                .ok_or_else(|| {
+                    ErrorKind::InternalServerError
+                        .with_message("A pinned policy version is no longer available")
+                        .with_context(format!("policy_version_id: {version_id}"))
+                })?;
+            policies.push(parse_definition(version.id, version.definition)?);
+        }
+        Ok(policies)
+    }
+
     /// Commits the detection row, its start event, its review thread, and its
     /// analysis job in one transaction.
     ///
@@ -405,6 +439,16 @@ impl WorkspaceDetectionService {
             .await;
         self.detection.wake_drainer();
     }
+}
+
+/// Deserializes a stored policy definition (plaintext JSONB) into an engine
+/// [`Policy`], failing if the stored body is malformed.
+fn parse_definition(version_id: Uuid, definition: serde_json::Value) -> Result<Policy> {
+    serde_json::from_value(definition).map_err(|err| {
+        ErrorKind::InternalServerError
+            .with_message("Stored policy definition is malformed")
+            .with_context(format!("policy_version_id: {version_id}: {err}"))
+    })
 }
 
 /// Finds a pipeline within a workspace by slug or returns NotFound.

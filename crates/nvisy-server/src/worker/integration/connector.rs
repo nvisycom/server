@@ -18,7 +18,7 @@ use crate::service::{
 };
 
 /// Tracing target for connection sync operations.
-const TRACING_TARGET: &str = "nvisy_server::service::sync";
+const TRACING_TARGET: &str = "nvisy_server::worker::sync";
 
 /// Connects a stored connection config to a live file source.
 #[derive(Clone)]

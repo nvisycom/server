@@ -1,12 +1,10 @@
 //! Application state and dependency injection.
 
 mod account_provisioner;
-mod assistant;
 mod auth_issuer;
 mod avatar;
 mod blob_reaper;
 mod crypto;
-mod detection;
 mod engine;
 pub mod event;
 mod health;
@@ -15,11 +13,11 @@ mod integration;
 mod notification;
 mod oidc;
 mod password;
+mod queue;
 mod run_blob_store;
 mod session_keys;
 mod user_agent;
 mod webhook;
-mod worker;
 
 use std::sync::Arc;
 
@@ -37,37 +35,33 @@ use tokio_util::sync::CancellationToken;
 use crate::middleware::UploadConfig;
 use crate::response::CookieConfig;
 pub use crate::service::account_provisioner::AccountProvisioner;
-pub use crate::service::assistant::{
-    AssistantCoordinator, AssistantJob, AssistantOutboxDrainer, AssistantQueue, AssistantWorker,
-};
 pub use crate::service::auth_issuer::AuthIssuer;
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::blob_reaper::BlobReaper;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
-pub(crate) use crate::service::detection::resolve_pinned_policies;
-pub use crate::service::detection::{
-    DetectionCoordinator, DetectionJob, DetectionOutboxDrainer, DetectionQueue,
-    DetectionStatusEvent, DetectionWorker, detection_subject,
-};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::infra::Infra;
 pub use crate::service::integration::{
-    ConnectionConfig, ConnectionSyncJob, ConnectionSyncService, ConnectionSyncWorker,
-    FileConnectorsConfig, FileServiceRedirect, IntegrationConfig, ProviderConfig, SourceEntry,
-    StandardCronSchedule, TransferKind, TransferRequest, persist_refreshed_tokens,
+    ConnectionConfig, ConnectionSyncService, FileConnectorsConfig, FileServiceRedirect,
+    IntegrationConfig, ProviderConfig, StandardCronSchedule, TransferKind, TransferRequest,
+    persist_refreshed_tokens,
 };
 pub use crate::service::notification::{NotificationEmitter, UnreadCountEvent};
 pub use crate::service::oidc::{
     OidcAuthorization, OidcConfig, OidcError, OidcIdentity, OidcService, RedirectKind,
 };
 pub use crate::service::password::PasswordService;
+pub use crate::service::queue::{AssistantQueue, DetectionQueue};
 pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
 pub use crate::service::user_agent::UserAgentParser;
 pub use crate::service::webhook::{WebhookDeliveryWorker, WebhookEmitter};
-pub use crate::service::worker::{Worker, WorkerSet};
+use crate::worker::assistant::{AssistantOutboxDrainer, AssistantWorker};
+use crate::worker::detection::{DetectionOutboxDrainer, DetectionWorker};
+use crate::worker::integration::ConnectionSyncWorker;
+use crate::worker::{Coordinator, WorkerSet};
 use crate::{Result, domain};
 
 /// Tracing target for service-state initialization.
@@ -111,11 +105,11 @@ pub struct ServiceState {
 
     // In-process wake signal from the detection enqueue path to the outbox
     // drainer, shared by the per-request `DetectionQueue` and the drainer.
-    pub detection: DetectionCoordinator,
+    pub detection: Coordinator,
 
     // In-process wake signal from the assistant enqueue path to its outbox
     // drainer, shared by the per-request `AssistantQueue` and the drainer.
-    pub assistant: AssistantCoordinator,
+    pub assistant: Coordinator,
 
     // Operational: the app-wide shutdown signal (cancelled once on Ctrl+C/SIGTERM
     // so long-lived handlers and background workers wind down promptly) and the
@@ -206,8 +200,8 @@ impl ServiceState {
             webhook: webhook_service,
             endpoint_policy,
             engine,
-            detection: DetectionCoordinator::new(),
-            assistant: AssistantCoordinator::new(),
+            detection: Coordinator::new(),
+            assistant: Coordinator::new(),
             shutdown: CancellationToken::new(),
             health_cache: HealthCache::new(&health_config, health_checkers),
             password: PasswordService::new(),
@@ -255,7 +249,6 @@ impl ServiceState {
             self.infra.clone(),
             self.engine.clone(),
             RunBlobStore::from_ref(self),
-            DetectionQueue::from_ref(self),
         ));
         workers.spawn(AssistantOutboxDrainer::new(
             self.infra.clone(),
@@ -358,8 +351,6 @@ impl_di_field!(
     webhook: WebhookService,
     endpoint_policy: EndpointPolicy,
     engine: EngineService,
-    detection: DetectionCoordinator,
-    assistant: AssistantCoordinator,
     shutdown: CancellationToken,
     health_cache: HealthCache,
     password: PasswordService,
@@ -386,7 +377,7 @@ impl axum::extract::FromRef<ServiceState> for RunBlobStore {
 }
 
 // `DetectionQueue` composes from two singletons — `Infra` and the shared
-// `DetectionCoordinator` — so it needs a hand-written `FromRef` rather than the
+// detection `Coordinator` — so it needs a hand-written `FromRef` rather than the
 // compose-from-`Infra`-alone macro above.
 impl axum::extract::FromRef<ServiceState> for DetectionQueue {
     fn from_ref(state: &ServiceState) -> Self {
@@ -394,8 +385,8 @@ impl axum::extract::FromRef<ServiceState> for DetectionQueue {
     }
 }
 
-// `AssistantQueue` likewise composes from `Infra` and the shared
-// `AssistantCoordinator`, so it needs a hand-written `FromRef`.
+// `AssistantQueue` likewise composes from `Infra` and the shared assistant
+// `Coordinator`, so it needs a hand-written `FromRef`.
 impl axum::extract::FromRef<ServiceState> for AssistantQueue {
     fn from_ref(state: &ServiceState) -> Self {
         AssistantQueue::new(state.infra.clone(), state.assistant.clone())

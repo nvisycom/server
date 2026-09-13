@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use elide_pipeline::primitive::RasterMode;
+use elide_pipeline::provider::{CodecParams, DocumentContext, RequestContext};
 use nvisy_postgres::model::{
     NewBlob, NewWorkspaceAudit, UpdateWorkspaceDetection, WorkspaceDetection, WorkspacePipeline,
 };
@@ -28,8 +29,7 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::job::{DetectionJob, DetectionStream};
-use super::service::DetectionQueue;
+use super::job::{DetectionJob, DetectionStream, broadcast_status};
 use super::support::{
     FailDetection, FailOutcome, extract_detection_usage, fail_detection, resolve_policies,
     resolve_policies_by_slugs,
@@ -37,7 +37,8 @@ use super::support::{
 use crate::extract::SecurityContext;
 use crate::handler::request::PipelineDefinition;
 use crate::response::{ErrorKind, Result};
-use crate::service::{EngineService, Infra, RunBlobStore, Worker, event};
+use crate::service::{EngineService, Infra, RunBlobStore, event};
+use crate::worker::Worker;
 
 /// Tracing target for detection worker operations.
 const TRACING_TARGET: &str = "nvisy_server::worker::detection";
@@ -58,7 +59,6 @@ pub struct DetectionWorker {
     infra: Infra,
     engine: EngineService,
     blob: RunBlobStore,
-    detection: DetectionQueue,
     /// Bounds how many detection jobs run at once, sized to the deployment's
     /// available parallelism. Detection analysis is CPU-bound under the default
     /// lineup, so unbounded concurrency would only oversubscribe cores and grow
@@ -99,12 +99,7 @@ impl DetectionWorker {
     /// Concurrency is sized to the deployment's available parallelism (falling
     /// back to a small default when the runtime cannot report it), so in-flight
     /// detections stay near core count.
-    pub fn new(
-        infra: Infra,
-        engine: EngineService,
-        blob: RunBlobStore,
-        detection: DetectionQueue,
-    ) -> Self {
+    pub fn new(infra: Infra, engine: EngineService, blob: RunBlobStore) -> Self {
         let concurrency = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(DEFAULT_DETECTION_CONCURRENCY);
@@ -112,7 +107,6 @@ impl DetectionWorker {
             infra,
             engine,
             blob,
-            detection,
             concurrency: Arc::new(Semaphore::new(concurrency)),
         }
     }
@@ -281,9 +275,7 @@ impl DetectionWorker {
         };
         let claim_token: jiff::Timestamp = claim_token.into();
 
-        self.detection
-            .broadcast_status(detection.id, DetectionStatus::Executing)
-            .await;
+        broadcast_status(&self.infra, detection.id, DetectionStatus::Executing).await;
 
         // Release the connection before analysis: `detect` manages its own
         // connections across its phases, so holding this one across the (slow)
@@ -308,7 +300,7 @@ impl DetectionWorker {
             };
             let outcome = fail_detection(
                 &mut conn,
-                &self.detection,
+                &self.infra,
                 FailDetection {
                     workspace_id: job.workspace_id,
                     detection_id: detection.id,
@@ -434,11 +426,8 @@ impl DetectionWorker {
             // Parse the workspace settings once; both raster mode and retention
             // read it.
             let settings = workspace.settings.or_default();
-            let request = self.engine.request_context(
-                &definition,
-                job.scope.clone(),
-                raster_mode_of(&settings),
-            );
+            let request =
+                request_context(&definition, job.scope.clone(), raster_mode_of(&settings));
 
             // Resolve the policies the analysis runs against: a pipeline
             // detection's from the pipeline's references, an ad-hoc detection's
@@ -659,9 +648,7 @@ impl DetectionWorker {
         }
 
         tracing::info!(target: TRACING_TARGET, detection_id = %detection.id, "Detection complete");
-        self.detection
-            .broadcast_status(detection.id, DetectionStatus::Complete)
-            .await;
+        broadcast_status(&self.infra, detection.id, DetectionStatus::Complete).await;
 
         Ok(())
     }
@@ -684,4 +671,31 @@ fn raster_mode_of(settings: &WorkspaceSettings) -> RasterMode {
         RasterPolicy::Always => RasterMode::always(),
         RasterPolicy::Never => RasterMode::Never,
     }
+}
+
+/// Builds the [`RequestContext`] for one detect run from a pipeline's intent.
+///
+/// Recognition is entirely engine-owned (the built-in pattern set plus the
+/// deployment's NER/LLM lineups always run). The document context is the
+/// request's own, falling back to the pipeline default. `raster_mode` is the
+/// workspace's page-rasterisation policy (always render vs. auto), carried in the
+/// codec params since it is server-derived, not caller-set. The engine records
+/// the context and codec params on the audit so redaction re-decodes and
+/// re-compiles against exactly what detection used. Deduplication and calibration
+/// are engine-owned defaults; the label catalog is derived from the run's
+/// policies at detect time.
+///
+/// No key is set: the server does not yet drive keyed operators
+/// (`HmacHash`/`Encrypt`), whose `KeyConfig` would be supplied here.
+fn request_context(
+    definition: &PipelineDefinition,
+    document_context: Option<DocumentContext>,
+    raster_mode: RasterMode,
+) -> RequestContext {
+    let context = document_context
+        .or_else(|| definition.default_scope.clone())
+        .unwrap_or_default();
+    RequestContext::new()
+        .with_context(context)
+        .with_codec(CodecParams::new().with_raster_mode(raster_mode))
 }

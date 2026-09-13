@@ -24,7 +24,8 @@ use uuid::Uuid;
 use crate::domain::input::OpenThreadInput;
 use crate::response::{Error, ErrorKind, Result};
 use crate::service::event::EventEmitter;
-use crate::service::{AssistantJob, AssistantQueue, event};
+use crate::service::{AssistantQueue, event};
+use crate::worker::assistant::AssistantJob;
 
 /// Tracing target for thread domain operations.
 const TRACING_TARGET: &str = "nvisy_server::service::thread";

@@ -17,7 +17,8 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{WebhookJob, WebhookStream};
-use crate::service::{CryptoService, Infra, Worker};
+use crate::service::{CryptoService, Infra};
+use crate::worker::Worker;
 use crate::{Error, Result};
 
 /// Type alias for webhook subscriber.

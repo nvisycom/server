@@ -15,13 +15,13 @@ use nvisy_postgres::model::WorkspaceAssistantJob;
 use nvisy_postgres::query::AssistantJobOutboxRepository;
 use tokio_util::sync::CancellationToken;
 
-use super::coordinator::AssistantCoordinator;
 use super::job::{AssistantJob, AssistantStream};
 use crate::response::{Error, Result};
-use crate::service::{Infra, Worker};
+use crate::service::Infra;
+use crate::worker::{Coordinator, Worker};
 
 /// Tracing target for the assistant-job drainer.
-const TRACING_TARGET: &str = "nvisy_server::service::assistant::drainer";
+const TRACING_TARGET: &str = "nvisy_server::worker::assistant::drainer";
 
 /// How often the drainer polls for due jobs. Short, since it is the enqueue
 /// latency between addressing the assistant and the worker picking it up.
@@ -52,7 +52,7 @@ const PUBLISH_TIMEOUT: Duration = Duration::from_secs(5);
 /// Drains the assistant-job outbox, publishing each pending job to the work-queue.
 pub struct AssistantOutboxDrainer {
     infra: Infra,
-    coordinator: AssistantCoordinator,
+    coordinator: Coordinator,
 }
 
 /// The tally of one [`drain_batch`](AssistantOutboxDrainer::drain_batch) pass: of
@@ -97,9 +97,9 @@ impl Worker for AssistantOutboxDrainer {
 impl AssistantOutboxDrainer {
     /// Creates a new [`AssistantOutboxDrainer`].
     ///
-    /// Shares the [`AssistantCoordinator`] with the enqueue-side `AssistantQueue`
+    /// Shares the [`Coordinator`] with the enqueue-side `AssistantQueue`
     /// so a job committed on this instance wakes this drainer at once.
-    pub fn new(infra: Infra, coordinator: AssistantCoordinator) -> Self {
+    pub fn new(infra: Infra, coordinator: Coordinator) -> Self {
         Self { infra, coordinator }
     }
 

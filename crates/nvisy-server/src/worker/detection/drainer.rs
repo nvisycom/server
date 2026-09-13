@@ -14,14 +14,13 @@ use nvisy_postgres::query::{DetectionJobOutboxRepository, WorkspaceDetectionRepo
 use nvisy_postgres::types::{DetectionMetadata, DetectionStatus, Json};
 use tokio_util::sync::CancellationToken;
 
-use super::coordinator::DetectionCoordinator;
-use super::job::DetectionJob;
-use super::service::DetectionQueue;
+use super::job::{DetectionJob, broadcast_status, enqueue};
 use crate::response::{Error, Result};
-use crate::service::{Infra, Worker};
+use crate::service::Infra;
+use crate::worker::{Coordinator, Worker};
 
 /// Tracing target for the detection-job drainer.
-const TRACING_TARGET: &str = "nvisy_server::service::detection::drainer";
+const TRACING_TARGET: &str = "nvisy_server::worker::detection::drainer";
 
 /// How often the drainer polls for due jobs. Short, since it is the enqueue
 /// latency between creating a detection and the worker picking it up.
@@ -56,8 +55,7 @@ const PUBLISH_TIMEOUT: Duration = Duration::from_secs(5);
 /// Drains the detection-job outbox, publishing each pending job to the work-queue.
 pub struct DetectionOutboxDrainer {
     infra: Infra,
-    queue: DetectionQueue,
-    coordinator: DetectionCoordinator,
+    coordinator: Coordinator,
 }
 
 /// The tally of one [`drain_batch`](DetectionOutboxDrainer::drain_batch) pass: of
@@ -102,15 +100,11 @@ impl Worker for DetectionOutboxDrainer {
 impl DetectionOutboxDrainer {
     /// Creates a new [`DetectionOutboxDrainer`].
     ///
-    /// Shares the [`DetectionCoordinator`] with the enqueue-side
-    /// [`DetectionQueue`] so a job committed on this instance wakes this drainer
-    /// at once.
-    pub fn new(infra: Infra, coordinator: DetectionCoordinator) -> Self {
-        Self {
-            queue: DetectionQueue::new(infra.clone(), coordinator.clone()),
-            infra,
-            coordinator,
-        }
+    /// Shares the [`Coordinator`] with the enqueue-side
+    /// [`DetectionQueue`](crate::service::DetectionQueue) so a job committed on this
+    /// instance wakes this drainer at once.
+    pub fn new(infra: Infra, coordinator: Coordinator) -> Self {
+        Self { infra, coordinator }
     }
 
     /// One drain pass: claim and publish batches until a short page signals the
@@ -232,9 +226,7 @@ impl DetectionOutboxDrainer {
         // authoritative, so a dropped broadcast is recoverable by a re-read.
         let (pass, dead_lettered) = outcome;
         for detection_id in dead_lettered {
-            self.queue
-                .broadcast_status(detection_id, DetectionStatus::Failed)
-                .await;
+            broadcast_status(&self.infra, detection_id, DetectionStatus::Failed).await;
         }
 
         Ok(pass)
@@ -249,7 +241,7 @@ impl DetectionOutboxDrainer {
         })?;
         // Bound the publish so a hung NATS cannot hold the batch transaction's
         // locks open; a timeout is a failed attempt like any other.
-        match tokio::time::timeout(PUBLISH_TIMEOUT, self.queue.enqueue(job)).await {
+        match tokio::time::timeout(PUBLISH_TIMEOUT, enqueue(&self.infra, job)).await {
             Ok(Ok(())) => Ok(()),
             Ok(Err(err)) => {
                 tracing::warn!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to publish detection job; deferring");

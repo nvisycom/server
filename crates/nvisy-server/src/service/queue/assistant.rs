@@ -1,29 +1,24 @@
-//! Assistant enqueue service.
-//!
-//! The request-side counterpart to the [`AssistantWorker`](super::AssistantWorker):
-//! publishes an assistant-reply job to the `AssistantStream` work-queue. Injected
-//! into the comment handler so the handler stays thin and the NATS wiring lives in
-//! one place.
+//! The request-side handle for the assistant subsystem.
 
-use super::coordinator::AssistantCoordinator;
-use super::job::{AssistantJob, AssistantStream};
 use crate::response::Result;
 use crate::service::Infra;
+use crate::worker::Coordinator;
+use crate::worker::assistant::{AssistantJob, AssistantStream};
 
 /// Enqueues assistant-reply jobs onto the work-queue.
 ///
-/// Cheaply cloneable (holds the shared [`Infra`] clients and the
-/// [`AssistantCoordinator`], all `Arc`-backed).
+/// Cheaply cloneable (holds the shared [`Infra`] clients and the [`Coordinator`],
+/// all `Arc`-backed).
 #[derive(Clone)]
 #[must_use = "service does nothing unless you enqueue with it"]
 pub struct AssistantQueue {
     infra: Infra,
-    coordinator: AssistantCoordinator,
+    coordinator: Coordinator,
 }
 
 impl AssistantQueue {
     /// Creates a new [`AssistantQueue`].
-    pub fn new(infra: Infra, coordinator: AssistantCoordinator) -> Self {
+    pub fn new(infra: Infra, coordinator: Coordinator) -> Self {
         Self { infra, coordinator }
     }
 

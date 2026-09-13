@@ -34,7 +34,8 @@ use nvisy_postgres::query::{
 use tokio_util::sync::CancellationToken;
 
 use crate::response::Result;
-use crate::service::{CryptoService, Infra, PurgeOutcome, RunBlobStore, Worker};
+use crate::service::{CryptoService, Infra, PurgeOutcome, RunBlobStore};
+use crate::worker::Worker;
 
 /// Tracing target for the blob reaper.
 const TRACING_TARGET: &str = "nvisy_server::worker::reaper";

@@ -26,7 +26,8 @@ use uuid::Uuid;
 use super::job::{AssistantJob, AssistantStream};
 use crate::extract::SecurityContext;
 use crate::response::{Error, ErrorKind, Result};
-use crate::service::{CryptoService, Infra, ProviderConfig, Worker, event};
+use crate::service::{CryptoService, Infra, ProviderConfig, event};
+use crate::worker::Worker;
 
 /// Tracing target for assistant worker operations.
 const TRACING_TARGET: &str = "nvisy_server::worker::assistant";

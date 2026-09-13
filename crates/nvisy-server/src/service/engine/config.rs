@@ -10,11 +10,25 @@
 //! `recognizers`/`enrichers` shape the file mirrors, so no server-side mirror
 //! types are needed.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use elide_pipeline::provider::ProviderConfig;
 
 use crate::{Error, Result};
+
+/// Deployment configuration for the redaction engine.
+#[must_use]
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "cli", derive(clap::Args))]
+pub struct EngineConfig {
+    /// Optional path to a TOML file with the deployment engine configuration.
+    ///
+    /// Carries the NER/LLM recognizer lineups and the OCR/STT enricher backends.
+    /// Absent means no NER/LLM recognizers and no enrichment (pattern recognizers
+    /// still run).
+    #[cfg_attr(feature = "cli", arg(long, env = "ENGINE_CONFIG_FILEPATH"))]
+    pub config_path: Option<PathBuf>,
+}
 
 /// Reads and parses the engine [`ProviderConfig`] from a TOML file.
 pub(super) async fn load(path: &Path) -> Result<ProviderConfig> {

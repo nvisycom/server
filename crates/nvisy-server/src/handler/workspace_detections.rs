@@ -43,10 +43,8 @@ use crate::handler::response::{
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, SseResponse};
 use crate::service::event::EventEmitter;
-use crate::service::{
-    DetectionQueue, DetectionStatusEvent, EngineService, RunBlobStore, ServiceState, event,
-    resolve_pinned_policies,
-};
+use crate::service::{DetectionQueue, EngineService, RunBlobStore, ServiceState, event};
+use crate::worker::detection::DetectionStatusEvent;
 
 /// Tracing target for detection operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::detections";
@@ -602,7 +600,9 @@ async fn redact_detection(
         // Redaction derives from this detection's base audit, so it re-redacts
         // with the exact policy versions the detection pinned when it ran, not the
         // policies' current versions.
-        let policies = resolve_pinned_policies(&mut conn, workspace.id, detection.id).await?;
+        let policies = detections
+            .resolve_pinned_policies(workspace.id, detection.id)
+            .await?;
 
         RedactInputs {
             detection,

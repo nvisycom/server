@@ -1,10 +1,21 @@
-//! Detection job and detection-status event types.
+//! Detection job and detection-status event types, and the NATS enqueue and
+//! status-broadcast primitives shared by the request-side
+//! [`DetectionQueue`](crate::service::DetectionQueue) and the background
+//! [`DetectionWorker`](super::DetectionWorker) and
+//! [`DetectionOutboxDrainer`](super::DetectionOutboxDrainer).
 
 use elide_pipeline::provider::DocumentContext;
+use nvisy_nats::stream::BroadcastStream;
 use nvisy_postgres::types::{DetectionStatus, Handle};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::response::Result;
+use crate::service::Infra;
+
+/// Tracing target for detection enqueue and broadcast primitives.
+const TRACING_TARGET: &str = "nvisy_server::worker::detection";
 
 /// The detection JetStream work-queue, carrying [`DetectionJob`] payloads.
 pub type DetectionStream = nvisy_nats::stream::DetectionStream<DetectionJob>;
@@ -50,4 +61,46 @@ pub struct DetectionStatusEvent {
 #[must_use]
 pub fn detection_subject(detection_id: Uuid) -> String {
     format!("pipeline.detections.{detection_id}.status")
+}
+
+/// Publishes a detection job onto the `DetectionStream` work-queue for the worker
+/// to pick up.
+pub async fn enqueue(infra: &Infra, job: DetectionJob) -> Result<()> {
+    let publisher = infra.nats.event_publisher::<DetectionStream>().await?;
+    publisher.publish(&job).await?;
+    Ok(())
+}
+
+/// Broadcasts a detection's status change on its core-NATS subject (best-effort;
+/// the detection row is authoritative, so a dropped broadcast is recoverable).
+pub async fn broadcast_status(infra: &Infra, detection_id: Uuid, status: DetectionStatus) {
+    let event = DetectionStatusEvent {
+        detection_id,
+        status,
+    };
+    if let Err(err) = infra
+        .nats
+        .publish_broadcast(detection_subject(detection_id), &event)
+        .await
+    {
+        tracing::debug!(
+            target: TRACING_TARGET,
+            error = %err,
+            "Failed to broadcast detection status",
+        );
+    }
+}
+
+/// Subscribes to a detection's status broadcasts, yielding each
+/// [`DetectionStatusEvent`]. Used by the SSE endpoint to forward status changes to
+/// a watching client.
+pub async fn subscribe_status(
+    infra: &Infra,
+    detection_id: Uuid,
+) -> Result<BroadcastStream<DetectionStatusEvent>> {
+    let stream = infra
+        .nats
+        .subscribe_broadcast::<DetectionStatusEvent>(detection_subject(detection_id))
+        .await?;
+    Ok(stream)
 }

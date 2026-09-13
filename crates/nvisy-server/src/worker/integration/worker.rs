@@ -31,9 +31,12 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::{ConnectionSyncService, StandardCronSchedule, TransferKind, TransferRequest};
 use crate::response::{ErrorKind, Result};
-use crate::service::{ConnectionConfig, CryptoService, Infra, Worker};
+use crate::service::{
+    ConnectionConfig, ConnectionSyncService, CryptoService, Infra, StandardCronSchedule,
+    TransferKind, TransferRequest,
+};
+use crate::worker::Worker;
 
 /// Tracing target for the connection sync worker.
 const TRACING_TARGET: &str = "nvisy_server::worker::connection_sync";
