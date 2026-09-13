@@ -14,6 +14,10 @@
 pub mod input;
 pub mod output;
 
+mod account;
+mod account_api_tokens;
+mod account_identities;
+mod account_notifications;
 mod workspace_connections;
 mod workspace_detections;
 mod workspace_documents;
@@ -26,6 +30,10 @@ mod workspace_threads;
 mod workspace_webhooks;
 mod workspaces;
 
+pub use account::AccountService;
+pub use account_api_tokens::AccountApiTokenService;
+pub use account_identities::{AccountIdentityService, ReauthVerified};
+pub use account_notifications::AccountNotificationService;
 pub use workspace_connections::WorkspaceConnectionService;
 pub use workspace_detections::WorkspaceDetectionService;
 pub use workspace_documents::WorkspaceDocumentService;
@@ -41,6 +49,14 @@ pub use workspaces::WorkspaceService;
 /// The per-resource domain services handlers call.
 #[derive(Clone)]
 pub struct Domain {
+    /// Account profile domain logic.
+    pub accounts: AccountService,
+    /// Account API-token domain logic.
+    pub account_api_tokens: AccountApiTokenService,
+    /// Account identity (credential) domain logic.
+    pub account_identities: AccountIdentityService,
+    /// Account notification domain logic.
+    pub account_notifications: AccountNotificationService,
     /// Workspace connection domain logic.
     pub connections: WorkspaceConnectionService,
     /// Workspace detection request-side domain logic.

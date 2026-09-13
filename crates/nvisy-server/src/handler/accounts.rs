@@ -1,43 +1,38 @@
-//! Account management handlers for user profile and notification operations.
+//! Account management handlers for user profile operations.
 //!
-//! This module provides comprehensive account management functionality including
-//! profile viewing, updating, deletion, and notifications. All operations follow
-//! security best practices with proper authorization and input validation.
+//! These handlers are thin: they authenticate, parse the request, delegate the
+//! account rules to [`AccountService`](crate::domain::AccountService), and map the
+//! result to a response. Avatar upload/delete stay here over
+//! [`AvatarService`](crate::service::AvatarService), with the self-authorization
+//! check inline.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use nvisy_postgres::model::Account as AccountModel;
-use nvisy_postgres::query::{AccountRepository, WorkspaceMemberRepository};
-use nvisy_postgres::{PgClient, PgConn};
-use uuid::Uuid;
 
 use super::request::{AccountPathParams, UpdateAccount};
 use super::response::{Account, PublicAccount};
+use crate::domain::AccountService;
 use crate::extract::{AuthState, AvatarUpload, Json, Path, ValidateJson};
-use crate::response::{Error, ErrorKind, ErrorResponse, Result};
+use crate::response::{ErrorKind, ErrorResponse, Result};
 use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState};
 
 /// Tracing target for account operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::accounts";
 
 /// Retrieves the authenticated account.
-#[tracing::instrument(
-    skip_all,
-    fields(account_id = %auth_state.account_id)
-)]
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn get_own_account(
-    State(pg_client): State<PgClient>,
+    State(accounts): State<AccountService>,
     auth_state: AuthState,
 ) -> Result<(StatusCode, Json<Account>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading account");
 
-    let mut conn = pg_client.get_connection().await?;
-    let account = find_account(&mut conn, auth_state.account_id).await?;
+    let account = accounts.find(auth_state.account_id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Account read");
-
     Ok((StatusCode::OK, Json(Account::from_model(account))))
 }
 
@@ -54,45 +49,19 @@ fn get_own_account_docs(op: TransformOperation) -> TransformOperation {
 /// otherwise the account is reported as not found. Only public fields are
 /// returned — private details (email) are available solely through the
 /// caller's own `/account/` view.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        requester_id = %auth_state.account_id,
-        target_id = tracing::field::Empty,
-    )
-)]
+#[tracing::instrument(skip_all, fields(requester_id = %auth_state.account_id))]
 async fn get_account(
-    State(pg_client): State<PgClient>,
+    State(accounts): State<AccountService>,
     auth_state: AuthState,
     Path(path_params): Path<AccountPathParams>,
 ) -> Result<(StatusCode, Json<PublicAccount>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading account by username");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    let account = conn
-        .find_account_by_username(&path_params.username)
-        .await?
-        .ok_or_else(|| Error::not_found("account"))?;
-    tracing::Span::current().record("target_id", tracing::field::display(account.id));
-
-    // Accessible only to accounts that share a workspace. A non-shared account is
-    // reported as not-found (not forbidden) so this endpoint cannot be used to
-    // distinguish existing from non-existing handles.
-    let shares_workspace = conn
-        .accounts_share_workspace(auth_state.account_id, account.id)
+    let account = accounts
+        .find_public(auth_state.account_id, &path_params.username)
         .await?;
 
-    if !shares_workspace {
-        tracing::warn!(
-            target: TRACING_TARGET,
-            "Account not accessible: no shared workspace"
-        );
-        return Err(Error::not_found("account"));
-    }
-
     tracing::info!(target: TRACING_TARGET, "Account read by username");
-
     Ok((StatusCode::OK, Json(PublicAccount::from_model(account))))
 }
 
@@ -109,49 +78,19 @@ fn get_account_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Updates the authenticated account.
-#[tracing::instrument(
-    skip_all,
-    fields(account_id = %auth_state.account_id)
-)]
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn update_own_account(
-    State(pg_client): State<PgClient>,
+    State(accounts): State<AccountService>,
     auth_state: AuthState,
     ValidateJson(request): ValidateJson<UpdateAccount>,
 ) -> Result<(StatusCode, Json<Account>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating account");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    // Check if email already exists for another account
-    if let Some(ref email) = request.email_address
-        && conn
-            .email_exists_for_other(email, auth_state.account_id)
-            .await?
-    {
-        tracing::warn!(target: TRACING_TARGET, "Account update failed: email already exists");
-        return Err(ErrorKind::Conflict
-            .with_message("Email is already registered")
-            .with_resource("account"));
-    }
-
-    // Check if username is already taken by another account
-    if let Some(ref username) = request.username
-        && conn
-            .username_exists_for_other(username, auth_state.account_id)
-            .await?
-    {
-        tracing::warn!(target: TRACING_TARGET, "Account update failed: username already taken");
-        return Err(ErrorKind::Conflict
-            .with_message("Handle is already taken")
-            .with_resource("account"));
-    }
-
-    let account = conn
-        .update_account(auth_state.account_id, request.into_model())
+    let account = accounts
+        .update(auth_state.account_id, request.into_model())
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Account updated");
-
     Ok((StatusCode::OK, Json(Account::from_model(account))))
 }
 
@@ -165,23 +104,16 @@ fn update_own_account_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Deletes the authenticated account.
-#[tracing::instrument(
-    skip_all,
-    fields(account_id = %auth_state.account_id)
-)]
+#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn delete_own_account(
-    State(pg_client): State<PgClient>,
+    State(accounts): State<AccountService>,
     auth_state: AuthState,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting account");
 
-    let mut conn = pg_client.get_connection().await?;
-    conn.delete_account(auth_state.account_id)
-        .await?
-        .ok_or_else(|| Error::not_found("account"))?;
+    accounts.delete(auth_state.account_id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Account deleted");
-
     Ok(StatusCode::OK)
 }
 
@@ -193,7 +125,6 @@ fn delete_own_account_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Finds an account by ID or returns NotFound error.
 /// Uploads (or replaces) the authenticated account's avatar.
 ///
 /// The image is normalized to WebP and stored; the account's `avatar_url` is set
@@ -202,7 +133,7 @@ fn delete_own_account_docs(op: TransformOperation) -> TransformOperation {
 /// with an image field.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn upload_account_avatar(
-    State(pg_client): State<PgClient>,
+    State(accounts): State<AccountService>,
     State(avatar): State<AvatarService>,
     auth_state: AuthState,
     Path(path_params): Path<AccountPathParams>,
@@ -210,18 +141,10 @@ async fn upload_account_avatar(
 ) -> Result<(StatusCode, Json<Account>)> {
     tracing::debug!(target: TRACING_TARGET, "Uploading account avatar");
 
-    // Authorize under a scoped connection, then release it: `set_account_avatar`
-    // does image processing and a NATS put (and acquires its own connection for
-    // the DB update), so holding this one across it would pin two pooled
-    // connections for the whole upload.
-    let account_id = {
-        let mut conn = pg_client.get_connection().await?;
-        let account = find_account(&mut conn, auth_state.account_id).await?;
-        authorize_self(&account, &path_params.username)?;
-        account.id
-    };
+    let account = accounts.find(auth_state.account_id).await?;
+    authorize_self(&account, &path_params.username)?;
 
-    let updated = avatar.set_account_avatar(account_id, bytes).await?;
+    let updated = avatar.set_account_avatar(account.id, bytes).await?;
 
     tracing::info!(target: TRACING_TARGET, "Account avatar set");
     Ok((StatusCode::OK, Json(Account::from_model(updated))))
@@ -242,15 +165,14 @@ fn upload_account_avatar_docs(op: TransformOperation) -> TransformOperation {
 /// Removes the authenticated account's avatar. Only the account itself may.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn delete_account_avatar(
-    State(pg_client): State<PgClient>,
+    State(accounts): State<AccountService>,
     State(avatar): State<AvatarService>,
     auth_state: AuthState,
     Path(path_params): Path<AccountPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting account avatar");
 
-    let mut conn = pg_client.get_connection().await?;
-    let account = find_account(&mut conn, auth_state.account_id).await?;
+    let account = accounts.find(auth_state.account_id).await?;
     authorize_self(&account, &path_params.username)?;
 
     avatar.delete_account_avatar(account.id).await?;
@@ -274,12 +196,6 @@ fn authorize_self(account: &AccountModel, username: &nvisy_postgres::types::Hand
     } else {
         Err(ErrorKind::Forbidden.with_message("You can only manage your own avatar"))
     }
-}
-
-async fn find_account(conn: &mut PgConn, account_id: Uuid) -> Result<AccountModel> {
-    conn.find_account_by_id(account_id)
-        .await?
-        .ok_or_else(|| Error::not_found("account"))
 }
 
 /// Returns a [`Router`] with all related routes.

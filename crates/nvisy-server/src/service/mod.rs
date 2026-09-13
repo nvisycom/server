@@ -418,12 +418,43 @@ impl_di_unit!(AccountProvisioner);
 
 // Per-resource domain services built over the Postgres client alone:
 impl_di_domain!(
+    domain::AccountService,
     domain::WorkspaceInviteService,
     domain::WorkspaceMemberService,
     domain::WorkspacePolicyService,
     domain::WorkspacePipelineService,
     domain::WorkspaceService,
 );
+
+// `AccountIdentityService` also holds the password service (to strength-check,
+// hash, and verify passwords), so it needs a hand-written `FromRef`.
+impl axum::extract::FromRef<ServiceState> for domain::AccountIdentityService {
+    fn from_ref(state: &ServiceState) -> Self {
+        domain::AccountIdentityService::new(state.infra.postgres.clone(), state.password.clone())
+    }
+}
+
+// `AccountApiTokenService` also holds the auth issuer (to sign a new token's
+// one-time JWT), so it needs a hand-written `FromRef`.
+impl axum::extract::FromRef<ServiceState> for domain::AccountApiTokenService {
+    fn from_ref(state: &ServiceState) -> Self {
+        domain::AccountApiTokenService::new(
+            state.infra.postgres.clone(),
+            AuthIssuer::from_ref(state),
+        )
+    }
+}
+
+// `AccountNotificationService` also holds the notification emitter (to broadcast
+// the unread count after a mark-read), so it needs a hand-written `FromRef`.
+impl axum::extract::FromRef<ServiceState> for domain::AccountNotificationService {
+    fn from_ref(state: &ServiceState) -> Self {
+        domain::AccountNotificationService::new(
+            state.infra.postgres.clone(),
+            NotificationEmitter::from_ref(state),
+        )
+    }
+}
 
 // `WorkspaceWebhookService` also holds the crypto service (to mint and decrypt
 // the signing secret) and the delivery client (to send a test), so it needs a
@@ -499,6 +530,10 @@ impl axum::extract::FromRef<ServiceState> for domain::WorkspaceDetectionService 
 impl axum::extract::FromRef<ServiceState> for domain::Domain {
     fn from_ref(state: &ServiceState) -> Self {
         domain::Domain {
+            accounts: domain::AccountService::from_ref(state),
+            account_api_tokens: domain::AccountApiTokenService::from_ref(state),
+            account_identities: domain::AccountIdentityService::from_ref(state),
+            account_notifications: domain::AccountNotificationService::from_ref(state),
             connections: domain::WorkspaceConnectionService::from_ref(state),
             detections: domain::WorkspaceDetectionService::from_ref(state),
             documents: domain::WorkspaceDocumentService::from_ref(state),
