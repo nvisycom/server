@@ -7,6 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::input::OpenThreadInput;
 use crate::extract::validators::validate_non_blank;
 
 /// Path parameters addressing one thread by its opaque id.
@@ -35,6 +36,15 @@ pub struct OpenWorkspaceThread {
     /// The opening message text (1-10000 characters).
     #[garde(length(chars, min = 1, max = 10_000), custom(validate_non_blank))]
     pub body: String,
+}
+
+impl From<OpenWorkspaceThread> for OpenThreadInput {
+    fn from(request: OpenWorkspaceThread) -> Self {
+        OpenThreadInput {
+            display_name: request.display_name,
+            body: request.body,
+        }
+    }
 }
 
 /// Request payload to assign or unassign a document review.

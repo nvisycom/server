@@ -21,7 +21,7 @@ use super::{
 use crate::{Error, Result};
 
 /// Tracing target for crypto service operations.
-const TRACING_TARGET: &str = "nvisy_server::crypto";
+const TRACING_TARGET: &str = "nvisy_server::service::crypto";
 
 /// Master encryption key file path configuration.
 #[derive(Debug, Clone)]

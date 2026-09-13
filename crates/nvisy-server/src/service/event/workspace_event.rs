@@ -77,7 +77,6 @@ workspace_events! {
     PolicyCreated           => "policy.created",
     PolicyUpdated           => "policy.updated",
     PolicyDeleted           => "policy.deleted",
-    PolicyPromoted          => "policy.promoted",
 
     ThreadOpened         => "thread.opened",
     ThreadClosed         => "thread.closed",
@@ -601,9 +600,9 @@ crud_events! {
 // A detection started: a plain activity + webhook event, no notification. (The
 // completed/failed events below notify the triggering account.)
 crud_events! {
-    fields { detection_id: Uuid, pipeline_slug: Handle }
+    fields { detection_id: Uuid, pipeline_slug: Option<Handle> }
     id = detection_id;
-    activity(this) = detection_activity(this.detection_id, &this.pipeline_slug);
+    activity(this) = detection_activity(this.detection_id, this.pipeline_slug.clone());
     webhook = yes;
 
     /// A detection was started.
@@ -614,7 +613,7 @@ crud_events! {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionCompleted {
     pub detection_id: Uuid,
-    pub pipeline_slug: Handle,
+    pub pipeline_slug: Option<Handle>,
     pub input_document_name: Option<String>,
     pub notify: Uuid,
 }
@@ -629,7 +628,7 @@ impl EventKind for DetectionCompleted {
     fn activity(&self) -> ActivityPayload {
         ActivityPayload::DetectionCompleted(detection_activity(
             self.detection_id,
-            &self.pipeline_slug,
+            self.pipeline_slug.clone(),
         ))
     }
 
@@ -656,7 +655,7 @@ impl EventKind for DetectionCompleted {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionFailed {
     pub detection_id: Uuid,
-    pub pipeline_slug: Handle,
+    pub pipeline_slug: Option<Handle>,
     pub input_document_name: Option<String>,
     pub error: Option<String>,
     pub notify: Uuid,
@@ -670,7 +669,10 @@ impl EventKind for DetectionFailed {
     }
 
     fn activity(&self) -> ActivityPayload {
-        ActivityPayload::DetectionFailed(detection_activity(self.detection_id, &self.pipeline_slug))
+        ActivityPayload::DetectionFailed(detection_activity(
+            self.detection_id,
+            self.pipeline_slug.clone(),
+        ))
     }
 
     fn webhook(&self) -> Option<WebhookDelivery> {
@@ -694,9 +696,12 @@ impl EventKind for DetectionFailed {
 }
 
 /// Builds the shared detection activity params.
-fn detection_activity(detection_id: Uuid, pipeline_slug: &Handle) -> DetectionActivityParams {
+fn detection_activity(
+    detection_id: Uuid,
+    pipeline_slug: Option<Handle>,
+) -> DetectionActivityParams {
     DetectionActivityParams {
-        pipeline_slug: pipeline_slug.clone(),
+        pipeline_slug,
         detection_id: DetectionId::from_uuid(detection_id),
     }
 }
@@ -705,7 +710,7 @@ fn detection_activity(detection_id: Uuid, pipeline_slug: &Handle) -> DetectionAc
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RedactionCreated {
     pub detection_id: Uuid,
-    pub pipeline_slug: Handle,
+    pub pipeline_slug: Option<Handle>,
     /// The redaction that was produced (its own id, distinct from the detection's
     /// — a detection can produce many redactions).
     pub redaction_id: Uuid,
@@ -762,8 +767,6 @@ crud_events! {
     PolicyUpdated => "policy.updated",
     /// A policy was deleted.
     PolicyDeleted => "policy.deleted",
-    /// A temporary policy was promoted to permanent.
-    PolicyPromoted => "policy.promoted",
 }
 
 /// Builds the shared policy activity params.

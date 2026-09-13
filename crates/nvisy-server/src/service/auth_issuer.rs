@@ -23,7 +23,7 @@ use crate::response::Result;
 use crate::service::{SessionKeys, UserAgentParser};
 
 /// Tracing target for token issuance.
-const TRACING_TARGET: &str = "nvisy_server::authentication";
+const TRACING_TARGET: &str = "nvisy_server::service::auth_issuer";
 
 /// Signs authentication credentials and mints session tokens.
 ///

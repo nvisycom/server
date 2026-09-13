@@ -18,10 +18,11 @@ pub trait DetectionPolicyVersionRepository {
     /// Records the policy versions a detection's analysis ran against.
     ///
     /// Run inside the transaction that commits the analysis so the pins commit
-    /// with it. A repeat of the same `(detection, version)` is ignored.
+    /// with it. A repeat of the same `(detection, version)` is ignored. The caller
+    /// resolves versions within the run's workspace, so only same-workspace
+    /// versions are ever pinned.
     fn record_detection_policy_versions(
         &mut self,
-        workspace_id: Uuid,
         detection_id: Uuid,
         version_ids: &[Uuid],
     ) -> impl Future<Output = Result<()>> + Send;
@@ -36,7 +37,6 @@ pub trait DetectionPolicyVersionRepository {
 impl DetectionPolicyVersionRepository for PgConnection {
     async fn record_detection_policy_versions(
         &mut self,
-        workspace_id: Uuid,
         detection_id: Uuid,
         version_ids: &[Uuid],
     ) -> Result<()> {
@@ -51,7 +51,6 @@ impl DetectionPolicyVersionRepository for PgConnection {
             .map(|policy_version_id| DetectionPolicyVersion {
                 detection_id,
                 policy_version_id,
-                workspace_id,
             })
             .collect();
 
@@ -99,6 +98,7 @@ mod tests {
 
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.workspace_id,
                 seeded.pipeline_id,
                 seeded.account_id,
                 seeded.document_id,
@@ -121,7 +121,6 @@ mod tests {
 
         // A repeated version id is deduplicated.
         conn.record_detection_policy_versions(
-            seeded.workspace_id,
             detection.id,
             &[first.version.id, second.version.id, first.version.id],
         )
@@ -134,12 +133,8 @@ mod tests {
         assert_eq!(pinned, expected);
 
         // Recording again is idempotent (no duplicate-key error).
-        conn.record_detection_policy_versions(
-            seeded.workspace_id,
-            detection.id,
-            &[first.version.id],
-        )
-        .await?;
+        conn.record_detection_policy_versions(detection.id, &[first.version.id])
+            .await?;
         assert_eq!(
             conn.list_detection_policy_versions(detection.id)
                 .await?
@@ -157,13 +152,14 @@ mod tests {
 
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.workspace_id,
                 seeded.pipeline_id,
                 seeded.account_id,
                 seeded.document_id,
             ))
             .await?;
 
-        conn.record_detection_policy_versions(seeded.workspace_id, detection.id, &[])
+        conn.record_detection_policy_versions(detection.id, &[])
             .await?;
         assert!(
             conn.list_detection_policy_versions(detection.id)

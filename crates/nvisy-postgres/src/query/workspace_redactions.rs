@@ -38,7 +38,9 @@ pub trait WorkspaceRedactionRepository {
     ///
     /// A [`RedactionId`](crate::types::RedactionId) is globally unique, so a
     /// redaction is addressable by id alone; this resolves it only within the
-    /// given workspace by joining through its detection's pipeline.
+    /// given workspace by joining through its detection's own workspace, so an
+    /// ad-hoc detection (no pipeline) or one whose pipeline was deleted still
+    /// resolves.
     fn find_redaction_in_workspace(
         &mut self,
         workspace_id: Uuid,
@@ -75,17 +77,17 @@ impl WorkspaceRedactionRepository for PgConnection {
         workspace_id: Uuid,
         redaction_id: Uuid,
     ) -> Result<Option<WorkspaceRedaction>> {
+        use schema::workspace_detections::dsl as detections;
         use schema::workspace_redactions::dsl as redactions;
-        use schema::{workspace_detections, workspace_pipelines, workspace_redactions};
+        use schema::{workspace_detections, workspace_redactions};
 
-        // Redactions carry no workspace column; scope through the detection's
-        // pipeline so the id resolves only within its workspace, and only while
-        // that pipeline is live (a soft-deleted pipeline hides its redactions).
+        // Redactions carry no workspace column; scope through the detection's own
+        // workspace so the id resolves only within its workspace, including an
+        // ad-hoc detection (no pipeline) and one whose pipeline was deleted.
         let redaction = workspace_redactions::table
-            .inner_join(workspace_detections::table.inner_join(workspace_pipelines::table))
+            .inner_join(workspace_detections::table)
             .filter(redactions::id.eq(redaction_id))
-            .filter(workspace_pipelines::workspace_id.eq(workspace_id))
-            .filter(workspace_pipelines::deleted_at.is_null())
+            .filter(detections::workspace_id.eq(workspace_id))
             .select(WorkspaceRedaction::as_select())
             .first(self)
             .await
@@ -164,6 +166,7 @@ mod tests {
         let mut conn = db.client.get_connection().await?;
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.workspace_id,
                 seeded.pipeline_id,
                 seeded.account_id,
                 seeded.document_id,
@@ -178,7 +181,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_then_find_is_scoped_through_the_pipeline() -> anyhow::Result<()> {
+    async fn create_then_find_is_scoped_to_the_detection_workspace() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let (account_id, workspace_id, _pipeline, detection_id) = seed_detection(&db).await?;
         let mut conn = db.client.get_connection().await?;
@@ -203,7 +206,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_soft_deleted_pipeline_hides_its_redactions() -> anyhow::Result<()> {
+    async fn a_redaction_resolves_after_its_pipeline_is_soft_deleted() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let (account_id, workspace_id, pipeline_id, detection_id) = seed_detection(&db).await?;
         let mut conn = db.client.get_connection().await?;
@@ -217,12 +220,13 @@ mod tests {
                 .is_some()
         );
 
-        // Soft-deleting the owning pipeline hides the redaction from the lookup.
+        // The redaction is scoped by its detection's workspace, not its pipeline,
+        // so soft-deleting the owning pipeline leaves it discoverable.
         conn.delete_workspace_pipeline(pipeline_id).await?;
         assert!(
             conn.find_redaction_in_workspace(workspace_id, redaction.id)
                 .await?
-                .is_none()
+                .is_some()
         );
         Ok(())
     }

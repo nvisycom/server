@@ -17,7 +17,7 @@ use crate::response::{ErrorKind, Result};
 use crate::service::OidcIdentity;
 
 /// Tracing target for account provisioning.
-const TRACING_TARGET: &str = "nvisy_server::account_provisioner";
+const TRACING_TARGET: &str = "nvisy_server::service::account_provisioner";
 
 /// How many suffixed handles to try when deriving a unique username on
 /// provisioning, before giving up. A collision past this many is implausible

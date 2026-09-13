@@ -1,13 +1,13 @@
 //! Workspace invite request types.
 
 use garde::Validate;
-use nvisy_postgres::model::NewWorkspaceInvite;
 use nvisy_postgres::types::{
     Direction, InviteFilter, InviteSortBy, InviteSortField, WorkspaceRole,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::domain::input::{CreateInviteInput, GenerateInviteCodeInput};
 
 /// Request payload for creating a new workspace invite.
 #[must_use]
@@ -24,23 +24,12 @@ pub struct CreateWorkspaceInvite {
     pub expires_in: InviteExpiration,
 }
 
-impl CreateWorkspaceInvite {
-    /// The invitee email, normalized (trimmed and lowercased) so lookups and the
-    /// stored value are consistent regardless of how the caller cased it.
-    pub fn normalized_email(&self) -> String {
-        self.invitee_email.trim().to_lowercase()
-    }
-
-    /// Converts to database model, storing the normalized invitee email.
-    pub fn to_model(&self, workspace_id: Uuid, created_by: Uuid) -> NewWorkspaceInvite {
-        NewWorkspaceInvite {
-            workspace_id,
-            invitee_email: Some(self.normalized_email()),
-            invited_role: Some(self.invited_role),
-            expires_at: self.expires_in.to_expiry_timestamp().map(Into::into),
-            created_by,
-            updated_by: created_by,
-            ..Default::default()
+impl From<CreateWorkspaceInvite> for CreateInviteInput {
+    fn from(request: CreateWorkspaceInvite) -> Self {
+        CreateInviteInput {
+            invitee_email: request.invitee_email,
+            invited_role: request.invited_role,
+            expires_at: request.expires_in.to_expiry_timestamp(),
         }
     }
 }
@@ -101,17 +90,11 @@ pub struct GenerateWorkspaceInviteCode {
     pub expires_in: InviteExpiration,
 }
 
-impl GenerateWorkspaceInviteCode {
-    /// Converts to database model.
-    pub fn into_model(self, workspace_id: Uuid, created_by: Uuid) -> NewWorkspaceInvite {
-        NewWorkspaceInvite {
-            workspace_id,
-            invitee_email: None,
-            invited_role: Some(self.invited_role),
-            expires_at: self.expires_in.to_expiry_timestamp().map(Into::into),
-            created_by,
-            updated_by: created_by,
-            ..Default::default()
+impl From<GenerateWorkspaceInviteCode> for GenerateInviteCodeInput {
+    fn from(request: GenerateWorkspaceInviteCode) -> Self {
+        GenerateInviteCodeInput {
+            invited_role: request.invited_role,
+            expires_at: request.expires_in.to_expiry_timestamp(),
         }
     }
 }
@@ -143,38 +126,5 @@ impl ListWorkspaceInvites {
         let order = self.order.unwrap_or_default();
         let field = self.sort_by.unwrap_or_default();
         InviteSortBy::new(field, order)
-    }
-}
-
-#[cfg(test)]
-mod create_invite_tests {
-    use nvisy_postgres::types::WorkspaceRole;
-    use uuid::Uuid;
-
-    use super::{CreateWorkspaceInvite, InviteExpiration};
-
-    #[test]
-    fn to_model_carries_email_and_actor_without_consuming_request() {
-        let workspace_id = Uuid::now_v7();
-        let actor_id = Uuid::now_v7();
-        let request = CreateWorkspaceInvite {
-            invitee_email: "invitee@example.com".to_owned(),
-            invited_role: WorkspaceRole::Editor,
-            expires_in: InviteExpiration::In7Days,
-        };
-
-        let model = request.to_model(workspace_id, actor_id);
-
-        assert_eq!(model.workspace_id, workspace_id);
-        assert_eq!(model.invitee_email.as_deref(), Some("invitee@example.com"));
-        assert_eq!(model.invited_role, Some(WorkspaceRole::Editor));
-        assert_eq!(model.created_by, actor_id);
-        assert_eq!(model.updated_by, actor_id);
-        // The DB default supplies the token; the request never sets one.
-        assert!(model.invite_token.is_none());
-        assert!(model.expires_at.is_some());
-
-        // `to_model` borrows, so the request is still usable afterwards.
-        assert_eq!(request.invitee_email, "invitee@example.com");
     }
 }

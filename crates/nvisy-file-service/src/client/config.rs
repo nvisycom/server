@@ -21,6 +21,7 @@ macro_rules! provider_app_config {
     (
         $(#[$meta:meta])*
         $name:ident,
+        $provider:literal,
         $id_long:literal, $id_env:literal,
         $secret_long:literal, $secret_env:literal
     ) => {
@@ -28,13 +29,26 @@ macro_rules! provider_app_config {
         #[derive(Debug, Clone, Default)]
         #[cfg_attr(feature = "cli", derive(clap::Args))]
         pub struct $name {
-            /// OAuth client id.
-            #[cfg_attr(feature = "cli", arg(id = $id_long, long = $id_long, env = $id_env))]
-            pub client_id: Option<String>,
-            /// OAuth client secret.
+            #[doc = concat!($provider, " OAuth app client id. Set with the client secret to enable the connector.")]
             #[cfg_attr(
                 feature = "cli",
-                arg(id = $secret_long, long = $secret_long, env = $secret_env)
+                arg(
+                    id = $id_long,
+                    long = $id_long,
+                    env = $id_env,
+                    help = concat!($provider, " OAuth app client id. Set with the client secret to enable the connector."),
+                )
+            )]
+            pub client_id: Option<String>,
+            #[doc = concat!($provider, " OAuth app client secret.")]
+            #[cfg_attr(
+                feature = "cli",
+                arg(
+                    id = $secret_long,
+                    long = $secret_long,
+                    env = $secret_env,
+                    help = concat!($provider, " OAuth app client secret."),
+                )
             )]
             pub client_secret: Option<String>,
         }
@@ -66,6 +80,7 @@ macro_rules! provider_app_config {
 provider_app_config!(
     /// Google Drive OAuth app credentials.
     GoogleDriveConfig,
+    "Google Drive",
     "google-drive-client-id",
     "GOOGLE_DRIVE_CLIENT_ID",
     "google-drive-client-secret",
@@ -74,6 +89,7 @@ provider_app_config!(
 provider_app_config!(
     /// Dropbox OAuth app credentials.
     DropboxConfig,
+    "Dropbox",
     "dropbox-client-id",
     "DROPBOX_CLIENT_ID",
     "dropbox-client-secret",
@@ -82,6 +98,7 @@ provider_app_config!(
 provider_app_config!(
     /// OneDrive OAuth app credentials.
     OneDriveConfig,
+    "OneDrive",
     "onedrive-client-id",
     "ONEDRIVE_CLIENT_ID",
     "onedrive-client-secret",
@@ -90,6 +107,7 @@ provider_app_config!(
 provider_app_config!(
     /// Box OAuth app credentials.
     BoxConfig,
+    "Box",
     "box-client-id",
     "BOX_CLIENT_ID",
     "box-client-secret",

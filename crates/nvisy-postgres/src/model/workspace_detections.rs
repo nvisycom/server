@@ -5,22 +5,31 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_detections;
-use crate::types::{DetectionMetadata, DetectionStatus, Json, PipelineTriggerType};
+use crate::types::{
+    DetectionMetadata, DetectionStatus, Json, PipelineTriggerType, RetentionOverride,
+};
 
-/// A detection: one analysis pass of a document through a pipeline.
+/// A detection: one analysis pass of a document, optionally through a pipeline.
 ///
 /// Detect creates the detection and stores the engine's `Audit` as a
 /// [`WorkspaceAudit`](crate::model::WorkspaceAudit) row (the base audit) pointing
 /// back via `detection_id`; the detection then stays `Complete` and can be
 /// redacted any number of times (each redaction is its own row).
+///
+/// A detection is workspace-scoped directly. A pipeline detection names the
+/// pipeline whose config drove it; an ad-hoc detection names its policies at
+/// create time and carries no pipeline.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_detections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct WorkspaceDetection {
     /// Unique detection identifier.
     pub id: Uuid,
-    /// Pipeline whose config drove the detection.
-    pub pipeline_id: Uuid,
+    /// Owning workspace.
+    pub workspace_id: Uuid,
+    /// Pipeline whose config drove the detection. `None` for an ad-hoc detection
+    /// or once the pipeline it ran through has been deleted.
+    pub pipeline_id: Option<Uuid>,
     /// Account the detection is attributed to (the user who started it, or the
     /// pipeline's creator for a system-initiated detection).
     pub account_id: Uuid,
@@ -36,6 +45,10 @@ pub struct WorkspaceDetection {
     pub status: DetectionStatus,
     /// Detect idempotency key (dedupes retries).
     pub idempotency_key: Option<String>,
+    /// Retention override the detection ran under, snapshotted at create. Read on
+    /// redact so output retention reflects the run, not a since-edited pipeline.
+    /// `None` falls back to the workspace retention baseline.
+    pub retention_override: Option<Json<RetentionOverride>>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Json<DetectionMetadata>,
     /// When a worker last claimed this detection. Acts as a lease: a redelivered
@@ -54,8 +67,10 @@ pub struct WorkspaceDetection {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[must_use]
 pub struct NewWorkspaceDetection {
-    /// Pipeline ID (required).
-    pub pipeline_id: Uuid,
+    /// Owning workspace (required).
+    pub workspace_id: Uuid,
+    /// Pipeline the detection runs through; `None` for an ad-hoc detection.
+    pub pipeline_id: Option<Uuid>,
     /// Account the detection is attributed to (required).
     pub account_id: Uuid,
     /// Source document ID (required).
@@ -69,6 +84,9 @@ pub struct NewWorkspaceDetection {
     pub status: Option<DetectionStatus>,
     /// Detect idempotency key.
     pub idempotency_key: Option<String>,
+    /// Retention override the detection runs under, snapshotted from its pipeline
+    /// or supplied directly for an ad-hoc detection.
+    pub retention_override: Option<Json<RetentionOverride>>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<Json<DetectionMetadata>>,
 }
@@ -78,9 +96,15 @@ impl NewWorkspaceDetection {
     /// tests. The trigger and status take their database defaults (`user`,
     /// `pending`), so the detection starts unclaimed and claimable.
     #[cfg(any(feature = "test_util", test))]
-    pub fn test(pipeline_id: Uuid, account_id: Uuid, input_document_id: Uuid) -> Self {
+    pub fn test(
+        workspace_id: Uuid,
+        pipeline_id: Uuid,
+        account_id: Uuid,
+        input_document_id: Uuid,
+    ) -> Self {
         Self {
-            pipeline_id,
+            workspace_id,
+            pipeline_id: Some(pipeline_id),
             account_id,
             input_document_id,
             ..Default::default()

@@ -119,8 +119,9 @@ pub struct PipelineActivityParams {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DetectionActivityParams {
-    /// Slug of the owning pipeline.
-    pub pipeline_slug: Handle,
+    /// Slug of the owning pipeline; absent for an ad-hoc detection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline_slug: Option<Handle>,
     /// Id of the detection.
     pub detection_id: DetectionId,
 }
@@ -130,8 +131,9 @@ pub struct DetectionActivityParams {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RedactionActivityParams {
-    /// Slug of the owning pipeline.
-    pub pipeline_slug: Handle,
+    /// Slug of the owning pipeline; absent when the detection was ad-hoc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline_slug: Option<Handle>,
     /// Id of the redaction.
     pub redaction_id: RedactionId,
 }
@@ -309,9 +311,6 @@ pub enum ActivityPayload {
     /// A policy was deleted.
     #[serde(rename = "policy.deleted")]
     PolicyDeleted(PolicyActivityParams),
-    /// A temporary policy was promoted to permanent.
-    #[serde(rename = "policy.promoted")]
-    PolicyPromoted(PolicyActivityParams),
 
     /// A thread was opened.
     #[serde(rename = "thread.opened")]
@@ -376,7 +375,6 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(_) => ActivityType::PolicyCreated,
             ActivityPayload::PolicyUpdated(_) => ActivityType::PolicyUpdated,
             ActivityPayload::PolicyDeleted(_) => ActivityType::PolicyDeleted,
-            ActivityPayload::PolicyPromoted(_) => ActivityType::PolicyPromoted,
             ActivityPayload::ThreadOpened(_) => ActivityType::ThreadOpened,
             ActivityPayload::ThreadClosed(_) => ActivityType::ThreadClosed,
             ActivityPayload::ThreadReopened(_) => ActivityType::ThreadReopened,
@@ -433,7 +431,6 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(_) => W::PolicyCreated,
             ActivityPayload::PolicyUpdated(_) => W::PolicyUpdated,
             ActivityPayload::PolicyDeleted(_) => W::PolicyDeleted,
-            ActivityPayload::PolicyPromoted(_) => W::PolicyPromoted,
             ActivityPayload::ThreadOpened(_) => W::ThreadOpened,
             ActivityPayload::ThreadClosed(_) => W::ThreadClosed,
             ActivityPayload::ThreadReopened(_) => W::ThreadReopened,
@@ -486,8 +483,7 @@ impl ActivityPayload {
 
             ActivityPayload::PolicyCreated(p)
             | ActivityPayload::PolicyUpdated(p)
-            | ActivityPayload::PolicyDeleted(p)
-            | ActivityPayload::PolicyPromoted(p) => Some(p.policy_id.to_string()),
+            | ActivityPayload::PolicyDeleted(p) => Some(p.policy_id.to_string()),
 
             ActivityPayload::ThreadOpened(p)
             | ActivityPayload::ThreadClosed(p)
@@ -543,9 +539,13 @@ impl ActivityPayload {
 
             ActivityPayload::DetectionStarted(p)
             | ActivityPayload::DetectionCompleted(p)
-            | ActivityPayload::DetectionFailed(p) => Some(p.pipeline_slug.to_string()),
+            | ActivityPayload::DetectionFailed(p) => {
+                p.pipeline_slug.as_ref().map(ToString::to_string)
+            }
 
-            ActivityPayload::RedactionCreated(p) => Some(p.pipeline_slug.to_string()),
+            ActivityPayload::RedactionCreated(p) => {
+                p.pipeline_slug.as_ref().map(ToString::to_string)
+            }
 
             ActivityPayload::ConnectionCreated(p)
             | ActivityPayload::ConnectionUpdated(p)
@@ -564,8 +564,7 @@ impl ActivityPayload {
 
             ActivityPayload::PolicyCreated(p)
             | ActivityPayload::PolicyUpdated(p)
-            | ActivityPayload::PolicyDeleted(p)
-            | ActivityPayload::PolicyPromoted(p) => Some(p.policy_slug.to_string()),
+            | ActivityPayload::PolicyDeleted(p) => Some(p.policy_slug.to_string()),
 
             // A thread/comment has no human-readable name; addressed by id only.
             ActivityPayload::ThreadOpened(_)

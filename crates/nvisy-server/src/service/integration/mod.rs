@@ -8,30 +8,25 @@
 //! apps.
 //!
 //! Built on top of [`ExternalObjectStore`](crate::service::ExternalObjectStore)
-//! (bare object-store access): [`ConnectionSyncService`] orchestrates the
-//! transfers, [`ConnectionSyncWorker`] schedules them, and [`StandardCronSchedule`]
-//! decides when a cron-scheduled connection is due.
+//! (bare object-store access): [`ConnectionSyncService`] is the request-side handle
+//! that opens runs and delegates transfers to the
+//! [`TransferEngine`](crate::worker::integration::TransferEngine), which the
+//! [`ConnectionSyncWorker`](crate::worker::integration::ConnectionSyncWorker)
+//! schedules; [`StandardCronSchedule`] decides when a cron-scheduled connection is
+//! due.
 
 mod connection_config;
-mod connector;
 mod connectors;
 mod cron_schedule;
 mod deployment;
-mod export;
-mod file_source;
-mod import;
-mod naming;
 mod persist_oauth;
 mod provider_config;
 mod service;
-mod worker;
 
 pub use connection_config::ConnectionConfig;
 pub use connectors::{FileConnectorsConfig, FileServiceRedirect};
 pub use cron_schedule::StandardCronSchedule;
 pub use deployment::IntegrationConfig;
-pub use file_source::SourceEntry;
 pub use persist_oauth::persist_refreshed_tokens;
 pub use provider_config::ProviderConfig;
 pub use service::{ConnectionSyncService, TransferKind, TransferRequest};
-pub use worker::{ConnectionSyncJob, ConnectionSyncWorker};

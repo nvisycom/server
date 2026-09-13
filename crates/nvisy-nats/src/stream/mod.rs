@@ -4,7 +4,7 @@
 //! publishing and subscribing over a stream configured via [`EventStream`].
 
 mod broadcast_stream;
-mod core;
+pub(crate) mod core;
 mod event_stream;
 mod typed_pub;
 mod typed_stream;

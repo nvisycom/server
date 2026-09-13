@@ -8,12 +8,10 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
-use nvisy_postgres::model::{
-    NewWorkspaceMember, Workspace as WorkspaceModel, WorkspaceMember as WorkspaceMemberModel,
-};
-use nvisy_postgres::query::{WorkspaceMemberRepository, WorkspaceRepository};
-use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
+use nvisy_postgres::PgClient;
+use uuid::Uuid;
 
+use crate::domain;
 use crate::extract::{
     AuthState, Authorized, AvatarUpload, Json, Query, SecurityContext, ValidateJson,
     WorkspaceContext, markers,
@@ -21,14 +19,12 @@ use crate::extract::{
 use crate::handler::request::{
     CreateWorkspace, CursorPagination, UpdateWorkspace, UpdateWorkspaceNotificationSettings,
 };
-use crate::handler::response::{
-    AccountRef, Page, Workspace, WorkspaceNotificationSettings, WorkspacesPage,
-};
+use crate::handler::response::{Page, Workspace, WorkspaceNotificationSettings, WorkspacesPage};
 use crate::handler::utility::resolve_account_ref;
 use crate::middleware::UploadConfig;
-use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::event::EventEmitter;
-use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState, event};
+use crate::response::{ErrorResponse, Result};
+use crate::service::event::EventOrigin;
+use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState};
 
 /// Tracing target for workspace operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspaces";
@@ -40,6 +36,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::workspaces";
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn create_workspace(
     State(pg_client): State<PgClient>,
+    State(workspaces): State<domain::WorkspaceService>,
     State(upload): State<UploadConfig>,
     auth_state: AuthState,
     security: SecurityContext,
@@ -47,47 +44,28 @@ async fn create_workspace(
 ) -> Result<(StatusCode, Json<Workspace>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace");
 
-    let new_workspace = request.into_model(auth_state.account_id)?;
-    let mut conn = pg_client.get_connection().await?;
     let creator_id = auth_state.account_id;
+    let new_workspace = request.into_model(creator_id)?;
 
-    // The workspace, its owner membership, and the creation event commit
-    // together, so the event is never lost, nor recorded for a workspace that
-    // rolled back.
-    let (workspace, membership) = conn
-        .transaction(async |conn| {
-            let workspace = conn.create_workspace(new_workspace).await?;
-            let new_member = NewWorkspaceMember::new_owner(workspace.id, creator_id);
-            let member = conn.add_workspace_member(new_member).await?;
-            conn.emit_event(
-                event::EventOrigin {
-                    workspace_id: workspace.id,
-                    account_id: creator_id,
-                    security: &security,
-                },
-                event::WorkspaceEvent::WorkspaceCreated(event::WorkspaceCreated {
-                    workspace_id: workspace.id,
-                    workspace_slug: workspace.slug.clone(),
-                }),
-            )
-            .await?;
-            Ok::<(WorkspaceModel, WorkspaceMemberModel), Error>((workspace, member))
-        })
+    let created = workspaces
+        .create(
+            EventOrigin {
+                workspace_id: Uuid::nil(),
+                account_id: creator_id,
+                security: &security,
+            },
+            new_workspace,
+        )
         .await?;
 
     // The creator is the authenticated caller; resolve their identity directly.
+    let mut conn = pg_client.get_connection().await?;
     let creator = resolve_account_ref(&mut conn, creator_id).await?;
     let response = Workspace::from_model_with_membership(
-        workspace,
-        membership,
+        created.workspace,
+        created.membership,
         creator,
         upload.max_file_bytes(),
-    );
-
-    tracing::info!(
-        target: TRACING_TARGET,
-        workspace_slug = %response.slug,
-        "Workspace created",
     );
 
     Ok((StatusCode::CREATED, Json(response)))
@@ -107,17 +85,13 @@ fn create_workspace_docs(op: TransformOperation) -> TransformOperation {
 /// in each workspace.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn list_workspaces(
-    State(pg_client): State<PgClient>,
+    State(workspaces): State<domain::WorkspaceService>,
     State(upload): State<UploadConfig>,
     auth_state: AuthState,
     Query(pagination): Query<CursorPagination>,
 ) -> Result<(StatusCode, Json<WorkspacesPage>)> {
-    let mut conn = pg_client.get_connection().await?;
-    let page = conn
-        .cursor_list_account_workspaces_with_details(
-            auth_state.account_id,
-            pagination.into_cursor(),
-        )
+    let page = workspaces
+        .list(auth_state.account_id, pagination.into_cursor())
         .await?;
 
     let hard_max_upload_bytes = upload.max_file_bytes();
@@ -157,17 +131,18 @@ fn list_workspaces_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn read_workspace(
-    State(pg_client): State<PgClient>,
+    State(workspaces): State<domain::WorkspaceService>,
     State(upload): State<UploadConfig>,
     authz: Authorized<markers::ViewWorkspace>,
 ) -> Result<(StatusCode, Json<Workspace>)> {
     let workspace = authz.workspace;
     let member = authz.member;
-    let mut conn = pg_client.get_connection().await?;
 
-    let creator = find_workspace_creator(&mut conn, workspace.slug.as_str()).await?;
-
-    tracing::info!(target: TRACING_TARGET, "Workspace read");
+    let creator = workspaces
+        .find_with_creator(workspace.slug.as_str())
+        .await?
+        .account
+        .into();
 
     let hard = upload.max_file_bytes();
     let response = Workspace::from_model_with_membership(workspace, member, creator, hard);
@@ -194,7 +169,7 @@ fn read_workspace_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn update_workspace(
-    State(pg_client): State<PgClient>,
+    State(workspaces): State<domain::WorkspaceService>,
     State(upload): State<UploadConfig>,
     authz: Authorized<markers::UpdateWorkspace>,
     security: SecurityContext,
@@ -205,35 +180,24 @@ async fn update_workspace(
     let account_id = authz.account_id;
     let workspace = authz.workspace;
     let member = authz.member;
-    let mut conn = pg_client.get_connection().await?;
 
     let update_data = request.into_model()?;
-
-    // The settings write and the update event commit together, so the event is
-    // never lost nor recorded for a settings change that rolled back.
-    let workspace_id = workspace.id;
-    let updated = conn
-        .transaction(async |conn| {
-            let updated = conn.update_workspace(workspace_id, update_data).await?;
-            conn.emit_event(
-                event::EventOrigin {
-                    workspace_id,
-                    account_id,
-                    security: &security,
-                },
-                event::WorkspaceEvent::WorkspaceUpdated(event::WorkspaceUpdated {
-                    workspace_id: updated.id,
-                    workspace_slug: updated.slug.clone(),
-                }),
-            )
-            .await?;
-            Ok::<_, Error>(updated)
-        })
+    let updated = workspaces
+        .update(
+            EventOrigin {
+                workspace_id: workspace.id,
+                account_id,
+                security: &security,
+            },
+            update_data,
+        )
         .await?;
 
-    let creator = find_workspace_creator(&mut conn, updated.slug.as_str()).await?;
-
-    tracing::info!(target: TRACING_TARGET, "Workspace updated");
+    let creator = workspaces
+        .find_with_creator(updated.slug.as_str())
+        .await?
+        .account
+        .into();
 
     let hard = upload.max_file_bytes();
     let response = Workspace::from_model_with_membership(updated, member, creator, hard);
@@ -264,7 +228,7 @@ fn update_workspace_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn delete_workspace(
-    State(pg_client): State<PgClient>,
+    State(workspaces): State<domain::WorkspaceService>,
     authz: Authorized<markers::DeleteWorkspace>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
@@ -272,29 +236,17 @@ async fn delete_workspace(
 
     let account_id = authz.account_id;
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
 
-    // Soft-delete the workspace and record the deletion event in one transaction,
-    // so the event is never lost, nor recorded for a delete that rolled back.
-    conn.transaction(async |conn| {
-        conn.delete_workspace(workspace.id).await?;
-        conn.emit_event(
-            event::EventOrigin {
+    workspaces
+        .delete(
+            EventOrigin {
                 workspace_id: workspace.id,
                 account_id,
                 security: &security,
             },
-            event::WorkspaceEvent::WorkspaceDeleted(event::WorkspaceDeleted {
-                workspace_id: workspace.id,
-                workspace_slug: workspace.slug.clone(),
-            }),
+            &workspace.slug,
         )
         .await?;
-        Ok::<_, Error>(())
-    })
-    .await?;
-
-    tracing::info!(target: TRACING_TARGET, "Workspace deleted");
 
     Ok(StatusCode::OK)
 }
@@ -317,21 +269,13 @@ fn delete_workspace_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn get_notification_settings(
-    State(pg_client): State<PgClient>,
+    State(members): State<domain::WorkspaceMemberService>,
     auth_state: AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
 ) -> Result<(StatusCode, Json<WorkspaceNotificationSettings>)> {
-    let mut conn = pg_client.get_connection().await?;
-    let Some(member) = conn
-        .find_workspace_member(workspace.id, auth_state.account_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_message("Workspace membership not found")
-            .with_resource("workspace_member"));
-    };
-
-    tracing::debug!(target: TRACING_TARGET, "Notification settings retrieved");
+    let member = members
+        .notification_settings(workspace.id, auth_state.account_id)
+        .await?;
 
     Ok((
         StatusCode::OK,
@@ -356,30 +300,14 @@ fn get_notification_settings_docs(op: TransformOperation) -> TransformOperation 
     )
 )]
 async fn update_notification_settings(
-    State(pg_client): State<PgClient>,
+    State(members): State<domain::WorkspaceMemberService>,
     auth_state: AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     ValidateJson(request): ValidateJson<UpdateWorkspaceNotificationSettings>,
 ) -> Result<(StatusCode, Json<WorkspaceNotificationSettings>)> {
-    let mut conn = pg_client.get_connection().await?;
-
-    // Verify membership exists
-    if conn
-        .find_workspace_member(workspace.id, auth_state.account_id)
-        .await?
-        .is_none()
-    {
-        return Err(ErrorKind::NotFound
-            .with_message("Workspace membership not found")
-            .with_resource("workspace_member"));
-    }
-
-    let update_data = request.into_model();
-    let member = conn
-        .update_workspace_member(workspace.id, auth_state.account_id, update_data)
+    let member = members
+        .update_notification_settings(workspace.id, auth_state.account_id, request.into_model())
         .await?;
-
-    tracing::info!(target: TRACING_TARGET, "Notification settings updated");
 
     Ok((
         StatusCode::OK,
@@ -394,15 +322,6 @@ fn update_notification_settings_docs(op: TransformOperation) -> TransformOperati
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
-}
-
-/// Returns the public identity of the account that created the workspace
-/// addressed by `slug`, or a NotFound error if no such workspace exists.
-async fn find_workspace_creator(conn: &mut PgConn, slug: &str) -> Result<AccountRef> {
-    conn.find_workspace_by_slug(slug)
-        .await?
-        .map(|wc| wc.account.into())
-        .ok_or_else(|| Error::not_found("workspace"))
 }
 
 /// Returns a [`Router`] with all workspace-related routes.

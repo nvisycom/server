@@ -128,12 +128,14 @@ pub trait WorkspacePolicyRepository {
         slug: &str,
     ) -> impl Future<Output = Result<Option<WithAccountRef<WorkspacePolicy>>>> + Send;
 
-    /// Lists all policies in a workspace with cursor pagination, each paired
-    /// with the handle and avatar of the account that created it.
+    /// Lists a workspace's policies with cursor pagination, each paired with the
+    /// handle and avatar of the account that created it. `kind` narrows to a single
+    /// policy kind; `None` returns every kind.
     fn cursor_list_workspace_policies(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination<PolicyCursor>,
+        kind: Option<PolicyKind>,
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspacePolicy>>>> + Send;
 
     /// Updates a policy with new data.
@@ -142,15 +144,6 @@ pub trait WorkspacePolicyRepository {
         policy_id: Uuid,
         updates: UpdateWorkspacePolicy,
     ) -> impl Future<Output = Result<WorkspacePolicy>> + Send;
-
-    /// Promotes a one-shot policy to authored, clearing its dedup hash, only while
-    /// it is still a live one-shot. Returns whether the transition changed a row,
-    /// so a concurrent promotion (or an already-authored policy) is a no-op rather
-    /// than a duplicate.
-    fn promote_policy_to_authored(
-        &mut self,
-        policy_id: Uuid,
-    ) -> impl Future<Output = Result<bool>> + Send;
 
     /// Soft deletes a policy by setting the deletion timestamp.
     fn delete_workspace_policy(
@@ -396,18 +389,23 @@ impl WorkspacePolicyRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination<PolicyCursor>,
+        kind: Option<PolicyKind>,
     ) -> Result<CursorPage<WithAccountRef<WorkspacePolicy>>> {
         use schema::workspace_policies::dsl;
         use schema::{accounts, workspace_policies};
 
-        // One-shot policies are excluded: the default list shows only authored,
-        // permanent policies. A promoted policy (now authored) appears here.
+        // The list carries every kind; `kind` narrows to one when set. A client
+        // distinguishes authored from one-shot policies by the `kind` field.
         let total = if pagination.include_count {
+            let mut count_query = workspace_policies::table
+                .filter(dsl::workspace_id.eq(workspace_id))
+                .filter(dsl::deleted_at.is_null())
+                .into_boxed();
+            if let Some(kind) = kind {
+                count_query = count_query.filter(dsl::kind.eq(kind));
+            }
             Some(
-                workspace_policies::table
-                    .filter(dsl::workspace_id.eq(workspace_id))
-                    .filter(dsl::deleted_at.is_null())
-                    .filter(dsl::kind.eq(PolicyKind::Authored))
+                count_query
                     .count()
                     .get_result::<i64>(self)
                     .await
@@ -417,12 +415,14 @@ impl WorkspacePolicyRepository for PgConnection {
             None
         };
 
-        let query = workspace_policies::table
+        let mut query = workspace_policies::table
             .inner_join(accounts::table)
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
-            .filter(dsl::kind.eq(PolicyKind::Authored))
             .into_boxed();
+        if let Some(kind) = kind {
+            query = query.filter(dsl::kind.eq(kind));
+        }
 
         let after = pagination
             .after_key()
@@ -476,29 +476,6 @@ impl WorkspacePolicyRepository for PgConnection {
         .map_err(Error::from)?;
 
         Ok(policy)
-    }
-
-    async fn promote_policy_to_authored(&mut self, policy_id: Uuid) -> Result<bool> {
-        use schema::workspace_policies::{self, dsl};
-
-        // Conditional on the row still being a live one-shot, so the transition is
-        // atomic: a concurrent promotion updates zero rows and the caller emits no
-        // duplicate event.
-        let affected = diesel::update(
-            workspace_policies::table
-                .filter(dsl::id.eq(policy_id))
-                .filter(dsl::deleted_at.is_null())
-                .filter(dsl::kind.eq(PolicyKind::Oneshot)),
-        )
-        .set((
-            dsl::kind.eq(PolicyKind::Authored),
-            dsl::content_hash.eq(None::<Vec<u8>>),
-        ))
-        .execute(self)
-        .await
-        .map_err(Error::from)?;
-
-        Ok(affected == 1)
     }
 
     async fn delete_workspace_policy(&mut self, policy_id: Uuid) -> Result<()> {
@@ -642,7 +619,7 @@ mod tests {
         conn.delete_workspace_policy(deleted.id).await?;
 
         let page = conn
-            .cursor_list_workspace_policies(seeded.workspace_id, CursorPagination::new(50))
+            .cursor_list_workspace_policies(seeded.workspace_id, CursorPagination::new(50), None)
             .await?;
         assert_eq!(
             page.items.iter().map(|p| p.item.id).collect::<Vec<_>>(),
@@ -775,7 +752,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oneshot_policy_is_excluded_from_the_list_until_promoted() -> anyhow::Result<()> {
+    async fn list_returns_every_kind_and_filters_by_kind() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
@@ -791,42 +768,45 @@ mod tests {
                 None,
             )
             .await?;
-        assert!(oneshot.created);
         assert_eq!(oneshot.policy.policy.kind, PolicyKind::Oneshot);
 
-        let permanent = conn
+        let authored = conn
             .create_test_policy(NewWorkspacePolicy::test(
                 seeded.workspace_id,
                 seeded.account_id,
             ))
             .await?;
 
-        // The default list shows the authored policy but hides the one-shot.
-        let page = conn
-            .cursor_list_workspace_policies(seeded.workspace_id, CursorPagination::new(50))
+        // The unfiltered list carries both kinds.
+        let all = conn
+            .cursor_list_workspace_policies(seeded.workspace_id, CursorPagination::new(50), None)
             .await?;
-        let listed: Vec<Uuid> = page.items.iter().map(|p| p.item.id).collect();
-        assert!(listed.contains(&permanent.id));
-        assert!(!listed.contains(&oneshot.policy.policy.id));
+        let all_ids: Vec<Uuid> = all.items.iter().map(|p| p.item.id).collect();
+        assert!(all_ids.contains(&authored.id));
+        assert!(all_ids.contains(&oneshot.policy.policy.id));
 
-        // Promoting (authored, hash cleared) makes it appear.
-        conn.update_workspace_policy(
-            oneshot.policy.policy.id,
-            UpdateWorkspacePolicy {
-                kind: Some(PolicyKind::Authored),
-                content_hash: Some(None),
-                ..Default::default()
-            },
-        )
-        .await?;
-        let page = conn
-            .cursor_list_workspace_policies(seeded.workspace_id, CursorPagination::new(50))
+        // Filtering narrows to the requested kind.
+        let only_oneshot = conn
+            .cursor_list_workspace_policies(
+                seeded.workspace_id,
+                CursorPagination::new(50),
+                Some(PolicyKind::Oneshot),
+            )
             .await?;
-        assert!(
-            page.items
-                .iter()
-                .any(|p| p.item.id == oneshot.policy.policy.id)
-        );
+        let oneshot_ids: Vec<Uuid> = only_oneshot.items.iter().map(|p| p.item.id).collect();
+        assert!(oneshot_ids.contains(&oneshot.policy.policy.id));
+        assert!(!oneshot_ids.contains(&authored.id));
+
+        let only_authored = conn
+            .cursor_list_workspace_policies(
+                seeded.workspace_id,
+                CursorPagination::new(50),
+                Some(PolicyKind::Authored),
+            )
+            .await?;
+        let authored_ids: Vec<Uuid> = only_authored.items.iter().map(|p| p.item.id).collect();
+        assert!(authored_ids.contains(&authored.id));
+        assert!(!authored_ids.contains(&oneshot.policy.policy.id));
         Ok(())
     }
 
@@ -929,7 +909,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_promoted_oneshot_no_longer_dedups() -> anyhow::Result<()> {
+    async fn clearing_a_content_hash_leaves_the_dedup_set() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
@@ -946,7 +926,7 @@ mod tests {
             )
             .await?;
 
-        // Promotion clears the hash, so the content leaves the dedup set.
+        // Clearing the hash takes the content out of the dedup set.
         conn.update_workspace_policy(
             oneshot.policy.policy.id,
             UpdateWorkspacePolicy {
@@ -1001,39 +981,6 @@ mod tests {
                 .await?
                 .is_some()
         );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn promote_to_authored_transitions_once() -> anyhow::Result<()> {
-        let db = TestDatabase::start().await;
-        let seeded = db.seed_account_and_workspace().await;
-        let mut conn = db.client.get_connection().await?;
-
-        let mut new_oneshot = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
-        new_oneshot.kind = PolicyKind::Oneshot;
-        new_oneshot.content_hash = Some(vec![1, 2, 3]);
-        let oneshot = conn
-            .find_or_create_oneshot_policy(
-                new_oneshot,
-                vec![1, 2, 3],
-                serde_json::json!({ "test": true }),
-                None,
-            )
-            .await?;
-        let policy_id = oneshot.policy.policy.id;
-
-        // The first promotion flips the row; a second is a no-op, so a concurrent
-        // caller cannot double-promote or emit a duplicate event.
-        assert!(conn.promote_policy_to_authored(policy_id).await?);
-        assert!(!conn.promote_policy_to_authored(policy_id).await?);
-
-        let promoted = conn
-            .find_policy_in_workspace(seeded.workspace_id, policy_id)
-            .await?
-            .expect("policy present");
-        assert_eq!(promoted.kind, PolicyKind::Authored);
-        assert!(promoted.content_hash.is_none());
         Ok(())
     }
 }

@@ -1,19 +1,15 @@
 //! Workspace member management handlers.
 //!
-//! This module provides comprehensive workspace member management functionality,
-//! allowing workspace administrators to view, add, modify, and remove workspace
-//! members. All operations are secured with proper authorization and follow
-//! role-based access control principles.
+//! Lists, reads, updates, and removes workspace members, and lets a member leave.
+//! Each handler authorizes the caller, delegates the domain logic to
+//! [`WorkspaceMemberService`], and maps the result to a response.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::query::{AccountRepository, WorkspaceMemberRepository};
-use nvisy_postgres::types::Handle;
-use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
-use uuid::Uuid;
 
+use crate::domain;
 use crate::extract::{
     AuthState, Authorized, Json, Path, Query, SecurityContext, ValidateJson, WorkspaceContext,
     markers,
@@ -22,9 +18,9 @@ use crate::handler::request::{
     CursorPagination, ListWorkspaceMembers, UpdateWorkspaceMember, WorkspaceMemberPathParams,
 };
 use crate::handler::response::{Page, WorkspaceMember, WorkspaceMembersPage};
-use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::event::EventEmitter;
-use crate::service::{ServiceState, event};
+use crate::response::{ErrorResponse, Result};
+use crate::service::ServiceState;
+use crate::service::event::EventOrigin;
 
 /// Tracing target for workspace member operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::members";
@@ -41,7 +37,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::members";
     )
 )]
 async fn list_members(
-    State(pg_client): State<PgClient>,
+    State(members): State<domain::WorkspaceMemberService>,
     authz: Authorized<markers::ViewMembers>,
     Query(query): Query<ListWorkspaceMembers>,
     Query(pagination): Query<CursorPagination>,
@@ -49,22 +45,14 @@ async fn list_members(
     tracing::debug!(target: TRACING_TARGET, "Listing workspace members");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let page = conn
-        .cursor_list_workspace_members_with_accounts(
+    let page = members
+        .list(
             workspace.id,
             pagination.into_cursor(),
             query.to_sort(),
             query.to_filter(),
         )
         .await?;
-
-    tracing::debug!(
-        target: TRACING_TARGET,
-        member_count = page.items.len(),
-        "Workspace members listed",
-    );
 
     let response = Page::from_cursor_page(page, |(member, account)| {
         WorkspaceMember::from_model(member, account)
@@ -91,40 +79,21 @@ fn list_members_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %authz.account_id,
         workspace_id = %authz.workspace.id,
-        member_id = tracing::field::Empty,
     )
 )]
 async fn get_member(
-    State(pg_client): State<PgClient>,
+    State(members): State<domain::WorkspaceMemberService>,
     authz: Authorized<markers::ViewMembers>,
     Path(path_params): Path<WorkspaceMemberPathParams>,
 ) -> Result<(StatusCode, Json<WorkspaceMember>)> {
     tracing::debug!(target: TRACING_TARGET, "Retrieving workspace member details");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let member_account_id = resolve_member_account_id(&mut conn, &path_params.username).await?;
-    tracing::Span::current().record("member_id", tracing::field::display(member_account_id));
-
-    let Some((workspace_member, account)) = conn
-        .find_workspace_member_with_account(workspace.id, member_account_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_resource("workspace_member")
-            .with_message("Workspace member not found"));
-    };
-
-    tracing::debug!(
-        target: TRACING_TARGET,
-        member_role = ?workspace_member.member_role,
-        "Workspace member read",
-    );
+    let (member, account) = members.find(workspace.id, &path_params.username).await?;
 
     Ok((
         StatusCode::OK,
-        Json(WorkspaceMember::from_model(workspace_member, account)),
+        Json(WorkspaceMember::from_model(member, account)),
     ))
 }
 
@@ -147,66 +116,27 @@ fn get_member_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %authz.account_id,
         workspace_id = %authz.workspace.id,
-        member_id = tracing::field::Empty,
     )
 )]
 async fn delete_member(
-    State(pg_client): State<PgClient>,
+    State(members): State<domain::WorkspaceMemberService>,
     authz: Authorized<markers::RemoveMembers>,
     Path(path_params): Path<WorkspaceMemberPathParams>,
     security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Removing workspace member");
 
-    let account_id = authz.account_id;
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let member_account_id = resolve_member_account_id(&mut conn, &path_params.username).await?;
-    tracing::Span::current().record("member_id", tracing::field::display(member_account_id));
-
-    // Prevent self-removal (use leave endpoint instead)
-    if account_id == member_account_id {
-        return Err(ErrorKind::BadRequest
-            .with_message("Cannot remove yourself. Use the leave workspace endpoint instead"));
-    }
-
-    let Some(member_to_remove) = conn
-        .find_workspace_member(workspace.id, member_account_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound.with_resource("workspace_member"));
-    };
-
-    // Owners cannot be removed, they can only leave
-    if member_to_remove.member_role.is_owner() {
-        return Err(ErrorKind::BadRequest
-            .with_message("Cannot remove an owner")
-            .with_context("Owners can only leave the workspace themselves"));
-    }
-
-    // Remove the member and record the outbox event atomically, so the event is
-    // never lost, nor recorded for a removal that rolled back.
-    conn.transaction(async |conn| {
-        conn.remove_workspace_member(workspace.id, member_account_id)
-            .await?;
-        conn.emit_event(
-            event::EventOrigin {
+    members
+        .remove(
+            EventOrigin {
                 workspace_id: workspace.id,
-                account_id,
+                account_id: authz.account_id,
                 security: &security,
             },
-            event::WorkspaceEvent::MemberDeleted(event::MemberDeleted {
-                member_id: member_account_id,
-                member_username: path_params.username.clone(),
-            }),
+            &path_params.username,
         )
         .await?;
-        Ok::<(), Error>(())
-    })
-    .await?;
-
-    tracing::info!(target: TRACING_TARGET, "Workspace member removed");
 
     Ok(StatusCode::OK)
 }
@@ -233,12 +163,11 @@ fn delete_member_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %authz.account_id,
         workspace_id = %authz.workspace.id,
-        member_id = tracing::field::Empty,
         new_role = ?request.role,
     )
 )]
 async fn update_member(
-    State(pg_client): State<PgClient>,
+    State(members): State<domain::WorkspaceMemberService>,
     authz: Authorized<markers::ManageRoles>,
     Path(path_params): Path<WorkspaceMemberPathParams>,
     security: SecurityContext,
@@ -246,71 +175,22 @@ async fn update_member(
 ) -> Result<(StatusCode, Json<WorkspaceMember>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace member role");
 
-    let account_id = authz.account_id;
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let member_account_id = resolve_member_account_id(&mut conn, &path_params.username).await?;
-    tracing::Span::current().record("member_id", tracing::field::display(member_account_id));
-
-    // Prevent self-role-update
-    if account_id == member_account_id {
-        return Err(ErrorKind::BadRequest
-            .with_message("Cannot update your own role")
-            .with_context("Ask another owner to update your role"));
-    }
-
-    let Some(current_member) = conn
-        .find_workspace_member(workspace.id, member_account_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound.with_resource("workspace_member"));
-    };
-
-    // Owners cannot be demoted, they can only leave
-    if current_member.member_role.is_owner() && !request.role.is_owner() {
-        return Err(ErrorKind::BadRequest
-            .with_message("Cannot demote an owner")
-            .with_context("Owners can only leave the workspace themselves"));
-    }
-
-    // Update the member and record the outbox event atomically, so the event is
-    // never lost, nor recorded for an update that rolled back.
-    conn.transaction(async |conn| {
-        conn.update_workspace_member(workspace.id, member_account_id, request.into_model())
-            .await?;
-        conn.emit_event(
-            event::EventOrigin {
+    let (member, account) = members
+        .update(
+            EventOrigin {
                 workspace_id: workspace.id,
-                account_id,
+                account_id: authz.account_id,
                 security: &security,
             },
-            event::WorkspaceEvent::MemberUpdated(event::MemberUpdated {
-                member_id: member_account_id,
-                member_username: path_params.username.clone(),
-            }),
+            &path_params.username,
+            request.into_model(),
         )
         .await?;
-        Ok::<(), Error>(())
-    })
-    .await?;
-
-    let Some((updated_member, account)) = conn
-        .find_workspace_member_with_account(workspace.id, member_account_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound.with_resource("workspace_member"));
-    };
-
-    tracing::info!(
-        target: TRACING_TARGET,
-        new_role = ?updated_member.member_role,
-        "WorkspaceMember role updated",
-    );
 
     Ok((
         StatusCode::OK,
-        Json(WorkspaceMember::from_model(updated_member, account)),
+        Json(WorkspaceMember::from_model(member, account)),
     ))
 }
 
@@ -339,61 +219,20 @@ fn update_member_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn leave_workspace(
-    State(pg_client): State<PgClient>,
+    State(members): State<domain::WorkspaceMemberService>,
     auth_state: AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     security: SecurityContext,
 ) -> Result<StatusCode> {
-    tracing::debug!(target: TRACING_TARGET, "WorkspaceMember leaving workspace");
+    tracing::debug!(target: TRACING_TARGET, "Workspace member leaving workspace");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    // Read the member's account to confirm membership and to name the departing
-    // member in the event. The role is re-read under lock inside the transaction.
-    let Some((_member, account)) = conn
-        .find_workspace_member_with_account(workspace.id, auth_state.account_id)
-        .await?
-    else {
-        return Err(ErrorKind::NotFound
-            .with_resource("workspace_member")
-            .with_message("You are not a member of this workspace"));
-    };
-
-    // Remove the member and record the departure atomically. A self-initiated
-    // leave is the same domain fact as an admin removal, so it records
-    // `MemberDeleted` with the leaving account as both actor and subject.
-    conn.transaction(async |conn| {
-        // The sole owner cannot leave and orphan the workspace: transfer ownership
-        // first. Read the owner set under a row lock inside this transaction — so
-        // the role is current (not the stale pre-transaction read) and two owners
-        // leaving at once cannot both pass — then check if this account is the
-        // last owner.
-        let owner_ids = conn.lock_owner_ids(workspace.id).await?;
-        if owner_ids.contains(&auth_state.account_id) && owner_ids.len() <= 1 {
-            return Err(ErrorKind::Conflict
-                .with_message("You are the only owner; transfer ownership before leaving")
-                .with_resource("workspace_member"));
-        }
-
-        conn.remove_workspace_member(workspace.id, auth_state.account_id)
-            .await?;
-        conn.emit_event(
-            event::EventOrigin {
-                workspace_id: workspace.id,
-                account_id: auth_state.account_id,
-                security: &security,
-            },
-            event::WorkspaceEvent::MemberDeleted(event::MemberDeleted {
-                member_id: auth_state.account_id,
-                member_username: account.username.clone(),
-            }),
-        )
+    members
+        .leave(EventOrigin {
+            workspace_id: workspace.id,
+            account_id: auth_state.account_id,
+            security: &security,
+        })
         .await?;
-        Ok::<(), Error>(())
-    })
-    .await?;
-
-    tracing::info!(target: TRACING_TARGET, "WorkspaceMember left workspace");
 
     Ok(StatusCode::OK)
 }
@@ -406,17 +245,6 @@ fn leave_workspace_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
-}
-
-/// Resolves a member's public handle to its account id, recording the id on the
-/// current tracing span. Returns `NotFound` when no such account exists.
-async fn resolve_member_account_id(conn: &mut PgConn, username: &Handle) -> Result<Uuid> {
-    let account = conn
-        .find_account_by_username(username)
-        .await?
-        .ok_or_else(|| Error::not_found("workspace_member"))?;
-    tracing::Span::current().record("member_id", tracing::field::display(account.id));
-    Ok(account.id)
 }
 
 /// Returns a [`Router`] with all workspace member related routes.

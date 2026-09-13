@@ -81,7 +81,7 @@ fn is_stream_not_found(err: &GetStreamError) -> bool {
 /// [`SUBJECT`](EventStream::SUBJECT) would match no stream and fail. Leaving the
 /// old stream as-is (the previous behavior) let that drift break publishing
 /// silently; updating it in place fixes it without an operator wiping JetStream.
-pub(super) async fn ensure_stream<S: EventStream>(jetstream: &Context) -> Result<()> {
+pub(crate) async fn ensure_stream<S: EventStream>(jetstream: &Context) -> Result<()> {
     // JetStream treats a zero `max_age` as unlimited retention, which is exactly
     // what `MAX_AGE = None` ("messages should not expire") means. Mapping `None`
     // to any positive default instead would silently cap a no-expiry stream and

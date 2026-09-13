@@ -299,7 +299,6 @@ diesel::table! {
     workspace_detection_policy_versions (detection_id, policy_version_id) {
         detection_id -> Uuid,
         policy_version_id -> Uuid,
-        workspace_id -> Uuid,
     }
 }
 
@@ -325,13 +324,15 @@ diesel::table! {
 
     workspace_detections (id) {
         id -> Uuid,
-        pipeline_id -> Uuid,
+        workspace_id -> Uuid,
+        pipeline_id -> Nullable<Uuid>,
         account_id -> Uuid,
         input_document_id -> Uuid,
         intermediate_blob_id -> Nullable<Uuid>,
         trigger_type -> PipelineTriggerType,
         status -> DetectionStatus,
         idempotency_key -> Nullable<Text>,
+        retention_override -> Nullable<Jsonb>,
         metadata -> Jsonb,
         claimed_at -> Nullable<Timestamptz>,
         started_at -> Timestamptz,
@@ -650,12 +651,13 @@ diesel::joinable!(workspace_connections -> accounts (account_id));
 diesel::joinable!(workspace_connections -> workspaces (workspace_id));
 diesel::joinable!(workspace_detection_jobs -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detection_policy_versions -> workspace_detections (detection_id));
-diesel::joinable!(workspace_detection_policy_versions -> workspaces (workspace_id));
+diesel::joinable!(workspace_detection_policy_versions -> workspace_policy_versions (policy_version_id));
 diesel::joinable!(workspace_detection_usage -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detections -> accounts (account_id));
 diesel::joinable!(workspace_detections -> workspace_blobs (intermediate_blob_id));
 diesel::joinable!(workspace_detections -> workspace_documents (input_document_id));
 diesel::joinable!(workspace_detections -> workspace_pipelines (pipeline_id));
+diesel::joinable!(workspace_detections -> workspaces (workspace_id));
 diesel::joinable!(workspace_document_exports -> workspace_connections (connection_id));
 diesel::joinable!(workspace_document_exports -> workspace_documents (document_id));
 diesel::joinable!(workspace_document_imports -> workspace_connections (connection_id));

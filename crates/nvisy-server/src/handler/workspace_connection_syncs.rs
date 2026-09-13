@@ -37,9 +37,10 @@ use crate::handler::response::{Page, WorkspaceConnectionSync, WorkspaceConnectio
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result};
 use crate::service::{
-    ConnectionConfig, ConnectionSyncService, CryptoService, ServiceState, SourceEntry,
-    TransferKind, TransferRequest,
+    ConnectionConfig, ConnectionSyncService, CryptoService, ServiceState, TransferKind,
+    TransferRequest,
 };
+use crate::worker::integration::SourceEntry;
 
 /// Tracing target for connection sync operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::connection_syncs";

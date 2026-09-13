@@ -24,8 +24,11 @@ CREATE TABLE workspace_detections (
     -- Primary identifier
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-    -- References
-    pipeline_id     UUID                    NOT NULL REFERENCES workspace_pipelines (id) ON DELETE CASCADE,
+    -- References. A detection is workspace-scoped directly: an ad-hoc detection
+    -- carries no pipeline, and deleting a pipeline detaches (SET NULL) its
+    -- detections rather than erasing the workspace's analysis history.
+    workspace_id    UUID                    NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+    pipeline_id     UUID                    DEFAULT NULL REFERENCES workspace_pipelines (id) ON DELETE SET NULL,
     account_id      UUID                    NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- What a detection relates to. The input is the source document (required);
@@ -47,6 +50,13 @@ CREATE TABLE workspace_detections (
     idempotency_key TEXT                    DEFAULT NULL,
     CONSTRAINT workspace_detections_idempotency_key_length CHECK (idempotency_key IS NULL OR length(idempotency_key) BETWEEN 1 AND 255),
 
+    -- The effective retention override this detection ran under, snapshotted at
+    -- create time (from its pipeline, or supplied directly for an ad-hoc
+    -- detection). Redaction reads it from here, so re-redacting stamps output
+    -- retention from what the detection ran with rather than a since-edited
+    -- pipeline. Null falls back to the workspace retention baseline.
+    retention_override JSONB                DEFAULT NULL,
+
     -- Non-encrypted metadata for filtering and display. The engine's full
     -- per-recognizer usage report (durations, per-model token counts) is kept
     -- here under `usage` for drill-down; per-model token totals for usage
@@ -65,9 +75,15 @@ CREATE TABLE workspace_detections (
     CONSTRAINT workspace_detections_completed_after_started CHECK (completed_at IS NULL OR completed_at >= started_at)
 );
 
--- A pipeline's detections, newest first (the detection list).
+-- A workspace's detections, newest first (the workspace detection list,
+-- including ad-hoc detections with no pipeline).
+CREATE INDEX workspace_detections_workspace_idx
+    ON workspace_detections (workspace_id, started_at DESC);
+
+-- A pipeline's detections, newest first (the per-pipeline detection list).
 CREATE INDEX workspace_detections_pipeline_idx
-    ON workspace_detections (pipeline_id, started_at DESC);
+    ON workspace_detections (pipeline_id, started_at DESC)
+    WHERE pipeline_id IS NOT NULL;
 
 -- Detections triggered by an account, newest first.
 CREATE INDEX workspace_detections_account_idx
@@ -88,9 +104,10 @@ CREATE INDEX workspace_detections_intermediate_blob_idx
     ON workspace_detections (intermediate_blob_id)
     WHERE intermediate_blob_id IS NOT NULL;
 
--- Idempotent detect: at most one detection per (pipeline, idempotency key).
+-- Idempotent detect: at most one detection per (workspace, idempotency key), so
+-- a retry replays the existing detection whether or not it names a pipeline.
 CREATE UNIQUE INDEX workspace_detections_idempotency_idx
-    ON workspace_detections (pipeline_id, idempotency_key)
+    ON workspace_detections (workspace_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
 
 -- A detection is append-only history: its document reference is kept even after
@@ -99,13 +116,15 @@ CREATE UNIQUE INDEX workspace_detections_idempotency_idx
 
 COMMENT ON TABLE workspace_detections IS 'Detections: one analysis pass of a document through a pipeline.';
 COMMENT ON COLUMN workspace_detections.id IS 'Unique detection identifier';
-COMMENT ON COLUMN workspace_detections.pipeline_id IS 'Pipeline whose config drove the detection';
+COMMENT ON COLUMN workspace_detections.workspace_id IS 'Owning workspace';
+COMMENT ON COLUMN workspace_detections.pipeline_id IS 'Pipeline whose config drove the detection; NULL for an ad-hoc detection or after its pipeline was deleted';
 COMMENT ON COLUMN workspace_detections.account_id IS 'Account that triggered the detection';
 COMMENT ON COLUMN workspace_detections.input_document_id IS 'Source document the detection analyzes';
 COMMENT ON COLUMN workspace_detections.intermediate_blob_id IS 'Enrichment intermediate blob (OCR layout, transcript) served to the client; NULL if no enricher ran';
 COMMENT ON COLUMN workspace_detections.trigger_type IS 'How the detection was initiated';
 COMMENT ON COLUMN workspace_detections.status IS 'Current detection status';
 COMMENT ON COLUMN workspace_detections.idempotency_key IS 'Detect idempotency key (dedupes retries)';
+COMMENT ON COLUMN workspace_detections.retention_override IS 'Retention override the detection ran under, snapshotted at create; read on redact so output retention reflects the run, not a since-edited pipeline. NULL falls back to the workspace baseline';
 COMMENT ON COLUMN workspace_detections.metadata IS 'Non-encrypted metadata for filtering/display; holds the full per-recognizer usage report under `usage`';
 COMMENT ON COLUMN workspace_detections.claimed_at IS 'Detection lease: when a worker last claimed this detection';
 COMMENT ON COLUMN workspace_detections.started_at IS 'When the detection started';
@@ -294,15 +313,10 @@ CREATE TABLE workspace_detection_policy_versions (
     -- its detection.
     detection_id        UUID        NOT NULL REFERENCES workspace_detections (id) ON DELETE CASCADE,
 
-    -- The policy version the analysis consumed. The composite key pins it to this
-    -- pin's workspace, so a caller cannot record a version from another workspace.
-    policy_version_id   UUID        NOT NULL,
-
-    -- Denormalized workspace scope.
-    workspace_id        UUID        NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    CONSTRAINT workspace_detection_policy_versions_version_fkey
-        FOREIGN KEY (workspace_id, policy_version_id)
-        REFERENCES workspace_policy_versions (workspace_id, id) ON DELETE RESTRICT,
+    -- The policy version the analysis consumed. A pinned version can never be
+    -- deleted (versions are immutable anyway). The worker only pins versions it
+    -- resolved within the run's workspace, so a foreign version is never recorded.
+    policy_version_id   UUID        NOT NULL REFERENCES workspace_policy_versions (id) ON DELETE RESTRICT,
 
     PRIMARY KEY (detection_id, policy_version_id)
 );
@@ -315,7 +329,6 @@ CREATE INDEX workspace_detection_policy_versions_version_idx
 COMMENT ON TABLE workspace_detection_policy_versions IS 'The exact policy versions a detection''s analysis ran against; pins a detection to reproducible config.';
 COMMENT ON COLUMN workspace_detection_policy_versions.detection_id IS 'Detection whose analysis pinned these versions';
 COMMENT ON COLUMN workspace_detection_policy_versions.policy_version_id IS 'Policy version the analysis consumed';
-COMMENT ON COLUMN workspace_detection_policy_versions.workspace_id IS 'Denormalized workspace scope';
 
 -- Detection run events feed the activity log, webhooks, and (for terminal
 -- completion/failure) in-app notifications.

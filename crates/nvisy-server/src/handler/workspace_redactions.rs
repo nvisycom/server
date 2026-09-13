@@ -14,7 +14,7 @@ use nvisy_postgres::query::WorkspaceRedactionRepository;
 use nvisy_postgres::{PgClient, PgConn};
 use uuid::Uuid;
 
-use super::workspace_detections::find_detection;
+use crate::domain;
 use crate::extract::{Authorized, Json, Path, Query, markers};
 use crate::handler::ServiceState;
 use crate::handler::request::{
@@ -39,6 +39,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::redactions";
 )]
 async fn list_detection_redactions(
     State(pg_client): State<PgClient>,
+    State(detections): State<domain::WorkspaceDetectionService>,
     authz: Authorized<markers::ViewDetections>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
     Query(pagination): Query<CursorPagination>,
@@ -46,13 +47,14 @@ async fn list_detection_redactions(
     tracing::debug!(target: TRACING_TARGET, "Listing detection redactions");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
 
     // Confirm the detection exists in this workspace (404 otherwise) before
     // listing its redactions.
-    let (detection, _pipeline) =
-        find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
+    let (detection, _pipeline) = detections
+        .find(workspace.id, path_params.detection_id.as_uuid())
+        .await?;
 
+    let mut conn = pg_client.get_connection().await?;
     let page = conn
         .cursor_list_detection_redactions(detection.id, pagination.into_cursor())
         .await?;

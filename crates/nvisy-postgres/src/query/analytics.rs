@@ -317,14 +317,11 @@ async fn load_detections_by_status(
     workspace_id: Uuid,
 ) -> Result<Vec<DetectionStatusCount>> {
     use diesel::dsl::count_star;
+    use schema::workspace_detections;
     use schema::workspace_detections::dsl as detections;
-    use schema::workspace_pipelines::dsl as pipelines;
-    use schema::{workspace_detections, workspace_pipelines};
 
     workspace_detections::table
-        .inner_join(workspace_pipelines::table)
-        .filter(pipelines::workspace_id.eq(workspace_id))
-        .filter(pipelines::deleted_at.is_null())
+        .filter(detections::workspace_id.eq(workspace_id))
         .group_by(detections::status)
         .select((detections::status, count_star()))
         .load(conn)
@@ -340,9 +337,8 @@ async fn load_detection_durations(
 ) -> Result<DetectionDurations> {
     use diesel::dsl::sql;
     use diesel::sql_types::{BigInt, Nullable};
+    use schema::workspace_detections;
     use schema::workspace_detections::dsl as detections;
-    use schema::workspace_pipelines::dsl as pipelines;
-    use schema::{workspace_detections, workspace_pipelines};
 
     // Duration in milliseconds: the interval's epoch-seconds are scaled by 1000
     // and rounded to a bigint in SQL, so the value crosses the boundary already in
@@ -360,9 +356,7 @@ async fn load_detection_durations(
     );
 
     let (avg_ms, p95_ms): (Option<i64>, Option<i64>) = workspace_detections::table
-        .inner_join(workspace_pipelines::table)
-        .filter(pipelines::workspace_id.eq(workspace_id))
-        .filter(pipelines::deleted_at.is_null())
+        .filter(detections::workspace_id.eq(workspace_id))
         // Durations describe successful analysis only. `completed_at` is stamped
         // on failure too, so filter on the terminal `Complete` status, not merely
         // on the timestamp being present.
@@ -386,14 +380,11 @@ async fn load_usage_by_model(
     use diesel::dsl::sum;
     use schema::workspace_detection_usage::dsl as usage;
     use schema::workspace_detections::dsl as detections;
-    use schema::workspace_pipelines::dsl as pipelines;
-    use schema::{workspace_detection_usage, workspace_detections, workspace_pipelines};
+    use schema::{workspace_detection_usage, workspace_detections};
 
     let rows: Vec<UsageByModelRow> = workspace_detection_usage::table
         .inner_join(workspace_detections::table.on(detections::id.eq(usage::detection_id)))
-        .inner_join(workspace_pipelines::table.on(pipelines::id.eq(detections::pipeline_id)))
-        .filter(pipelines::workspace_id.eq(workspace_id))
-        .filter(pipelines::deleted_at.is_null())
+        .filter(detections::workspace_id.eq(workspace_id))
         .group_by(usage::model)
         .select((
             usage::model,
@@ -437,9 +428,8 @@ async fn load_detection_day_counts(
 ) -> Result<Vec<DetectionDayCounts>> {
     use diesel::dsl::{case_when, count_star, sql, sum};
     use diesel::sql_types::{BigInt, Nullable as SqlNullable};
+    use schema::workspace_detections;
     use schema::workspace_detections::dsl as detections;
-    use schema::workspace_pipelines::dsl as pipelines;
-    use schema::{workspace_detections, workspace_pipelines};
 
     // Durations in milliseconds (epoch-seconds scaled by 1000, rounded to bigint),
     // so the value crosses the boundary already in the API unit and type. The
@@ -464,9 +454,7 @@ async fn load_detection_day_counts(
     ));
 
     workspace_detections::table
-        .inner_join(workspace_pipelines::table)
-        .filter(pipelines::workspace_id.eq(workspace_id))
-        .filter(pipelines::deleted_at.is_null())
+        .filter(detections::workspace_id.eq(workspace_id))
         .filter(detections::started_at.ge(from))
         .filter(detections::started_at.lt(to))
         .group_by(detection_day())
@@ -504,8 +492,7 @@ async fn load_detection_day_tokens(
     use diesel::dsl::sum;
     use schema::workspace_detection_usage::dsl as usage;
     use schema::workspace_detections::dsl as detections;
-    use schema::workspace_pipelines::dsl as pipelines;
-    use schema::{workspace_detection_usage, workspace_detections, workspace_pipelines};
+    use schema::{workspace_detection_usage, workspace_detections};
 
     let per_detection_input = workspace_detection_usage::table
         .filter(usage::detection_id.eq(detections::id))
@@ -521,9 +508,7 @@ async fn load_detection_day_tokens(
         .single_value();
 
     workspace_detections::table
-        .inner_join(workspace_pipelines::table)
-        .filter(pipelines::workspace_id.eq(workspace_id))
-        .filter(pipelines::deleted_at.is_null())
+        .filter(detections::workspace_id.eq(workspace_id))
         .filter(detections::started_at.ge(from))
         .filter(detections::started_at.lt(to))
         .group_by(detection_day())
@@ -557,6 +542,7 @@ mod tests {
     /// per-day aggregates.
     async fn completed_detection(
         conn: &mut PgConn,
+        workspace_id: Uuid,
         pipeline_id: Uuid,
         account_id: Uuid,
         input_document_id: Uuid,
@@ -564,7 +550,8 @@ mod tests {
         duration: Span,
     ) -> anyhow::Result<Uuid> {
         let started = Timestamp::now() - started_ago;
-        let mut new = NewWorkspaceDetection::test(pipeline_id, account_id, input_document_id);
+        let mut new =
+            NewWorkspaceDetection::test(workspace_id, pipeline_id, account_id, input_document_id);
         new.status = Some(DetectionStatus::Complete);
         let detection = conn.create_workspace_detection(new).await?;
         // Backdate the run span so the day-bucket and duration aggregates see a
@@ -597,6 +584,7 @@ mod tests {
         // Detections: one Complete (with a duration) and one Pending.
         let complete = completed_detection(
             &mut conn,
+            seeded.workspace_id,
             seeded.pipeline_id,
             seeded.account_id,
             seeded.document_id,
@@ -606,6 +594,7 @@ mod tests {
         .await?;
         let _pending = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.workspace_id,
                 seeded.pipeline_id,
                 seeded.account_id,
                 seeded.document_id,
@@ -674,6 +663,7 @@ mod tests {
         let mut conn = db.client.get_connection().await?;
         let _ = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
+                other.workspace_id,
                 other.pipeline_id,
                 other.account_id,
                 other.document_id,
@@ -706,6 +696,7 @@ mod tests {
         // Two detections started ~1 day ago (same UTC day), one ~3 days ago.
         let recent = completed_detection(
             &mut conn,
+            seeded.workspace_id,
             seeded.pipeline_id,
             seeded.account_id,
             seeded.document_id,
@@ -715,6 +706,7 @@ mod tests {
         .await?;
         let _recent2 = completed_detection(
             &mut conn,
+            seeded.workspace_id,
             seeded.pipeline_id,
             seeded.account_id,
             seeded.document_id,
@@ -724,6 +716,7 @@ mod tests {
         .await?;
         let _old = completed_detection(
             &mut conn,
+            seeded.workspace_id,
             seeded.pipeline_id,
             seeded.account_id,
             seeded.document_id,

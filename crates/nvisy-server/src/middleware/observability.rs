@@ -19,11 +19,8 @@ use tower_http::trace::TraceLayer;
 
 use super::counting_body::CountingBody;
 
-/// Tracing target for request metrics.
-const TRACING_TARGET_METRICS: &str = "nvisy_server::metrics";
-
-/// Tracing target for the per-request span.
-const TRACING_TARGET_REQUEST: &str = "nvisy_server::request";
+/// Tracing target for request observability (per-request spans and metrics).
+const TRACING_TARGET: &str = "nvisy_server::middleware::observability";
 
 /// Builds the per-request tracing span carrying the method and path.
 ///
@@ -31,7 +28,7 @@ const TRACING_TARGET_REQUEST: &str = "nvisy_server::request";
 /// error responses (4xx/5xx) are always attributable to a route.
 fn request_span(request: &Request) -> tracing::Span {
     tracing::info_span!(
-        target: TRACING_TARGET_REQUEST,
+        target: TRACING_TARGET,
         "request",
         method = %request.method(),
         path = %request.uri().path(),
@@ -94,7 +91,7 @@ pub async fn track_request_metrics(request: Request, next: Next) -> Response {
         .unwrap_or(0);
 
     tracing::trace!(
-        target: TRACING_TARGET_METRICS,
+        target: TRACING_TARGET,
         method = %method,
         uri = %uri,
         request_size = request_size,
@@ -114,7 +111,7 @@ pub async fn track_request_metrics(request: Request, next: Next) -> Response {
     let body = CountingBody::new(body, move |response_size| {
         let _guard = span.enter();
         tracing::trace!(
-            target: TRACING_TARGET_METRICS,
+            target: TRACING_TARGET,
             method = %method,
             uri = %uri,
             status = %status,

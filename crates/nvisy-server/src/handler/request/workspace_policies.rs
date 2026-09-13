@@ -1,15 +1,28 @@
 //! Policy request types.
 
 use elide_pipeline::entity::{LabelCatalog, LabelRef};
-use elide_pipeline::governance::policy::{LabelScope, Policy, PolicyRule, TemplateOrigin};
-use elide_pipeline::governance::redaction::{ModalityRedactions, TextRedaction};
+use elide_pipeline::governance::policy::{LabelScope, PolicyRule};
+use elide_pipeline::governance::redaction::ModalityRedactions;
 use elide_pipeline::template::PolicyTemplate;
 use garde::Validate;
-use nvisy_postgres::types::Handle;
+use nvisy_postgres::types::{Handle, PolicyKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use uuid::Uuid;
+
+use crate::domain::input::{
+    CreatePolicyInput, PolicyBodyInput, PolicyDraftInput, UpdatePolicyInput,
+};
+
+/// Query parameters for listing policies.
+///
+/// Every field is an optional filter; unset fields impose no constraint.
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePoliciesQuery {
+    /// Narrow the list to a single policy kind (`authored` or `oneshot`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<PolicyKind>,
+}
 
 /// Path parameters for policy operations.
 ///
@@ -31,8 +44,8 @@ pub struct WorkspacePolicyPathParams {
 /// The engine's `Policy` also carries an `id` and a `template` origin. Both are
 /// server-owned — the `id` is minted at creation and the `template` records which
 /// built-in a policy was seeded from (provenance). Neither is representable here,
-/// so a client cannot mint ids or forge provenance; the server stamps them in
-/// [`into_definition`](PolicyDraft::into_definition).
+/// so a client cannot mint ids or forge provenance; the server stamps them when it
+/// builds the engine definition.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PolicyDraft {
@@ -52,55 +65,14 @@ pub struct PolicyDraft {
     pub fallback: Option<ModalityRedactions>,
 }
 
-impl PolicyDraft {
-    /// Builds a full engine [`Policy`] from this draft, stamping the server-owned
-    /// fields: a fresh `id`, and the given `template` origin (`None` for a
-    /// hand-authored body, the built-in's origin when seeded from a template).
-    pub fn into_definition(self, template: Option<TemplateOrigin>) -> Policy {
-        Policy {
-            id: Uuid::now_v7(),
-            name: self.name.into(),
-            description: self.description.map(Into::into),
-            template,
-            scopes: self.scopes,
-            rules: self.rules,
-            fallback: self.fallback,
-        }
-    }
-}
-
-/// The blanket redaction action a one-shot policy applies to every label it
-/// detects. A one-shot trades per-label control for a single default; a full
-/// policy is the tier for per-label actions and rules.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum OneshotAction {
-    /// Replace each detected value with a mask (`*`), keeping its shape.
-    #[default]
-    Mask,
-    /// Delete each detected value entirely.
-    Erase,
-}
-
-impl OneshotAction {
-    /// The engine text redaction this action maps to.
-    fn text_redaction(self) -> TextRedaction {
-        match self {
-            OneshotAction::Mask => TextRedaction::Mask {
-                mask_char: '*',
-                keep_prefix: 0,
-                keep_suffix: 0,
-            },
-            OneshotAction::Erase => TextRedaction::Erase,
-        }
-    }
-
-    /// A stable one-byte tag folded into the one-shot content hash, so two
-    /// one-shots over the same labels but different actions hash distinctly.
-    fn hash_tag(self) -> u8 {
-        match self {
-            OneshotAction::Mask => 0,
-            OneshotAction::Erase => 1,
+impl From<PolicyDraft> for PolicyDraftInput {
+    fn from(draft: PolicyDraft) -> Self {
+        PolicyDraftInput {
+            name: draft.name,
+            description: draft.description,
+            scopes: draft.scopes,
+            rules: draft.rules,
+            fallback: draft.fallback,
         }
     }
 }
@@ -110,7 +82,7 @@ impl OneshotAction {
 ///
 /// Tagged by `source`: `{ "source": "template", "template": { ... } }`,
 /// `{ "source": "inline", "definition": { ... } }`, or
-/// `{ "source": "labels", "labels": [ ... ], "action": "mask" }`.
+/// `{ "source": "labels", "labels": [ ... ] }`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "source", rename_all = "camelCase")]
 pub enum PolicyBody {
@@ -130,77 +102,24 @@ pub enum PolicyBody {
         /// template id, and most requests use a template.
         definition: Box<PolicyDraft>,
     },
-    /// A one-shot body: a bare list of labels to redact with a single blanket
-    /// action. The created policy is temporary — hidden from the list and not
-    /// attachable to a pipeline until promoted. This is the ad-hoc redact flow.
+    /// A one-shot body: a bare list of labels, each erased. The created policy is
+    /// content-addressed and deduplicated (an identical one is reused) and is
+    /// immutable once minted. This is the ad-hoc redact flow.
     Labels {
-        /// The built-in labels to detect and redact (e.g. `person_name`,
+        /// The built-in labels to detect and erase (e.g. `person_name`,
         /// `email_address`).
         labels: Vec<String>,
-        /// The blanket action applied to every label. Defaults to masking.
-        #[serde(default)]
-        action: OneshotAction,
     },
 }
 
-impl PolicyBody {
-    /// Whether this body creates a one-shot policy. Only the labels source does.
-    pub fn is_oneshot(&self) -> bool {
-        matches!(self, PolicyBody::Labels { .. })
-    }
-
-    /// The content-address hash of a one-shot body, or `None` for template/inline.
-    ///
-    /// A one-shot is identified by its semantic content: the set of labels and the
-    /// blanket action. Labels are sorted and deduplicated first so the same content
-    /// hashes equally regardless of request order, letting an identical one-shot be
-    /// reused instead of duplicated. The minted definition `id` is deliberately not
-    /// part of the hash.
-    pub fn oneshot_content_hash(&self) -> Option<Vec<u8>> {
-        let PolicyBody::Labels { labels, action } = self else {
-            return None;
-        };
-        let mut ids: Vec<&str> = labels.iter().map(String::as_str).collect();
-        ids.sort_unstable();
-        ids.dedup();
-
-        let mut hasher = Sha256::new();
-        hasher.update([action.hash_tag()]);
-        for id in ids {
-            hasher.update((id.len() as u32).to_le_bytes());
-            hasher.update(id.as_bytes());
-        }
-        Some(hasher.finalize().to_vec())
-    }
-
-    /// Resolves the body source into a concrete policy definition with a fresh
-    /// `id`, so two policies seeded from the same template stay independent.
-    ///
-    /// An inline body is hand-authored, so it carries no template origin; a
-    /// template body keeps the template's own origin (stamped by `build`). A
-    /// labels body builds a degenerate definition — one scope over the picked
-    /// labels plus a blanket fallback action — under the given generated name.
-    pub fn into_definition(self, generated_name: &str) -> Policy {
-        match self {
-            PolicyBody::Inline { definition } => definition.into_definition(None),
-            PolicyBody::Template { template } => Policy {
-                // `build()` bakes a stable constant id; re-mint so each created
-                // policy is distinct.
-                id: Uuid::now_v7(),
-                ..template.build().policy
+impl From<PolicyBody> for PolicyBodyInput {
+    fn from(body: PolicyBody) -> Self {
+        match body {
+            PolicyBody::Template { template } => PolicyBodyInput::Template { template },
+            PolicyBody::Inline { definition } => PolicyBodyInput::Inline {
+                definition: Box::new((*definition).into()),
             },
-            PolicyBody::Labels { labels, action } => {
-                let refs = labels.into_iter().map(LabelRef::new);
-                Policy {
-                    id: Uuid::now_v7(),
-                    name: generated_name.into(),
-                    description: None,
-                    template: None,
-                    scopes: vec![LabelScope::new(generated_name.to_owned(), refs)],
-                    rules: Vec::new(),
-                    fallback: Some(ModalityRedactions::text(action.text_redaction())),
-                }
-            }
+            PolicyBody::Labels { labels } => PolicyBodyInput::Labels { labels },
         }
     }
 }
@@ -232,9 +151,20 @@ pub struct CreateWorkspacePolicy {
     pub body: PolicyBody,
 }
 
+impl From<CreateWorkspacePolicy> for CreatePolicyInput {
+    fn from(request: CreateWorkspacePolicy) -> Self {
+        CreatePolicyInput {
+            display_name: request.display_name,
+            slug: request.slug,
+            description: request.description,
+            body: request.body.into(),
+        }
+    }
+}
+
 /// A one-shot (labels) body must name at least one label and no more than 64.
 fn validate_body(body: &PolicyBody, _: &()) -> garde::Result {
-    if let PolicyBody::Labels { labels, .. } = body {
+    if let PolicyBody::Labels { labels } = body {
         if labels.is_empty() {
             return Err(garde::Error::new("at least one label is required"));
         }
@@ -276,105 +206,29 @@ pub struct UpdateWorkspacePolicy {
     pub definition: Option<PolicyDraft>,
 }
 
+impl From<UpdateWorkspacePolicy> for UpdatePolicyInput {
+    fn from(request: UpdateWorkspacePolicy) -> Self {
+        UpdatePolicyInput {
+            display_name: request.display_name,
+            description: request.description,
+            definition: request.definition.map(Into::into),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn labels_body_builds_a_degenerate_definition() {
-        let body = PolicyBody::Labels {
-            labels: vec!["person_name".to_owned(), "email_address".to_owned()],
-            action: OneshotAction::Mask,
-        };
-        assert!(body.is_oneshot());
-
-        let definition = body.into_definition("Quick redaction abc123");
-        assert_eq!(&*definition.name, "Quick redaction abc123");
-        assert!(definition.rules.is_empty());
-        assert_eq!(definition.scopes.len(), 1);
-        let labels: Vec<&str> = definition.scopes[0]
-            .labels
-            .iter()
-            .map(LabelRef::as_str)
-            .collect();
-        assert_eq!(labels, vec!["person_name", "email_address"]);
-        assert!(
-            matches!(
-                definition.fallback.as_ref().and_then(|f| f.text.as_ref()),
-                Some(TextRedaction::Mask { .. })
-            ),
-            "mask action maps to a text Mask fallback"
-        );
-    }
-
-    #[test]
-    fn erase_action_maps_to_erase() {
-        let body = PolicyBody::Labels {
-            labels: vec!["ip_address".to_owned()],
-            action: OneshotAction::Erase,
-        };
-        let definition = body.into_definition("Quick redaction def456");
-        assert!(matches!(
-            definition.fallback.as_ref().and_then(|f| f.text.as_ref()),
-            Some(TextRedaction::Erase)
-        ));
-    }
-
-    #[test]
-    fn template_and_inline_bodies_are_not_temporary() {
-        let inline = PolicyBody::Inline {
-            definition: Box::new(PolicyDraft {
-                name: "Custom".to_owned(),
-                description: None,
-                scopes: Vec::new(),
-                rules: Vec::new(),
-                fallback: None,
-            }),
-        };
-        assert!(!inline.is_oneshot());
-    }
-
-    #[test]
-    fn oneshot_hash_is_order_insensitive_and_action_sensitive() {
-        let a = PolicyBody::Labels {
-            labels: vec!["person_name".to_owned(), "email_address".to_owned()],
-            action: OneshotAction::Mask,
-        };
-        let b = PolicyBody::Labels {
-            labels: vec!["email_address".to_owned(), "person_name".to_owned()],
-            action: OneshotAction::Mask,
-        };
-        assert_eq!(a.oneshot_content_hash(), b.oneshot_content_hash());
-
-        let erase = PolicyBody::Labels {
-            labels: vec!["person_name".to_owned(), "email_address".to_owned()],
-            action: OneshotAction::Erase,
-        };
-        assert_ne!(a.oneshot_content_hash(), erase.oneshot_content_hash());
-
-        let inline = PolicyBody::Inline {
-            definition: Box::new(PolicyDraft {
-                name: "Custom".to_owned(),
-                description: None,
-                scopes: Vec::new(),
-                rules: Vec::new(),
-                fallback: None,
-            }),
-        };
-        assert!(inline.oneshot_content_hash().is_none());
-    }
-
-    #[test]
     fn validate_body_accepts_known_labels_and_rejects_unknown() {
         let known = PolicyBody::Labels {
             labels: vec!["person_name".to_owned(), "email_address".to_owned()],
-            action: OneshotAction::Mask,
         };
         assert!(validate_body(&known, &()).is_ok());
 
         let unknown = PolicyBody::Labels {
             labels: vec!["person_name".to_owned(), "not_a_real_label".to_owned()],
-            action: OneshotAction::Mask,
         };
         let err = validate_body(&unknown, &()).expect_err("unknown label is rejected");
         assert!(err.to_string().contains("not_a_real_label"));

@@ -43,11 +43,7 @@ CREATE TABLE workspace_blobs (
     reclaimed_at            TIMESTAMPTZ      DEFAULT NULL,
     CONSTRAINT blobs_expires_after_created CHECK (expires_at IS NULL OR expires_at >= created_at),
     CONSTRAINT blobs_purged_after_created CHECK (purged_at IS NULL OR purged_at >= created_at),
-    CONSTRAINT blobs_reclaimed_after_purged CHECK (reclaimed_at IS NULL OR purged_at IS NOT NULL),
-
-    -- Composite unique target so a referrer's (workspace_id, id) foreign key can
-    -- enforce that a referenced blob belongs to the referrer's workspace.
-    CONSTRAINT workspace_blobs_workspace_id_id_key UNIQUE (workspace_id, id)
+    CONSTRAINT blobs_reclaimed_after_purged CHECK (reclaimed_at IS NULL OR purged_at IS NOT NULL)
 );
 
 -- Deduplication lookup: an incoming blob reuses a live match on this key. Unique

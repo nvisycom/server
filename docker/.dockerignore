@@ -35,8 +35,6 @@ Makefile
 # CI/CD
 .github/
 .gitlab-ci.yml
-.travis.yml
-.circleci/
 
 # Docker (prevent recursion)
 docker/

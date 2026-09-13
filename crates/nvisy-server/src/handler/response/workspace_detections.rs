@@ -23,8 +23,10 @@ use super::{AccountRef, Page};
 pub struct WorkspaceDetection {
     /// Opaque identifier of the detection.
     pub id: DetectionId,
-    /// Handle of the pipeline this detection belongs to.
-    pub pipeline_slug: Handle,
+    /// Handle of the pipeline this detection belongs to; absent for an ad-hoc
+    /// detection or once its pipeline was deleted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipeline_slug: Option<Handle>,
     /// Handle of the workspace this detection belongs to.
     pub workspace_slug: Handle,
     /// Source document this detection analyzes.
@@ -63,7 +65,7 @@ impl WorkspaceDetection {
     /// input file display name.
     pub fn from_model(
         detection: DetectionModel,
-        pipeline_slug: Handle,
+        pipeline_slug: Option<Handle>,
         workspace_slug: Handle,
         triggered_by: AccountRef,
         files: DetectionDocuments,

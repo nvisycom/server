@@ -3,6 +3,8 @@
 #![doc = include_str!("../README.md")]
 
 mod config;
+#[cfg(test)]
+mod env_example;
 mod server;
 
 use std::process;

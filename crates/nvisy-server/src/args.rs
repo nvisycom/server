@@ -23,7 +23,7 @@ use crate::service::{
 };
 
 /// Tracing target for configuration echoes emitted by the config aggregates.
-pub(crate) const TRACING_TARGET_CONFIG: &str = "nvisy_server::config";
+pub(crate) const TRACING_TARGET_CONFIG: &str = "nvisy_server::args";
 
 /// Every external-service and resource config [`ServiceState`] is built from.
 ///
@@ -35,51 +35,60 @@ pub(crate) const TRACING_TARGET_CONFIG: &str = "nvisy_server::config";
 #[must_use = "config does nothing unless you use it"]
 pub struct ServiceArgs {
     /// Postgres database configuration.
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "PostgreSQL"))]
     pub postgres: PgConfig,
 
     /// NATS configuration.
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "NATS"))]
     pub nats: NatsConfig,
 
     /// S3-compatible blob storage configuration.
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(
+        feature = "cli",
+        clap(flatten, next_help_heading = "S3-compatible blob store")
+    )]
     pub s3: S3Config,
 
     /// JWT session key paths.
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "Authentication"))]
     pub session_keys: SessionKeysConfig,
 
     /// Master encryption key path.
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "Encryption"))]
     pub crypto: CryptoConfig,
 
     /// Redaction engine configuration.
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "Engine"))]
     pub engine: EngineConfig,
 
     /// Health monitoring configuration.
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "Health"))]
     pub health: HealthConfig,
 
     /// Integration deployment configuration (endpoint policy, sync concurrency).
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "Connections"))]
     pub integration: IntegrationConfig,
 
     /// Cloud file-service OAuth app configuration.
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(
+        feature = "cli",
+        clap(flatten, next_help_heading = "Cloud file-service connectors (OAuth)")
+    )]
     pub file_service: FileConnectorsConfig,
 
     /// OIDC sign-in provider configuration (Google, Microsoft).
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "OIDC sign-in"))]
     pub oidc: OidcConfig,
 
     /// Request body size limits (server-wide hard caps).
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(
+        feature = "cli",
+        clap(flatten, next_help_heading = "Request body size limits")
+    )]
     pub upload: UploadConfig,
 
     /// Session-cookie policy (the `Secure` attribute) for browser clients.
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "Session cookies"))]
     pub cookie: CookieConfig,
 }
 

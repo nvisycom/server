@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::response::{ErrorKind, Result};
 
 /// Tracing target for authentication operations.
-const TRACING_TARGET: &str = "nvisy_server::authentication";
+const TRACING_TARGET: &str = "nvisy_server::extract::auth";
 
 /// Far-future timestamp for tokens that never expire (100 years from now).
 const NEVER_EXPIRES_SECONDS: i64 = 100 * 365 * 24 * 60 * 60;

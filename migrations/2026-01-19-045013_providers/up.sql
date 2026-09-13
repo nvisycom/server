@@ -24,8 +24,6 @@ CREATE TABLE workspace_providers (
     workspace_id    UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     account_id      UUID            NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
-    -- Composite key target for workspace-scoped access and foreign keys.
-    CONSTRAINT workspace_providers_workspace_id_id_key UNIQUE (workspace_id, id),
 
     -- Human-readable label for the provider.
     display_name    TEXT            NOT NULL,

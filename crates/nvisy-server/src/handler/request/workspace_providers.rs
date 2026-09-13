@@ -5,6 +5,7 @@ use nvisy_postgres::types::ProviderId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::domain::input::{CreateProviderInput, UpdateProviderInput};
 use crate::service::ProviderConfig;
 
 /// Path parameters for provider operations.
@@ -38,6 +39,16 @@ pub struct CreateWorkspaceProvider {
     pub config: ProviderConfig,
 }
 
+impl From<CreateWorkspaceProvider> for CreateProviderInput {
+    fn from(request: CreateWorkspaceProvider) -> Self {
+        CreateProviderInput {
+            display_name: request.display_name,
+            is_active: request.is_active,
+            config: request.config,
+        }
+    }
+}
+
 /// Request payload for updating an existing workspace provider.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +62,16 @@ pub struct UpdateWorkspaceProvider {
     /// Typed provider configuration. If provided, fully replaces the stored config
     /// (and, with it, the provider). Omit to leave it unchanged.
     pub config: Option<ProviderConfig>,
+}
+
+impl From<UpdateWorkspaceProvider> for UpdateProviderInput {
+    fn from(request: UpdateWorkspaceProvider) -> Self {
+        UpdateProviderInput {
+            display_name: request.display_name,
+            is_active: request.is_active,
+            config: request.config,
+        }
+    }
 }
 
 /// Query parameters for listing providers.
