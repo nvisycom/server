@@ -429,12 +429,15 @@ impl DetectionWorker {
             let request =
                 request_context(&definition, job.scope.clone(), raster_mode_of(&settings));
 
-            // Resolve the policies the analysis runs against: a pipeline
-            // detection's from the pipeline's references, an ad-hoc detection's
-            // from the slugs named on the job.
-            let resolved = match pipeline {
-                Some(pipeline) => {
-                    resolve_policies(&mut conn, job.workspace_id, pipeline.id).await?
+            // Resolve the policies the analysis runs against, keyed off the
+            // detection's own `pipeline_id` (stable across a pipeline soft-delete,
+            // which nulls nothing) rather than the live pipeline row: a pipeline
+            // detection resolves from the pipeline's references — still reachable
+            // through the join rows a soft-delete leaves in place — and an ad-hoc
+            // detection from the slugs named on the job.
+            let resolved = match detection.pipeline_id {
+                Some(pipeline_id) => {
+                    resolve_policies(&mut conn, job.workspace_id, pipeline_id).await?
                 }
                 None => {
                     resolve_policies_by_slugs(&mut conn, job.workspace_id, &job.policy_slugs)

@@ -89,22 +89,17 @@ impl WorkspaceDetectionService {
         }
 
         // Idempotent replay: a repeated key returns the detection created the first
-        // time, attributed to whoever originally triggered it.
+        // time, attributed to whoever originally triggered it. The reported
+        // pipeline is the existing detection's own — an idempotency key is
+        // workspace-scoped, so a replay may resolve a detection created by a
+        // different pipeline (or none), and reporting this URL's pipeline would
+        // misattribute it.
         if let Some(key) = &idempotency_key
             && let Some(existing) = conn
                 .find_detection_by_idempotency_key(workspace_id, key)
                 .await?
         {
-            let documents = conn
-                .detection_document_names(workspace_id, &existing)
-                .await?;
-            return Ok(CreatedDetection {
-                trigger_account_id: existing.account_id,
-                detection: existing,
-                pipeline_slug: Some(pipeline.slug),
-                documents,
-                created: false,
-            });
+            return self.replay(&mut conn, workspace_id, existing).await;
         }
 
         // Validate synchronously so a bad request fails fast (4xx) rather than as a
@@ -193,21 +188,15 @@ impl WorkspaceDetectionService {
         let workspace_id = origin.workspace_id;
         let mut conn = self.postgres.get_connection().await?;
 
+        // Idempotent replay: a workspace-scoped key may resolve a detection created
+        // by a pipeline, so the reported pipeline is the existing detection's own,
+        // not unconditionally none.
         if let Some(key) = &idempotency_key
             && let Some(existing) = conn
                 .find_detection_by_idempotency_key(workspace_id, key)
                 .await?
         {
-            let documents = conn
-                .detection_document_names(workspace_id, &existing)
-                .await?;
-            return Ok(CreatedDetection {
-                trigger_account_id: existing.account_id,
-                detection: existing,
-                pipeline_slug: None,
-                documents,
-                created: false,
-            });
+            return self.replay(&mut conn, workspace_id, existing).await;
         }
 
         let document = conn
@@ -263,6 +252,34 @@ impl WorkspaceDetectionService {
                 input: Some(document.display_name),
             },
             created: true,
+        })
+    }
+
+    /// Builds the replay response for an existing detection matched by
+    /// idempotency key, reporting its own live pipeline's slug (`None` for an
+    /// ad-hoc detection, or one whose pipeline was deleted).
+    async fn replay(
+        &self,
+        conn: &mut PgConn,
+        workspace_id: Uuid,
+        existing: WorkspaceDetectionModel,
+    ) -> Result<CreatedDetection> {
+        let pipeline_slug = match conn
+            .find_workspace_detection_by_id(workspace_id, existing.id)
+            .await?
+        {
+            Some((_, pipeline)) => pipeline.map(|pipeline| pipeline.slug),
+            None => None,
+        };
+        let documents = conn
+            .detection_document_names(workspace_id, &existing)
+            .await?;
+        Ok(CreatedDetection {
+            trigger_account_id: existing.account_id,
+            detection: existing,
+            pipeline_slug,
+            documents,
+            created: false,
         })
     }
 

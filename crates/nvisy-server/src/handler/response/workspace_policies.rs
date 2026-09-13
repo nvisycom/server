@@ -30,7 +30,8 @@ pub struct WorkspacePolicy {
     /// The current version number of the policy's definition.
     pub version_number: i32,
     /// How the policy came to exist. A one-shot policy (minted from labels) is
-    /// hidden from the list and not pipeline-attachable until promoted.
+    /// content-addressed, deduplicated, and immutable; an authored policy is a
+    /// normal, editable policy.
     pub kind: PolicyKind,
     /// When the policy was created.
     pub created_at: Timestamp,
@@ -58,7 +59,8 @@ pub struct WorkspacePolicySummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// How the policy came to exist. A one-shot policy (minted from labels) is
-    /// hidden from the list and not pipeline-attachable until promoted.
+    /// content-addressed, deduplicated, and immutable; an authored policy is a
+    /// normal, editable policy.
     pub kind: PolicyKind,
     /// When the policy was created.
     pub created_at: Timestamp,

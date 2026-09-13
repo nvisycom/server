@@ -99,7 +99,7 @@ impl WorkspaceInviteService {
                     origin,
                     event::WorkspaceEvent::InviteCreated(event::InviteCreated {
                         invite_id: invite.id,
-                        email: Some(input.invitee_email.clone()),
+                        email: Some(invitee_email.clone()),
                     }),
                 )
                 .await?;

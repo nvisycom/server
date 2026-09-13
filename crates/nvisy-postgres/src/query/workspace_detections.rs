@@ -388,14 +388,16 @@ impl WorkspaceDetectionRepository for PgConnection {
         // Scope by the detection's own workspace. The owning pipeline's slug, the
         // triggering account, and the input document's name are selected alongside
         // each detection so the response can name them without a per-row lookup.
-        // The pipeline is LEFT-joined so an ad-hoc detection (no pipeline) still
-        // lists with a null slug; the input document is LEFT-joined so a document
-        // removed by retention yields a null name rather than dropping the row.
+        // The pipeline is LEFT-joined (and only while live) so an ad-hoc detection
+        // (no pipeline) and one whose pipeline was soft-deleted both list with a
+        // null slug; the input document is LEFT-joined so a document removed by
+        // retention yields a null name rather than dropping the row.
         let scoped = || {
             let mut query = detections::workspace_detections
                 .left_join(
-                    pipelines::workspace_pipelines
-                        .on(detections::pipeline_id.eq(pipelines::id.nullable())),
+                    pipelines::workspace_pipelines.on(detections::pipeline_id
+                        .eq(pipelines::id.nullable())
+                        .and(pipelines::deleted_at.is_null())),
                 )
                 .inner_join(accounts::accounts)
                 .left_join(
@@ -969,6 +971,42 @@ mod tests {
             .iter()
             .find(|row| row.detection.id == detection.id)
             .expect("ad-hoc detection listed");
+        assert!(row.pipeline_slug.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_soft_deleted_pipeline_lists_its_detection_with_no_slug() -> anyhow::Result<()> {
+        use crate::query::WorkspacePipelineRepository;
+
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_pipeline_and_document().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let detection = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.workspace_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.document_id,
+            ))
+            .await?;
+
+        // Soft-deleting the pipeline must not drop the detection from the listing;
+        // its slug just resolves to none, matching find-by-id.
+        conn.delete_workspace_pipeline(seeded.pipeline_id).await?;
+        let page = conn
+            .cursor_list_workspace_detections(
+                seeded.workspace_id,
+                CursorPagination::new(50),
+                &DetectionFilter::default(),
+            )
+            .await?;
+        let row = page
+            .items
+            .iter()
+            .find(|row| row.detection.id == detection.id)
+            .expect("detection still listed after pipeline soft-delete");
         assert!(row.pipeline_slug.is_none());
         Ok(())
     }

@@ -103,8 +103,8 @@ pub enum PolicyBody {
         definition: Box<PolicyDraft>,
     },
     /// A one-shot body: a bare list of labels, each erased. The created policy is
-    /// temporary — hidden from the list and not attachable to a pipeline until
-    /// promoted. This is the ad-hoc redact flow.
+    /// content-addressed and deduplicated (an identical one is reused) and is
+    /// immutable once minted. This is the ad-hoc redact flow.
     Labels {
         /// The built-in labels to detect and erase (e.g. `person_name`,
         /// `email_address`).
