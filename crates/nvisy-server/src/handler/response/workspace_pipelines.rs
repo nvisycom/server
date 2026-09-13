@@ -5,6 +5,7 @@ use nvisy_postgres::model;
 use nvisy_postgres::types::{Handle, PipelineStatus, RetentionOverride};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::{AccountRef, Page};
 use crate::handler::request::PipelineDefinition;
@@ -14,9 +15,11 @@ use crate::handler::request::PipelineDefinition;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePipeline {
-    /// URL slug of the pipeline, unique within its workspace.
-    pub slug: Handle,
-    /// Handle of the workspace this pipeline belongs to.
+    /// Unique identifier of the pipeline.
+    pub id: Uuid,
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub workspace_slug: Handle,
     /// Account that created this pipeline.
     pub created_by: AccountRef,
@@ -39,21 +42,23 @@ pub struct WorkspacePipeline {
 }
 
 impl WorkspacePipeline {
-    /// Creates a response from the database model and its reference slugs.
+    /// Creates a response from the database model and its reference ids.
     ///
-    /// The `policy_slugs` come from the join table and are merged with the stored
+    /// The `policy_ids` come from the join table and are merged with the stored
     /// engine config to rebuild the full definition. Fails if the stored config
     /// JSON does not decode to the current schema.
     pub fn from_model(
         pipeline: model::WorkspacePipeline,
+        workspace_id: Uuid,
         workspace_slug: Handle,
         created_by: AccountRef,
-        policy_slugs: Vec<Handle>,
+        policy_ids: Vec<Uuid>,
     ) -> serde_json::Result<Self> {
         let retention = pipeline.metadata.or_default().retention;
-        let definition = PipelineDefinition::from_parts(pipeline.definition, policy_slugs)?;
+        let definition = PipelineDefinition::from_parts(pipeline.definition, policy_ids)?;
         Ok(Self {
-            slug: pipeline.slug,
+            id: pipeline.id,
+            workspace_id,
             workspace_slug,
             created_by,
             display_name: pipeline.display_name,
@@ -75,9 +80,11 @@ pub type WorkspacePipelinesPage = Page<WorkspacePipeline>;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePipelineSummary {
-    /// URL slug of the pipeline, unique within its workspace.
-    pub slug: Handle,
-    /// Handle of the workspace this pipeline belongs to.
+    /// Unique identifier of the pipeline.
+    pub id: Uuid,
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub workspace_slug: Handle,
     /// Account that created this pipeline.
     pub created_by: AccountRef,
@@ -99,11 +106,13 @@ impl WorkspacePipelineSummary {
     /// its creator.
     pub fn from_model(
         pipeline: model::WorkspacePipeline,
+        workspace_id: Uuid,
         workspace_slug: Handle,
         created_by: AccountRef,
     ) -> Self {
         Self {
-            slug: pipeline.slug,
+            id: pipeline.id,
+            workspace_id,
             workspace_slug,
             created_by,
             display_name: pipeline.display_name,

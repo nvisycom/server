@@ -570,31 +570,31 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/syncs/",
+            "/workspaces/{workspaceId}/syncs/",
             get_with(list_workspace_syncs, list_workspace_syncs_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/connections/{connectionId}/sync/",
+            "/workspaces/{workspaceId}/connections/{connectionId}/sync/",
             post_with(sync_connection, sync_connection_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/connections/{connectionId}/import/",
+            "/workspaces/{workspaceId}/connections/{connectionId}/import/",
             post_with(import_files, import_files_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/connections/{connectionId}/export/",
+            "/workspaces/{workspaceId}/connections/{connectionId}/export/",
             post_with(export_files, export_files_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/connections/{connectionId}/syncs/",
+            "/workspaces/{workspaceId}/connections/{connectionId}/syncs/",
             get_with(list_connection_syncs, list_connection_syncs_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/connections/{connectionId}/syncs/{syncId}/",
+            "/workspaces/{workspaceId}/connections/{connectionId}/syncs/{syncId}/",
             get_with(read_connection_sync, read_connection_sync_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/connections/{connectionId}/syncs/{syncId}/cancel/",
+            "/workspaces/{workspaceId}/connections/{connectionId}/syncs/{syncId}/cancel/",
             post_with(cancel_connection_sync, cancel_connection_sync_docs),
         )
         .with_path_items(|item| item.tag("Connection Syncs"))

@@ -180,7 +180,7 @@ fn unlink_provider_docs(op: TransformOperation) -> TransformOperation {
 /// Returns the authenticated account-identity routes.
 ///
 /// Mounted under the singular `/account/` self-resource (matching `/account/`
-/// for the profile), not the plural `/accounts/{username}/` collection that
+/// for the profile), not the plural `/accounts/{accountId}/` collection that
 /// addresses other accounts — the identity is always the authenticated caller's.
 pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()

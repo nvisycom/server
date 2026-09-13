@@ -7,6 +7,7 @@ use nvisy_postgres::model::{
 use nvisy_postgres::types::{ConnectionId, ConnectionType, Handle, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::{AccountRef, Page};
 
@@ -36,7 +37,9 @@ pub struct WorkspaceSyncSchedule {
 pub struct WorkspaceConnection {
     /// Opaque identifier of the connection.
     pub id: ConnectionId,
-    /// Handle of the workspace this connection belongs to.
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub workspace_slug: Handle,
     /// Account that created this connection.
     pub created_by: AccountRef,
@@ -116,6 +119,7 @@ impl WorkspaceConnection {
     /// Creates a response from a database model and its creator.
     pub fn from_model(
         connection: WorkspaceConnectionModel,
+        workspace_id: Uuid,
         workspace_slug: Handle,
         created_by: AccountRef,
         schedule: Option<WorkspaceConnectionSchedule>,
@@ -128,6 +132,7 @@ impl WorkspaceConnection {
         });
         Self {
             id: ConnectionId::from_uuid(connection.id),
+            workspace_id,
             workspace_slug,
             created_by,
             display_name: connection.display_name,

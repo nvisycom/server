@@ -19,6 +19,9 @@ pub struct ThreadFilter {
     /// Filter by the account that opened the thread.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author_account_id: Option<Uuid>,
+    /// Filter document review threads by their assigned reviewer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignee_account_id: Option<Uuid>,
     /// Filter a workspace thread by open/closed state: `Some(true)` = closed only,
     /// `Some(false)` = open only, `None` = either.
     #[serde(skip_serializing_if = "Option::is_none")]

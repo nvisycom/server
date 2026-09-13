@@ -10,7 +10,7 @@ use nvisy_postgres::model::{NewWorkspacePolicy, WorkspacePolicy, WorkspacePolicy
 use nvisy_postgres::query::{
     PolicyCursor, WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
 };
-use nvisy_postgres::types::{CursorPage, CursorPagination, Handle, PolicyKind, WithAccountRef};
+use nvisy_postgres::types::{CursorPage, CursorPagination, PolicyKind, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, model};
 use uuid::Uuid;
 
@@ -42,10 +42,10 @@ impl WorkspacePolicyService {
     /// Creates a policy from a create request.
     ///
     /// A labels body is content-addressed: it mints — or reuses an identical live
-    /// one — a one-shot policy with a hash-derived slug and name (`created` is
-    /// false on reuse). A template or inline body is a permanent authored policy
-    /// the caller names. The policy, its first version, and the creation event
-    /// commit together.
+    /// one — a one-shot policy with a hash-derived name (`created` is false on
+    /// reuse). A template or inline body is a permanent authored policy the caller
+    /// names. The policy, its first version, and the creation event commit
+    /// together.
     pub async fn create(
         &self,
         origin: event::EventOrigin<'_>,
@@ -61,19 +61,14 @@ impl WorkspacePolicyService {
         }
     }
 
-    /// Creates an authored (template or inline) policy: a new permanent row with a
-    /// caller-supplied slug, its first version, and a creation event, in one
-    /// transaction.
+    /// Creates an authored (template or inline) policy: a new permanent row with
+    /// its first version and a creation event, in one transaction.
     async fn create_authored(
         &self,
         conn: &mut PgConn,
         origin: event::EventOrigin<'_>,
         input: CreatePolicyInput,
     ) -> Result<ResolvedPolicy> {
-        let slug = input.slug.ok_or_else(|| {
-            ErrorKind::BadRequest.with_message("A slug is required for this policy body")
-        })?;
-
         let definition = input.body.into_definition("");
         let display_name = input
             .display_name
@@ -86,7 +81,6 @@ impl WorkspacePolicyService {
         let new_policy = NewWorkspacePolicy {
             workspace_id: origin.workspace_id,
             account_id: origin.account_id,
-            slug,
             display_name,
             description,
             kind: PolicyKind::Authored,
@@ -101,7 +95,6 @@ impl WorkspacePolicyService {
                     origin,
                     event::WorkspaceEvent::PolicyCreated(event::PolicyCreated {
                         policy_id: created.policy.id,
-                        policy_slug: created.policy.slug.clone(),
                     }),
                 )
                 .await?;
@@ -109,7 +102,7 @@ impl WorkspacePolicyService {
             })
             .await?;
 
-        tracing::info!(target: TRACING_TARGET, policy_slug = %created.policy.slug, "Policy created");
+        tracing::info!(target: TRACING_TARGET, policy_id = %created.policy.id, "Policy created");
         Ok(ResolvedPolicy {
             policy: created.policy,
             version: created.version,
@@ -119,8 +112,8 @@ impl WorkspacePolicyService {
 
     /// Creates or reuses a one-shot policy from a labels body, content-addressed by
     /// `content_hash`: an identical live one-shot is reused rather than duplicated,
-    /// and a fresh one is created with a hash-derived slug and name plus a creation
-    /// event, all in one transaction.
+    /// and a fresh one is created with a hash-derived name plus a creation event,
+    /// all in one transaction.
     async fn create_oneshot(
         &self,
         conn: &mut PgConn,
@@ -128,11 +121,6 @@ impl WorkspacePolicyService {
         body: PolicyBodyInput,
         content_hash: Vec<u8>,
     ) -> Result<ResolvedPolicy> {
-        let slug = Handle::parse(oneshot_slug(&content_hash)).map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Failed to generate a one-shot policy slug")
-                .with_context(err.to_string())
-        })?;
         let display_name = oneshot_display_name(&content_hash);
 
         let definition = body.into_definition(&display_name);
@@ -141,7 +129,6 @@ impl WorkspacePolicyService {
         let new_policy = NewWorkspacePolicy {
             workspace_id: origin.workspace_id,
             account_id: origin.account_id,
-            slug,
             display_name,
             description: None,
             kind: PolicyKind::Oneshot,
@@ -159,7 +146,6 @@ impl WorkspacePolicyService {
                         origin,
                         event::WorkspaceEvent::PolicyCreated(event::PolicyCreated {
                             policy_id: resolved.policy.policy.id,
-                            policy_slug: resolved.policy.policy.slug.clone(),
                         }),
                     )
                     .await?;
@@ -169,7 +155,7 @@ impl WorkspacePolicyService {
             .await?;
 
         if resolved.created {
-            tracing::info!(target: TRACING_TARGET, policy_slug = %resolved.policy.policy.slug, "One-shot policy created");
+            tracing::info!(target: TRACING_TARGET, policy_id = %resolved.policy.policy.id, "One-shot policy created");
         }
 
         Ok(ResolvedPolicy {
@@ -193,14 +179,14 @@ impl WorkspacePolicyService {
             .await?)
     }
 
-    /// Finds a policy by slug with its creator and current version, or a NotFound.
+    /// Finds a policy by id with its creator and current version, or a NotFound.
     pub async fn find(
         &self,
         workspace_id: Uuid,
-        policy_slug: &str,
+        policy_id: Uuid,
     ) -> Result<(WithAccountRef<WorkspacePolicy>, WorkspacePolicyVersion)> {
         let mut conn = self.postgres.get_connection().await?;
-        let found = find_policy(&mut conn, workspace_id, policy_slug).await?;
+        let found = find_policy(&mut conn, workspace_id, policy_id).await?;
         let version = current_version(&mut conn, workspace_id, &found.item).await?;
         Ok((found, version))
     }
@@ -215,11 +201,11 @@ impl WorkspacePolicyService {
     pub async fn update(
         &self,
         origin: event::EventOrigin<'_>,
-        policy_slug: &str,
+        policy_id: Uuid,
         input: UpdatePolicyInput,
     ) -> Result<(WithAccountRef<WorkspacePolicy>, WorkspacePolicyVersion)> {
         let mut conn = self.postgres.get_connection().await?;
-        let existing = find_policy(&mut conn, origin.workspace_id, policy_slug)
+        let existing = find_policy(&mut conn, origin.workspace_id, policy_id)
             .await?
             .item;
 
@@ -244,9 +230,6 @@ impl WorkspacePolicyService {
             None => None,
         };
 
-        let policy_id = existing.id;
-        let event_slug = existing.slug.clone();
-
         let account_id = origin.account_id;
         let workspace_id = origin.workspace_id;
         conn.transaction(async |conn| {
@@ -270,10 +253,7 @@ impl WorkspacePolicyService {
             }
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::PolicyUpdated(event::PolicyUpdated {
-                    policy_id,
-                    policy_slug: event_slug,
-                }),
+                event::WorkspaceEvent::PolicyUpdated(event::PolicyUpdated { policy_id }),
             )
             .await?;
             Ok::<(), Error>(())
@@ -281,26 +261,20 @@ impl WorkspacePolicyService {
         .await?;
 
         tracing::info!(target: TRACING_TARGET, "Policy updated");
-        self.find(workspace_id, policy_slug).await
+        self.find(workspace_id, policy_id).await
     }
 
     /// Soft-deletes a policy from its workspace, recording the event atomically.
-    pub async fn delete(&self, origin: event::EventOrigin<'_>, policy_slug: &str) -> Result<()> {
+    pub async fn delete(&self, origin: event::EventOrigin<'_>, policy_id: Uuid) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
-        let existing = find_policy(&mut conn, origin.workspace_id, policy_slug)
-            .await?
-            .item;
-        let policy_id = existing.id;
-        let policy_slug = existing.slug.clone();
+        // Confirm the policy exists in the workspace before deleting.
+        find_policy(&mut conn, origin.workspace_id, policy_id).await?;
 
         conn.transaction(async |conn| {
             conn.delete_workspace_policy(policy_id).await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::PolicyDeleted(event::PolicyDeleted {
-                    policy_id,
-                    policy_slug,
-                }),
+                event::WorkspaceEvent::PolicyDeleted(event::PolicyDeleted { policy_id }),
             )
             .await?;
             Ok::<(), Error>(())
@@ -328,13 +302,13 @@ fn malformed_definition(err: serde_json::Error) -> Error<'static> {
         .with_context(err.to_string())
 }
 
-/// Finds a policy within a workspace by slug, with its creator, or a NotFound.
+/// Finds a policy within a workspace by id, with its creator, or a NotFound.
 async fn find_policy(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    policy_slug: &str,
+    policy_id: Uuid,
 ) -> Result<WithAccountRef<WorkspacePolicy>> {
-    conn.find_policy_in_workspace_by_slug(workspace_id, policy_slug)
+    conn.find_policy_in_workspace_by_id(workspace_id, policy_id)
         .await?
         .ok_or_else(|| Error::not_found("policy"))
 }
@@ -352,16 +326,6 @@ async fn current_version(
     conn.find_policy_version(workspace_id, version_id)
         .await?
         .ok_or_else(|| Error::not_found("policy_version"))
-}
-
-/// The slug for a one-shot policy, e.g. `oneshot-1f0a3c8b9d2e`.
-///
-/// Derived from the content hash, so the same one-shot always maps to the same
-/// slug and dedup reuses its row rather than colliding. The 12-hex prefix of the
-/// hash satisfies the slug format (lowercase alphanumeric with single internal
-/// dashes) and length (3-32).
-fn oneshot_slug(content_hash: &[u8]) -> String {
-    format!("oneshot-{}", hex_prefix(content_hash, 6))
 }
 
 /// The display name for a one-shot policy, e.g. `Quick redaction 1f0a3c8b9d2e`.
@@ -385,7 +349,6 @@ fn hex_prefix(content_hash: &[u8], bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use nvisy_postgres::test_util::TestDatabase;
-    use nvisy_postgres::types::Handle;
 
     use super::*;
     use crate::domain::input::PolicyDraftInput;
@@ -395,14 +358,13 @@ mod tests {
         SecurityContext::default()
     }
 
-    fn authored_request(slug: &str) -> CreatePolicyInput {
+    fn authored_request(name: &str) -> CreatePolicyInput {
         CreatePolicyInput {
             display_name: None,
-            slug: Some(Handle::parse(slug.to_owned()).expect("valid slug")),
             description: None,
             body: PolicyBodyInput::Inline {
                 definition: Box::new(PolicyDraftInput {
-                    name: "Test policy".to_owned(),
+                    name: name.to_owned(),
                     description: None,
                     scopes: Vec::new(),
                     rules: Vec::new(),
@@ -415,7 +377,6 @@ mod tests {
     fn oneshot_request(labels: &[&str]) -> CreatePolicyInput {
         CreatePolicyInput {
             display_name: None,
-            slug: None,
             description: None,
             body: PolicyBodyInput::Labels {
                 labels: labels.iter().map(|l| (*l).to_owned()).collect(),
@@ -487,7 +448,7 @@ mod tests {
         let oneshot = service
             .create(origin(), oneshot_request(&["person_name"]))
             .await?;
-        let slug = oneshot.policy.slug.as_str().to_owned();
+        let policy_id = oneshot.policy.id;
 
         // A label-only edit is rejected: a one-shot is immutable.
         let label_edit = UpdatePolicyInput {
@@ -496,7 +457,7 @@ mod tests {
             definition: None,
         };
         let err = service
-            .update(origin(), &slug, label_edit)
+            .update(origin(), policy_id, label_edit)
             .await
             .expect_err("a one-shot rejects a label edit");
         assert_eq!(err.kind(), ErrorKind::BadRequest);
@@ -514,13 +475,13 @@ mod tests {
             }),
         };
         let err = service
-            .update(origin(), &slug, definition_edit)
+            .update(origin(), policy_id, definition_edit)
             .await
             .expect_err("a one-shot rejects a definition edit");
         assert_eq!(err.kind(), ErrorKind::BadRequest);
 
         // The one-shot is unchanged.
-        let (found, _) = service.find(seeded.workspace_id, &slug).await?;
+        let (found, _) = service.find(seeded.workspace_id, policy_id).await?;
         assert_eq!(found.item.kind, PolicyKind::Oneshot);
         assert!(found.item.content_hash.is_some());
         Ok(())
@@ -538,7 +499,7 @@ mod tests {
             security: &security,
         };
 
-        service
+        let created = service
             .create(origin(), authored_request("editable"))
             .await?;
 
@@ -553,7 +514,7 @@ mod tests {
                 fallback: None,
             }),
         };
-        let (updated, version) = service.update(origin(), "editable", request).await?;
+        let (updated, version) = service.update(origin(), created.policy.id, request).await?;
         assert_eq!(updated.item.kind, PolicyKind::Authored);
         assert_eq!(version.version_number, 2);
         Ok(())

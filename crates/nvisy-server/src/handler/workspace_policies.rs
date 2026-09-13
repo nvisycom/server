@@ -66,7 +66,8 @@ async fn create_policy(
 
     let mut conn = pg_client.get_connection().await?;
     let creator = resolve_account_ref(&mut conn, account_id).await?;
-    let response = WorkspacePolicy::from_model(policy, version, workspace.slug, creator)?;
+    let response =
+        WorkspacePolicy::from_model(policy, version, workspace.id, workspace.slug, creator)?;
 
     // A one-shot body reuses an identical live policy (200) rather than minting a
     // duplicate; everything else creates a new policy (201).
@@ -124,7 +125,12 @@ async fn list_policies(
     // The list carries only metadata; the definition is loaded only by the
     // single-policy endpoint, so a page stays small.
     let page = PoliciesPage::from_cursor_page(page, |wc| {
-        WorkspacePolicySummary::from_model(wc.item, workspace.slug.clone(), wc.account.into())
+        WorkspacePolicySummary::from_model(
+            wc.item,
+            workspace.id,
+            workspace.slug.clone(),
+            wc.account.into(),
+        )
     });
 
     Ok((StatusCode::OK, Json(page)))
@@ -147,7 +153,7 @@ fn list_policies_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %authz.account_id,
         workspace_id = %authz.workspace.id,
-        policy_slug = %path_params.policy_slug,
+        policy_id = %path_params.policy_id,
     )
 )]
 async fn read_policy(
@@ -159,12 +165,15 @@ async fn read_policy(
 
     let workspace = authz.workspace;
 
-    let (found, version) = policies
-        .find(workspace.id, &path_params.policy_slug)
-        .await?;
+    let (found, version) = policies.find(workspace.id, path_params.policy_id).await?;
 
-    let response =
-        WorkspacePolicy::from_model(found.item, version, workspace.slug, found.account.into())?;
+    let response = WorkspacePolicy::from_model(
+        found.item,
+        version,
+        workspace.id,
+        workspace.slug,
+        found.account.into(),
+    )?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace policy read");
     Ok((StatusCode::OK, Json(response)))
@@ -189,7 +198,7 @@ fn read_policy_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %authz.account_id,
         workspace_id = %authz.workspace.id,
-        policy_slug = %path_params.policy_slug,
+        policy_id = %path_params.policy_id,
     )
 )]
 async fn update_policy(
@@ -209,11 +218,16 @@ async fn update_policy(
     };
 
     let (found, version) = policies
-        .update(origin, &path_params.policy_slug, request.into())
+        .update(origin, path_params.policy_id, request.into())
         .await?;
 
-    let response =
-        WorkspacePolicy::from_model(found.item, version, workspace.slug, found.account.into())?;
+    let response = WorkspacePolicy::from_model(
+        found.item,
+        version,
+        workspace.id,
+        workspace.slug,
+        found.account.into(),
+    )?;
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -234,7 +248,7 @@ fn update_policy_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %authz.account_id,
         workspace_id = %authz.workspace.id,
-        policy_slug = %path_params.policy_slug,
+        policy_id = %path_params.policy_id,
     )
 )]
 async fn delete_policy(
@@ -252,7 +266,7 @@ async fn delete_policy(
         security: &security,
     };
 
-    policies.delete(origin, &path_params.policy_slug).await?;
+    policies.delete(origin, path_params.policy_id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -272,12 +286,12 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/policies/",
+            "/workspaces/{workspaceId}/policies/",
             post_with(create_policy, create_policy_docs)
                 .get_with(list_policies, list_policies_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/policies/{policySlug}/",
+            "/workspaces/{workspaceId}/policies/{policyId}/",
             get_with(read_policy, read_policy_docs)
                 .patch_with(update_policy, update_policy_docs)
                 .delete_with(delete_policy, delete_policy_docs),

@@ -123,7 +123,7 @@ async fn list_invites(
     Ok((
         StatusCode::OK,
         Json(WorkspaceInvitesPage::from_cursor_page(page, |invite| {
-            WorkspaceInvite::from_model(invite, workspace.slug.clone())
+            WorkspaceInvite::from_model(invite, workspace.id, workspace.slug.clone())
         })),
     ))
 }
@@ -261,7 +261,11 @@ async fn generate_invite_code(
 
     Ok((
         StatusCode::CREATED,
-        Json(WorkspaceInviteCode::from_invite(&invite, workspace.slug)),
+        Json(WorkspaceInviteCode::from_invite(
+            &invite,
+            workspace.id,
+            workspace.slug,
+        )),
     ))
 }
 
@@ -358,15 +362,15 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/invites/",
+            "/workspaces/{workspaceId}/invites/",
             post_with(send_invite, send_invite_docs).get_with(list_invites, list_invites_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/invites/code/",
+            "/workspaces/{workspaceId}/invites/code/",
             post_with(generate_invite_code, generate_invite_code_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/invites/{inviteId}/",
+            "/workspaces/{workspaceId}/invites/{inviteId}/",
             delete_with(cancel_invite, cancel_invite_docs)
                 .post_with(reply_to_invite, reply_to_invite_docs),
         )

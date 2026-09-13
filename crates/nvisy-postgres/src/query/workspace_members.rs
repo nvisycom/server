@@ -354,6 +354,7 @@ impl WorkspaceMemberRepository for PgConnection {
             Workspace::as_select(),
             WorkspaceMember::as_select(),
             (
+                accounts::id,
                 accounts::username,
                 accounts::display_name,
                 accounts::avatar_url,

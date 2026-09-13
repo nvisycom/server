@@ -5,6 +5,7 @@ use nvisy_postgres::model;
 use nvisy_postgres::types::{Handle, NotificationEvent, WorkspaceRole, WorkspaceSettings};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::{AccountRef, Page};
 
@@ -13,7 +14,9 @@ use super::{AccountRef, Page};
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Workspace {
-    /// URL-safe workspace identifier.
+    /// Unique identifier of the workspace.
+    pub id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub slug: Handle,
     /// Display name of the workspace.
     pub display_name: String,
@@ -47,6 +50,7 @@ impl Workspace {
         hard_max_upload_bytes: u64,
     ) -> Self {
         Self {
+            id: workspace.id,
             slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,
@@ -70,6 +74,7 @@ impl Workspace {
         hard_max_upload_bytes: u64,
     ) -> Self {
         Self {
+            id: workspace.id,
             slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,

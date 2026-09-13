@@ -5,7 +5,7 @@ use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
 use crate::schema::workspace_pipelines;
-use crate::types::{Handle, Json, PipelineMetadata, PipelineStatus};
+use crate::types::{Json, PipelineMetadata, PipelineStatus};
 
 /// Workspace pipeline model representing a workflow definition in the system.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -18,8 +18,6 @@ pub struct WorkspacePipeline {
     pub workspace_id: Uuid,
     /// Reference to the account that created this pipeline.
     pub account_id: Uuid,
-    /// URL-safe pipeline identifier, unique within the workspace.
-    pub slug: Handle,
     /// Pipeline display name.
     pub display_name: String,
     /// Pipeline description.
@@ -48,8 +46,6 @@ pub struct NewWorkspacePipeline {
     pub workspace_id: Uuid,
     /// Account ID (required).
     pub account_id: Uuid,
-    /// URL-safe pipeline identifier, unique within the workspace.
-    pub slug: Handle,
     /// Pipeline display name.
     pub display_name: String,
     /// Pipeline description.
@@ -65,15 +61,13 @@ pub struct NewWorkspacePipeline {
 impl NewWorkspacePipeline {
     /// A minimal draft pipeline for `workspace_id`, for tests.
     ///
-    /// The slug is unique per call (so several test pipelines fit in one
-    /// workspace), the definition is a non-empty placeholder object, and the
-    /// status takes its `draft` database default.
+    /// The definition is a non-empty placeholder object, and the status takes its
+    /// `draft` database default.
     #[cfg(any(feature = "test_util", test))]
     pub fn test(workspace_id: Uuid, account_id: Uuid) -> Self {
         Self {
             workspace_id,
             account_id,
-            slug: Handle::test(),
             display_name: "Test Pipeline".to_owned(),
             description: None,
             status: None,

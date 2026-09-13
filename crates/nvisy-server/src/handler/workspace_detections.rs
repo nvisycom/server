@@ -54,6 +54,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::detections";
 async fn created_response(
     conn: &mut PgConn,
     created: domain::output::CreatedDetection,
+    workspace_id: uuid::Uuid,
     workspace_slug: nvisy_postgres::types::Handle,
 ) -> Result<(StatusCode, Json<WorkspaceDetection>)> {
     let status = if created.created {
@@ -66,7 +67,7 @@ async fn created_response(
         status,
         Json(WorkspaceDetection::from_model(
             created.detection,
-            created.pipeline_slug,
+            workspace_id,
             workspace_slug,
             trigger,
             created.documents,
@@ -84,7 +85,7 @@ async fn created_response(
     fields(
         account_id = %authz.account_id,
         workspace_id = %authz.workspace.id,
-        pipeline_slug = %path_params.pipeline_slug,
+        pipeline_id = %path_params.pipeline_id,
     )
 )]
 async fn create_detection(
@@ -107,14 +108,14 @@ async fn create_detection(
     let created = detections
         .create(
             origin,
-            &path_params.pipeline_slug,
+            path_params.pipeline_id,
             idempotency_key,
             request.into(),
         )
         .await?;
 
     let mut conn = pg_client.get_connection().await?;
-    created_response(&mut conn, created, workspace.slug).await
+    created_response(&mut conn, created, workspace.id, workspace.slug).await
 }
 
 fn create_detection_docs(op: TransformOperation) -> TransformOperation {
@@ -171,7 +172,7 @@ async fn create_adhoc_detection(
         .await?;
 
     let mut conn = pg_client.get_connection().await?;
-    created_response(&mut conn, created, workspace.slug).await
+    created_response(&mut conn, created, workspace.id, workspace.slug).await
 }
 
 fn create_adhoc_detection_docs(op: TransformOperation) -> TransformOperation {
@@ -196,7 +197,7 @@ fn create_adhoc_detection_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %authz.account_id,
         workspace_id = %authz.workspace.id,
-        pipeline_slug = %path_params.pipeline_slug,
+        pipeline_id = %path_params.pipeline_id,
     )
 )]
 async fn list_pipeline_detections(
@@ -212,7 +213,7 @@ async fn list_pipeline_detections(
     let page = detections
         .list_for_pipeline(
             workspace.id,
-            &path_params.pipeline_slug,
+            path_params.pipeline_id,
             pagination.into_cursor(),
             &query.into(),
         )
@@ -221,7 +222,7 @@ async fn list_pipeline_detections(
     let response = WorkspaceDetectionsPage::from_cursor_page(page, |row| {
         WorkspaceDetection::from_model(
             row.detection,
-            row.pipeline_slug,
+            workspace.id,
             workspace.slug.clone(),
             row.account.into(),
             DetectionDocuments {
@@ -274,7 +275,7 @@ async fn list_workspace_detections(
         Json(WorkspaceDetectionsPage::from_cursor_page(page, |row| {
             WorkspaceDetection::from_model(
                 row.detection,
-                row.pipeline_slug,
+                workspace.id,
                 workspace.slug.clone(),
                 row.account.into(),
                 DetectionDocuments {
@@ -316,7 +317,7 @@ async fn get_detection(
     tracing::debug!(target: TRACING_TARGET, "Getting detection");
 
     let workspace = authz.workspace;
-    let (detection, pipeline_slug, trigger_account_id, documents) = detections
+    let (detection, trigger_account_id, documents) = detections
         .get(workspace.id, path_params.detection_id.as_uuid())
         .await?;
 
@@ -329,7 +330,7 @@ async fn get_detection(
         StatusCode::OK,
         Json(WorkspaceDetection::from_model(
             detection,
-            pipeline_slug,
+            workspace.id,
             workspace.slug,
             trigger,
             documents,
@@ -744,7 +745,7 @@ async fn redact_detection(
                 },
                 event::WorkspaceEvent::RedactionCreated(event::RedactionCreated {
                     detection_id: inputs.detection.id,
-                    pipeline_slug: inputs.pipeline.as_ref().map(|p| p.slug.clone()),
+                    pipeline_id: inputs.pipeline.as_ref().map(|p| p.id),
                     redaction_id: redaction.id,
                     input_document_name: Some(inputs.document.display_name.clone()),
                     notify: inputs.detection.account_id,
@@ -809,6 +810,7 @@ async fn redact_detection(
         StatusCode::CREATED,
         Json(WorkspaceRedactionResult::from_model(
             redaction,
+            workspace.id,
             workspace.slug,
             requested_by,
         )),
@@ -841,28 +843,28 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/pipelines/detections/",
+            "/workspaces/{workspaceId}/pipelines/detections/",
             get_with(list_workspace_detections, list_workspace_detections_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/pipelines/{pipelineSlug}/detections/",
+            "/workspaces/{workspaceId}/pipelines/{pipelineId}/detections/",
             post_with(create_detection, create_detection_docs)
                 .get_with(list_pipeline_detections, list_pipeline_detections_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/detections/",
+            "/workspaces/{workspaceId}/detections/",
             post_with(create_adhoc_detection, create_adhoc_detection_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/detections/{detectionId}/",
+            "/workspaces/{workspaceId}/detections/{detectionId}/",
             get_with(get_detection, get_detection_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/detections/{detectionId}/events/",
+            "/workspaces/{workspaceId}/detections/{detectionId}/events/",
             get_with(stream_detection_events, stream_detection_events_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/detections/{detectionId}/redactions/",
+            "/workspaces/{workspaceId}/detections/{detectionId}/redactions/",
             post_with(redact_detection, redact_detection_docs),
         )
         .with_path_items(|item| item.tag("WorkspaceDetections"))

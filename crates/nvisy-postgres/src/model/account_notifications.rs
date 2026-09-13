@@ -49,11 +49,11 @@ impl NewAccountNotification {
     /// non-expiring, for tests.
     #[cfg(any(feature = "test_util", test))]
     pub fn test(account_id: Uuid) -> Self {
-        use crate::types::{Handle, MemberJoinedParams, NotificationPayload};
+        use crate::types::{MemberJoinedParams, NotificationPayload};
 
         let payload = NotificationPayload::MemberJoined(MemberJoinedParams {
-            workspace_slug: Handle::test(),
-            member_username: Handle::test(),
+            workspace_id: Uuid::now_v7(),
+            member_id: Uuid::now_v7(),
         });
         let (notify_type, params) = payload.into_stored();
         Self {

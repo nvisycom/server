@@ -69,6 +69,7 @@ async fn create_provider(
         StatusCode::CREATED,
         Json(WorkspaceProvider::from_model(
             created.item,
+            workspace.id,
             workspace.slug,
             created.account.into(),
         )),
@@ -115,7 +116,12 @@ async fn list_providers(
     Ok((
         StatusCode::OK,
         Json(WorkspaceProvidersPage::from_cursor_page(page, |wp| {
-            WorkspaceProvider::from_model(wp.item, workspace.slug.clone(), wp.account.into())
+            WorkspaceProvider::from_model(
+                wp.item,
+                workspace.id,
+                workspace.slug.clone(),
+                wp.account.into(),
+            )
         })),
     ))
 }
@@ -159,6 +165,7 @@ async fn read_provider(
         StatusCode::OK,
         Json(WorkspaceProvider::from_model(
             found.item,
+            workspace.id,
             workspace.slug,
             found.account.into(),
         )),
@@ -211,6 +218,7 @@ async fn update_provider(
         StatusCode::OK,
         Json(WorkspaceProvider::from_model(
             found.item,
+            workspace.id,
             workspace.slug,
             found.account.into(),
         )),
@@ -342,18 +350,18 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/providers/",
+            "/workspaces/{workspaceId}/providers/",
             post_with(create_provider, create_provider_docs)
                 .get_with(list_providers, list_providers_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/providers/{providerId}/",
+            "/workspaces/{workspaceId}/providers/{providerId}/",
             get_with(read_provider, read_provider_docs)
                 .patch_with(update_provider, update_provider_docs)
                 .delete_with(delete_provider, delete_provider_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/providers/{providerId}/verify/",
+            "/workspaces/{workspaceId}/providers/{providerId}/verify/",
             post_with(verify_provider, verify_provider_docs),
         )
         .with_path_items(|item| item.tag("Providers"))

@@ -14,8 +14,8 @@ use nvisy_postgres::model::{
     UpdateWorkspaceThreadComment, WorkspaceThread, WorkspaceThreadComment,
 };
 use nvisy_postgres::query::{
-    AccountRepository, AssistantJobOutboxRepository, WorkspaceDocumentRepository,
-    WorkspaceMemberRepository, WorkspaceThreadCommentRepository, WorkspaceThreadRepository,
+    AssistantJobOutboxRepository, WorkspaceDocumentRepository, WorkspaceMemberRepository,
+    WorkspaceThreadCommentRepository, WorkspaceThreadRepository,
 };
 use nvisy_postgres::types::Handle;
 use nvisy_postgres::{ASSISTANT_ACCOUNT_ID, ASSISTANT_HANDLE, AsyncConnection, PgClient, PgConn};
@@ -66,7 +66,6 @@ impl WorkspaceThreadService {
         let author_id = origin.account_id;
 
         let mentions = resolve_mentions(&mut conn, workspace_id, &input.body, author_id).await?;
-        let author_username = account_username(&mut conn, author_id).await?;
 
         let new_thread = NewWorkspaceThread {
             workspace_id,
@@ -85,7 +84,7 @@ impl WorkspaceThreadService {
                         thread_id: thread.id,
                         opening_comment_id: opening.id,
                         document_id: thread.document_id,
-                        author_username: author_username.clone(),
+                        author_id,
                         mentioned: mentions.recipients,
                     }),
                 )
@@ -276,9 +275,9 @@ impl WorkspaceThreadService {
     }
 
     /// Assigns or unassigns a document's review. A `null` assignee clears the
-    /// current one; a set assignee must be a workspace member (else a NotFound),
-    /// resolved to its handle for the event. Raises the matching review event,
-    /// notifying the assignee unless they assigned themselves.
+    /// current one; a set assignee must be a workspace member (else a NotFound).
+    /// Raises the matching review event, notifying the assignee unless they
+    /// assigned themselves.
     pub async fn assign_review(
         &self,
         origin: event::EventOrigin<'_>,
@@ -295,34 +294,30 @@ impl WorkspaceThreadService {
             .await?
             .ok_or_else(|| Error::not_found("workspace_thread"))?;
 
-        // A set assignee must be a workspace member; resolving through membership
-        // also keeps a non-member's identity from being exposed across workspaces.
-        let assignee_username = match assignee {
-            Some(assignee) => Some(
-                conn.find_workspace_member_with_account(origin.workspace_id, assignee)
-                    .await?
-                    .map(|(_, account)| account.username)
-                    .ok_or_else(|| Error::not_found("account"))?,
-            ),
-            None => None,
-        };
+        // A set assignee must be a workspace member; the membership check keeps a
+        // non-member from being assigned across workspaces.
+        if let Some(assignee) = assignee {
+            conn.find_workspace_member_with_account(origin.workspace_id, assignee)
+                .await?
+                .ok_or_else(|| Error::not_found("account"))?;
+        }
 
         let actor_id = origin.account_id;
         let updated = conn
             .transaction(async |conn| {
                 let updated = conn.assign_review(thread.id, assignee, actor_id).await?;
-                let event = match (assignee, assignee_username) {
-                    (Some(assignee), Some(username)) => {
+                let event = match assignee {
+                    Some(assignee) => {
                         event::WorkspaceEvent::ReviewAssigned(event::ReviewAssigned {
                             thread_id: thread.id,
                             document_id: document.id,
                             document_name: document.display_name.clone(),
-                            assignee_username: username,
+                            assignee_id: assignee,
                             // The reviewer is notified unless they assigned themselves.
                             notify: (assignee != actor_id).then_some(assignee),
                         })
                     }
-                    _ => event::WorkspaceEvent::ReviewUnassigned(event::ReviewUnassigned {
+                    None => event::WorkspaceEvent::ReviewUnassigned(event::ReviewUnassigned {
                         thread_id: thread.id,
                         document_id: document.id,
                         document_name: Some(document.display_name.clone()),
@@ -354,7 +349,6 @@ impl WorkspaceThreadService {
         // The thread must exist in the workspace (and be live).
         let thread = find_thread(&mut conn, workspace_id, thread_id).await?;
         let mentions = resolve_mentions(&mut conn, workspace_id, &body, author_id).await?;
-        let author_username = account_username(&mut conn, author_id).await?;
 
         let (comment, queued_assistant) = conn
             .transaction(async |conn| {
@@ -386,7 +380,7 @@ impl WorkspaceThreadService {
                         comment_id: comment.id,
                         thread_id: thread.id,
                         document_id: thread.document_id,
-                        author_username: author_username.clone(),
+                        author_id,
                         mentioned: mentions.recipients,
                     }),
                 )
@@ -567,14 +561,6 @@ async fn enqueue_assistant_if_addressed(
     })
     .await?;
     Ok(true)
-}
-
-/// The username of an account by id, or a NotFound.
-async fn account_username(conn: &mut PgConn, account_id: Uuid) -> Result<Handle> {
-    conn.find_account_by_id(account_id)
-        .await?
-        .map(|account| account.username)
-        .ok_or_else(|| Error::not_found("account"))
 }
 
 /// Finds a live thread in the workspace or returns a 404.

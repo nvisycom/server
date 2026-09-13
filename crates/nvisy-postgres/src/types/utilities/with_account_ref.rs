@@ -1,18 +1,21 @@
 //! Pairing a row with a public reference to its associated account.
 
 use diesel::Queryable;
+use uuid::Uuid;
 
 use crate::types::Handle;
 
 /// A public reference to an account, joined alongside a resource.
 ///
-/// Loads directly from a `(username, display_name, avatar_url)` column group, so
-/// a joined lookup selects `(Model::as_select(), AccountRefRow::columns())` and
-/// receives a named `AccountRefRow` rather than a positional tuple.
+/// Loads directly from an `(id, username, display_name, avatar_url)` column
+/// group, so a joined lookup selects `(Model::as_select(), AccountRefRow::columns())`
+/// and receives a named `AccountRefRow` rather than a positional tuple.
 #[derive(Debug, Clone, PartialEq, Queryable)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct AccountRefRow {
-    /// Handle of the account.
+    /// Immutable id of the account.
+    pub id: Uuid,
+    /// Handle of the account (display).
     pub username: Handle,
     /// Human-readable display name, when set.
     pub display_name: Option<String>,

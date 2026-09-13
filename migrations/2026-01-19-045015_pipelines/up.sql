@@ -23,13 +23,6 @@ CREATE TABLE workspace_pipelines (
     -- Composite key target for workspace-scoped foreign keys (join tables).
     CONSTRAINT workspace_pipelines_workspace_id_id_key UNIQUE (workspace_id, id),
 
-    -- URL identity, unique within the workspace (among live pipelines; enforced
-    -- by a partial index below so a slug frees up after soft deletion): lowercase
-    -- alphanumeric with single internal dashes, 3-32 characters.
-    slug            TEXT             NOT NULL,
-    CONSTRAINT workspace_pipelines_slug_length CHECK (length(slug) BETWEEN 3 AND 32),
-    CONSTRAINT workspace_pipelines_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
-
     -- Core attributes
     display_name    TEXT             NOT NULL,
     CONSTRAINT workspace_pipelines_display_name_length CHECK (length(trim(display_name)) BETWEEN 2 AND 128),
@@ -59,11 +52,6 @@ CREATE TABLE workspace_pipelines (
 -- Maintain updated_at on every row modification.
 SELECT setup_updated_at('workspace_pipelines');
 
--- One live pipeline per slug within a workspace (slug frees up after deletion).
-CREATE UNIQUE INDEX workspace_pipelines_slug_unique_idx
-    ON workspace_pipelines (workspace_id, slug)
-    WHERE deleted_at IS NULL;
-
 -- Live pipelines of a workspace, newest first (the pipeline list).
 CREATE INDEX workspace_pipelines_workspace_idx
     ON workspace_pipelines (workspace_id, created_at DESC)
@@ -88,7 +76,6 @@ COMMENT ON TABLE workspace_pipelines IS 'Workspace-scoped redaction pipeline def
 COMMENT ON COLUMN workspace_pipelines.id IS 'Unique pipeline identifier';
 COMMENT ON COLUMN workspace_pipelines.workspace_id IS 'Workspace this pipeline belongs to';
 COMMENT ON COLUMN workspace_pipelines.account_id IS 'Account that created the pipeline';
-COMMENT ON COLUMN workspace_pipelines.slug IS 'URL identity, unique among live pipelines in the workspace';
 COMMENT ON COLUMN workspace_pipelines.display_name IS 'Pipeline display name (2-128 chars)';
 COMMENT ON COLUMN workspace_pipelines.description IS 'Pipeline description (up to 500 chars)';
 COMMENT ON COLUMN workspace_pipelines.status IS 'Pipeline lifecycle status';

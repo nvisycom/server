@@ -37,14 +37,14 @@ pub trait WorkspacePipelineRepository {
         new_pipeline: NewWorkspacePipeline,
     ) -> impl Future<Output = Result<WorkspacePipeline>> + Send;
 
-    /// Finds a pipeline by slug within a specific workspace, with the handle and
+    /// Finds a pipeline by id within a specific workspace, with the handle and
     /// avatar of the account that created it.
     ///
     /// Excludes soft-deleted pipelines.
-    fn find_pipeline_in_workspace_by_slug(
+    fn find_pipeline_in_workspace_by_id(
         &mut self,
         workspace_id: Uuid,
-        slug: &str,
+        pipeline_id: Uuid,
     ) -> impl Future<Output = Result<Option<WithAccountRef<WorkspacePipeline>>>> + Send;
 
     /// Lists all pipelines in a workspace with cursor pagination, each paired
@@ -88,10 +88,10 @@ impl WorkspacePipelineRepository for PgConnection {
         Ok(pipeline)
     }
 
-    async fn find_pipeline_in_workspace_by_slug(
+    async fn find_pipeline_in_workspace_by_id(
         &mut self,
         workspace_id: Uuid,
-        slug: &str,
+        pipeline_id: Uuid,
     ) -> Result<Option<WithAccountRef<WorkspacePipeline>>> {
         use schema::workspace_pipelines::dsl;
         use schema::{accounts, workspace_pipelines};
@@ -99,11 +99,12 @@ impl WorkspacePipelineRepository for PgConnection {
         let row = workspace_pipelines::table
             .inner_join(accounts::table)
             .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::slug.eq(slug))
+            .filter(dsl::id.eq(pipeline_id))
             .filter(dsl::deleted_at.is_null())
             .select((
                 WorkspacePipeline::as_select(),
                 (
+                    accounts::id,
                     accounts::username,
                     accounts::display_name,
                     accounts::avatar_url,
@@ -174,6 +175,7 @@ impl WorkspacePipelineRepository for PgConnection {
         .select((
             WorkspacePipeline::as_select(),
             (
+                accounts::id,
                 accounts::username,
                 accounts::display_name,
                 accounts::avatar_url,
@@ -254,17 +256,16 @@ mod tests {
                 seeded.account_id,
             ))
             .await?;
-        let slug = pipeline.slug.as_str().to_owned();
 
-        // Found by slug within its workspace, with the creator handle.
+        // Found by id within its workspace, with the creator handle.
         let found = conn
-            .find_pipeline_in_workspace_by_slug(seeded.workspace_id, &slug)
+            .find_pipeline_in_workspace_by_id(seeded.workspace_id, pipeline.id)
             .await?;
         assert_eq!(found.map(|p| p.item.id), Some(pipeline.id));
 
         // Not found in another workspace.
         assert!(
-            conn.find_pipeline_in_workspace_by_slug(Uuid::now_v7(), &slug)
+            conn.find_pipeline_in_workspace_by_id(Uuid::now_v7(), pipeline.id)
                 .await?
                 .is_none()
         );
@@ -281,10 +282,10 @@ mod tests {
             .await?;
         assert_eq!(updated.status, PipelineStatus::Enabled);
 
-        // Soft delete hides it from the by-slug lookup.
+        // Soft delete hides it from the by-id lookup.
         conn.delete_workspace_pipeline(pipeline.id).await?;
         assert!(
-            conn.find_pipeline_in_workspace_by_slug(seeded.workspace_id, &slug)
+            conn.find_pipeline_in_workspace_by_id(seeded.workspace_id, pipeline.id)
                 .await?
                 .is_none()
         );

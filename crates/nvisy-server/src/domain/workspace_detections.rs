@@ -22,9 +22,7 @@ use nvisy_postgres::query::{
     WorkspaceDocumentRepository, WorkspacePipelineRepository, WorkspacePolicyRepository,
     WorkspacePolicyVersionRepository, WorkspaceThreadRepository,
 };
-use nvisy_postgres::types::{
-    CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Handle, Json,
-};
+use nvisy_postgres::types::{CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Json};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
@@ -71,7 +69,7 @@ impl WorkspaceDetectionService {
     pub async fn create(
         &self,
         origin: event::EventOrigin<'_>,
-        pipeline_slug: &str,
+        pipeline_id: Uuid,
         idempotency_key: Option<String>,
         input: CreateDetectionInput,
     ) -> Result<CreatedDetection> {
@@ -93,7 +91,7 @@ impl WorkspaceDetectionService {
             return self.replay(&mut conn, workspace_id, existing).await;
         }
 
-        let pipeline = find_pipeline(&mut conn, workspace_id, pipeline_slug).await?;
+        let pipeline = find_pipeline(&mut conn, workspace_id, pipeline_id).await?;
 
         // Only an enabled pipeline runs: a draft (still being configured) or a
         // disabled (paused) pipeline is rejected.
@@ -155,7 +153,7 @@ impl WorkspaceDetectionService {
                 workspace_id,
                 document.id,
                 new_detection,
-                Some(pipeline.slug.clone()),
+                Some(pipeline.id),
                 input.scope,
                 Vec::new(),
             )
@@ -167,7 +165,6 @@ impl WorkspaceDetectionService {
         Ok(CreatedDetection {
             trigger_account_id: detection_row.account_id,
             detection: detection_row,
-            pipeline_slug: Some(pipeline.slug),
             documents: DetectionDocuments {
                 input: Some(document.display_name),
             },
@@ -206,10 +203,10 @@ impl WorkspaceDetectionService {
             .ok_or_else(|| Error::not_found("document"))?;
 
         // Every named policy must resolve to a live policy (any kind) in the
-        // workspace, so an unknown slug is a 404 now rather than a worker failure.
-        for slug in &input.policy_slugs {
+        // workspace, so an unknown id is a 404 now rather than a worker failure.
+        for policy_id in &input.policy_ids {
             if conn
-                .find_policy_in_workspace_by_slug(workspace_id, slug.as_str())
+                .find_policy_in_workspace_by_id(workspace_id, *policy_id)
                 .await?
                 .is_none()
             {
@@ -238,7 +235,7 @@ impl WorkspaceDetectionService {
                 new_detection,
                 None,
                 input.scope,
-                input.policy_slugs,
+                input.policy_ids,
             )
             .await?;
 
@@ -248,7 +245,6 @@ impl WorkspaceDetectionService {
         Ok(CreatedDetection {
             trigger_account_id: origin.account_id,
             detection: detection_row,
-            pipeline_slug: None,
             documents: DetectionDocuments {
                 input: Some(document.display_name),
             },
@@ -257,28 +253,20 @@ impl WorkspaceDetectionService {
     }
 
     /// Builds the replay response for an existing detection matched by
-    /// idempotency key, reporting its own live pipeline's slug (`None` for an
-    /// ad-hoc detection, or one whose pipeline was deleted).
+    /// idempotency key. The owning pipeline is named by the detection's own
+    /// `pipeline_id` (`None` for an ad-hoc detection).
     async fn replay(
         &self,
         conn: &mut PgConn,
         workspace_id: Uuid,
         existing: WorkspaceDetectionModel,
     ) -> Result<CreatedDetection> {
-        let pipeline_slug = match conn
-            .find_workspace_detection_by_id(workspace_id, existing.id)
-            .await?
-        {
-            Some((_, pipeline)) => pipeline.map(|pipeline| pipeline.slug),
-            None => None,
-        };
         let documents = conn
             .detection_document_names(workspace_id, &existing)
             .await?;
         Ok(CreatedDetection {
             trigger_account_id: existing.account_id,
             detection: existing,
-            pipeline_slug,
             documents,
             created: false,
         })
@@ -288,12 +276,12 @@ impl WorkspaceDetectionService {
     pub async fn list_for_pipeline(
         &self,
         workspace_id: Uuid,
-        pipeline_slug: &str,
+        pipeline_id: Uuid,
         pagination: CursorPagination<DetectionCursor>,
         filter: &DetectionFilter,
     ) -> Result<CursorPage<DetectionListRow>> {
         let mut conn = self.postgres.get_connection().await?;
-        let pipeline = find_pipeline(&mut conn, workspace_id, pipeline_slug).await?;
+        let pipeline = find_pipeline(&mut conn, workspace_id, pipeline_id).await?;
         Ok(conn
             .cursor_list_pipeline_detections(pipeline.id, pagination, filter)
             .await?)
@@ -313,21 +301,16 @@ impl WorkspaceDetectionService {
             .await?)
     }
 
-    /// Finds a detection by id within a workspace, with its owning pipeline (if
-    /// any), the triggering account, and its input document name — the context a
-    /// single-detection response renders from.
+    /// Finds a detection by id within a workspace, with the triggering account and
+    /// its input document name — the context a single-detection response renders
+    /// from. The owning pipeline is named by the detection's own `pipeline_id`.
     pub async fn get(
         &self,
         workspace_id: Uuid,
         detection_id: Uuid,
-    ) -> Result<(
-        WorkspaceDetectionModel,
-        Option<Handle>,
-        Uuid,
-        DetectionDocuments,
-    )> {
+    ) -> Result<(WorkspaceDetectionModel, Uuid, DetectionDocuments)> {
         let mut conn = self.postgres.get_connection().await?;
-        let (detection, pipeline) = conn
+        let (detection, _pipeline) = conn
             .find_workspace_detection_by_id(workspace_id, detection_id)
             .await?
             .ok_or_else(|| Error::not_found("detection"))?;
@@ -335,12 +318,7 @@ impl WorkspaceDetectionService {
         let documents = conn
             .detection_document_names(workspace_id, &detection)
             .await?;
-        Ok((
-            detection,
-            pipeline.map(|p| p.slug),
-            trigger_account_id,
-            documents,
-        ))
+        Ok((detection, trigger_account_id, documents))
     }
 
     /// Finds a detection and its owning pipeline (if any) within a workspace, for a
@@ -401,9 +379,9 @@ impl WorkspaceDetectionService {
         workspace_id: Uuid,
         document_id: Uuid,
         new_detection: NewWorkspaceDetection,
-        pipeline_slug: Option<Handle>,
+        pipeline_id: Option<Uuid>,
         scope: Option<DocumentContext>,
-        policy_slugs: Vec<Handle>,
+        policy_ids: Vec<Uuid>,
     ) -> Result<WorkspaceDetectionModel> {
         let account_id = origin.account_id;
         conn.transaction(async |conn| {
@@ -412,7 +390,7 @@ impl WorkspaceDetectionService {
                 origin,
                 event::WorkspaceEvent::DetectionStarted(event::DetectionStarted {
                     detection_id: detection_row.id,
-                    pipeline_slug,
+                    pipeline_id,
                 }),
             )
             .await?;
@@ -429,7 +407,7 @@ impl WorkspaceDetectionService {
                 workspace_id,
                 detection_id: detection_row.id,
                 scope,
-                policy_slugs,
+                policy_ids,
             };
             conn.insert_detection_job(NewWorkspaceDetectionJob {
                 detection_id: detection_row.id,
@@ -469,13 +447,13 @@ fn parse_definition(version_id: Uuid, definition: serde_json::Value) -> Result<P
     })
 }
 
-/// Finds a pipeline within a workspace by slug or returns NotFound.
+/// Finds a pipeline within a workspace by id or returns NotFound.
 async fn find_pipeline(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    pipeline_slug: &str,
+    pipeline_id: Uuid,
 ) -> Result<WorkspacePipeline> {
-    conn.find_pipeline_in_workspace_by_slug(workspace_id, pipeline_slug)
+    conn.find_pipeline_in_workspace_by_id(workspace_id, pipeline_id)
         .await?
         .map(|wc| wc.item)
         .ok_or_else(|| Error::not_found("pipeline"))

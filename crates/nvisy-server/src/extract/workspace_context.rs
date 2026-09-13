@@ -1,9 +1,9 @@
 //! Workspace resolution extractor.
 //!
-//! Resolves the `{workspaceSlug}` path segment to the addressed [`Workspace`],
-//! so handlers receive a validated workspace (and its `id`) without repeating
-//! the lookup. The slug is the workspace's public URL identity; its `id`
-//! remains the internal key used for authorization and scoped queries.
+//! Resolves the `{workspaceId}` path segment to the addressed [`Workspace`], so
+//! handlers receive a validated workspace without repeating the lookup. The `id`
+//! is the workspace's public URL identity and the internal key used for
+//! authorization and scoped queries; the slug is a display-only name.
 
 use aide::OperationInput;
 use aide::generate::GenContext;
@@ -16,16 +16,16 @@ use nvisy_postgres::model::Workspace;
 use nvisy_postgres::query::WorkspaceRepository;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use uuid::Uuid;
 
 use crate::extract::Path;
 use crate::response::{Error, ErrorKind};
 
-/// The workspace addressed by the `{workspaceSlug}` path segment.
+/// The workspace addressed by the `{workspaceId}` path segment.
 ///
-/// Extracting this resolves the slug to a live, non-deleted [`Workspace`]. A
-/// slug that matches no workspace rejects with `404 Not Found` — the same
-/// response an unknown resource id produces, so the slug cannot be used to
-/// probe which workspaces exist beyond what the caller can already reach.
+/// Extracting this resolves the id to a live, non-deleted [`Workspace`]. An id
+/// that matches no workspace rejects with `404 Not Found` — the same response
+/// any unknown resource id produces.
 ///
 /// The resolved [`Workspace::id`] is the value handlers pass to
 /// `authorize_workspace` and the workspace-scoped repository methods.
@@ -33,13 +33,13 @@ use crate::response::{Error, ErrorKind};
 #[derive(Debug, Clone)]
 pub struct WorkspaceContext(pub Workspace);
 
-/// The `{workspaceSlug}` path segment. Named to match the OpenAPI parameter and
-/// the route definition.
+/// The `{workspaceId}` path segment. Named to match the OpenAPI parameter and the
+/// route definition.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-struct SlugParam {
-    /// URL-safe workspace identifier.
-    workspace_slug: String,
+struct IdParam {
+    /// Workspace identifier.
+    workspace_id: Uuid,
 }
 
 impl<S> FromRequestParts<S> for WorkspaceContext
@@ -50,7 +50,7 @@ where
     type Rejection = Error<'static>;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let Path(SlugParam { workspace_slug }) = parts.extract::<Path<SlugParam>>().await?;
+        let Path(IdParam { workspace_id }) = parts.extract::<Path<IdParam>>().await?;
 
         let pg_client = PgClient::from_ref(state);
         let mut conn = pg_client.get_connection().await.map_err(|error| {
@@ -61,9 +61,8 @@ where
         })?;
 
         let workspace = conn
-            .find_workspace_by_slug(&workspace_slug)
+            .find_workspace_by_id(workspace_id)
             .await?
-            .map(|wc| wc.item)
             .ok_or_else(|| {
                 ErrorKind::NotFound
                     .with_message("Workspace not found")
@@ -76,13 +75,13 @@ where
 
 impl OperationInput for WorkspaceContext {
     fn operation_input(ctx: &mut GenContext, operation: &mut Operation) {
-        Path::<SlugParam>::operation_input(ctx, operation);
+        Path::<IdParam>::operation_input(ctx, operation);
     }
 
     fn inferred_early_responses(
         ctx: &mut GenContext,
         operation: &mut Operation,
     ) -> Vec<(Option<aide::openapi::StatusCode>, Response)> {
-        Path::<SlugParam>::inferred_early_responses(ctx, operation)
+        Path::<IdParam>::inferred_early_responses(ctx, operation)
     }
 }

@@ -26,7 +26,9 @@ pub struct WorkspaceRedactionResult {
     pub id: RedactionId,
     /// The detection this redaction was produced from.
     pub detection_id: DetectionId,
-    /// Handle of the workspace this redaction belongs to.
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub workspace_slug: Handle,
     /// Redacted output document this redaction produced. `None` only if the file
     /// was removed (e.g. by retention).
@@ -42,16 +44,18 @@ pub struct WorkspaceRedactionResult {
 pub type WorkspaceRedactionsPage = Page<WorkspaceRedactionResult>;
 
 impl WorkspaceRedactionResult {
-    /// Creates a redaction response from the database model, the owning
-    /// workspace slug, and the requesting account.
+    /// Creates a redaction response from the database model, the owning workspace
+    /// id and slug, and the requesting account.
     pub fn from_model(
         redaction: RedactionModel,
+        workspace_id: Uuid,
         workspace_slug: Handle,
         requested_by: AccountRef,
     ) -> Self {
         Self {
             id: RedactionId::from_uuid(redaction.id),
             detection_id: DetectionId::from_uuid(redaction.detection_id),
+            workspace_id,
             workspace_slug,
             output_document_id: redaction.output_document_id,
             requested_by,

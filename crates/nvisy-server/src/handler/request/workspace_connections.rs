@@ -14,7 +14,7 @@ use crate::service::ConnectionConfig;
 
 /// Path parameters for connection operations.
 ///
-/// The workspace is resolved separately from the `{workspaceSlug}` segment by
+/// The workspace is resolved separately from the `{workspaceId}` segment by
 /// the [`WorkspaceContext`] extractor.
 ///
 /// [`WorkspaceContext`]: crate::extract::WorkspaceContext

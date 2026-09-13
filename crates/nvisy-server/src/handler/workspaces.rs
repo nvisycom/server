@@ -131,18 +131,15 @@ fn list_workspaces_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn read_workspace(
-    State(workspaces): State<domain::WorkspaceService>,
+    State(pg_client): State<PgClient>,
     State(upload): State<UploadConfig>,
     authz: Authorized<markers::ViewWorkspace>,
 ) -> Result<(StatusCode, Json<Workspace>)> {
     let workspace = authz.workspace;
     let member = authz.member;
 
-    let creator = workspaces
-        .find_with_creator(workspace.slug.as_str())
-        .await?
-        .account
-        .into();
+    let mut conn = pg_client.get_connection().await?;
+    let creator = resolve_account_ref(&mut conn, workspace.created_by).await?;
 
     let hard = upload.max_file_bytes();
     let response = Workspace::from_model_with_membership(workspace, member, creator, hard);
@@ -169,6 +166,7 @@ fn read_workspace_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn update_workspace(
+    State(pg_client): State<PgClient>,
     State(workspaces): State<domain::WorkspaceService>,
     State(upload): State<UploadConfig>,
     authz: Authorized<markers::UpdateWorkspace>,
@@ -193,11 +191,8 @@ async fn update_workspace(
         )
         .await?;
 
-    let creator = workspaces
-        .find_with_creator(updated.slug.as_str())
-        .await?
-        .account
-        .into();
+    let mut conn = pg_client.get_connection().await?;
+    let creator = resolve_account_ref(&mut conn, updated.created_by).await?;
 
     let hard = upload.max_file_bytes();
     let response = Workspace::from_model_with_membership(updated, member, creator, hard);
@@ -238,14 +233,11 @@ async fn delete_workspace(
     let workspace = authz.workspace;
 
     workspaces
-        .delete(
-            EventOrigin {
-                workspace_id: workspace.id,
-                account_id,
-                security: &security,
-            },
-            &workspace.slug,
-        )
+        .delete(EventOrigin {
+            workspace_id: workspace.id,
+            account_id,
+            security: &security,
+        })
         .await?;
 
     Ok(StatusCode::OK)
@@ -392,19 +384,19 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .get_with(list_workspaces, list_workspaces_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/",
+            "/workspaces/{workspaceId}/",
             get_with(read_workspace, read_workspace_docs)
                 .patch_with(update_workspace, update_workspace_docs)
                 .delete_with(delete_workspace, delete_workspace_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/avatar/",
+            "/workspaces/{workspaceId}/avatar/",
             put_with(upload_workspace_avatar, upload_workspace_avatar_docs)
                 .layer(DefaultBodyLimit::max(MAX_AVATAR_UPLOAD_BYTES))
                 .delete_with(delete_workspace_avatar, delete_workspace_avatar_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/notifications/",
+            "/workspaces/{workspaceId}/notifications/",
             get_with(get_notification_settings, get_notification_settings_docs).patch_with(
                 update_notification_settings,
                 update_notification_settings_docs,

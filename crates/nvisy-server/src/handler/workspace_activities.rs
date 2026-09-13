@@ -25,7 +25,7 @@ use crate::handler::request::{
     WorkspaceActivityFilterQuery,
 };
 use crate::handler::response::{WorkspaceActivitiesPage, WorkspaceActivity};
-use crate::handler::utility::{ActorFilter, DownloadDocs, resolve_actor};
+use crate::handler::utility::DownloadDocs;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, attachment_headers};
 
 /// Tracing target for activity export operations.
@@ -122,26 +122,21 @@ async fn list_activities(
     let workspace = authz.workspace;
     let mut conn = pg_client.get_connection().await?;
 
-    let actor = resolve_actor(&mut conn, filter_query.actor.as_ref()).await?;
-
-    // Build the filter unconditionally so an invalid date window is rejected (400)
-    // regardless of the actor; only then does an actor matching no account
-    // short-circuit to an empty page (rather than an unfiltered one).
-    let actor_id = match actor {
-        ActorFilter::Any | ActorFilter::Unknown => None,
-        ActorFilter::Account(id) => Some(id),
-    };
-    let filter = filter_query.to_filter(actor_id, &window)?;
-    if actor == ActorFilter::Unknown {
-        return Ok((StatusCode::OK, Json(WorkspaceActivitiesPage::empty())));
-    }
+    // The window is validated even when the id matches nobody, so an invalid date
+    // range is still a 400; a nonexistent actor id simply matches no rows.
+    let filter = filter_query.to_filter(filter_query.actor, &window)?;
 
     let page = conn
         .cursor_list_workspace_activity(workspace.id, filter, pagination.into_cursor())
         .await?;
 
     let response = WorkspaceActivitiesPage::from_cursor_page(page, |wc| {
-        WorkspaceActivity::from_model(wc.item, workspace.slug.clone(), wc.account.into())
+        WorkspaceActivity::from_model(
+            wc.item,
+            workspace.id,
+            workspace.slug.clone(),
+            wc.account.into(),
+        )
     });
 
     tracing::debug!(
@@ -188,23 +183,13 @@ async fn export_activities(
 
     let window = window_query.resolve()?;
 
-    // An `actor` that matches no account narrows the export to nobody: emit an
-    // empty (but valid) file rather than one filtered on a sentinel id.
-    let actor = resolve_actor(&mut conn, filter_query.actor.as_ref()).await?;
-    let mut rows = match actor {
-        ActorFilter::Unknown => Vec::new(),
-        ActorFilter::Any | ActorFilter::Account(_) => {
-            let actor_id = match actor {
-                ActorFilter::Account(id) => Some(id),
-                _ => None,
-            };
-            let filter = filter_query.to_export_filter(actor_id, &window)?;
-            // Fetch one past the cap so a full result signals truncation.
-            let fetch_limit = (MAX_EXPORT_ROWS + 1) as i64;
-            conn.list_workspace_activity_for_export(workspace.id, filter, fetch_limit)
-                .await?
-        }
-    };
+    // A nonexistent actor id simply narrows the export to no rows.
+    let filter = filter_query.to_export_filter(filter_query.actor, &window)?;
+    // Fetch one past the cap so a full result signals truncation.
+    let fetch_limit = (MAX_EXPORT_ROWS + 1) as i64;
+    let mut rows = conn
+        .list_workspace_activity_for_export(workspace.id, filter, fetch_limit)
+        .await?;
 
     let truncated = rows.len() > MAX_EXPORT_ROWS;
     rows.truncate(MAX_EXPORT_ROWS);
@@ -334,11 +319,11 @@ fn serialize_error(error: impl std::fmt::Display) -> Error<'static> {
 pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/activities/",
+            "/workspaces/{workspaceId}/activities/",
             get_with(list_activities, list_activities_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/activities/export",
+            "/workspaces/{workspaceId}/activities/export",
             get_with(export_activities, export_activities_docs),
         )
         .with_path_items(|item| item.tag("Activities"))

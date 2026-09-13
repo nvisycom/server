@@ -1,9 +1,10 @@
 -- Policies: structured redaction policy definitions (nvisy_schema Policy) the
 -- engine consults. A standalone workspace resource. A policy is a stable logical
--- identity (slug, display name) whose content is versioned: the plaintext JSONB
--- definition lives in workspace_policy_versions, and current_version_id names the
--- live version. Editing the definition mints a new immutable version; a detection
--- pins the exact version it ran (see the detections migration).
+-- identity (addressed by id, with a display name) whose content is versioned: the
+-- plaintext JSONB definition lives in workspace_policy_versions, and
+-- current_version_id names the live version. Editing the definition mints a new
+-- immutable version; a detection pins the exact version it ran (see the detections
+-- migration).
 
 -- How a policy came to exist.
 CREATE TYPE POLICY_KIND AS ENUM (
@@ -26,13 +27,6 @@ CREATE TABLE workspace_policies (
     -- Composite key target for workspace-scoped foreign keys (join tables and the
     -- version table).
     CONSTRAINT workspace_policies_workspace_id_id_key UNIQUE (workspace_id, id),
-
-    -- URL identity, unique within the workspace (among live policies; enforced by
-    -- a partial index below so a slug frees up after soft deletion): lowercase
-    -- alphanumeric with single internal dashes, 3-32 characters.
-    slug            TEXT            NOT NULL,
-    CONSTRAINT workspace_policies_slug_length CHECK (length(slug) BETWEEN 3 AND 32),
-    CONSTRAINT workspace_policies_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
 
     -- Core attributes
     display_name    TEXT            NOT NULL,
@@ -83,11 +77,6 @@ CREATE INDEX workspace_policies_account_idx
     ON workspace_policies (account_id, created_at DESC)
     WHERE deleted_at IS NULL;
 
--- One live slug per workspace (frees up after soft deletion).
-CREATE UNIQUE INDEX workspace_policies_slug_unique_idx
-    ON workspace_policies (workspace_id, slug)
-    WHERE deleted_at IS NULL;
-
 -- One live display name per workspace (case- and whitespace-insensitive).
 CREATE UNIQUE INDEX workspace_policies_display_name_unique_idx
     ON workspace_policies (workspace_id, lower(trim(display_name)))
@@ -103,7 +92,6 @@ COMMENT ON TABLE workspace_policies IS 'Structured redaction policies (nvisy_sch
 COMMENT ON COLUMN workspace_policies.id IS 'Unique policy identifier';
 COMMENT ON COLUMN workspace_policies.workspace_id IS 'Parent workspace reference';
 COMMENT ON COLUMN workspace_policies.account_id IS 'Creator account reference';
-COMMENT ON COLUMN workspace_policies.slug IS 'URL identity, unique within the workspace (3-32 chars, dashed slug)';
 COMMENT ON COLUMN workspace_policies.display_name IS 'Human-readable policy display name (1-255 chars)';
 COMMENT ON COLUMN workspace_policies.description IS 'Policy description (up to 4096 chars)';
 COMMENT ON COLUMN workspace_policies.current_version_id IS 'The live version whose definition the engine consumes';

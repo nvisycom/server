@@ -79,6 +79,7 @@ async fn create_connection(
         StatusCode::CREATED,
         Json(WorkspaceConnection::from_model(
             found.connection.item,
+            workspace.id,
             workspace.slug,
             found.connection.account.into(),
             found.schedule,
@@ -129,6 +130,7 @@ async fn list_connections(
         Json(WorkspaceConnectionsPage::from_cursor_page(page, |entry| {
             WorkspaceConnection::from_model(
                 entry.connection.item,
+                workspace.id,
                 workspace.slug.clone(),
                 entry.connection.account.into(),
                 entry.schedule,
@@ -177,6 +179,7 @@ async fn read_connection(
         StatusCode::OK,
         Json(WorkspaceConnection::from_model(
             found.connection.item,
+            workspace.id,
             workspace.slug,
             found.connection.account.into(),
             found.schedule,
@@ -231,6 +234,7 @@ async fn update_connection(
         StatusCode::OK,
         Json(WorkspaceConnection::from_model(
             found.connection.item,
+            workspace.id,
             workspace.slug,
             found.connection.account.into(),
             found.schedule,
@@ -512,22 +516,22 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/connections/",
+            "/workspaces/{workspaceId}/connections/",
             post_with(create_connection, create_connection_docs)
                 .get_with(list_connections, list_connections_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/connections/{connectionId}/",
+            "/workspaces/{workspaceId}/connections/{connectionId}/",
             get_with(read_connection, read_connection_docs)
                 .patch_with(update_connection, update_connection_docs)
                 .delete_with(delete_connection, delete_connection_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/connections/{connectionId}/verify/",
+            "/workspaces/{workspaceId}/connections/{connectionId}/verify/",
             post_with(verify_connection, verify_connection_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/connections/{connectionId}/picker-token/",
+            "/workspaces/{workspaceId}/connections/{connectionId}/picker-token/",
             post_with(mint_picker_token, mint_picker_token_docs),
         )
         .with_path_items(|item| item.tag("Connections"))

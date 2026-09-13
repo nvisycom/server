@@ -5,13 +5,16 @@ use nvisy_postgres::model;
 use nvisy_postgres::types::Handle;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Represents an account.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
-    /// Public handle of the account.
+    /// Unique identifier of the account.
+    pub id: Uuid,
+    /// Public handle of the account. Display-only.
     pub username: Handle,
     /// Whether the account email has been verified.
     pub is_activated: bool,
@@ -36,6 +39,7 @@ pub struct Account {
 impl Account {
     pub fn from_model(account: model::Account) -> Self {
         Self {
+            id: account.id,
             username: account.username,
             is_activated: account.is_verified,
             is_suspended: account.is_suspended,
@@ -58,7 +62,9 @@ impl Account {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicAccount {
-    /// Public handle of the account.
+    /// Unique identifier of the account.
+    pub id: Uuid,
+    /// Public handle of the account. Display-only.
     pub username: Handle,
     /// Display name of the account holder, when set.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -73,6 +79,7 @@ pub struct PublicAccount {
 impl PublicAccount {
     pub fn from_model(account: model::Account) -> Self {
         Self {
+            id: account.id,
             username: account.username,
             display_name: account.display_name,
             avatar_url: account.avatar_url,

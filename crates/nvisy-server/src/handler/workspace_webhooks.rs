@@ -68,6 +68,7 @@ async fn create_webhook(
         StatusCode::CREATED,
         Json(WorkspaceWebhookCreated::from_model(
             created.webhook,
+            workspace.id,
             workspace.slug,
             creator,
             created.secret,
@@ -113,7 +114,12 @@ async fn list_webhooks(
     Ok((
         StatusCode::OK,
         Json(WorkspaceWebhooksPage::from_cursor_page(page, |wc| {
-            WorkspaceWebhook::from_model(wc.item, workspace.slug.clone(), wc.account.into())
+            WorkspaceWebhook::from_model(
+                wc.item,
+                workspace.id,
+                workspace.slug.clone(),
+                wc.account.into(),
+            )
         })),
     ))
 }
@@ -153,6 +159,7 @@ async fn read_webhook(
         StatusCode::OK,
         Json(WorkspaceWebhook::from_model(
             found.item,
+            workspace.id,
             workspace.slug,
             found.account.into(),
         )),
@@ -206,6 +213,7 @@ async fn update_webhook(
         StatusCode::OK,
         Json(WorkspaceWebhook::from_model(
             found.item,
+            workspace.id,
             workspace.slug,
             found.account.into(),
         )),
@@ -317,18 +325,18 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/webhooks/",
+            "/workspaces/{workspaceId}/webhooks/",
             post_with(create_webhook, create_webhook_docs)
                 .get_with(list_webhooks, list_webhooks_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/webhooks/{webhookId}/",
+            "/workspaces/{workspaceId}/webhooks/{webhookId}/",
             get_with(read_webhook, read_webhook_docs)
                 .patch_with(update_webhook, update_webhook_docs)
                 .delete_with(delete_webhook, delete_webhook_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/webhooks/{webhookId}/test/",
+            "/workspaces/{workspaceId}/webhooks/{webhookId}/test/",
             post_with(test_webhook, test_webhook_docs),
         )
         .with_path_items(|item| item.tag("Webhooks"))

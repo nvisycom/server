@@ -5,9 +5,9 @@
 //! transitions and their events live in one place.
 
 use nvisy_postgres::model::{Account, WorkspaceMember};
-use nvisy_postgres::query::{AccountRepository, WorkspaceMemberCursor, WorkspaceMemberRepository};
-use nvisy_postgres::types::{CursorPage, CursorPagination, Handle, MemberFilter, MemberSortBy};
-use nvisy_postgres::{AsyncConnection, PgClient, PgConn, model};
+use nvisy_postgres::query::{WorkspaceMemberCursor, WorkspaceMemberRepository};
+use nvisy_postgres::types::{CursorPage, CursorPagination, MemberFilter, MemberSortBy};
+use nvisy_postgres::{AsyncConnection, PgClient, model};
 use uuid::Uuid;
 
 use crate::response::{Error, ErrorKind, Result};
@@ -47,14 +47,13 @@ impl WorkspaceMemberService {
             .await?)
     }
 
-    /// Finds a member by username with their account, or a NotFound.
+    /// Finds a member by account id with their account, or a NotFound.
     pub async fn find(
         &self,
         workspace_id: Uuid,
-        username: &Handle,
+        member_account_id: Uuid,
     ) -> Result<(WorkspaceMember, Account)> {
         let mut conn = self.postgres.get_connection().await?;
-        let member_account_id = resolve_member_account_id(&mut conn, username).await?;
         conn.find_workspace_member_with_account(workspace_id, member_account_id)
             .await?
             .ok_or_else(|| {
@@ -68,12 +67,14 @@ impl WorkspaceMemberService {
     ///
     /// The actor cannot remove themselves (they leave instead), and an owner
     /// cannot be removed (an owner can only leave).
-    pub async fn remove(&self, origin: event::EventOrigin<'_>, username: &Handle) -> Result<()> {
+    pub async fn remove(
+        &self,
+        origin: event::EventOrigin<'_>,
+        member_account_id: Uuid,
+    ) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         let workspace_id = origin.workspace_id;
         let actor_id = origin.account_id;
-
-        let member_account_id = resolve_member_account_id(&mut conn, username).await?;
 
         if actor_id == member_account_id {
             return Err(ErrorKind::BadRequest
@@ -100,7 +101,6 @@ impl WorkspaceMemberService {
                 origin,
                 event::WorkspaceEvent::MemberDeleted(event::MemberDeleted {
                     member_id: member_account_id,
-                    member_username: username.clone(),
                 }),
             )
             .await?;
@@ -120,14 +120,12 @@ impl WorkspaceMemberService {
     pub async fn update(
         &self,
         origin: event::EventOrigin<'_>,
-        username: &Handle,
+        member_account_id: Uuid,
         updates: model::UpdateWorkspaceMember,
     ) -> Result<(WorkspaceMember, Account)> {
         let mut conn = self.postgres.get_connection().await?;
         let workspace_id = origin.workspace_id;
         let actor_id = origin.account_id;
-
-        let member_account_id = resolve_member_account_id(&mut conn, username).await?;
 
         if actor_id == member_account_id {
             return Err(ErrorKind::BadRequest
@@ -159,7 +157,6 @@ impl WorkspaceMemberService {
                 origin,
                 event::WorkspaceEvent::MemberUpdated(event::MemberUpdated {
                     member_id: member_account_id,
-                    member_username: username.clone(),
                 }),
             )
             .await?;
@@ -228,14 +225,15 @@ impl WorkspaceMemberService {
         let workspace_id = origin.workspace_id;
         let account_id = origin.account_id;
 
-        let Some((_member, account)) = conn
-            .find_workspace_member_with_account(workspace_id, account_id)
+        if conn
+            .find_workspace_member(workspace_id, account_id)
             .await?
-        else {
+            .is_none()
+        {
             return Err(ErrorKind::NotFound
                 .with_resource("workspace_member")
                 .with_message("You are not a member of this workspace"));
-        };
+        }
 
         conn.transaction(async |conn| {
             // Read the owner set under a row lock inside this transaction so the
@@ -253,7 +251,6 @@ impl WorkspaceMemberService {
                 origin,
                 event::WorkspaceEvent::MemberDeleted(event::MemberDeleted {
                     member_id: account_id,
-                    member_username: account.username.clone(),
                 }),
             )
             .await?;
@@ -266,19 +263,10 @@ impl WorkspaceMemberService {
     }
 }
 
-/// Resolves a member's public handle to its account id. Returns `NotFound` when
-/// no such account exists.
-async fn resolve_member_account_id(conn: &mut PgConn, username: &Handle) -> Result<Uuid> {
-    let account = conn
-        .find_account_by_username(username)
-        .await?
-        .ok_or_else(|| Error::not_found("workspace_member"))?;
-    Ok(account.id)
-}
-
 #[cfg(test)]
 mod tests {
     use nvisy_postgres::model::{NewAccount, NewWorkspaceMember};
+    use nvisy_postgres::query::AccountRepository;
     use nvisy_postgres::test_util::TestDatabase;
     use nvisy_postgres::types::WorkspaceRole;
 
@@ -290,8 +278,8 @@ mod tests {
     }
 
     /// Seeds a second account and adds it to the workspace with `role`, returning
-    /// its username.
-    async fn add_member(db: &TestDatabase, workspace_id: Uuid, role: WorkspaceRole) -> Handle {
+    /// its account id.
+    async fn add_member(db: &TestDatabase, workspace_id: Uuid, role: WorkspaceRole) -> Uuid {
         let mut conn = db.client.get_connection().await.expect("connection");
         let account = conn
             .create_account(NewAccount::test())
@@ -300,7 +288,7 @@ mod tests {
         conn.add_workspace_member(NewWorkspaceMember::new(workspace_id, account.id, role))
             .await
             .expect("member");
-        account.username
+        account.id
     }
 
     #[tokio::test]
@@ -320,7 +308,7 @@ mod tests {
             member_role: Some(WorkspaceRole::Editor),
             ..Default::default()
         };
-        let (updated, _account) = service.update(origin, &member, updates).await?;
+        let (updated, _account) = service.update(origin, member, updates).await?;
         assert_eq!(updated.member_role, WorkspaceRole::Editor);
         Ok(())
     }
@@ -330,12 +318,8 @@ mod tests {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
         let service = WorkspaceMemberService::new(db.client.clone());
-        // The acting account is a member of its own workspace under its own handle.
+        // The acting account is a member of its own workspace.
         let mut conn = db.client.get_connection().await?;
-        let self_account = conn
-            .find_account_by_id(seeded.account_id)
-            .await?
-            .expect("acting account");
         conn.add_workspace_member(NewWorkspaceMember::new(
             seeded.workspace_id,
             seeded.account_id,
@@ -355,7 +339,7 @@ mod tests {
             ..Default::default()
         };
         let err = service
-            .update(origin, &self_account.username, updates)
+            .update(origin, seeded.account_id, updates)
             .await
             .expect_err("cannot update your own role");
         assert_eq!(err.kind(), ErrorKind::BadRequest);
@@ -421,7 +405,7 @@ mod tests {
         };
 
         let err = service
-            .remove(origin, &owner)
+            .remove(origin, owner)
             .await
             .expect_err("cannot remove an owner");
         assert_eq!(err.kind(), ErrorKind::BadRequest);

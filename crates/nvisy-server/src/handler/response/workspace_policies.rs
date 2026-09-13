@@ -6,6 +6,7 @@ use nvisy_postgres::model::{WorkspacePolicy as WorkspacePolicyModel, WorkspacePo
 use nvisy_postgres::types::{Handle, PolicyKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::{AccountRef, Page};
 use crate::response::{ErrorKind, Result};
@@ -14,9 +15,11 @@ use crate::response::{ErrorKind, Result};
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePolicy {
-    /// URL slug of the policy, unique within its workspace.
-    pub slug: Handle,
-    /// Handle of the workspace this policy belongs to.
+    /// Unique identifier of the policy.
+    pub id: Uuid,
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub workspace_slug: Handle,
     /// Account that created this policy.
     pub created_by: AccountRef,
@@ -47,9 +50,11 @@ pub struct WorkspacePolicy {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePolicySummary {
-    /// URL slug of the policy, unique within its workspace.
-    pub slug: Handle,
-    /// Handle of the workspace this policy belongs to.
+    /// Unique identifier of the policy.
+    pub id: Uuid,
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub workspace_slug: Handle,
     /// Account that created this policy.
     pub created_by: AccountRef,
@@ -73,11 +78,13 @@ impl WorkspacePolicySummary {
     /// definition.
     pub fn from_model(
         policy: WorkspacePolicyModel,
+        workspace_id: Uuid,
         workspace_slug: Handle,
         created_by: AccountRef,
     ) -> Self {
         Self {
-            slug: policy.slug,
+            id: policy.id,
+            workspace_id,
             workspace_slug,
             created_by,
             display_name: policy.display_name,
@@ -98,6 +105,7 @@ impl WorkspacePolicy {
     pub fn from_model(
         policy: WorkspacePolicyModel,
         version: WorkspacePolicyVersion,
+        workspace_id: Uuid,
         workspace_slug: Handle,
         created_by: AccountRef,
     ) -> Result<Self> {
@@ -108,7 +116,8 @@ impl WorkspacePolicy {
         })?;
 
         Ok(Self {
-            slug: policy.slug,
+            id: policy.id,
+            workspace_id,
             workspace_slug,
             created_by,
             display_name: policy.display_name,

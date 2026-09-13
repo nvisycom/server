@@ -13,7 +13,7 @@ use crate::model::{
     WorkspaceDetection, WorkspacePipeline,
 };
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Handle, keyset,
+    AccountRefRow, CursorPage, CursorPagination, DetectionFilter, DetectionStatus, keyset,
 };
 use crate::{Error, PgConnection, Result, schema};
 
@@ -39,17 +39,15 @@ pub struct DetectionDocuments {
 }
 
 /// One row of a detection listing: the detection plus the context a response
-/// needs to render it without follow-up lookups — the triggering account, the
-/// owning pipeline's slug (`None` for an ad-hoc detection or a deleted pipeline),
-/// and the input document's display name (`None` if the document was removed).
+/// needs to render it without follow-up lookups — the triggering account and the
+/// input document's display name (`None` if the document was removed). The owning
+/// pipeline is named by the detection's own `pipeline_id`.
 #[derive(Debug, Clone)]
 pub struct DetectionListRow {
-    /// The detection.
+    /// The detection. Its `pipeline_id` names the owning pipeline, if any.
     pub detection: WorkspaceDetection,
     /// The account that triggered the detection.
     pub account: AccountRefRow,
-    /// Slug of the detection's owning pipeline, if it still has one.
-    pub pipeline_slug: Option<Handle>,
     /// Display name of the detection's input document, if still present.
     pub input_document_name: Option<String>,
 }
@@ -99,9 +97,9 @@ pub trait WorkspaceDetectionRepository {
     /// Lists all of a workspace's detections with cursor pagination, including
     /// ad-hoc detections that name no pipeline.
     ///
-    /// Scoped by the detection's own `workspace_id`; the owning pipeline is
-    /// LEFT-joined for its slug. `filter` narrows by status, document, and/or
-    /// owning pipeline; use [`cursor_list_pipeline_detections`] for a single
+    /// Scoped by the detection's own `workspace_id`; the owning pipeline is named
+    /// by each detection's own `pipeline_id`. `filter` narrows by status, document,
+    /// and/or owning pipeline; use [`cursor_list_pipeline_detections`] for a single
     /// pipeline.
     ///
     /// [`cursor_list_pipeline_detections`]: Self::cursor_list_pipeline_detections
@@ -281,18 +279,17 @@ impl WorkspaceDetectionRepository for PgConnection {
         filter: &DetectionFilter,
     ) -> Result<CursorPage<DetectionListRow>> {
         use schema::workspace_detections::dsl;
-        use schema::{accounts, workspace_detections, workspace_documents, workspace_pipelines};
+        use schema::{accounts, workspace_detections, workspace_documents};
 
         // One scoped builder for both the count and the page, so a future filter
         // cannot be added to one and forgotten on the other. The listing is
         // already scoped to one pipeline, so `filter.pipeline_id` is not applied.
-        // Join the owning pipeline (for its slug) and the input document (to name
-        // the detection's analyzed document) so a row is self-contained; the
-        // document is LEFT-joined so one removed by retention yields a null name.
+        // Join the input document (to name the detection's analyzed document) so a
+        // row is self-contained; the document is LEFT-joined so one removed by
+        // retention yields a null name.
         let scoped = || {
             let mut query = workspace_detections::table
                 .inner_join(accounts::table)
-                .inner_join(workspace_pipelines::table)
                 .left_join(
                     workspace_documents::table.on(dsl::input_document_id
                         .eq(workspace_documents::id)
@@ -330,18 +327,18 @@ impl WorkspaceDetectionRepository for PgConnection {
         let selection = (
             WorkspaceDetection::as_select(),
             (
+                accounts::id,
                 accounts::username,
                 accounts::display_name,
                 accounts::avatar_url,
             ),
-            workspace_pipelines::slug,
             workspace_documents::display_name.nullable(),
         );
 
         let after = pagination
             .after_key()
             .map(|k| (jiff_diesel::Timestamp::from(k.started_at), k.id));
-        let rows: Vec<(WorkspaceDetection, AccountRefRow, Handle, Option<String>)> = keyset!(
+        let rows: Vec<(WorkspaceDetection, AccountRefRow, Option<String>)> = keyset!(
             scoped(),
             dsl::started_at,
             dsl::id,
@@ -357,10 +354,9 @@ impl WorkspaceDetectionRepository for PgConnection {
         let items = rows
             .into_iter()
             .map(
-                |(detection, account, pipeline_slug, input_document_name)| DetectionListRow {
+                |(detection, account, input_document_name)| DetectionListRow {
                     detection,
                     account,
-                    pipeline_slug: Some(pipeline_slug),
                     input_document_name,
                 },
             )
@@ -383,22 +379,15 @@ impl WorkspaceDetectionRepository for PgConnection {
         use schema::accounts::dsl as accounts;
         use schema::workspace_detections::dsl as detections;
         use schema::workspace_documents::dsl as documents;
-        use schema::workspace_pipelines::dsl as pipelines;
 
-        // Scope by the detection's own workspace. The owning pipeline's slug, the
-        // triggering account, and the input document's name are selected alongside
-        // each detection so the response can name them without a per-row lookup.
-        // The pipeline is LEFT-joined (and only while live) so an ad-hoc detection
-        // (no pipeline) and one whose pipeline was soft-deleted both list with a
-        // null slug; the input document is LEFT-joined so a document removed by
-        // retention yields a null name rather than dropping the row.
+        // Scope by the detection's own workspace. The triggering account and the
+        // input document's name are selected alongside each detection so the
+        // response can name them without a per-row lookup. The input document is
+        // LEFT-joined so a document removed by retention yields a null name rather
+        // than dropping the row. The owning pipeline is named by the detection's
+        // own `pipeline_id`.
         let scoped = || {
             let mut query = detections::workspace_detections
-                .left_join(
-                    pipelines::workspace_pipelines.on(detections::pipeline_id
-                        .eq(pipelines::id.nullable())
-                        .and(pipelines::deleted_at.is_null())),
-                )
                 .inner_join(accounts::accounts)
                 .left_join(
                     documents::workspace_documents.on(detections::input_document_id
@@ -439,8 +428,8 @@ impl WorkspaceDetectionRepository for PgConnection {
 
         let selection = (
             WorkspaceDetection::as_select(),
-            pipelines::slug.nullable(),
             (
+                accounts::id,
                 accounts::username,
                 accounts::display_name,
                 accounts::avatar_url,
@@ -451,12 +440,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         let after = pagination
             .after_key()
             .map(|k| (jiff_diesel::Timestamp::from(k.started_at), k.id));
-        let rows: Vec<(
-            WorkspaceDetection,
-            Option<Handle>,
-            AccountRefRow,
-            Option<String>,
-        )> = keyset!(
+        let rows: Vec<(WorkspaceDetection, AccountRefRow, Option<String>)> = keyset!(
             scoped(),
             detections::started_at,
             detections::id,
@@ -472,10 +456,9 @@ impl WorkspaceDetectionRepository for PgConnection {
         let items = rows
             .into_iter()
             .map(
-                |(detection, pipeline_slug, account, input_document_name)| DetectionListRow {
+                |(detection, account, input_document_name)| DetectionListRow {
                     detection,
                     account,
-                    pipeline_slug,
                     input_document_name,
                 },
             )
@@ -971,12 +954,13 @@ mod tests {
             .iter()
             .find(|row| row.detection.id == detection.id)
             .expect("ad-hoc detection listed");
-        assert!(row.pipeline_slug.is_none());
+        assert!(row.detection.pipeline_id.is_none());
         Ok(())
     }
 
     #[tokio::test]
-    async fn a_soft_deleted_pipeline_lists_its_detection_with_no_slug() -> anyhow::Result<()> {
+    async fn a_soft_deleted_pipeline_lists_its_detection_with_its_pipeline_id() -> anyhow::Result<()>
+    {
         use crate::query::WorkspacePipelineRepository;
 
         let db = TestDatabase::start().await;
@@ -993,7 +977,7 @@ mod tests {
             .await?;
 
         // Soft-deleting the pipeline must not drop the detection from the listing;
-        // its slug just resolves to none, matching find-by-id.
+        // the detection keeps its own `pipeline_id`, which still names the pipeline.
         conn.delete_workspace_pipeline(seeded.pipeline_id).await?;
         let page = conn
             .cursor_list_workspace_detections(
@@ -1007,7 +991,7 @@ mod tests {
             .iter()
             .find(|row| row.detection.id == detection.id)
             .expect("detection still listed after pipeline soft-delete");
-        assert!(row.pipeline_slug.is_none());
+        assert_eq!(row.detection.pipeline_id, Some(seeded.pipeline_id));
         Ok(())
     }
 

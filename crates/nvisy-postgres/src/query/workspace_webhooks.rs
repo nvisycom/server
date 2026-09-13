@@ -153,6 +153,7 @@ impl WorkspaceWebhookRepository for PgConnection {
             .select((
                 WorkspaceWebhook::as_select(),
                 (
+                    accounts::id,
                     accounts::username,
                     accounts::display_name,
                     accounts::avatar_url,
@@ -203,6 +204,7 @@ impl WorkspaceWebhookRepository for PgConnection {
                 .select((
                     WorkspaceWebhook::as_select(),
                     (
+                        accounts::id,
                         accounts::username,
                         accounts::display_name,
                         accounts::avatar_url,

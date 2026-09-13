@@ -12,7 +12,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::PipelinePolicy;
-use crate::types::{Handle, PolicyKind};
+use crate::types::PolicyKind;
 use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for pipeline reference join tables.
@@ -30,28 +30,25 @@ pub trait PipelineReferenceRepository {
 
     /// Lists the ids of the policies a pipeline references.
     ///
-    /// Used by the run path to resolve each referenced policy to its record for
-    /// the engine; the API-facing read path uses [`Self::list_pipeline_policy_slugs`].
+    /// Used both by the run path to resolve each referenced policy to its record
+    /// for the engine and by the API-facing read path to surface the references.
     fn list_pipeline_policy_ids(
         &mut self,
         pipeline_id: Uuid,
     ) -> impl Future<Output = Result<Vec<Uuid>>> + Send;
 
-    /// Lists the slugs of the policies a pipeline references.
-    fn list_pipeline_policy_slugs(
-        &mut self,
-        pipeline_id: Uuid,
-    ) -> impl Future<Output = Result<Vec<Handle>>> + Send;
-
-    /// Resolves policy slugs to their ids within a workspace, preserving order.
+    /// Validates policy ids as live authored policies within a workspace,
+    /// preserving request order.
     ///
-    /// Returns `None` if any slug does not match a live policy in the workspace,
-    /// so the caller can reject the whole set rather than silently dropping an
-    /// unknown reference.
-    fn resolve_policy_slugs(
+    /// Each id must name a live (not soft-deleted) authored policy in the
+    /// workspace; one-shot policies are excluded and so do not validate. Returns
+    /// `None` if any id fails to validate, so the caller can reject the whole set
+    /// rather than silently dropping an unknown reference. An empty input
+    /// validates to an empty vec.
+    fn validate_policy_ids(
         &mut self,
         workspace_id: Uuid,
-        slugs: &[Handle],
+        policy_ids: &[Uuid],
     ) -> impl Future<Output = Result<Option<Vec<Uuid>>>> + Send;
 }
 
@@ -107,62 +104,41 @@ impl PipelineReferenceRepository for PgConnection {
         Ok(ids)
     }
 
-    async fn list_pipeline_policy_slugs(&mut self, pipeline_id: Uuid) -> Result<Vec<Handle>> {
-        use schema::{workspace_pipeline_policies, workspace_policies};
-
-        // Join to the parent so soft-deleted policies (deleted_at set, join row
-        // still present since CASCADE only fires on hard delete) are excluded.
-        let slugs = workspace_pipeline_policies::table
-            .inner_join(
-                workspace_policies::table
-                    .on(workspace_policies::id.eq(workspace_pipeline_policies::policy_id)),
-            )
-            .filter(workspace_pipeline_policies::pipeline_id.eq(pipeline_id))
-            .filter(workspace_policies::deleted_at.is_null())
-            .select(workspace_policies::slug)
-            .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(slugs)
-    }
-
-    async fn resolve_policy_slugs(
+    async fn validate_policy_ids(
         &mut self,
         workspace_id: Uuid,
-        slugs: &[Handle],
+        policy_ids: &[Uuid],
     ) -> Result<Option<Vec<Uuid>>> {
         use schema::workspace_policies::{self, dsl};
 
-        if slugs.is_empty() {
+        if policy_ids.is_empty() {
             return Ok(Some(Vec::new()));
         }
 
         // One-shot policies are not attachable to a pipeline: a pipeline references
-        // authored policies only. Excluding them here means a one-shot slug resolves
+        // authored policies only. Excluding them here means a one-shot id validates
         // as unknown, so attachment rejects it.
-        let wanted: Vec<String> = slugs.iter().map(|slug| slug.as_str().to_owned()).collect();
-        let found: Vec<(Handle, Uuid)> = workspace_policies::table
+        let found: Vec<Uuid> = workspace_policies::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .filter(dsl::kind.eq(PolicyKind::Authored))
-            .filter(dsl::slug.eq_any(&wanted))
-            .select((dsl::slug, dsl::id))
+            .filter(dsl::id.eq_any(policy_ids))
+            .select(dsl::id)
             .load(self)
             .await
             .map_err(Error::from)?;
 
-        Ok(map_slugs_to_ids(slugs, found))
+        Ok(preserve_valid_ids(policy_ids, found))
     }
 }
 
-/// Maps the requested slugs to ids in request order, returning `None` if any
-/// requested slug is missing from the resolved set.
-fn map_slugs_to_ids(requested: &[Handle], found: Vec<(Handle, Uuid)>) -> Option<Vec<Uuid>> {
-    let by_slug: std::collections::HashMap<Handle, Uuid> = found.into_iter().collect();
+/// Returns the requested ids in request order, or `None` if any requested id is
+/// missing from the validated set.
+fn preserve_valid_ids(requested: &[Uuid], found: Vec<Uuid>) -> Option<Vec<Uuid>> {
+    let valid: std::collections::HashSet<Uuid> = found.into_iter().collect();
     requested
         .iter()
-        .map(|slug| by_slug.get(slug).copied())
+        .map(|id| valid.contains(id).then_some(*id))
         .collect()
 }
 
@@ -181,7 +157,7 @@ mod tests {
         PipelineReferenceRepository, WorkspacePipelineRepository, WorkspacePolicyRepository,
     };
     use crate::test_util::TestDatabase;
-    use crate::types::{Handle, PolicyKind};
+    use crate::types::PolicyKind;
 
     /// Seeds a pipeline plus `count` policies, returning `(workspace_id,
     /// pipeline_id, policy_ids)`.
@@ -250,21 +226,19 @@ mod tests {
         conn.replace_workspace_pipeline_policies(workspace_id, pipeline_id, &policies)
             .await?;
         assert_eq!(conn.list_pipeline_policy_ids(pipeline_id).await?.len(), 2);
-        assert_eq!(conn.list_pipeline_policy_slugs(pipeline_id).await?.len(), 2);
 
-        // Soft-deleting a referenced policy drops it from both listings (the join
+        // Soft-deleting a referenced policy drops it from the listing (the join
         // row remains, but the parent is filtered on `deleted_at`).
         conn.delete_workspace_policy(policies[0]).await?;
         assert_eq!(
             conn.list_pipeline_policy_ids(pipeline_id).await?,
             vec![policies[1]]
         );
-        assert_eq!(conn.list_pipeline_policy_slugs(pipeline_id).await?.len(), 1);
         Ok(())
     }
 
     #[tokio::test]
-    async fn resolve_policy_slugs_preserves_order_and_rejects_unknown() -> anyhow::Result<()> {
+    async fn validate_policy_ids_preserves_order_and_rejects_unknown() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
@@ -282,32 +256,29 @@ mod tests {
             ))
             .await?;
 
-        // Resolution preserves request order, not storage order.
+        // Validation preserves request order, not storage order.
         let resolved = conn
-            .resolve_policy_slugs(
-                seeded.workspace_id,
-                &[bravo.slug.clone(), alpha.slug.clone()],
-            )
+            .validate_policy_ids(seeded.workspace_id, &[bravo.id, alpha.id])
             .await?;
         assert_eq!(resolved, Some(vec![bravo.id, alpha.id]));
 
-        // An empty request resolves to an empty vec (not `None`).
+        // An empty request validates to an empty vec (not `None`).
         assert_eq!(
-            conn.resolve_policy_slugs(seeded.workspace_id, &[]).await?,
+            conn.validate_policy_ids(seeded.workspace_id, &[]).await?,
             Some(Vec::new())
         );
 
-        // If any slug is unknown, the whole set is rejected with `None`.
-        let unknown = Handle::test();
+        // If any id is unknown, the whole set is rejected with `None`.
+        let unknown = Uuid::now_v7();
         assert_eq!(
-            conn.resolve_policy_slugs(seeded.workspace_id, &[alpha.slug.clone(), unknown])
+            conn.validate_policy_ids(seeded.workspace_id, &[alpha.id, unknown])
                 .await?,
             None
         );
 
-        // A slug that exists only in another workspace does not resolve here.
+        // An id that exists only in another workspace does not validate here.
         assert_eq!(
-            conn.resolve_policy_slugs(Uuid::now_v7(), std::slice::from_ref(&alpha.slug))
+            conn.validate_policy_ids(Uuid::now_v7(), std::slice::from_ref(&alpha.id))
                 .await?,
             None
         );
@@ -315,7 +286,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_policy_slugs_ignores_oneshot_policies() -> anyhow::Result<()> {
+    async fn validate_policy_ids_ignores_oneshot_policies() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
@@ -331,19 +302,19 @@ mod tests {
                 None,
             )
             .await?;
-        let slug = oneshot.policy.policy.slug.clone();
+        let policy_id = oneshot.policy.policy.id;
 
-        // A one-shot policy's slug does not resolve for pipeline attachment, so the
-        // set is rejected as if the slug were unknown.
+        // A one-shot policy's id does not validate for pipeline attachment, so the
+        // set is rejected as if the id were unknown.
         assert_eq!(
-            conn.resolve_policy_slugs(seeded.workspace_id, std::slice::from_ref(&slug))
+            conn.validate_policy_ids(seeded.workspace_id, std::slice::from_ref(&policy_id))
                 .await?,
             None
         );
 
-        // Once promoted (authored, hash cleared), it resolves.
+        // Once promoted (authored, hash cleared), it validates.
         conn.update_workspace_policy(
-            oneshot.policy.policy.id,
+            policy_id,
             crate::model::UpdateWorkspacePolicy {
                 kind: Some(PolicyKind::Authored),
                 content_hash: Some(None),
@@ -352,9 +323,9 @@ mod tests {
         )
         .await?;
         assert_eq!(
-            conn.resolve_policy_slugs(seeded.workspace_id, std::slice::from_ref(&slug))
+            conn.validate_policy_ids(seeded.workspace_id, std::slice::from_ref(&policy_id))
                 .await?,
-            Some(vec![oneshot.policy.policy.id])
+            Some(vec![policy_id])
         );
         Ok(())
     }

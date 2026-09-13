@@ -32,7 +32,7 @@ use uuid::Uuid;
 use super::job::{DetectionJob, DetectionStream, broadcast_status};
 use super::support::{
     FailDetection, FailOutcome, extract_detection_usage, fail_detection, resolve_policies,
-    resolve_policies_by_slugs,
+    resolve_policies_by_ids,
 };
 use crate::extract::SecurityContext;
 use crate::handler::request::PipelineDefinition;
@@ -300,7 +300,7 @@ impl DetectionWorker {
                 FailDetection {
                     workspace_id: job.workspace_id,
                     detection_id: detection.id,
-                    pipeline_slug: pipeline.as_ref().map(|p| p.slug.clone()),
+                    pipeline_id: pipeline.as_ref().map(|p| p.id),
                     triggered_by: detection.account_id,
                     reason: &err.to_string(),
                     metadata: detection.metadata.or_default(),
@@ -430,14 +430,13 @@ impl DetectionWorker {
             // which nulls nothing) rather than the live pipeline row: a pipeline
             // detection resolves from the pipeline's references — still reachable
             // through the join rows a soft-delete leaves in place — and an ad-hoc
-            // detection from the slugs named on the job.
+            // detection from the ids named on the job.
             let resolved = match detection.pipeline_id {
                 Some(pipeline_id) => {
                     resolve_policies(&mut conn, job.workspace_id, pipeline_id).await?
                 }
                 None => {
-                    resolve_policies_by_slugs(&mut conn, job.workspace_id, &job.policy_slugs)
-                        .await?
+                    resolve_policies_by_ids(&mut conn, job.workspace_id, &job.policy_ids).await?
                 }
             };
             if resolved.is_empty() {
@@ -539,7 +538,7 @@ impl DetectionWorker {
         let completed_event =
             event::WorkspaceEvent::DetectionCompleted(event::DetectionCompleted {
                 detection_id: detection.id,
-                pipeline_slug: pipeline.map(|p| p.slug.clone()),
+                pipeline_id: pipeline.map(|p| p.id),
                 input_document_name: Some(document.display_name.clone()),
                 notify: detection.account_id,
             });

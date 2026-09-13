@@ -11,6 +11,7 @@ use aide::transform::TransformOperation;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use nvisy_postgres::model::Account as AccountModel;
+use uuid::Uuid;
 
 use super::request::{AccountPathParams, UpdateAccount};
 use super::response::{Account, PublicAccount};
@@ -43,7 +44,7 @@ fn get_own_account_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
 }
 
-/// Retrieves the public profile of an account by its handle.
+/// Retrieves the public profile of an account by its id.
 ///
 /// The requester must share at least one workspace with the target account;
 /// otherwise the account is reported as not found. Only public fields are
@@ -55,20 +56,20 @@ async fn get_account(
     auth_state: AuthState,
     Path(path_params): Path<AccountPathParams>,
 ) -> Result<(StatusCode, Json<PublicAccount>)> {
-    tracing::debug!(target: TRACING_TARGET, "Reading account by username");
+    tracing::debug!(target: TRACING_TARGET, "Reading account by id");
 
     let account = accounts
-        .find_public(auth_state.account_id, &path_params.username)
+        .find_public(auth_state.account_id, path_params.account_id)
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, "Account read by username");
+    tracing::info!(target: TRACING_TARGET, "Account read by id");
     Ok((StatusCode::OK, Json(PublicAccount::from_model(account))))
 }
 
 fn get_account_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Get account by username")
+    op.summary("Get account by id")
         .description(
-            "Returns an account's public profile by its handle. \
+            "Returns an account's public profile by its id. \
              The requester must share at least one workspace with the target account.",
         )
         .response::<200, Json<PublicAccount>>()
@@ -129,7 +130,7 @@ fn delete_own_account_docs(op: TransformOperation) -> TransformOperation {
 ///
 /// The image is normalized to WebP and stored; the account's `avatar_url` is set
 /// to its serve path. Only the account itself may set its avatar, so the
-/// `{username}` in the path must resolve to the caller. Requires a multipart body
+/// `{accountId}` in the path must be the caller's own. Requires a multipart body
 /// with an image field.
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn upload_account_avatar(
@@ -142,7 +143,7 @@ async fn upload_account_avatar(
     tracing::debug!(target: TRACING_TARGET, "Uploading account avatar");
 
     let account = accounts.find(auth_state.account_id).await?;
-    authorize_self(&account, &path_params.username)?;
+    authorize_self(&account, path_params.account_id)?;
 
     let updated = avatar.set_account_avatar(account.id, bytes).await?;
 
@@ -173,7 +174,7 @@ async fn delete_account_avatar(
     tracing::debug!(target: TRACING_TARGET, "Deleting account avatar");
 
     let account = accounts.find(auth_state.account_id).await?;
-    authorize_self(&account, &path_params.username)?;
+    authorize_self(&account, path_params.account_id)?;
 
     avatar.delete_account_avatar(account.id).await?;
     tracing::info!(target: TRACING_TARGET, "Account avatar deleted");
@@ -189,9 +190,9 @@ fn delete_account_avatar_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Rejects the request unless the path's username resolves to `account`.
-fn authorize_self(account: &AccountModel, username: &nvisy_postgres::types::Handle) -> Result<()> {
-    if &account.username == username {
+/// Rejects the request unless the path's account id is the caller's own.
+fn authorize_self(account: &AccountModel, account_id: Uuid) -> Result<()> {
+    if account.id == account_id {
         Ok(())
     } else {
         Err(ErrorKind::Forbidden.with_message("You can only manage your own avatar"))
@@ -212,11 +213,11 @@ pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
                 .delete_with(delete_own_account, delete_own_account_docs),
         )
         .api_route(
-            "/accounts/{username}/",
+            "/accounts/{accountId}/",
             get_with(get_account, get_account_docs),
         )
         .api_route(
-            "/accounts/{username}/avatar/",
+            "/accounts/{accountId}/avatar/",
             put_with(upload_account_avatar, upload_account_avatar_docs)
                 .layer(DefaultBodyLimit::max(MAX_AVATAR_UPLOAD_BYTES))
                 .delete_with(delete_account_avatar, delete_account_avatar_docs),

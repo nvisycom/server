@@ -5,6 +5,7 @@ use nvisy_postgres::model::WorkspaceProvider as WorkspaceProviderModel;
 use nvisy_postgres::types::{Handle, ProviderId, ProviderType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::{AccountRef, Page};
 
@@ -17,7 +18,9 @@ use super::{AccountRef, Page};
 pub struct WorkspaceProvider {
     /// Opaque identifier of the provider.
     pub id: ProviderId,
-    /// Handle of the workspace this provider belongs to.
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub workspace_slug: Handle,
     /// Account that created this provider.
     pub created_by: AccountRef,
@@ -42,11 +45,13 @@ impl WorkspaceProvider {
     /// Creates a response from a database model and its creator.
     pub fn from_model(
         provider: WorkspaceProviderModel,
+        workspace_id: Uuid,
         workspace_slug: Handle,
         created_by: AccountRef,
     ) -> Self {
         Self {
             id: ProviderId::from_uuid(provider.id),
+            workspace_id,
             workspace_slug,
             created_by,
             display_name: provider.display_name,

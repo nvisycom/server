@@ -68,11 +68,9 @@ impl NewWorkspaceActivity {
     /// deriving the type from the payload.
     #[cfg(any(feature = "test_util", test))]
     pub fn test(workspace_id: Uuid, account_id: Uuid) -> Self {
-        use crate::types::{Handle, WorkspaceActivityParams};
+        use crate::types::WorkspaceActivityParams;
 
-        let payload = ActivityPayload::WorkspaceCreated(WorkspaceActivityParams {
-            workspace_slug: Handle::test(),
-        });
+        let payload = ActivityPayload::WorkspaceCreated(WorkspaceActivityParams { workspace_id });
         Self {
             workspace_id,
             account_id,

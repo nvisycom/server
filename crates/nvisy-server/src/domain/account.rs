@@ -11,7 +11,6 @@
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Account, UpdateAccount};
 use nvisy_postgres::query::{AccountRepository, WorkspaceMemberRepository};
-use nvisy_postgres::types::Handle;
 use uuid::Uuid;
 
 use crate::response::{Error, ErrorKind, Result};
@@ -43,17 +42,17 @@ impl AccountService {
             .ok_or_else(|| Error::not_found("account"))
     }
 
-    /// Finds another account's profile by its handle, visible only to a requester
+    /// Finds another account's profile by its id, visible only to a requester
     /// that shares a workspace with it.
     ///
     /// A non-shared (or non-existent) account is reported as not-found rather than
     /// forbidden, so this endpoint cannot be used to distinguish existing from
-    /// non-existing handles.
-    pub async fn find_public(&self, requester_id: Uuid, username: &Handle) -> Result<Account> {
+    /// non-existing accounts.
+    pub async fn find_public(&self, requester_id: Uuid, account_id: Uuid) -> Result<Account> {
         let mut conn = self.postgres.get_connection().await?;
 
         let account = conn
-            .find_account_by_username(username)
+            .find_account_by_id(account_id)
             .await?
             .ok_or_else(|| Error::not_found("account"))?;
 

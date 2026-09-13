@@ -1,7 +1,7 @@
 //! Detection service inputs.
 
 use elide_pipeline::provider::DocumentContext;
-use nvisy_postgres::types::{Handle, RetentionOverride};
+use nvisy_postgres::types::RetentionOverride;
 use uuid::Uuid;
 
 /// Input for starting a detection over a document through a pipeline.
@@ -16,8 +16,8 @@ pub struct CreateDetectionInput {
 pub struct CreateAdhocDetectionInput {
     /// The document to analyze.
     pub document_id: Uuid,
-    /// The policies to run against, by slug.
-    pub policy_slugs: Vec<Handle>,
+    /// The policies to run against, by id.
+    pub policy_ids: Vec<Uuid>,
     /// Per-document scope for the run.
     pub scope: Option<DocumentContext>,
     /// Retention override for the outputs this detection produces.
