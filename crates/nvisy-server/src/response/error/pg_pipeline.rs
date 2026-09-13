@@ -79,9 +79,6 @@ impl From<WorkspaceConnectionConstraints> for Error<'static> {
                 WorkspaceConnectionConstraints::ScheduleCronLength => {
                     ErrorKind::BadRequest.with_message("Connection schedule cron length is invalid")
                 }
-                WorkspaceConnectionConstraints::ScheduleImportOnly => {
-                    ErrorKind::BadRequest.with_message("Only import connections can be scheduled")
-                }
                 WorkspaceConnectionConstraints::WorkspaceIdIdUnique => ErrorKind::Conflict
                     .with_message("A connection with this identifier already exists"),
                 WorkspaceConnectionConstraints::NameUnique => {
