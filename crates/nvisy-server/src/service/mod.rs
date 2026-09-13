@@ -15,7 +15,6 @@ mod integration;
 mod notification;
 mod oidc;
 mod password;
-mod policy;
 mod run_blob_store;
 mod session_keys;
 mod user_agent;
@@ -35,7 +34,6 @@ pub use nvisy_s3::S3Config;
 use nvisy_webhook::WebhookService;
 use tokio_util::sync::CancellationToken;
 
-use crate::Result;
 use crate::middleware::UploadConfig;
 use crate::response::CookieConfig;
 pub use crate::service::account_provisioner::AccountProvisioner;
@@ -65,12 +63,12 @@ pub use crate::service::oidc::{
     OidcAuthorization, OidcConfig, OidcError, OidcIdentity, OidcService, RedirectKind,
 };
 pub use crate::service::password::PasswordService;
-pub use crate::service::policy::{PolicyService, ResolvedPolicy};
 pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
 pub use crate::service::user_agent::UserAgentParser;
 pub use crate::service::webhook::{WebhookDeliveryWorker, WebhookEmitter};
 pub use crate::service::worker::{Worker, WorkerSet};
+use crate::{Result, domain};
 
 /// Tracing target for service-state initialization.
 const TRACING_TARGET: &str = "nvisy_server::service";
@@ -327,6 +325,21 @@ macro_rules! impl_di_infra {
     )+};
 }
 
+/// Derives [`FromRef`] for a per-resource domain service by building it over the
+/// Postgres client from the shared [`Infra`]. Each service holds only the client
+/// and acquires its own connection per call, so construction is a cheap clone.
+///
+/// [`FromRef`]: axum::extract::FromRef
+macro_rules! impl_di_domain {
+    ($($t:ty),+ $(,)?) => {$(
+        impl axum::extract::FromRef<ServiceState> for $t {
+            fn from_ref(state: &ServiceState) -> Self {
+                <$t>::new(state.infra.postgres.clone())
+            }
+        }
+    )+};
+}
+
 // The ambient clients, resolved from the shared `Infra`:
 impl_di_infra!(
     postgres: PgClient,
@@ -406,4 +419,102 @@ impl axum::extract::FromRef<ServiceState> for AuthIssuer {
 
 // Stateless unit services, holding nothing and acting on the connection passed to
 // each method:
-impl_di_unit!(AccountProvisioner, PolicyService);
+impl_di_unit!(AccountProvisioner);
+
+// Per-resource domain services built over the Postgres client alone:
+impl_di_domain!(
+    domain::WorkspaceInviteService,
+    domain::WorkspaceMemberService,
+    domain::WorkspacePolicyService,
+    domain::WorkspacePipelineService,
+    domain::WorkspaceService,
+);
+
+// `WorkspaceWebhookService` also holds the crypto service (to mint and decrypt
+// the signing secret) and the delivery client (to send a test), so it needs a
+// hand-written `FromRef`.
+impl axum::extract::FromRef<ServiceState> for domain::WorkspaceWebhookService {
+    fn from_ref(state: &ServiceState) -> Self {
+        domain::WorkspaceWebhookService::new(
+            state.infra.postgres.clone(),
+            state.crypto.clone(),
+            state.webhook.clone(),
+        )
+    }
+}
+
+// `WorkspaceThreadService` also holds the assistant queue (to wake the reply
+// drainer when a comment addresses the assistant), so it needs a hand-written
+// `FromRef`.
+impl axum::extract::FromRef<ServiceState> for domain::WorkspaceThreadService {
+    fn from_ref(state: &ServiceState) -> Self {
+        domain::WorkspaceThreadService::new(
+            state.infra.postgres.clone(),
+            AssistantQueue::from_ref(state),
+        )
+    }
+}
+
+// `WorkspaceProviderService` and `WorkspaceConnectionService` also hold the crypto
+// service (to encrypt and decrypt the provider/connection config) and the endpoint
+// policy (to validate custom endpoints at write time), so they need hand-written
+// `FromRef`s.
+impl axum::extract::FromRef<ServiceState> for domain::WorkspaceProviderService {
+    fn from_ref(state: &ServiceState) -> Self {
+        domain::WorkspaceProviderService::new(
+            state.infra.postgres.clone(),
+            state.crypto.clone(),
+            state.endpoint_policy,
+        )
+    }
+}
+
+impl axum::extract::FromRef<ServiceState> for domain::WorkspaceConnectionService {
+    fn from_ref(state: &ServiceState) -> Self {
+        domain::WorkspaceConnectionService::new(
+            state.infra.postgres.clone(),
+            state.crypto.clone(),
+            state.endpoint_policy,
+        )
+    }
+}
+
+// `WorkspaceDocumentService` also holds the engine (to resolve list-filter format
+// and modality tokens), so it needs a hand-written `FromRef`.
+impl axum::extract::FromRef<ServiceState> for domain::WorkspaceDocumentService {
+    fn from_ref(state: &ServiceState) -> Self {
+        domain::WorkspaceDocumentService::new(state.infra.postgres.clone(), state.engine.clone())
+    }
+}
+
+// `WorkspaceDetectionService` also holds the detection queue (to broadcast the
+// initial status and wake the outbox drainer after a create), so it needs a
+// hand-written `FromRef`.
+impl axum::extract::FromRef<ServiceState> for domain::WorkspaceDetectionService {
+    fn from_ref(state: &ServiceState) -> Self {
+        domain::WorkspaceDetectionService::new(
+            state.infra.postgres.clone(),
+            DetectionQueue::from_ref(state),
+        )
+    }
+}
+
+// `Domain` bundles the domain services; resolved by composing each from the
+// state, the way `Infra` bundles the ambient clients.
+impl axum::extract::FromRef<ServiceState> for domain::Domain {
+    fn from_ref(state: &ServiceState) -> Self {
+        domain::Domain {
+            connections: domain::WorkspaceConnectionService::from_ref(state),
+            detections: domain::WorkspaceDetectionService::from_ref(state),
+            documents: domain::WorkspaceDocumentService::from_ref(state),
+            invites: domain::WorkspaceInviteService::from_ref(state),
+            members: domain::WorkspaceMemberService::from_ref(state),
+            pipelines: domain::WorkspacePipelineService::from_ref(state),
+            policies: domain::WorkspacePolicyService::from_ref(state),
+            providers: domain::WorkspaceProviderService::from_ref(state),
+            threads: domain::WorkspaceThreadService::from_ref(state),
+            webhooks: domain::WorkspaceWebhookService::from_ref(state),
+            workspaces: domain::WorkspaceService::from_ref(state),
+        }
+    }
+}

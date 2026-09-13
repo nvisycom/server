@@ -6,6 +6,9 @@ use nvisy_postgres::types::{ConnectionId, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::domain::input::{
+    CreateConnectionInput, SyncScheduleInput as SyncScheduleInputDomain, UpdateConnectionInput,
+};
 use crate::extract::validators::{validate_non_blank, validate_non_blank_opt};
 use crate::service::ConnectionConfig;
 
@@ -61,6 +64,16 @@ pub struct SyncScheduleInput {
     pub deletion_policy: SyncDeletionPolicy,
 }
 
+impl From<SyncScheduleInput> for SyncScheduleInputDomain {
+    fn from(input: SyncScheduleInput) -> Self {
+        SyncScheduleInputDomain {
+            sync_mode: input.sync_mode,
+            schedule_cron: input.schedule_cron,
+            deletion_policy: input.deletion_policy,
+        }
+    }
+}
+
 /// Request payload for creating a new workspace connection.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -81,6 +94,17 @@ pub struct CreateWorkspaceConnection {
     #[garde(dive)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync: Option<SyncScheduleInput>,
+}
+
+impl From<CreateWorkspaceConnection> for CreateConnectionInput {
+    fn from(request: CreateWorkspaceConnection) -> Self {
+        CreateConnectionInput {
+            display_name: request.display_name,
+            is_active: request.is_active,
+            config: request.config,
+            sync: request.sync.map(Into::into),
+        }
+    }
 }
 
 /// Path parameters for the OAuth start endpoint: which cloud file provider to
@@ -146,6 +170,17 @@ pub struct UpdateWorkspaceConnection {
     #[garde(dive)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync: Option<SyncScheduleInput>,
+}
+
+impl From<UpdateWorkspaceConnection> for UpdateConnectionInput {
+    fn from(request: UpdateWorkspaceConnection) -> Self {
+        UpdateConnectionInput {
+            display_name: request.display_name,
+            is_active: request.is_active,
+            config: request.config,
+            sync: request.sync.map(Into::into),
+        }
+    }
 }
 
 /// Query parameters for listing connections.

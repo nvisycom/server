@@ -1,10 +1,11 @@
 //! Workspace document upload and management handlers.
 //!
-//! This module provides comprehensive document management functionality for
-//! workspaces, including upload, download, metadata management, and document
-//! operations. All operations are secured with workspace-level authorization.
+//! Metadata operations (list, read, update, delete) delegate to
+//! [`WorkspaceDocumentService`]; the byte-I/O actions — upload (multipart
+//! streaming to storage) and download (streaming decrypt to the client) — stay
+//! here, loading a document through the service. All operations are secured with
+//! workspace-level authorization.
 
-use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use aide::axum::ApiRouter;
@@ -14,16 +15,17 @@ use axum::extract::multipart::Field;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use futures::StreamExt;
-use nvisy_postgres::model::{NewBlob, NewWorkspaceDocument, WorkspaceDocument as DocumentModel};
+use nvisy_postgres::model::{NewBlob, NewWorkspaceDocument};
 use nvisy_postgres::query::{
     DocumentWithBlob, WorkspaceBlobRepository, WorkspaceDocumentRepository,
 };
-use nvisy_postgres::types::{DocumentKind, WithAccountRef};
-use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
+use nvisy_postgres::types::DocumentKind;
+use nvisy_postgres::{AsyncConnection, PgClient};
 use nvisy_s3::{BlobStore, Bucket, DocumentKey};
 use tokio_util::io::{ReaderStream, StreamReader};
 use uuid::Uuid;
 
+use crate::domain;
 use crate::extract::{
     AuthState, Authorized, Json, Multipart, Path, Permission, Query, SecurityContext, ValidateJson,
     WorkspaceContext, markers,
@@ -46,29 +48,6 @@ use crate::service::{
 /// Tracing target for workspace document operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspace_documents";
 
-/// Finds a document within a workspace or returns NotFound error.
-async fn find_document(
-    conn: &mut PgConn,
-    workspace_id: Uuid,
-    document_id: Uuid,
-) -> Result<DocumentModel> {
-    conn.find_document_in_workspace(workspace_id, document_id)
-        .await?
-        .ok_or_else(|| Error::not_found("document"))
-}
-
-/// Finds a document within a workspace, with its uploader's identity, or returns a
-/// NotFound error.
-async fn find_document_with_creator(
-    conn: &mut PgConn,
-    workspace_id: Uuid,
-    document_id: Uuid,
-) -> Result<WithAccountRef<DocumentWithBlob>> {
-    conn.find_document_in_workspace_with_creator(workspace_id, document_id)
-        .await?
-        .ok_or_else(|| Error::not_found("document"))
-}
-
 /// Lists documents in a workspace with cursor-based pagination.
 #[tracing::instrument(
     skip_all,
@@ -78,8 +57,7 @@ async fn find_document_with_creator(
     )
 )]
 async fn list_documents(
-    State(pg_client): State<PgClient>,
-    State(engine): State<EngineService>,
+    State(documents): State<domain::WorkspaceDocumentService>,
     authz: Authorized<markers::ViewDocuments>,
     Query(documents_query): Query<ListWorkspaceDocuments>,
     Query(cursor_pagination): Query<CursorPagination>,
@@ -87,16 +65,12 @@ async fn list_documents(
     tracing::debug!(target: TRACING_TARGET, "Listing documents");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let filter = documents_query.to_filter(&engine).map_err(|err| {
-        ErrorKind::BadRequest
-            .with_message("Unknown document format filter")
-            .with_context(err.to_string())
-    })?;
-
-    let page = conn
-        .cursor_list_workspace_documents(workspace.id, cursor_pagination.into_cursor(), filter)
+    let page = documents
+        .list(
+            workspace.id,
+            cursor_pagination.into_cursor(),
+            documents_query.into(),
+        )
         .await?;
 
     let response = WorkspaceDocumentsPage::from_cursor_page(page, |wc| {
@@ -483,17 +457,16 @@ fn upload_document_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn read_document(
-    State(pg_client): State<PgClient>,
+    State(documents): State<domain::WorkspaceDocumentService>,
     authz: Authorized<markers::ViewDocuments>,
     Path(path_params): Path<WorkspaceDocumentPathParams>,
 ) -> Result<(StatusCode, Json<WorkspaceDocument>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading document metadata");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let found =
-        find_document_with_creator(&mut conn, workspace.id, path_params.document_id).await?;
+    let found = documents
+        .find(workspace.id, path_params.document_id)
+        .await?;
 
     tracing::debug!(target: TRACING_TARGET, "WorkspaceDocument metadata retrieved");
 
@@ -527,7 +500,7 @@ fn read_document_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn update_document(
-    State(pg_client): State<PgClient>,
+    State(documents): State<domain::WorkspaceDocumentService>,
     authz: Authorized<markers::UpdateDocuments>,
     Path(path_params): Path<WorkspaceDocumentPathParams>,
     security: SecurityContext,
@@ -536,42 +509,14 @@ async fn update_document(
     tracing::debug!(target: TRACING_TARGET, "Updating document");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    // Confirm the document exists in this workspace before mutating.
-    find_document(&mut conn, workspace.id, path_params.document_id).await?;
-
-    let updates = request.into_model();
-
-    // Update the document and record its update event in one transaction, so the
-    // event is never lost, nor recorded for an update that rolled back.
-    conn.transaction(async |conn| {
-        let updated_document = conn
-            .update_workspace_document(path_params.document_id, updates)
-            .await
-            .map_err(|err| {
-                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to update document");
-                ErrorKind::InternalServerError.with_message("Failed to update document")
-            })?;
-        conn.emit_event(
-            event::EventOrigin {
-                workspace_id: workspace.id,
-                account_id: authz.account_id,
-                security: &security,
-            },
-            event::WorkspaceEvent::DocumentUpdated(event::DocumentUpdated {
-                document_id: path_params.document_id,
-                document_name: updated_document.display_name.clone(),
-            }),
-        )
+    let origin = event::EventOrigin {
+        workspace_id: workspace.id,
+        account_id: authz.account_id,
+        security: &security,
+    };
+    let found = documents
+        .update(origin, path_params.document_id, request.into())
         .await?;
-        Ok::<_, Error>(())
-    })
-    .await?;
-
-    let found =
-        find_document_with_creator(&mut conn, workspace.id, path_params.document_id).await?;
-    let uploaded_by = found.account;
 
     tracing::info!(target: TRACING_TARGET, "WorkspaceDocument updated");
 
@@ -581,7 +526,7 @@ async fn update_document(
             found.item.document,
             &found.item.blob,
             workspace.slug,
-            uploaded_by.into(),
+            found.account.into(),
         )),
     ))
 }
@@ -607,6 +552,7 @@ fn update_document_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn download_document(
     State(pg_client): State<PgClient>,
+    State(documents): State<domain::WorkspaceDocumentService>,
     State(blobs): State<BlobStore>,
     State(crypto): State<CryptoService>,
     WorkspaceContext(workspace): WorkspaceContext,
@@ -623,24 +569,27 @@ async fn download_document(
     // role this check does, so it never rejects an otherwise-authorized caller.
     auth.authorize_workspace(&mut conn, workspace.id, Permission::ViewDocuments)
         .await?;
+    drop(conn);
 
     // The permission a download requires depends on the document's kind, so the
     // raw original bytes and the redacted output are gated separately. Audit and
     // intermediate bytes are not documents; they download through the
     // detection-audit endpoints under DownloadAudit.
-    let document = find_document(&mut conn, workspace.id, path_params.document_id).await?;
-    let blob = conn
-        .find_blob_by_id(document.blob_id)
-        .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_message("WorkspaceDocument content not found"))?;
+    let found = documents
+        .find(workspace.id, path_params.document_id)
+        .await?;
+    let document = found.item.document;
+    let blob = found.item.blob;
 
     let permission = match document.kind {
         DocumentKind::Original => Permission::DownloadOriginalDocuments,
         DocumentKind::Redacted => Permission::DownloadRedactedDocuments,
     };
 
+    let mut conn = pg_client.get_connection().await?;
     auth.authorize_workspace(&mut conn, workspace.id, permission)
         .await?;
+    drop(conn);
 
     let document_key = DocumentKey::from_str(&blob.storage_path).map_err(|err| {
         tracing::error!(
@@ -727,7 +676,7 @@ fn download_document_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn delete_document(
-    State(pg_client): State<PgClient>,
+    State(documents): State<domain::WorkspaceDocumentService>,
     authz: Authorized<markers::DeleteDocuments>,
     Path(path_params): Path<WorkspaceDocumentPathParams>,
     security: SecurityContext,
@@ -735,33 +684,12 @@ async fn delete_document(
     tracing::debug!(target: TRACING_TARGET, "Deleting document");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    // Confirm the document exists in this workspace before deleting.
-    let document = find_document(&mut conn, workspace.id, path_params.document_id).await?;
-
-    // Soft-delete the document (which drops its blob reference) and record the
-    // deletion event in one transaction, so the event is never lost, nor recorded
-    // for a delete that rolled back. The backing object is not removed here: its
-    // bytes may be shared with another document, so the reaper reclaims the blob
-    // once its last reference is gone and its retention window has passed.
-    conn.transaction(async |conn| {
-        conn.delete_workspace_document(document.id).await?;
-        conn.emit_event(
-            event::EventOrigin {
-                workspace_id: workspace.id,
-                account_id: authz.account_id,
-                security: &security,
-            },
-            event::WorkspaceEvent::DocumentDeleted(event::DocumentDeleted {
-                document_id: path_params.document_id,
-                document_name: document.display_name.clone(),
-            }),
-        )
-        .await?;
-        Ok::<_, Error>(())
-    })
-    .await?;
+    let origin = event::EventOrigin {
+        workspace_id: workspace.id,
+        account_id: authz.account_id,
+        security: &security,
+    };
+    documents.delete(origin, path_params.document_id).await?;
 
     tracing::info!(target: TRACING_TARGET, "WorkspaceDocument deleted");
     Ok(StatusCode::NO_CONTENT)
@@ -790,7 +718,7 @@ fn delete_document_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn bulk_delete_documents(
-    State(pg_client): State<PgClient>,
+    State(documents): State<domain::WorkspaceDocumentService>,
     authz: Authorized<markers::DeleteDocuments>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<DeleteDocumentsRequest>,
@@ -798,65 +726,26 @@ async fn bulk_delete_documents(
     tracing::debug!(target: TRACING_TARGET, "Bulk-deleting documents");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
+    let origin = event::EventOrigin {
+        workspace_id: workspace.id,
+        account_id: authz.account_id,
+        security: &security,
+    };
+    let outcome = documents.bulk_delete(origin, request.document_ids).await?;
 
-    // De-duplicate the requested ids.
-    let requested: BTreeSet<Uuid> = request.document_ids.into_iter().collect();
-    let requested: Vec<Uuid> = requested.into_iter().collect();
-
-    // Atomically soft-delete the live documents among them and record a deletion event
-    // for each in one transaction: the delete resolves and transitions the rows in
-    // a single guarded statement (so a row a concurrent request already deleted is
-    // never double-reported), and the events commit with it — none lost, none
-    // recorded for a delete that rolled back. `documents` holds exactly the rows
-    // this request deleted.
-    let documents = conn
-        .transaction(async |conn| {
-            let documents = conn
-                .delete_documents_in_workspace(workspace.id, &requested)
-                .await?;
-            for document in &documents {
-                conn.emit_event(
-                    event::EventOrigin {
-                        workspace_id: workspace.id,
-                        account_id: authz.account_id,
-                        security: &security,
-                    },
-                    event::WorkspaceEvent::DocumentDeleted(event::DocumentDeleted {
-                        document_id: document.id,
-                        document_name: document.display_name.clone(),
-                    }),
-                )
-                .await?;
-            }
-            Ok::<_, Error>(documents)
-        })
-        .await?;
-
-    // Whatever was not deleted is skipped: unknown, already deleted, another
-    // workspace's, or held by an in-progress detection — the delete is idempotent.
-    let deleted_ids: BTreeSet<Uuid> = documents.iter().map(|document| document.id).collect();
-    let skipped: Vec<Uuid> = requested
-        .into_iter()
-        .filter(|id| !deleted_ids.contains(id))
-        .collect();
-
-    // The backing objects are not removed here: each deleted document dropped its
-    // blob reference in the transaction above, and the reaper reclaims a blob once
-    // its last reference is gone and its retention window has passed. This keeps
-    // deletion cheap and correct when bytes are shared between documents.
-
-    let deleted: Vec<Uuid> = deleted_ids.into_iter().collect();
     tracing::info!(
         target: TRACING_TARGET,
-        deleted = deleted.len(),
-        skipped = skipped.len(),
+        deleted = outcome.deleted.len(),
+        skipped = outcome.skipped.len(),
         "WorkspaceDocuments bulk-deleted",
     );
 
     Ok((
         StatusCode::OK,
-        Json(response::WorkspaceDeletedDocuments { deleted, skipped }),
+        Json(response::WorkspaceDeletedDocuments {
+            deleted: outcome.deleted,
+            skipped: outcome.skipped,
+        }),
     ))
 }
 

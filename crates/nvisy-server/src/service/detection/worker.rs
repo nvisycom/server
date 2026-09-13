@@ -19,7 +19,9 @@ use nvisy_postgres::query::{
     WorkspaceBlobRepository, WorkspaceDetectionRepository, WorkspaceDocumentRepository,
     WorkspaceRepository,
 };
-use nvisy_postgres::types::{DetectionStatus, Json, RasterPolicy, WorkspaceSettings};
+use nvisy_postgres::types::{
+    DetectionStatus, Json, RasterPolicy, RetentionOverride, WorkspaceSettings,
+};
 use nvisy_postgres::{AsyncConnection, DieselError, Error as PgError};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -30,6 +32,7 @@ use super::job::{DetectionJob, DetectionStream};
 use super::service::DetectionQueue;
 use super::support::{
     FailDetection, FailOutcome, extract_detection_usage, fail_detection, resolve_policies,
+    resolve_policies_by_slugs,
 };
 use crate::extract::SecurityContext;
 use crate::handler::request::PipelineDefinition;
@@ -288,7 +291,10 @@ impl DetectionWorker {
         // pool. It is re-acquired below only if the detection fails.
         drop(conn);
 
-        if let Err(err) = self.detect(&job, &claimed, &pipeline, claim_token).await {
+        if let Err(err) = self
+            .detect(&job, &claimed, pipeline.as_ref(), claim_token)
+            .await
+        {
             tracing::warn!(target: TRACING_TARGET, error = %err, "Detection failed");
             let mut conn = match self.infra.postgres.get_connection().await {
                 Ok(conn) => conn,
@@ -306,7 +312,7 @@ impl DetectionWorker {
                 FailDetection {
                     workspace_id: job.workspace_id,
                     detection_id: detection.id,
-                    pipeline_slug: pipeline.slug.clone(),
+                    pipeline_slug: pipeline.as_ref().map(|p| p.slug.clone()),
                     triggered_by: detection.account_id,
                     reason: &err.to_string(),
                     metadata: detection.metadata.or_default(),
@@ -344,7 +350,8 @@ impl DetectionWorker {
     /// fetch only to find nothing.
     async fn stage_intermediates<T: serde::Serialize>(
         &self,
-        pipeline: &WorkspacePipeline,
+        workspace_id: Uuid,
+        retention_override: Option<&RetentionOverride>,
         settings: &WorkspaceSettings,
         artifacts: &T,
     ) -> Result<Option<NewBlob>> {
@@ -366,7 +373,12 @@ impl DetectionWorker {
 
         let blob = self
             .blob
-            .stage_intermediates(pipeline, &settings.retention, artifacts)
+            .stage_intermediates(
+                workspace_id,
+                retention_override,
+                &settings.retention,
+                artifacts,
+            )
             .await?;
         Ok(Some(blob))
     }
@@ -382,7 +394,7 @@ impl DetectionWorker {
         &self,
         job: &DetectionJob,
         detection: &WorkspaceDetection,
-        pipeline: &WorkspacePipeline,
+        pipeline: Option<&WorkspacePipeline>,
         claim_token: jiff::Timestamp,
     ) -> Result<()> {
         // Phase 1: read the inputs under a connection, then drop it.
@@ -404,14 +416,20 @@ impl DetectionWorker {
                     ErrorKind::NotFound.with_message("Input document content not found")
                 })?;
 
-            let definition =
-                PipelineDefinition::from_parts(pipeline.definition.clone(), Vec::new()).map_err(
-                    |err| {
-                        ErrorKind::InternalServerError
-                            .with_message("Failed to decode pipeline definition")
-                            .with_context(err.to_string())
-                    },
-                )?;
+            // A pipeline detection takes its default scope from the pipeline
+            // definition; an ad-hoc detection has none, so the engine falls back to
+            // the per-request scope and its own defaults.
+            let definition = match pipeline {
+                Some(pipeline) => {
+                    PipelineDefinition::from_parts(pipeline.definition.clone(), Vec::new())
+                        .map_err(|err| {
+                            ErrorKind::InternalServerError
+                                .with_message("Failed to decode pipeline definition")
+                                .with_context(err.to_string())
+                        })?
+                }
+                None => PipelineDefinition::default(),
+            };
 
             // Parse the workspace settings once; both raster mode and retention
             // read it.
@@ -422,11 +440,22 @@ impl DetectionWorker {
                 raster_mode_of(&settings),
             );
 
-            let resolved = resolve_policies(&mut conn, job.workspace_id, pipeline.id).await?;
+            // Resolve the policies the analysis runs against: a pipeline
+            // detection's from the pipeline's references, an ad-hoc detection's
+            // from the slugs named on the job.
+            let resolved = match pipeline {
+                Some(pipeline) => {
+                    resolve_policies(&mut conn, job.workspace_id, pipeline.id).await?
+                }
+                None => {
+                    resolve_policies_by_slugs(&mut conn, job.workspace_id, &job.policy_slugs)
+                        .await?
+                }
+            };
             if resolved.is_empty() {
                 return Err(ErrorKind::BadRequest
-                    .with_message("Pipeline has no policies")
-                    .with_resource("pipeline"));
+                    .with_message("Detection has no policies")
+                    .with_resource("detection"));
             }
             // Split the resolved set into the version ids the run pins and the
             // definitions the engine consumes.
@@ -466,9 +495,18 @@ impl DetectionWorker {
         // Write the (non-transactional) audit object first, then commit its blob
         // and base-audit row together with the detection's usage and status in one
         // transaction below.
+        let retention_override = detection
+            .retention_override
+            .as_ref()
+            .map(|snapshot| snapshot.or_default());
         let audit_blob = self
             .blob
-            .stage_analyzed_document(pipeline, &settings.retention, audit)
+            .stage_analyzed_document(
+                detection.workspace_id,
+                retention_override.as_ref(),
+                &settings.retention,
+                audit,
+            )
             .await?;
 
         // Stage the enrichment intermediates (OCR layout, transcript, tokenized
@@ -477,7 +515,12 @@ impl DetectionWorker {
         // artifact set — nothing is stored and the detection carries no
         // intermediates reference.
         let intermediates_blob = self
-            .stage_intermediates(pipeline, &settings, &analyzed.artifacts)
+            .stage_intermediates(
+                detection.workspace_id,
+                retention_override.as_ref(),
+                &settings,
+                &analyzed.artifacts,
+            )
             .await?;
 
         // Record inference usage: per-model token rows into the usage table (the
@@ -508,7 +551,7 @@ impl DetectionWorker {
         let completed_event =
             event::WorkspaceEvent::DetectionCompleted(event::DetectionCompleted {
                 detection_id: detection.id,
-                pipeline_slug: pipeline.slug.clone(),
+                pipeline_slug: pipeline.map(|p| p.slug.clone()),
                 input_document_name: Some(document.display_name.clone()),
                 notify: detection.account_id,
             });
@@ -543,12 +586,8 @@ impl DetectionWorker {
                     .await?;
                 // Pin the exact policy versions this analysis consumed, so the
                 // detection is reproducible against them regardless of later edits.
-                conn.record_detection_policy_versions(
-                    workspace_id,
-                    detection_id,
-                    &policy_version_ids,
-                )
-                .await?;
+                conn.record_detection_policy_versions(detection_id, &policy_version_ids)
+                    .await?;
                 // The intermediate is a blob-ref on the detection; resolving the
                 // blob records the detection's reference to it.
                 let intermediate_blob = match intermediates_blob {

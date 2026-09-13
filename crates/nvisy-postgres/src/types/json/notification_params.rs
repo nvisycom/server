@@ -57,8 +57,9 @@ pub struct ConnectionSyncFailedParams {
 pub struct DetectionCompletedParams {
     /// Id of the detection.
     pub detection_id: DetectionId,
-    /// Slug of the owning pipeline.
-    pub pipeline_slug: Handle,
+    /// Slug of the owning pipeline; absent for an ad-hoc detection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline_slug: Option<Handle>,
     /// Display name of the analyzed document, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_document_name: Option<String>,
@@ -73,8 +74,9 @@ pub struct RedactionCreatedParams {
     pub redaction_id: RedactionId,
     /// Id of the detection the redaction was produced from.
     pub detection_id: DetectionId,
-    /// Slug of the owning pipeline.
-    pub pipeline_slug: Handle,
+    /// Slug of the owning pipeline; absent for an ad-hoc detection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline_slug: Option<Handle>,
     /// Display name of the redacted document, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_document_name: Option<String>,
@@ -87,8 +89,9 @@ pub struct RedactionCreatedParams {
 pub struct DetectionFailedParams {
     /// Id of the detection.
     pub detection_id: DetectionId,
-    /// Slug of the owning pipeline.
-    pub pipeline_slug: Handle,
+    /// Slug of the owning pipeline; absent for an ad-hoc detection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline_slug: Option<Handle>,
     /// Display name of the analyzed document, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_document_name: Option<String>,
@@ -213,7 +216,7 @@ mod tests {
         let detection_id = DetectionId::from_uuid(Uuid::now_v7());
         let payload = NotificationPayload::DetectionCompleted(DetectionCompletedParams {
             detection_id,
-            pipeline_slug: Handle::from_str("redact-invoices").unwrap(),
+            pipeline_slug: Some(Handle::from_str("redact-invoices").unwrap()),
             input_document_name: Some("invoice.pdf".to_owned()),
         });
 

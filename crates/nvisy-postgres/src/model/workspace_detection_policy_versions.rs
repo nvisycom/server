@@ -18,6 +18,4 @@ pub struct DetectionPolicyVersion {
     pub detection_id: Uuid,
     /// Policy version the analysis consumed.
     pub policy_version_id: Uuid,
-    /// Workspace both belong to.
-    pub workspace_id: Uuid,
 }

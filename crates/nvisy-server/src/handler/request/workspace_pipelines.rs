@@ -6,11 +6,11 @@
 
 use elide_pipeline::provider::DocumentContext;
 use garde::Validate;
-use nvisy_postgres::model::{NewWorkspacePipeline, UpdateWorkspacePipeline as UpdatePipelineModel};
-use nvisy_postgres::types::{Handle, Json, PipelineMetadata, PipelineStatus, RetentionOverride};
+use nvisy_postgres::types::{Handle, PipelineStatus, RetentionOverride};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::domain::input::{CreatePipelineInput, PipelineDefinitionInput, UpdatePipelineInput};
 
 /// A pipeline's detection + governance intent.
 ///
@@ -49,18 +49,6 @@ pub struct PipelineDefinition {
 }
 
 impl PipelineDefinition {
-    /// Splits the definition into its stored parts: the engine config JSON (with
-    /// the relational references removed) and the policy reference slugs.
-    ///
-    /// The references live in a join table, so they are stripped from the JSON to
-    /// keep a single source of truth. Serialization failure is surfaced rather
-    /// than swallowed so a bad config never gets silently persisted as empty.
-    pub fn into_parts(mut self) -> serde_json::Result<(serde_json::Value, Vec<Handle>)> {
-        let policy_slugs = std::mem::take(&mut self.policy_slugs);
-        let config = serde_json::to_value(&self)?;
-        Ok((config, policy_slugs))
-    }
-
     /// Rebuilds a definition from stored config JSON and the reference slugs read
     /// back from the join table.
     ///
@@ -74,6 +62,15 @@ impl PipelineDefinition {
         let mut definition: Self = serde_json::from_value(config)?;
         definition.policy_slugs = policy_slugs;
         Ok(definition)
+    }
+}
+
+impl From<PipelineDefinition> for PipelineDefinitionInput {
+    fn from(definition: PipelineDefinition) -> Self {
+        PipelineDefinitionInput {
+            default_scope: definition.default_scope,
+            policy_slugs: definition.policy_slugs,
+        }
     }
 }
 
@@ -106,61 +103,17 @@ pub struct CreateWorkspacePipeline {
     pub retention: Option<RetentionOverride>,
 }
 
-/// A pipeline's reference slugs, split out to be resolved to ids and written to
-/// the join table after the pipeline row exists.
-#[derive(Debug, Default, Clone)]
-pub struct PipelineReferences {
-    /// Slugs of the policies the pipeline references.
-    pub policy_slugs: Vec<Handle>,
-}
-
-impl CreateWorkspacePipeline {
-    /// Splits this request into the pipeline model and its reference ids.
-    ///
-    /// The stored model carries only the engine config JSON; the policy
-    /// references are returned separately for the caller to persist into the
-    /// join table (`None` when no definition was supplied).
-    ///
-    /// # Arguments
-    ///
-    /// * `workspace_id` - The ID of the workspace this pipeline belongs to.
-    /// * `account_id` - The ID of the account creating the pipeline.
-    pub fn into_parts(
-        self,
-        workspace_id: Uuid,
-        account_id: Uuid,
-    ) -> serde_json::Result<(NewWorkspacePipeline, PipelineReferences)> {
-        let (definition, references) = split_definition(self.definition)?;
-        let metadata = self.retention.map(|retention| {
-            Json::encode(&PipelineMetadata {
-                retention: Some(retention),
-                ..Default::default()
-            })
-        });
-        let model = NewWorkspacePipeline {
-            workspace_id,
-            account_id,
-            slug: self.slug,
-            display_name: self.display_name,
-            description: self.description,
-            status: self.status,
-            definition: Some(definition),
-            metadata,
-        };
-        Ok((model, references))
+impl From<CreateWorkspacePipeline> for CreatePipelineInput {
+    fn from(request: CreateWorkspacePipeline) -> Self {
+        CreatePipelineInput {
+            display_name: request.display_name,
+            slug: request.slug,
+            description: request.description,
+            definition: request.definition.map(Into::into),
+            status: request.status,
+            retention: request.retention,
+        }
     }
-}
-
-/// Splits an optional definition into its stored JSON config and reference ids.
-///
-/// A missing definition stores the empty-config default (the `definition` column
-/// is `NOT NULL`) and no references.
-fn split_definition(
-    definition: Option<PipelineDefinition>,
-) -> serde_json::Result<(serde_json::Value, PipelineReferences)> {
-    let (config, policy_slugs) = definition.unwrap_or_default().into_parts()?;
-    let references = PipelineReferences { policy_slugs };
-    Ok((config, references))
 }
 
 /// Request payload to update an existing pipeline.
@@ -188,41 +141,15 @@ pub struct UpdateWorkspacePipeline {
     pub retention: Option<RetentionOverride>,
 }
 
-impl UpdateWorkspacePipeline {
-    /// Splits this request into the update model and its reference ids.
-    ///
-    /// A missing `definition` leaves both the config column and the reference
-    /// join table untouched (partial update); a present one replaces both, so
-    /// the references are returned only in that case. A supplied retention
-    /// override is merged into the metadata column (preserving other fields).
-    pub fn into_parts(
-        self,
-        current_metadata: PipelineMetadata,
-    ) -> serde_json::Result<(UpdatePipelineModel, Option<PipelineReferences>)> {
-        let (definition, references) = match self.definition {
-            Some(definition) => {
-                let (config, policy_slugs) = definition.into_parts()?;
-                (Some(config), Some(PipelineReferences { policy_slugs }))
-            }
-            None => (None, None),
-        };
-        // Merge the retention override into the current metadata so other fields
-        // (tags) are preserved when only retention changes.
-        let metadata = self.retention.map(|retention| {
-            Json::encode(&PipelineMetadata {
-                retention: Some(retention),
-                tags: current_metadata.tags,
-            })
-        });
-        let model = UpdatePipelineModel {
-            display_name: self.display_name,
-            description: self.description.map(Some),
-            status: self.status,
-            definition,
-            metadata,
-            ..Default::default()
-        };
-        Ok((model, references))
+impl From<UpdateWorkspacePipeline> for UpdatePipelineInput {
+    fn from(request: UpdateWorkspacePipeline) -> Self {
+        UpdatePipelineInput {
+            display_name: request.display_name,
+            description: request.description,
+            status: request.status,
+            definition: request.definition.map(Into::into),
+            retention: request.retention,
+        }
     }
 }
 

@@ -6,15 +6,11 @@
 use std::collections::HashMap;
 
 use garde::Validate;
-use nvisy_postgres::model::{
-    NewWorkspaceWebhook, UpdateWorkspaceWebhook as UpdateWorkspaceWebhookModel,
-};
-use nvisy_postgres::types::{Json, WebhookEvent, WebhookHeaders, WebhookStatus};
+use nvisy_postgres::types::{WebhookEvent, WebhookStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use crate::response::{ErrorKind, Result};
+use crate::domain::input::{CreateWebhookInput, UpdateWebhookInput};
 
 /// Request payload for creating a new workspace webhook.
 #[must_use]
@@ -39,57 +35,17 @@ pub struct CreateWorkspaceWebhook {
     pub status: Option<WebhookStatus>,
 }
 
-impl CreateWorkspaceWebhook {
-    /// Converts this request into a [`NewWorkspaceWebhook`] model.
-    ///
-    /// # Arguments
-    ///
-    /// * `workspace_id` - The workspace this webhook belongs to.
-    /// * `account_id` - The account creating the webhook.
-    #[inline]
-    pub fn into_model(
-        self,
-        workspace_id: Uuid,
-        account_id: Uuid,
-        encrypted_secret: Vec<u8>,
-    ) -> Result<NewWorkspaceWebhook> {
-        let events = self.events.into_iter().map(Some).collect();
-        let headers = validate_headers(self.headers)?;
-        // Suspended is a system-only state; coerce a user-supplied Suspended to
-        // Disabled (the user off-switch).
-        let status = self.status.map(|s| match s {
-            WebhookStatus::Suspended => WebhookStatus::Disabled,
-            other => other,
-        });
-
-        Ok(NewWorkspaceWebhook {
-            workspace_id,
-            display_name: self.display_name,
-            description: self.description,
-            url: self.url,
-            events,
-            headers,
-            encrypted_secret,
-            status,
-            created_by: account_id,
-        })
+impl From<CreateWorkspaceWebhook> for CreateWebhookInput {
+    fn from(request: CreateWorkspaceWebhook) -> Self {
+        CreateWebhookInput {
+            display_name: request.display_name,
+            description: request.description,
+            url: request.url,
+            events: request.events,
+            headers: request.headers,
+            status: request.status,
+        }
     }
-}
-
-/// Validates optional raw headers into a stored column, rejecting malformed names
-/// or values with a `400`.
-fn validate_headers(
-    headers: Option<HashMap<String, String>>,
-) -> Result<Option<Json<WebhookHeaders>>> {
-    let Some(headers) = headers else {
-        return Ok(None);
-    };
-    let headers = WebhookHeaders::try_new(headers).map_err(|err| {
-        ErrorKind::BadRequest
-            .with_message("Invalid webhook header")
-            .with_context(err.to_string())
-    })?;
-    Ok(headers.into_column())
 }
 
 /// Request payload for updating an existing workspace webhook.
@@ -116,35 +72,16 @@ pub struct UpdateWorkspaceWebhook {
     pub status: Option<WebhookStatus>,
 }
 
-impl UpdateWorkspaceWebhook {
-    /// Converts this request into an [`UpdateWorkspaceWebhookModel`].
-    ///
-    /// While `current_status` is `Suspended` (system-set), the status field is
-    /// ignored. A user-supplied `Suspended` is coerced to `Disabled`.
-    #[inline]
-    pub fn into_model(self, current_status: WebhookStatus) -> Result<UpdateWorkspaceWebhookModel> {
-        let events = self.events.map(|e| e.into_iter().map(Some).collect());
-        let headers = validate_headers(self.headers)?;
-        // A system-suspended webhook ignores user status changes; coerce a
-        // user-supplied Suspended to Disabled.
-        let status = if current_status.is_suspended() {
-            None
-        } else {
-            self.status.map(|s| match s {
-                WebhookStatus::Suspended => WebhookStatus::Disabled,
-                other => other,
-            })
-        };
-
-        Ok(UpdateWorkspaceWebhookModel {
-            display_name: self.display_name,
-            description: self.description,
-            url: self.url,
-            events,
-            headers,
-            status,
-            ..Default::default()
-        })
+impl From<UpdateWorkspaceWebhook> for UpdateWebhookInput {
+    fn from(request: UpdateWorkspaceWebhook) -> Self {
+        UpdateWebhookInput {
+            display_name: request.display_name,
+            description: request.description,
+            url: request.url,
+            events: request.events,
+            headers: request.headers,
+            status: request.status,
+        }
     }
 }
 

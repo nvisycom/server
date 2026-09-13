@@ -20,7 +20,7 @@ mod detection_audits;
 mod monitors;
 pub mod request;
 pub mod response;
-mod utility;
+pub(crate) mod utility;
 mod workspace_connection_syncs;
 mod workspace_connections;
 mod workspace_detections;
@@ -42,7 +42,6 @@ use axum::http::{Method, Uri};
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 pub use utility::CustomRoutes;
-pub use workspace_invites::{CreatedInvite, InviteOutcome, create_invite};
 
 use crate::middleware::{csrf_protect, require_authentication, slide_session};
 use crate::response::ErrorKind;

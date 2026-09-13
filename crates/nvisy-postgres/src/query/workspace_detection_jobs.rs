@@ -163,6 +163,7 @@ mod tests {
         let mut conn = db.client.get_connection().await?;
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.workspace_id,
                 seeded.pipeline_id,
                 seeded.account_id,
                 seeded.document_id,

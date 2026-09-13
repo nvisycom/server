@@ -113,8 +113,9 @@ pub(crate) struct FailDetection<'a> {
     pub workspace_id: Uuid,
     /// The detection to fail.
     pub detection_id: Uuid,
-    /// Slug of the detection's pipeline, for the emitted event.
-    pub pipeline_slug: Handle,
+    /// Slug of the detection's pipeline, for the emitted event; `None` for an
+    /// ad-hoc detection.
+    pub pipeline_slug: Option<Handle>,
     /// The account that triggered the detection (the failure's actor and notify
     /// target).
     pub triggered_by: Uuid,
@@ -277,6 +278,46 @@ pub(crate) async fn resolve_policies(
                 ErrorKind::InternalServerError
                     .with_message("Referenced policy is no longer available")
                     .with_context(format!("policy_id: {id}"))
+            })?;
+        let definition = parse_definition(found.version.id, found.version.definition)?;
+        policies.push(ResolvedPolicy {
+            version_id: found.version.id,
+            definition,
+        });
+    }
+    Ok(policies)
+}
+
+/// Resolves an explicit list of policy slugs to their current versions, for an
+/// ad-hoc detection that names its policies directly rather than through a
+/// pipeline.
+///
+/// Each slug must resolve to a live policy of any kind (authored or one-shot) in
+/// the workspace; an unknown slug fails the run. Returns the same
+/// [`ResolvedPolicy`] shape as [`resolve_policies`], so the caller pins versions
+/// identically.
+pub(crate) async fn resolve_policies_by_slugs(
+    conn: &mut nvisy_postgres::PgConn,
+    workspace_id: Uuid,
+    slugs: &[Handle],
+) -> Result<Vec<ResolvedPolicy>> {
+    let mut policies = Vec::with_capacity(slugs.len());
+    for slug in slugs {
+        let policy = conn
+            .find_policy_in_workspace_by_slug(workspace_id, slug.as_str())
+            .await?
+            .ok_or_else(|| {
+                ErrorKind::InternalServerError
+                    .with_message("Referenced policy is no longer available")
+                    .with_context(format!("policy_slug: {slug}"))
+            })?;
+        let found = conn
+            .find_policy_with_version(workspace_id, policy.item.id)
+            .await?
+            .ok_or_else(|| {
+                ErrorKind::InternalServerError
+                    .with_message("Referenced policy is no longer available")
+                    .with_context(format!("policy_slug: {slug}"))
             })?;
         let definition = parse_definition(found.version.id, found.version.definition)?;
         policies.push(ResolvedPolicy {

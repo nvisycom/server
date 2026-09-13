@@ -22,11 +22,9 @@ use bytes::Bytes;
 use elide_pipeline::file::Document;
 use elide_pipeline::{ArtifactSet, Audit, Engine};
 use nvisy_postgres::PgConn;
-use nvisy_postgres::model::{
-    Blob, NewBlob, WorkspaceDetection, WorkspaceDocument, WorkspacePipeline,
-};
+use nvisy_postgres::model::{Blob, NewBlob, WorkspaceDetection, WorkspaceDocument};
 use nvisy_postgres::query::{ReclaimableBlob, WorkspaceAuditRepository, WorkspaceBlobRepository};
-use nvisy_postgres::types::{RetentionScope, RetentionSettings};
+use nvisy_postgres::types::{RetentionOverride, RetentionScope, RetentionSettings};
 use nvisy_s3::{AuditKey, Bucket, DocumentKey, IntermediateKey};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -239,12 +237,19 @@ impl RunBlobStore {
     /// [`discard_staged_object`](Self::discard_staged_object).
     pub async fn stage_analyzed_document(
         &self,
-        pipeline: &WorkspacePipeline,
+        workspace_id: Uuid,
+        retention_override: Option<&RetentionOverride>,
         workspace_settings: &RetentionSettings,
         analyzed: &Audit,
     ) -> Result<NewBlob> {
-        self.stage_audit_blob(pipeline, workspace_settings, analyzed, "encrypt analysis")
-            .await
+        self.stage_audit_blob(
+            workspace_id,
+            retention_override,
+            workspace_settings,
+            analyzed,
+            "encrypt analysis",
+        )
+        .await
     }
 
     /// Encrypts a redaction's review audit, writes it to the audit bucket, and
@@ -257,12 +262,14 @@ impl RunBlobStore {
     /// audit sets `redaction_id` and `derived_from`.
     pub async fn stage_review_audit(
         &self,
-        pipeline: &WorkspacePipeline,
+        workspace_id: Uuid,
+        retention_override: Option<&RetentionOverride>,
         workspace_settings: &RetentionSettings,
         reviewed: &Audit,
     ) -> Result<NewBlob> {
         self.stage_audit_blob(
-            pipeline,
+            workspace_id,
+            retention_override,
             workspace_settings,
             reviewed,
             "encrypt review audit",
@@ -275,12 +282,12 @@ impl RunBlobStore {
     /// retention scope and return the blob to resolve.
     async fn stage_audit_blob(
         &self,
-        pipeline: &WorkspacePipeline,
+        workspace_id: Uuid,
+        retention_override: Option<&RetentionOverride>,
         workspace_settings: &RetentionSettings,
         audit: &Audit,
         encrypt_step: &str,
     ) -> Result<NewBlob> {
-        let workspace_id = pipeline.workspace_id;
         let plaintext = serde_json::to_vec(audit).map_err(analysis_serde_error)?;
         let hash = Sha256::digest(&plaintext).to_vec();
         let size = plaintext.len() as i64;
@@ -296,11 +303,10 @@ impl RunBlobStore {
         let key = AuditKey::generate(workspace_id);
         self.infra.blobs.put(&key, Cursor::new(ciphertext)).await?;
 
-        // Retention expiry for the audit scope (workspace baseline, pipeline
-        // override if set).
-        let over = pipeline.metadata.or_default().retention;
+        // Retention expiry for the audit scope: the detection's snapshotted
+        // override if any, else the workspace baseline.
         let expires_at = workspace_settings
-            .resolve(RetentionScope::AuditLogs, over.as_ref())
+            .resolve(RetentionScope::AuditLogs, retention_override)
             .expires_at(jiff::Timestamp::now());
 
         Ok(NewBlob {
@@ -323,11 +329,11 @@ impl RunBlobStore {
     /// pipeline override if set).
     pub async fn stage_intermediates<T: Serialize>(
         &self,
-        pipeline: &WorkspacePipeline,
+        workspace_id: Uuid,
+        retention_override: Option<&RetentionOverride>,
         workspace_settings: &RetentionSettings,
         artifacts: &T,
     ) -> Result<NewBlob> {
-        let workspace_id = pipeline.workspace_id;
         let plaintext = serde_json::to_vec(artifacts).map_err(analysis_serde_error)?;
         let hash = Sha256::digest(&plaintext).to_vec();
         let size = plaintext.len() as i64;
@@ -343,9 +349,8 @@ impl RunBlobStore {
         let key = IntermediateKey::generate(workspace_id);
         self.infra.blobs.put(&key, Cursor::new(ciphertext)).await?;
 
-        let over = pipeline.metadata.or_default().retention;
         let expires_at = workspace_settings
-            .resolve(RetentionScope::Intermediates, over.as_ref())
+            .resolve(RetentionScope::Intermediates, retention_override)
             .expires_at(jiff::Timestamp::now());
 
         Ok(NewBlob {
@@ -372,7 +377,7 @@ impl RunBlobStore {
     pub async fn stage_redacted_document(
         &self,
         source_document: &WorkspaceDocument,
-        pipeline: &WorkspacePipeline,
+        retention_override: Option<&RetentionOverride>,
         workspace_settings: &RetentionSettings,
         bytes: Bytes,
     ) -> Result<(NewBlob, String)> {
@@ -388,9 +393,8 @@ impl RunBlobStore {
         let key = DocumentKey::generate(workspace_id);
         self.infra.blobs.put(&key, Cursor::new(ciphertext)).await?;
 
-        let over = pipeline.metadata.or_default().retention;
         let expires_at = workspace_settings
-            .resolve(RetentionScope::RedactedDocuments, over.as_ref())
+            .resolve(RetentionScope::RedactedDocuments, retention_override)
             .expires_at(jiff::Timestamp::now());
 
         let redacted_name = redacted_display_name(

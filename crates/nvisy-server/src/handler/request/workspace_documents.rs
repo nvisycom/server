@@ -1,19 +1,17 @@
 //! Document request types.
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 
 use derive_more::{AsRef, Into};
 use elide_pipeline::FormatRegistry;
 use garde::Validate;
-use nvisy_postgres::model::UpdateWorkspaceDocument as UpdateDocumentModel;
-use nvisy_postgres::types::DocumentFilter;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::input::{ListDocumentsInput, UpdateDocumentInput};
 use crate::handler::utility::DocumentHash;
-use crate::service::{EngineService, UnknownFormatToken};
 
 /// Request to update document metadata.
 #[must_use]
@@ -28,12 +26,11 @@ pub struct UpdateWorkspaceDocument {
     pub metadata: Option<serde_json::Value>,
 }
 
-impl UpdateWorkspaceDocument {
-    pub fn into_model(self) -> UpdateDocumentModel {
-        UpdateDocumentModel {
-            display_name: self.display_name,
-            metadata: self.metadata,
-            ..Default::default()
+impl From<UpdateWorkspaceDocument> for UpdateDocumentInput {
+    fn from(request: UpdateWorkspaceDocument) -> Self {
+        UpdateDocumentInput {
+            display_name: request.display_name,
+            metadata: request.metadata,
         }
     }
 }
@@ -124,53 +121,18 @@ pub struct ListWorkspaceDocuments {
     pub hash: Option<DocumentHash>,
 }
 
-impl ListWorkspaceDocuments {
-    /// Converts to the DB filter, resolving format and modality tokens to file
-    /// extensions against the engine's codec registry.
-    ///
-    /// `formats` and `modality` are separate facets combined with AND: when both
-    /// are given, only documents whose extension is in both sets match (their
-    /// intersection). A facet that is absent imposes no constraint. Returns
-    /// [`UnknownFormatToken`] if a token matches no known extension or modality.
-    pub fn to_filter(&self, engine: &EngineService) -> Result<DocumentFilter, UnknownFormatToken> {
-        let formats = self.formats.as_deref();
-        let formats = formats.map(|t| engine.resolve_extensions(t)).transpose()?;
-
-        let modality = self.modality.as_deref();
-        let modality = modality.map(|t| engine.resolve_modalities(t)).transpose()?;
-
-        // An empty search string is not a real search — normalize it to `None`
-        // here so the filter always carries a meaningful term.
-        let search = self
-            .search
-            .as_deref()
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned);
-
-        Ok(DocumentFilter {
-            search,
-            extensions: intersect_facets(formats, modality),
-            hash: self.hash.as_ref().map(DocumentHash::to_bytes),
-        })
-    }
-}
-
-/// Combines the two extension facets with AND: the intersection when both are
-/// present, either one alone when only one is, or `None` when neither is.
-fn intersect_facets(
-    formats: Option<Vec<String>>,
-    modality: Option<Vec<String>>,
-) -> Option<Vec<String>> {
-    match (formats, modality) {
-        // Both facets active: keep only extensions in both sets.
-        (Some(a), Some(b)) => {
-            let keep: HashSet<&String> = b.iter().collect();
-            Some(a.into_iter().filter(|ext| keep.contains(ext)).collect())
+impl From<ListWorkspaceDocuments> for ListDocumentsInput {
+    fn from(query: ListWorkspaceDocuments) -> Self {
+        ListDocumentsInput {
+            search: query.search,
+            formats: query
+                .formats
+                .map(|t| t.into_iter().map(Into::into).collect()),
+            modality: query
+                .modality
+                .map(|t| t.into_iter().map(Into::into).collect()),
+            hash: query.hash.as_ref().map(DocumentHash::to_bytes),
         }
-        // One facet active: it is the constraint on its own.
-        (only @ Some(_), None) | (None, only @ Some(_)) => only,
-        // Neither: no extension constraint.
-        (None, None) => None,
     }
 }
 

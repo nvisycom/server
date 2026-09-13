@@ -3,10 +3,14 @@
 use elide_pipeline::entity::EditSet;
 use elide_pipeline::provider::DocumentContext;
 use garde::Validate;
-use nvisy_postgres::types::{DetectionFilter, DetectionStatus, PipelineTriggerType};
+use nvisy_postgres::types::{
+    DetectionFilter, DetectionStatus, Handle, PipelineTriggerType, RetentionOverride,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::domain::input::{CreateAdhocDetectionInput, CreateDetectionInput};
 
 /// Query parameters for listing detections across a workspace.
 ///
@@ -84,6 +88,50 @@ pub struct CreateWorkspaceDetection {
     /// the pipeline default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<DocumentContext>,
+}
+
+impl From<CreateWorkspaceDetection> for CreateDetectionInput {
+    fn from(request: CreateWorkspaceDetection) -> Self {
+        CreateDetectionInput {
+            document_id: request.document_id,
+            scope: request.scope,
+        }
+    }
+}
+
+/// Request payload to start an ad-hoc detection over a document, naming its
+/// policies directly rather than through a pipeline.
+///
+/// Analyzes the document against the given policies (authored or one-shot) and
+/// returns the detection holding the findings for review before redaction.
+#[must_use]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
+pub struct CreateAdhocWorkspaceDetection {
+    /// The document to analyze.
+    pub document_id: Uuid,
+    /// The policies to run against, by slug. At least one is required.
+    #[garde(length(min = 1, max = 64))]
+    pub policy_slugs: Vec<Handle>,
+    /// Per-document scope (languages, jurisdictions, document labels).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<DocumentContext>,
+    /// Retention override for the outputs this detection produces. Absent falls
+    /// back to the workspace retention baseline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention_override: Option<RetentionOverride>,
+}
+
+impl From<CreateAdhocWorkspaceDetection> for CreateAdhocDetectionInput {
+    fn from(request: CreateAdhocWorkspaceDetection) -> Self {
+        CreateAdhocDetectionInput {
+            document_id: request.document_id,
+            policy_slugs: request.policy_slugs,
+            scope: request.scope,
+            retention_override: request.retention_override,
+        }
+    }
 }
 
 /// Request payload to redact a detection.

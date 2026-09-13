@@ -1,9 +1,12 @@
 //! Detection handlers: detect, review, and redact.
 //!
-//! A detection is one analysis of a document through a pipeline. Detect creates the
-//! detection and stores the findings; once it is complete a redaction consumes
-//! the findings (with optional reviewer edits) and produces a redacted document. A
-//! detection can be redacted many times.
+//! A detection is one analysis of a document through a pipeline (or, ad-hoc,
+//! against an explicit policy list). Create and read delegate to
+//! [`WorkspaceDetectionService`]; the async analysis runs in the detection worker.
+//! Once a detection is complete a redaction consumes the findings (with optional
+//! reviewer edits) and produces a redacted document. A detection can be redacted
+//! many times. The streaming (SSE) and redaction actions stay here, loading a
+//! detection through the service.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
@@ -14,27 +17,25 @@ use axum::response::sse::Event;
 use elide_pipeline::governance::policy::Policy;
 use futures::StreamExt;
 use nvisy_postgres::model::{
-    Blob, NewWorkspaceAudit, NewWorkspaceDetection, NewWorkspaceDetectionJob, NewWorkspaceDocument,
-    NewWorkspaceRedaction, WorkspaceDetection as WorkspaceDetectionModel, WorkspaceDocument,
-    WorkspacePipeline,
+    Blob, NewWorkspaceAudit, NewWorkspaceDocument, NewWorkspaceRedaction,
+    WorkspaceDetection as WorkspaceDetectionModel, WorkspaceDocument, WorkspacePipeline,
 };
 use nvisy_postgres::query::{
-    DetectionDocuments, DetectionJobOutboxRepository, PipelineReferenceRepository,
-    WorkspaceAuditRepository, WorkspaceBlobRepository, WorkspaceDetectionRepository,
-    WorkspaceDocumentRepository, WorkspacePipelineRepository, WorkspaceRedactionRepository,
-    WorkspaceThreadRepository,
+    DetectionDocuments, WorkspaceAuditRepository, WorkspaceBlobRepository,
+    WorkspaceDocumentRepository, WorkspaceRedactionRepository, WorkspaceThreadRepository,
 };
 use nvisy_postgres::types::{DetectionStatus, DocumentKind};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
+use crate::domain;
 use crate::extract::{
     Authorized, IdempotencyKey, Json, Path, Query, SecurityContext, ValidateJson, markers,
 };
 use crate::handler::request::{
-    CreateWorkspaceDetection, CursorPagination, PipelineDefinition, RedactWorkspaceDetection,
-    WorkspaceDetectionPathParams, WorkspaceDetectionsQuery, WorkspacePipelineDetectionsQuery,
-    WorkspacePipelinePathParams,
+    CreateAdhocWorkspaceDetection, CreateWorkspaceDetection, CursorPagination,
+    RedactWorkspaceDetection, WorkspaceDetectionPathParams, WorkspaceDetectionsQuery,
+    WorkspacePipelineDetectionsQuery, WorkspacePipelinePathParams,
 };
 use crate::handler::response::{
     WorkspaceDetection, WorkspaceDetectionsPage, WorkspaceRedactionResult,
@@ -43,12 +44,37 @@ use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, SseResponse};
 use crate::service::event::EventEmitter;
 use crate::service::{
-    DetectionJob, DetectionQueue, DetectionStatusEvent, EngineService, RunBlobStore, ServiceState,
-    event, resolve_pinned_policies,
+    DetectionQueue, DetectionStatusEvent, EngineService, RunBlobStore, ServiceState, event,
+    resolve_pinned_policies,
 };
 
 /// Tracing target for detection operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::detections";
+
+/// Maps a service's created/replayed detection to the HTTP response, resolving
+/// the triggering account to its public reference.
+async fn created_response(
+    conn: &mut PgConn,
+    created: domain::output::CreatedDetection,
+    workspace_slug: nvisy_postgres::types::Handle,
+) -> Result<(StatusCode, Json<WorkspaceDetection>)> {
+    let status = if created.created {
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::OK
+    };
+    let trigger = resolve_account_ref(conn, created.trigger_account_id).await?;
+    Ok((
+        status,
+        Json(WorkspaceDetection::from_model(
+            created.detection,
+            created.pipeline_slug,
+            workspace_slug,
+            trigger,
+            created.documents,
+        )),
+    ))
+}
 
 /// Starts a detection: analyzes a document with the pipeline's configuration.
 ///
@@ -65,7 +91,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::detections";
 )]
 async fn create_detection(
     State(pg_client): State<PgClient>,
-    State(detection): State<DetectionQueue>,
+    State(detections): State<domain::WorkspaceDetectionService>,
     authz: Authorized<markers::RunDetections>,
     Path(path_params): Path<WorkspacePipelinePathParams>,
     IdempotencyKey(idempotency_key): IdempotencyKey,
@@ -75,164 +101,22 @@ async fn create_detection(
     tracing::debug!(target: TRACING_TARGET, "Starting detection");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
-
-    // Only an enabled pipeline runs: a draft (still being configured) or a
-    // disabled (paused) pipeline is rejected.
-    if !pipeline.status.is_enabled() {
-        return Err(ErrorKind::Conflict
-            .with_message("Pipeline is not enabled")
-            .with_resource("pipeline"));
-    }
-
-    // Idempotent replay: a repeated key returns the detection created the first
-    // time, attributed to whoever originally triggered it (not the current
-    // caller).
-    if let Some(key) = &idempotency_key
-        && let Some(existing) = conn
-            .find_detection_by_idempotency_key(pipeline.id, key)
-            .await?
-    {
-        tracing::debug!(target: TRACING_TARGET, "Replaying detection for idempotency key");
-        let trigger = resolve_account_ref(&mut conn, existing.account_id).await?;
-        let documents = conn
-            .detection_document_names(workspace.id, &existing)
-            .await?;
-        return Ok((
-            StatusCode::OK,
-            Json(WorkspaceDetection::from_model(
-                existing,
-                pipeline.slug.clone(),
-                workspace.slug.clone(),
-                trigger,
-                documents,
-            )),
-        ));
-    }
-
-    // Validate synchronously so a bad request fails fast (4xx) rather than as a
-    // detection that immediately fails in the worker.
-    let document = conn
-        .find_document_in_workspace(pipeline.workspace_id, request.document_id)
-        .await?
-        .ok_or_else(|| Error::not_found("document"))?;
-
-    if conn.list_pipeline_policy_ids(pipeline.id).await?.is_empty() {
-        return Err(ErrorKind::BadRequest
-            .with_message("Pipeline has no policies; attach at least one before running")
-            .with_resource("pipeline"));
-    }
-
-    // Decode the pipeline definition now so an undecodable definition fails the
-    // request synchronously (400) instead of returning 202 and failing later in
-    // the worker. The decoded value is rebuilt in the worker from the same
-    // stored bytes; this is validation only.
-    let _validated = PipelineDefinition::from_parts(pipeline.definition.clone(), Vec::new())
-        .map_err(|err| {
-            ErrorKind::BadRequest
-                .with_message("Pipeline definition is invalid")
-                .with_resource("pipeline")
-                .with_context(err.to_string())
-        })?;
-
-    // Create the detection (its id is the engine correlation id). The response
-    // returns immediately; the client learns the findings are ready via the
-    // detection's status (SSE at `.../events` or a re-read).
-    let new_detection = NewWorkspaceDetection {
-        pipeline_id: pipeline.id,
-        input_document_id: document.id,
+    let origin = event::EventOrigin {
+        workspace_id: workspace.id,
         account_id: authz.account_id,
-        status: Some(DetectionStatus::Pending),
-        idempotency_key: idempotency_key.clone(),
-        ..Default::default()
+        security: &security,
     };
-
-    // Create the detection, record its start event, and queue its analysis in one
-    // transaction, so all three commit or roll back together. The job goes onto
-    // the outbox (not published inline) so the detection is never lost to a
-    // publish that failed after the row committed, nor marked failed for a publish
-    // that in fact went through: the drainer relays the outbox row to the
-    // work-queue, and the worker's claim dedups an at-least-once redelivery.
-    let scope = request.scope;
-    let detection_row = conn
-        .transaction(async |conn| {
-            let detection_row = conn.create_workspace_detection(new_detection).await?;
-            conn.emit_event(
-                event::EventOrigin {
-                    workspace_id: workspace.id,
-                    account_id: authz.account_id,
-                    security: &security,
-                },
-                event::WorkspaceEvent::DetectionStarted(event::DetectionStarted {
-                    detection_id: detection_row.id,
-                    pipeline_slug: pipeline.slug.clone(),
-                }),
-            )
-            .await?;
-
-            // The document's review is its thread: ensure it exists (one live
-            // thread per document) so this detection has somewhere to be reviewed.
-            // On the document's first detection this creates the thread at
-            // `needs_review` and records a `review.detection.created` timeline
-            // event; a re-detection finds the existing thread and reopens it if it
-            // was resolved.
-            let thread = conn
-                .find_or_create_document_thread(workspace.id, document.id, authz.account_id)
-                .await?;
-            conn.reopen_review(thread.id, authz.account_id).await?;
-            let job = DetectionJob {
-                workspace_id: workspace.id,
-                detection_id: detection_row.id,
-                scope,
-            };
-            conn.insert_detection_job(NewWorkspaceDetectionJob {
-                detection_id: detection_row.id,
-                job: serde_json::to_value(&job).map_err(|err| {
-                    ErrorKind::InternalServerError
-                        .with_message("Failed to encode detection job")
-                        .with_context(err.to_string())
-                })?,
-            })
-            .await?;
-            Ok::<_, Error>(detection_row)
-        })
+    let created = detections
+        .create(
+            origin,
+            &path_params.pipeline_slug,
+            idempotency_key,
+            request.into(),
+        )
         .await?;
 
-    // Broadcast `Pending` before waking the drainer, so this instance does not
-    // race its own worker: waking first could let the worker publish `Executing`
-    // ahead of this `Pending` and invert the order a watcher sees. Best-effort UI
-    // hint; the detection row is authoritative, and `stream_detection_events`
-    // still guards against a late `Pending` from another instance's drainer.
-    detection
-        .broadcast_status(detection_row.id, DetectionStatus::Pending)
-        .await;
-
-    // Wake the outbox drainer so the job is relayed to the work-queue at once,
-    // rather than waiting for the drainer's next timer tick. The job row is
-    // already committed, so a missed wake only reverts to the timer.
-    detection.wake_drainer();
-
-    tracing::info!(target: TRACING_TARGET, detection_id = %detection_row.id, "WorkspaceDetection queued");
-
-    let trigger = resolve_account_ref(&mut conn, detection_row.account_id).await?;
-
-    // The detection was just created from this document.
-    let documents = DetectionDocuments {
-        input: Some(document.display_name),
-    };
-
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(WorkspaceDetection::from_model(
-            detection_row,
-            pipeline.slug,
-            workspace.slug,
-            trigger,
-            documents,
-        )),
-    ))
+    let mut conn = pg_client.get_connection().await?;
+    created_response(&mut conn, created, workspace.slug).await
 }
 
 fn create_detection_docs(op: TransformOperation) -> TransformOperation {
@@ -255,6 +139,59 @@ fn create_detection_docs(op: TransformOperation) -> TransformOperation {
         .response::<409, Json<ErrorResponse>>()
 }
 
+/// Starts an ad-hoc detection: analyzes a document against an explicit list of
+/// policies, with no pipeline.
+///
+/// Returns the detection holding the findings for review. A repeated request with
+/// the same `Idempotency-Key` returns the existing detection instead of analyzing
+/// again. Requires `RunDetections` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
+    )
+)]
+async fn create_adhoc_detection(
+    State(pg_client): State<PgClient>,
+    State(detections): State<domain::WorkspaceDetectionService>,
+    authz: Authorized<markers::RunDetections>,
+    IdempotencyKey(idempotency_key): IdempotencyKey,
+    security: SecurityContext,
+    ValidateJson(request): ValidateJson<CreateAdhocWorkspaceDetection>,
+) -> Result<(StatusCode, Json<WorkspaceDetection>)> {
+    tracing::debug!(target: TRACING_TARGET, "Starting ad-hoc detection");
+
+    let workspace = authz.workspace;
+    let origin = event::EventOrigin {
+        workspace_id: workspace.id,
+        account_id: authz.account_id,
+        security: &security,
+    };
+    let created = detections
+        .create_adhoc(origin, idempotency_key, request.into())
+        .await?;
+
+    let mut conn = pg_client.get_connection().await?;
+    created_response(&mut conn, created, workspace.slug).await
+}
+
+fn create_adhoc_detection_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Start an ad-hoc detection")
+        .description(
+            "Starts a detection over a document against an explicit list of policies, \
+             with no pipeline. Returns 202 with the pending detection; fetch the findings \
+             from `.../detections/{detectionId}/analysis/` once it reaches `complete`. A \
+             repeated Idempotency-Key returns the existing detection.",
+        )
+        .response::<202, Json<WorkspaceDetection>>()
+        .response::<200, Json<WorkspaceDetection>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
 /// Lists detections for a specific pipeline.
 #[tracing::instrument(
     skip_all,
@@ -265,7 +202,7 @@ fn create_detection_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn list_pipeline_detections(
-    State(pg_client): State<PgClient>,
+    State(detections): State<domain::WorkspaceDetectionService>,
     authz: Authorized<markers::ViewDetections>,
     Path(path_params): Path<WorkspacePipelinePathParams>,
     Query(pagination): Query<CursorPagination>,
@@ -274,19 +211,14 @@ async fn list_pipeline_detections(
     tracing::debug!(target: TRACING_TARGET, "Listing pipeline detections");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let pipeline = find_pipeline(&mut conn, workspace.id, &path_params.pipeline_slug).await?;
-
-    let page = conn
-        .cursor_list_pipeline_detections(pipeline.id, pagination.into_cursor(), &query.into())
+    let page = detections
+        .list_for_pipeline(
+            workspace.id,
+            &path_params.pipeline_slug,
+            pagination.into_cursor(),
+            &query.into(),
+        )
         .await?;
-
-    tracing::debug!(
-        target: TRACING_TARGET,
-        detection_count = page.items.len(),
-        "Pipeline detections listed"
-    );
 
     let response = WorkspaceDetectionsPage::from_cursor_page(page, |row| {
         WorkspaceDetection::from_model(
@@ -327,7 +259,7 @@ fn list_pipeline_detections_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn list_workspace_detections(
-    State(pg_client): State<PgClient>,
+    State(detections): State<domain::WorkspaceDetectionService>,
     authz: Authorized<markers::ViewDetections>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<WorkspaceDetectionsQuery>,
@@ -335,17 +267,9 @@ async fn list_workspace_detections(
     tracing::debug!(target: TRACING_TARGET, "Listing workspace detections");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let page = conn
-        .cursor_list_workspace_detections(workspace.id, pagination.into_cursor(), &query.into())
+    let page = detections
+        .list_for_workspace(workspace.id, pagination.into_cursor(), &query.into())
         .await?;
-
-    tracing::debug!(
-        target: TRACING_TARGET,
-        detection_count = page.items.len(),
-        "Workspace detections listed"
-    );
 
     Ok((
         StatusCode::OK,
@@ -387,21 +311,19 @@ fn list_workspace_detections_docs(op: TransformOperation) -> TransformOperation 
 )]
 async fn get_detection(
     State(pg_client): State<PgClient>,
+    State(detections): State<domain::WorkspaceDetectionService>,
     authz: Authorized<markers::ViewDetections>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
 ) -> Result<(StatusCode, Json<WorkspaceDetection>)> {
     tracing::debug!(target: TRACING_TARGET, "Getting detection");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let (detection, pipeline) =
-        find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
-
-    let trigger = resolve_account_ref(&mut conn, detection.account_id).await?;
-    let documents = conn
-        .detection_document_names(workspace.id, &detection)
+    let (detection, pipeline_slug, trigger_account_id, documents) = detections
+        .get(workspace.id, path_params.detection_id.as_uuid())
         .await?;
+
+    let mut conn = pg_client.get_connection().await?;
+    let trigger = resolve_account_ref(&mut conn, trigger_account_id).await?;
 
     tracing::debug!(target: TRACING_TARGET, "WorkspaceDetection retrieved");
 
@@ -409,7 +331,7 @@ async fn get_detection(
         StatusCode::OK,
         Json(WorkspaceDetection::from_model(
             detection,
-            pipeline.slug,
+            pipeline_slug,
             workspace.slug,
             trigger,
             documents,
@@ -450,7 +372,7 @@ fn get_detection_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn stream_detection_events(
-    State(pg_client): State<PgClient>,
+    State(detections): State<domain::WorkspaceDetectionService>,
     State(detection): State<DetectionQueue>,
     authz: Authorized<markers::ViewDetections>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
@@ -459,7 +381,6 @@ async fn stream_detection_events(
 
     let workspace = authz.workspace;
     let detection_id = path_params.detection_id.as_uuid();
-    let mut conn = pg_client.get_connection().await?;
 
     // Subscribe BEFORE reading the current status: core-NATS broadcasts are not
     // replayed, so a terminal status published between the read and the
@@ -468,10 +389,10 @@ async fn stream_detection_events(
 
     // Confirm the detection exists (and is workspace-scoped) so a bad id 404s here
     // rather than opening an empty stream.
-    let (detection_row, _pipeline) = find_detection(&mut conn, workspace.id, detection_id).await?;
+    let (detection_row, _pipeline) = detections.find(workspace.id, detection_id).await?;
     let current = detection_row.status;
-    drop(conn);
 
+    let workspace_id = workspace.id;
     let stream = stream! {
         // Status progression is monotonic (pending -> executing -> terminal), but
         // its sources are not ordered: this instance broadcasts `Pending` while a
@@ -507,7 +428,7 @@ async fn stream_detection_events(
                 // The subscription ended; fall back to the DB so the client still
                 // learns the final status.
                 Ok(None) => {
-                    if let Some(status) = reread_detection_status(&pg_client, workspace.id, detection_id).await
+                    if let Some(status) = reread_detection_status(&detections, workspace_id, detection_id).await
                         && status.phase() >= max_phase
                     {
                         yield status_event(&DetectionStatusEvent { detection_id, status });
@@ -518,7 +439,7 @@ async fn stream_detection_events(
                 // detection row. This recovers a dropped best-effort broadcast
                 // (core NATS is at-most-once) instead of hanging on keep-alive.
                 Err(_) => {
-                    if let Some(status) = reread_detection_status(&pg_client, workspace.id, detection_id).await
+                    if let Some(status) = reread_detection_status(&detections, workspace_id, detection_id).await
                         && status.phase() >= max_phase
                     {
                         max_phase = status.phase();
@@ -544,12 +465,11 @@ const STATUS_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs
 /// the detection can no longer be read (missing, or a transient error — the next
 /// poll retries).
 async fn reread_detection_status(
-    pg_client: &PgClient,
+    detections: &domain::WorkspaceDetectionService,
     workspace_id: Uuid,
     detection_id: Uuid,
 ) -> Option<DetectionStatus> {
-    let mut conn = pg_client.get_connection().await.ok()?;
-    match find_detection(&mut conn, workspace_id, detection_id).await {
+    match detections.find(workspace_id, detection_id).await {
         Ok((detection, _pipeline)) => Some(detection.status),
         Err(err) => {
             tracing::debug!(target: TRACING_TARGET, error = %err, %detection_id, "Failed to re-read detection status");
@@ -586,7 +506,8 @@ fn status_event(event: &DetectionStatusEvent) -> Event {
 /// for the slow analysis and staging work.
 struct RedactInputs {
     detection: WorkspaceDetectionModel,
-    pipeline: WorkspacePipeline,
+    /// The detection's owning pipeline, if it still has one (for the event slug).
+    pipeline: Option<WorkspacePipeline>,
     /// The detection's input document.
     document: WorkspaceDocument,
     /// The input document's backing blob (for its extension and byte access).
@@ -614,6 +535,7 @@ struct RedactInputs {
 )]
 async fn redact_detection(
     State(pg_client): State<PgClient>,
+    State(detections): State<domain::WorkspaceDetectionService>,
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::RunRedactions>,
@@ -629,12 +551,13 @@ async fn redact_detection(
     // Holding a pooled connection across the audit load, redaction inference, and
     // object I/O below would pin it for many seconds and starve the pool under
     // load, so this scope drops the connection before that slow work begins. Only
-    // the audit blob is resolved here; its bytes are loaded in phase 2.
+    // the audit blob is resolved here; its bytes are loaded in phase 2. The
+    // detection lookup goes through the service; the rest is redaction's own work.
+    let (detection, pipeline) = detections
+        .find(workspace.id, path_params.detection_id.as_uuid())
+        .await?;
     let inputs = {
         let mut conn = pg_client.get_connection().await?;
-
-        let (detection, pipeline) =
-            find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
 
         // A detection can only be redacted once its analysis is complete.
         if !detection.status.is_complete() {
@@ -729,12 +652,21 @@ async fn redact_detection(
     // Stage both produced objects (redacted document + review audit) outside the
     // transaction — object writes are not transactional — then commit their blobs,
     // document, audit, and redaction rows together. On rollback the staged objects
-    // are reclaimed so no orphaned bytes accrue.
+    // are reclaimed so no orphaned bytes accrue. Retention comes from the
+    // detection's snapshotted override (the run's own retention), not the live
+    // pipeline, so re-redacting reflects what the detection ran under.
     let retention = workspace.settings.or_default().retention;
+    // The detection's snapshotted override, decoded to an owned value borrowed by
+    // both staging calls below.
+    let retention_override = inputs
+        .detection
+        .retention_override
+        .as_ref()
+        .map(|snapshot| snapshot.or_default());
     let staged_output = blob
         .stage_redacted_document(
             &inputs.document,
-            &inputs.pipeline,
+            retention_override.as_ref(),
             &retention,
             redacted.bytes,
         )
@@ -742,7 +674,12 @@ async fn redact_detection(
     // Staging the review audit after the output means a failure here would strand
     // the already-written output object (no blob to reclaim it); discard it first.
     let staged_review = match blob
-        .stage_review_audit(&inputs.pipeline, &retention, &reviewed)
+        .stage_review_audit(
+            inputs.detection.workspace_id,
+            retention_override.as_ref(),
+            &retention,
+            &reviewed,
+        )
         .await
     {
         Ok(staged) => staged,
@@ -804,7 +741,7 @@ async fn redact_detection(
                 },
                 event::WorkspaceEvent::RedactionCreated(event::RedactionCreated {
                     detection_id: inputs.detection.id,
-                    pipeline_slug: inputs.pipeline.slug.clone(),
+                    pipeline_slug: inputs.pipeline.as_ref().map(|p| p.slug.clone()),
                     redaction_id: redaction.id,
                     input_document_name: Some(inputs.document.display_name.clone()),
                     notify: inputs.detection.account_id,
@@ -893,31 +830,6 @@ fn redact_detection_docs(op: TransformOperation) -> TransformOperation {
         .response::<409, Json<ErrorResponse>>()
 }
 
-/// Finds a pipeline within a workspace by slug or returns NotFound.
-async fn find_pipeline(
-    conn: &mut PgConn,
-    workspace_id: Uuid,
-    pipeline_slug: &str,
-) -> Result<WorkspacePipeline> {
-    conn.find_pipeline_in_workspace_by_slug(workspace_id, pipeline_slug)
-        .await?
-        .map(|wc| wc.item)
-        .ok_or_else(|| Error::not_found("pipeline"))
-}
-
-/// Resolves a detection by its opaque id within a workspace, returning the
-/// detection and its owning pipeline (for the response's pipeline slug). The
-/// lookup is workspace-scoped through the owning pipeline.
-pub(super) async fn find_detection(
-    conn: &mut PgConn,
-    workspace_id: Uuid,
-    detection_id: Uuid,
-) -> Result<(WorkspaceDetectionModel, WorkspacePipeline)> {
-    conn.find_workspace_detection_by_id(workspace_id, detection_id)
-        .await?
-        .ok_or_else(|| Error::not_found("detection"))
-}
-
 /// Returns a [`Router`] with all detection routes.
 ///
 /// [`Router`]: axum::routing::Router
@@ -935,6 +847,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .get_with(list_pipeline_detections, list_pipeline_detections_docs),
         )
         .api_route(
+            "/workspaces/{workspaceSlug}/detections/",
+            post_with(create_adhoc_detection, create_adhoc_detection_docs),
+        )
+        .api_route(
             "/workspaces/{workspaceSlug}/detections/{detectionId}/",
             get_with(get_detection, get_detection_docs),
         )
@@ -946,5 +862,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/workspaces/{workspaceSlug}/detections/{detectionId}/redactions/",
             post_with(redact_detection, redact_detection_docs),
         )
-        .with_path_items(|item| item.tag("Detections"))
+        .with_path_items(|item| item.tag("WorkspaceDetections"))
 }

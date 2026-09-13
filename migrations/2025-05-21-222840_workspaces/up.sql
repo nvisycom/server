@@ -181,8 +181,6 @@ CREATE TABLE workspace_invites (
     -- References
     workspace_id   UUID            NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
 
-    -- Composite key target for workspace-scoped access and foreign keys.
-    CONSTRAINT workspace_invites_workspace_id_id_key UNIQUE (workspace_id, id),
 
     -- Invitation details
     invitee_email  TEXT            DEFAULT NULL,

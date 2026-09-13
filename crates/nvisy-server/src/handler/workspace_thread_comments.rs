@@ -1,17 +1,15 @@
 //! Comment handlers: posting, editing, and deleting the messages within a
-//! thread. The thread lifecycle (open/close/reopen/rename/delete), the review
-//! transitions, and the timeline live in the sibling `workspace_threads` module,
-//! which also owns the helpers shared here (mention resolution, assistant
-//! enqueue, lookups).
+//! thread. A thin HTTP layer over [`WorkspaceThreadService`], which owns comment
+//! creation (mention resolution, assistant enqueue) alongside the thread
+//! lifecycle it shares an aggregate with.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::{NewWorkspaceThreadComment, UpdateWorkspaceThreadComment};
-use nvisy_postgres::query::{WorkspaceThreadCommentRepository, WorkspaceThreadRepository};
-use nvisy_postgres::{AsyncConnection, PgClient};
+use nvisy_postgres::PgClient;
 
+use crate::domain;
 use crate::extract::{Authorized, Json, Path, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
     CreateWorkspaceComment, UpdateWorkspaceComment, WorkspaceCommentPathParams,
@@ -19,12 +17,11 @@ use crate::handler::request::{
 };
 use crate::handler::response::WorkspaceComment;
 use crate::handler::utility::resolve_account_ref;
-use crate::handler::workspace_threads::{
-    MentionOutcome, TRACING_TARGET, emit_thread_event, enqueue_assistant_if_addressed,
-    find_comment, find_thread, resolve_mentions, workspace_origin,
-};
-use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{AssistantQueue, ServiceState, event};
+use crate::response::{ErrorResponse, Result};
+use crate::service::{ServiceState, event};
+
+/// Tracing target for comment operations.
+const TRACING_TARGET: &str = "nvisy_server::handler::comments";
 
 /// Posts a comment (message) in a thread.
 ///
@@ -40,7 +37,7 @@ use crate::service::{AssistantQueue, ServiceState, event};
 )]
 async fn create_comment(
     State(pg_client): State<PgClient>,
-    State(assistant): State<AssistantQueue>,
+    State(threads): State<domain::WorkspaceThreadService>,
     authz: Authorized<markers::Review>,
     Path(path_params): Path<WorkspaceThreadPathParams>,
     security: SecurityContext,
@@ -49,80 +46,20 @@ async fn create_comment(
     tracing::debug!(target: TRACING_TARGET, "Posting comment");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    // The thread must exist in the workspace (and be live).
-    let thread = find_thread(&mut conn, workspace.id, path_params.thread_id).await?;
-
-    let MentionOutcome {
-        recipients,
-        addressed_assistant,
-    } = resolve_mentions(&mut conn, workspace.id, &request.body, authz.account_id).await?;
-
-    let author_username = resolve_account_ref(&mut conn, authz.account_id)
-        .await?
-        .username;
-
-    // Post the comment, record its event, and — if the assistant was addressed —
-    // queue the reply job, all in one transaction so they commit together.
-    let (comment, queued_assistant) = conn
-        .transaction(async |conn| {
-            // Lock the thread and re-check its closed state inside the transaction:
-            // a closed thread is a finished discussion, and the row lock serializes
-            // against a concurrent close so a comment (and its ThreadCommentCreated
-            // event) can never land after ThreadClosed. Reopen to continue.
-            let locked = conn
-                .lock_thread_in_workspace(workspace.id, thread.id)
-                .await?
-                .ok_or_else(|| Error::not_found("workspace_thread"))?;
-            if locked.closed_at.is_some() {
-                return Err(ErrorKind::Conflict
-                    .with_message("This thread is closed; reopen it before posting a comment"));
-            }
-
-            let comment = conn
-                .create_comment(NewWorkspaceThreadComment {
-                    workspace_id: workspace.id,
-                    thread_id: thread.id,
-                    author_account_id: authz.account_id,
-                    parent_id: None,
-                    body: request.body,
-                })
-                .await?;
-
-            emit_thread_event(
-                conn,
-                workspace_origin(workspace.id, authz.account_id, &security),
-                event::WorkspaceEvent::ThreadCommentCreated(event::ThreadCommentCreated {
-                    comment_id: comment.id,
-                    thread_id: thread.id,
-                    document_id: thread.document_id,
-                    author_username: author_username.clone(),
-                    mentioned: recipients,
-                }),
-            )
-            .await?;
-
-            let queued = enqueue_assistant_if_addressed(
-                conn,
-                addressed_assistant,
-                authz.account_id,
-                workspace.id,
-                thread.id,
-                comment.id,
-            )
-            .await?;
-            Ok::<_, Error>((comment, queued))
-        })
+    let comment = threads
+        .create_comment(
+            event::EventOrigin {
+                workspace_id: workspace.id,
+                account_id: authz.account_id,
+                security: &security,
+            },
+            path_params.thread_id,
+            request.body,
+        )
         .await?;
 
-    if queued_assistant {
-        assistant.wake_drainer();
-    }
-
+    let mut conn = pg_client.get_connection().await?;
     let author = resolve_account_ref(&mut conn, comment.author_account_id).await?;
-
-    tracing::info!(target: TRACING_TARGET, comment_id = %comment.id, "WorkspaceComment posted");
 
     Ok((
         StatusCode::CREATED,
@@ -156,6 +93,7 @@ fn create_comment_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn update_comment(
     State(pg_client): State<PgClient>,
+    State(threads): State<domain::WorkspaceThreadService>,
     authz: Authorized<markers::Review>,
     Path(path_params): Path<WorkspaceCommentPathParams>,
     ValidateJson(request): ValidateJson<UpdateWorkspaceComment>,
@@ -163,29 +101,17 @@ async fn update_comment(
     tracing::debug!(target: TRACING_TARGET, "Editing comment");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let comment = find_comment(&mut conn, workspace.id, path_params.comment_id).await?;
-
-    // Only the author may edit their own comment.
-    if comment.author_account_id != authz.account_id {
-        return Err(ErrorKind::Forbidden
-            .with_message("Only the author can edit this comment")
-            .with_resource("workspace_thread_comment"));
-    }
-
-    let updated = conn
-        .update_comment_body(
-            comment.id,
-            UpdateWorkspaceThreadComment {
-                body: Some(request.body),
-            },
+    let updated = threads
+        .update_comment(
+            workspace.id,
+            authz.account_id,
+            path_params.comment_id,
+            request.body,
         )
         .await?;
 
+    let mut conn = pg_client.get_connection().await?;
     let author = resolve_account_ref(&mut conn, updated.author_account_id).await?;
-
-    tracing::info!(target: TRACING_TARGET, "WorkspaceComment edited");
 
     Ok((
         StatusCode::OK,
@@ -213,27 +139,16 @@ fn update_comment_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn delete_comment(
-    State(pg_client): State<PgClient>,
+    State(threads): State<domain::WorkspaceThreadService>,
     authz: Authorized<markers::Review>,
     Path(path_params): Path<WorkspaceCommentPathParams>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting comment");
 
     let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let comment = find_comment(&mut conn, workspace.id, path_params.comment_id).await?;
-
-    // Only the author may delete their own comment.
-    if comment.author_account_id != authz.account_id {
-        return Err(ErrorKind::Forbidden
-            .with_message("Only the author can delete this comment")
-            .with_resource("workspace_thread_comment"));
-    }
-
-    conn.delete_comment(comment.id).await?;
-
-    tracing::info!(target: TRACING_TARGET, "WorkspaceComment deleted");
+    threads
+        .delete_comment(workspace.id, authz.account_id, path_params.comment_id)
+        .await?;
 
     Ok(StatusCode::OK)
 }

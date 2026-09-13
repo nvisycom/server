@@ -1,7 +1,7 @@
 //! Detection job and detection-status event types.
 
 use elide_pipeline::provider::DocumentContext;
-use nvisy_postgres::types::DetectionStatus;
+use nvisy_postgres::types::{DetectionStatus, Handle};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -13,9 +13,10 @@ pub type DetectionStream = nvisy_nats::stream::DetectionStream<DetectionJob>;
 ///
 /// Published to the `DetectionStream` work-queue by the create-detection handler
 /// and consumed by the [`DetectionWorker`](super::DetectionWorker). The worker
-/// re-loads the detection, pipeline, file, and policies from the ids; only the
-/// caller-supplied per-request scope, which is not otherwise persisted, travels
-/// on the job.
+/// re-loads the detection, file, and (for a pipeline detection) the pipeline and
+/// its policies from the ids; the caller-supplied per-request scope and, for an
+/// ad-hoc detection, the policy slugs it named — neither persisted on the
+/// detection — travel on the job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionJob {
     /// Workspace owning the detection.
@@ -25,6 +26,10 @@ pub struct DetectionJob {
     /// Caller-supplied per-request scope override, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<DocumentContext>,
+    /// For an ad-hoc detection (no pipeline), the policy slugs it runs against;
+    /// empty for a pipeline detection, whose policies come from the pipeline.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policy_slugs: Vec<Handle>,
 }
 
 /// A detection's status change, broadcast on the core-NATS subject

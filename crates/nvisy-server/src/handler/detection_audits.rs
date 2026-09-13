@@ -18,7 +18,7 @@ use elide_pipeline::export::{ExportCsv, ExportJson};
 use elide_pipeline::{ArtifactSet, Audit};
 use nvisy_postgres::PgClient;
 
-use super::workspace_detections::find_detection;
+use crate::domain;
 use crate::extract::{Authorized, Json, Path, Query, markers};
 use crate::handler::request::{ExportFormat, ExportQuery, WorkspaceDetectionPathParams};
 use crate::handler::utility::DownloadDocs;
@@ -42,6 +42,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::detection_audits";
 )]
 async fn get_detection_analysis(
     State(pg_client): State<PgClient>,
+    State(detections): State<domain::WorkspaceDetectionService>,
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadAudit>,
@@ -51,15 +52,14 @@ async fn get_detection_analysis(
 
     let workspace = authz.workspace;
 
-    // Resolve the detection and its audit file row under a scoped connection, then
-    // release it before the object-store load below so the pooled connection is
-    // not held across the NATS round-trip.
+    // Resolve the detection through the service, then resolve its audit file row on
+    // a scoped connection released before the object-store load below so the pooled
+    // connection is not held across the NATS round-trip.
+    let (detection, _pipeline) = detections
+        .find(workspace.id, path_params.detection_id.as_uuid())
+        .await?;
     let audit_blob = {
         let mut conn = pg_client.get_connection().await?;
-
-        let (detection, _pipeline) =
-            find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
-
         blob.resolve_audit_blob(&mut conn, &detection).await?
     };
 
@@ -100,6 +100,7 @@ fn get_detection_analysis_docs(op: TransformOperation) -> TransformOperation {
 )]
 async fn get_detection_intermediates(
     State(pg_client): State<PgClient>,
+    State(detections): State<domain::WorkspaceDetectionService>,
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadOriginalDocuments>,
@@ -109,14 +110,14 @@ async fn get_detection_intermediates(
 
     let workspace = authz.workspace;
 
-    // Resolve the detection and its intermediates file row under a scoped
-    // connection, then release it before the object-store load so the pooled
-    // connection is not held across the NATS round-trip.
+    // Resolve the detection through the service, then resolve its intermediates
+    // file row on a scoped connection released before the object-store load so the
+    // pooled connection is not held across the NATS round-trip.
+    let (detection, _pipeline) = detections
+        .find(workspace.id, path_params.detection_id.as_uuid())
+        .await?;
     let intermediates_blob = {
         let mut conn = pg_client.get_connection().await?;
-
-        let (detection, _pipeline) =
-            find_detection(&mut conn, workspace.id, path_params.detection_id.as_uuid()).await?;
 
         blob.resolve_intermediates_blob(&mut conn, &detection)
             .await?
@@ -163,6 +164,7 @@ fn get_detection_intermediates_docs(op: TransformOperation) -> TransformOperatio
 )]
 async fn download_detection_audit(
     State(pg_client): State<PgClient>,
+    State(detections): State<domain::WorkspaceDetectionService>,
     State(blob): State<RunBlobStore>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadAudit>,
@@ -173,14 +175,13 @@ async fn download_detection_audit(
 
     let workspace = authz.workspace;
 
-    // Resolve the detection and its audit file row under a scoped connection, then
-    // release it before the object-store load below so the pooled connection is
-    // not held across the NATS round-trip.
+    // Resolve the detection through the service, then resolve its audit file row on
+    // a scoped connection released before the object-store load below so the pooled
+    // connection is not held across the NATS round-trip.
     let detection_id = path_params.detection_id.as_uuid();
+    let (detection, _pipeline) = detections.find(workspace.id, detection_id).await?;
     let audit_blob = {
         let mut conn = pg_client.get_connection().await?;
-
-        let (detection, _pipeline) = find_detection(&mut conn, workspace.id, detection_id).await?;
         blob.resolve_audit_blob(&mut conn, &detection).await?
     };
 

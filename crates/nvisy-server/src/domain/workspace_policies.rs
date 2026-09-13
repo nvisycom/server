@@ -1,11 +1,9 @@
 //! Workspace policy domain logic: create (authored or one-shot), read, list,
-//! update, promote, and delete.
+//! update, and delete.
 //!
-//! Stateless, operating on a connection and the request's parsed body, factored
-//! out of the handler so the policy rules — one-shot content-addressing, the
-//! authored/one-shot split, promotion, and the auto-promote-on-edit invariant —
-//! live in one place and can be reasoned about (and tested) independently of the
-//! HTTP flow.
+//! Holds the policy rules — one-shot content-addressing, the authored/one-shot
+//! split, and one-shot immutability — in one place, factored out of the handler
+//! so they can be reasoned about (and tested) independently of the HTTP flow.
 
 use elide_pipeline::governance::policy::Policy;
 use nvisy_postgres::model::{NewWorkspacePolicy, WorkspacePolicy, WorkspacePolicyVersion};
@@ -13,10 +11,11 @@ use nvisy_postgres::query::{
     PolicyCursor, WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
 };
 use nvisy_postgres::types::{CursorPage, CursorPagination, Handle, PolicyKind, WithAccountRef};
-use nvisy_postgres::{AsyncConnection, PgConn, model};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConn, model};
 use uuid::Uuid;
 
-use crate::handler::request::{CreateWorkspacePolicy, PolicyBody, UpdateWorkspacePolicy};
+use crate::domain::input::{CreatePolicyInput, PolicyBodyInput, UpdatePolicyInput};
+use crate::domain::output::ResolvedPolicy;
 use crate::response::{Error, ErrorKind, Result};
 use crate::service::event;
 use crate::service::event::EventEmitter;
@@ -24,27 +23,22 @@ use crate::service::event::EventEmitter;
 /// Tracing target for policy domain operations.
 const TRACING_TARGET: &str = "nvisy_server::service::policy";
 
-/// A policy paired with its current version, and whether this call created it.
+/// Creates, reads, updates, and deletes workspace policies.
 ///
-/// `created` distinguishes a freshly minted policy from a reused one-shot, so the
-/// handler can answer `201` on creation and `200` on reuse.
-pub struct ResolvedPolicy {
-    /// The policy row.
-    pub policy: WorkspacePolicy,
-    /// The current version whose definition the engine consumes.
-    pub version: WorkspacePolicyVersion,
-    /// Whether this call created the policy (vs. reusing an existing one-shot).
-    pub created: bool,
+/// Holds the Postgres client and acquires its own connection per call, so each
+/// method is a self-contained transaction. Resolved per request from
+/// [`ServiceState`](crate::service::ServiceState).
+#[derive(Clone)]
+pub struct WorkspacePolicyService {
+    postgres: PgClient,
 }
 
-/// Creates, reads, updates, promotes, and deletes workspace policies.
-///
-/// Stateless: every method takes the connection to act on. Resolved per request
-/// from [`ServiceState`](crate::service::ServiceState).
-#[derive(Clone, Copy, Default)]
-pub struct PolicyService;
+impl WorkspacePolicyService {
+    /// Creates a [`WorkspacePolicyService`] over the given connection pool.
+    pub fn new(postgres: PgClient) -> Self {
+        Self { postgres }
+    }
 
-impl PolicyService {
     /// Creates a policy from a create request.
     ///
     /// A labels body is content-addressed: it mints — or reuses an identical live
@@ -54,16 +48,16 @@ impl PolicyService {
     /// commit together.
     pub async fn create(
         &self,
-        conn: &mut PgConn,
         origin: event::EventOrigin<'_>,
-        request: CreateWorkspacePolicy,
+        input: CreatePolicyInput,
     ) -> Result<ResolvedPolicy> {
-        match request.body.oneshot_content_hash() {
+        let mut conn = self.postgres.get_connection().await?;
+        match input.body.oneshot_content_hash() {
             Some(content_hash) => {
-                self.create_oneshot(conn, origin, request.body, content_hash)
+                self.create_oneshot(&mut conn, origin, input.body, content_hash)
                     .await
             }
-            None => self.create_authored(conn, origin, request).await,
+            None => self.create_authored(&mut conn, origin, input).await,
         }
     }
 
@@ -74,17 +68,17 @@ impl PolicyService {
         &self,
         conn: &mut PgConn,
         origin: event::EventOrigin<'_>,
-        request: CreateWorkspacePolicy,
+        input: CreatePolicyInput,
     ) -> Result<ResolvedPolicy> {
-        let slug = request.slug.ok_or_else(|| {
+        let slug = input.slug.ok_or_else(|| {
             ErrorKind::BadRequest.with_message("A slug is required for this policy body")
         })?;
 
-        let definition = request.body.into_definition("");
-        let display_name = request
+        let definition = input.body.into_definition("");
+        let display_name = input
             .display_name
             .unwrap_or_else(|| definition.name.to_string());
-        let description = request
+        let description = input
             .description
             .or_else(|| definition.description.clone().map(Into::into));
         let body = definition_to_json(&definition)?;
@@ -131,7 +125,7 @@ impl PolicyService {
         &self,
         conn: &mut PgConn,
         origin: event::EventOrigin<'_>,
-        body: PolicyBody,
+        body: PolicyBodyInput,
         content_hash: Vec<u8>,
     ) -> Result<ResolvedPolicy> {
         let slug = Handle::parse(oneshot_slug(&content_hash)).map_err(|err| {
@@ -185,53 +179,61 @@ impl PolicyService {
         })
     }
 
-    /// Lists a workspace's policies, newest first. One-shot policies are excluded.
+    /// Lists a workspace's policies, newest first. `kind` narrows to a single
+    /// policy kind; `None` returns every kind.
     pub async fn list(
         &self,
-        conn: &mut PgConn,
         workspace_id: Uuid,
         pagination: CursorPagination<PolicyCursor>,
+        kind: Option<PolicyKind>,
     ) -> Result<CursorPage<WithAccountRef<WorkspacePolicy>>> {
+        let mut conn = self.postgres.get_connection().await?;
         Ok(conn
-            .cursor_list_workspace_policies(workspace_id, pagination)
+            .cursor_list_workspace_policies(workspace_id, pagination, kind)
             .await?)
     }
 
     /// Finds a policy by slug with its creator and current version, or a NotFound.
     pub async fn find(
         &self,
-        conn: &mut PgConn,
         workspace_id: Uuid,
         policy_slug: &str,
     ) -> Result<(WithAccountRef<WorkspacePolicy>, WorkspacePolicyVersion)> {
-        let found = find_policy(conn, workspace_id, policy_slug).await?;
-        let version = current_version(conn, workspace_id, &found.item).await?;
+        let mut conn = self.postgres.get_connection().await?;
+        let found = find_policy(&mut conn, workspace_id, policy_slug).await?;
+        let version = current_version(&mut conn, workspace_id, &found.item).await?;
         Ok((found, version))
     }
 
-    /// Updates a policy, returning it with its current version and creator.
+    /// Updates an authored policy, returning it with its current version and
+    /// creator.
     ///
     /// A definition change mints a new version; a label-only change mutates the
-    /// logical row in place. Editing a one-shot's definition promotes it (clears
-    /// the dedup hash, making it authored), since its content no longer matches its
-    /// content-address; a label-only edit leaves a one-shot as it is. The write and
-    /// its event commit together.
+    /// logical row in place. The write and its event commit together. A one-shot
+    /// policy is immutable — content-addressed and reused by identity — so any edit
+    /// to one is rejected; to change it, create a new policy.
     pub async fn update(
         &self,
-        conn: &mut PgConn,
         origin: event::EventOrigin<'_>,
         policy_slug: &str,
-        request: UpdateWorkspacePolicy,
+        input: UpdatePolicyInput,
     ) -> Result<(WithAccountRef<WorkspacePolicy>, WorkspacePolicyVersion)> {
-        let existing = find_policy(conn, origin.workspace_id, policy_slug)
+        let mut conn = self.postgres.get_connection().await?;
+        let existing = find_policy(&mut conn, origin.workspace_id, policy_slug)
             .await?
             .item;
-        let current = current_version(conn, origin.workspace_id, &existing).await?;
+
+        if existing.kind == PolicyKind::Oneshot {
+            return Err(ErrorKind::BadRequest
+                .with_message("One-shot policies are immutable; create a new policy instead"));
+        }
+
+        let current = current_version(&mut conn, origin.workspace_id, &existing).await?;
 
         // A replaced body keeps the policy's server-owned template origin: the
         // caller authored new rules, but where the policy came from is provenance
         // the client cannot set or clear. Carry the current version's origin forward.
-        let new_definition = match request.definition {
+        let new_definition = match input.definition {
             Some(draft) => {
                 let template = serde_json::from_value::<Policy>(current.definition)
                     .map_err(malformed_definition)?
@@ -245,11 +247,6 @@ impl PolicyService {
         let policy_id = existing.id;
         let event_slug = existing.slug.clone();
 
-        // A definition edit on a one-shot promotes it to authored: its content no
-        // longer matches its content-address, so it leaves the dedup set. A
-        // label-only edit leaves a one-shot as it is.
-        let promote = existing.kind == PolicyKind::Oneshot && new_definition.is_some();
-
         let account_id = origin.account_id;
         let workspace_id = origin.workspace_id;
         conn.transaction(async |conn| {
@@ -257,18 +254,15 @@ impl PolicyService {
                 conn.create_policy_version(workspace_id, policy_id, account_id, definition, None)
                     .await?;
             }
-            // Promote conditionally so the Oneshot -> Authored transition is atomic
-            // and emits PolicyPromoted only when this call is the one that flips it.
-            let promoted = promote && conn.promote_policy_to_authored(policy_id).await?;
             // Only touch the logical row when there is a label field to change:
-            // a definition-only edit mints a version (and may promote) but leaves
-            // the row's own columns alone, so an empty changeset is never issued.
-            if request.display_name.is_some() || request.description.is_some() {
+            // a definition-only edit mints a version but leaves the row's own
+            // columns alone, so an empty changeset is never issued.
+            if input.display_name.is_some() || input.description.is_some() {
                 conn.update_workspace_policy(
                     policy_id,
                     model::UpdateWorkspacePolicy {
-                        display_name: request.display_name,
-                        description: request.description,
+                        display_name: input.display_name,
+                        description: input.description,
                         ..Default::default()
                     },
                 )
@@ -278,73 +272,22 @@ impl PolicyService {
                 origin,
                 event::WorkspaceEvent::PolicyUpdated(event::PolicyUpdated {
                     policy_id,
-                    policy_slug: event_slug.clone(),
+                    policy_slug: event_slug,
                 }),
             )
             .await?;
-            if promoted {
-                conn.emit_event(
-                    origin,
-                    event::WorkspaceEvent::PolicyPromoted(event::PolicyPromoted {
-                        policy_id,
-                        policy_slug: event_slug,
-                    }),
-                )
-                .await?;
-            }
             Ok::<(), Error>(())
         })
         .await?;
 
         tracing::info!(target: TRACING_TARGET, "Policy updated");
-        self.find(conn, workspace_id, policy_slug).await
-    }
-
-    /// Promotes a one-shot policy to authored, clearing its dedup hash, returning
-    /// it with its current version and creator.
-    ///
-    /// A no-op on an already-authored policy: it is returned unchanged, writing
-    /// nothing and recording no event.
-    pub async fn promote(
-        &self,
-        conn: &mut PgConn,
-        origin: event::EventOrigin<'_>,
-        policy_slug: &str,
-    ) -> Result<(WithAccountRef<WorkspacePolicy>, WorkspacePolicyVersion)> {
-        let found = find_policy(conn, origin.workspace_id, policy_slug).await?;
-        let policy_id = found.item.id;
-        let policy_slug_owned = found.item.slug.clone();
-
-        // Promote conditionally inside the transaction so the Oneshot -> Authored
-        // transition is atomic: an already-authored policy or a concurrent
-        // promotion changes no row and emits no event.
-        conn.transaction(async |conn| {
-            if conn.promote_policy_to_authored(policy_id).await? {
-                conn.emit_event(
-                    origin,
-                    event::WorkspaceEvent::PolicyPromoted(event::PolicyPromoted {
-                        policy_id,
-                        policy_slug: policy_slug_owned,
-                    }),
-                )
-                .await?;
-            }
-            Ok::<(), Error>(())
-        })
-        .await?;
-
-        tracing::info!(target: TRACING_TARGET, "Policy promoted");
-        self.find(conn, origin.workspace_id, policy_slug).await
+        self.find(workspace_id, policy_slug).await
     }
 
     /// Soft-deletes a policy from its workspace, recording the event atomically.
-    pub async fn delete(
-        &self,
-        conn: &mut PgConn,
-        origin: event::EventOrigin<'_>,
-        policy_slug: &str,
-    ) -> Result<()> {
-        let existing = find_policy(conn, origin.workspace_id, policy_slug)
+    pub async fn delete(&self, origin: event::EventOrigin<'_>, policy_slug: &str) -> Result<()> {
+        let mut conn = self.postgres.get_connection().await?;
+        let existing = find_policy(&mut conn, origin.workspace_id, policy_slug)
             .await?
             .item;
         let policy_id = existing.id;
@@ -445,20 +388,20 @@ mod tests {
     use nvisy_postgres::types::Handle;
 
     use super::*;
+    use crate::domain::input::PolicyDraftInput;
     use crate::extract::SecurityContext;
-    use crate::handler::request::{CreateWorkspacePolicy, PolicyBody, PolicyDraft};
 
     fn security() -> SecurityContext {
         SecurityContext::default()
     }
 
-    fn authored_request(slug: &str) -> CreateWorkspacePolicy {
-        CreateWorkspacePolicy {
+    fn authored_request(slug: &str) -> CreatePolicyInput {
+        CreatePolicyInput {
             display_name: None,
             slug: Some(Handle::parse(slug.to_owned()).expect("valid slug")),
             description: None,
-            body: PolicyBody::Inline {
-                definition: Box::new(PolicyDraft {
+            body: PolicyBodyInput::Inline {
+                definition: Box::new(PolicyDraftInput {
                     name: "Test policy".to_owned(),
                     description: None,
                     scopes: Vec::new(),
@@ -469,14 +412,13 @@ mod tests {
         }
     }
 
-    fn oneshot_request(labels: &[&str]) -> CreateWorkspacePolicy {
-        CreateWorkspacePolicy {
+    fn oneshot_request(labels: &[&str]) -> CreatePolicyInput {
+        CreatePolicyInput {
             display_name: None,
             slug: None,
             description: None,
-            body: PolicyBody::Labels {
+            body: PolicyBodyInput::Labels {
                 labels: labels.iter().map(|l| (*l).to_owned()).collect(),
-                action: Default::default(),
             },
         }
     }
@@ -485,15 +427,15 @@ mod tests {
     async fn creates_an_authored_policy() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
-        let mut conn = db.client.get_connection().await?;
+        let service = WorkspacePolicyService::new(db.client.clone());
         let origin = event::EventOrigin {
             workspace_id: seeded.workspace_id,
             account_id: seeded.account_id,
             security: &security(),
         };
 
-        let resolved = PolicyService
-            .create(&mut conn, origin, authored_request("audit-policy"))
+        let resolved = service
+            .create(origin, authored_request("audit-policy"))
             .await?;
         assert!(resolved.created);
         assert_eq!(resolved.policy.kind, PolicyKind::Authored);
@@ -506,7 +448,7 @@ mod tests {
     async fn one_shot_dedups_identical_content() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
-        let mut conn = db.client.get_connection().await?;
+        let service = WorkspacePolicyService::new(db.client.clone());
         let security = security();
         let origin = || event::EventOrigin {
             workspace_id: seeded.workspace_id,
@@ -514,15 +456,15 @@ mod tests {
             security: &security,
         };
 
-        let first = PolicyService
-            .create(&mut conn, origin(), oneshot_request(&["person_name"]))
+        let first = service
+            .create(origin(), oneshot_request(&["person_name"]))
             .await?;
         assert!(first.created);
         assert_eq!(first.policy.kind, PolicyKind::Oneshot);
 
         // The same labels reuse the row rather than minting a second one.
-        let second = PolicyService
-            .create(&mut conn, origin(), oneshot_request(&["person_name"]))
+        let second = service
+            .create(origin(), oneshot_request(&["person_name"]))
             .await?;
         assert!(!second.created);
         assert_eq!(second.policy.id, first.policy.id);
@@ -531,10 +473,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn promote_is_a_no_op_on_an_authored_policy() -> anyhow::Result<()> {
+    async fn editing_a_one_shot_is_rejected() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
-        let mut conn = db.client.get_connection().await?;
+        let service = WorkspacePolicyService::new(db.client.clone());
         let security = security();
         let origin = || event::EventOrigin {
             workspace_id: seeded.workspace_id,
@@ -542,94 +484,28 @@ mod tests {
             security: &security,
         };
 
-        let created = PolicyService
-            .create(&mut conn, origin(), authored_request("keep-me"))
-            .await?;
-
-        let (promoted, _) = PolicyService
-            .promote(&mut conn, origin(), "keep-me")
-            .await?;
-        assert_eq!(promoted.item.kind, PolicyKind::Authored);
-        assert_eq!(promoted.item.id, created.policy.id);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn promoting_a_one_shot_clears_its_hash() -> anyhow::Result<()> {
-        let db = TestDatabase::start().await;
-        let seeded = db.seed_account_and_workspace().await;
-        let mut conn = db.client.get_connection().await?;
-        let security = security();
-        let origin = || event::EventOrigin {
-            workspace_id: seeded.workspace_id,
-            account_id: seeded.account_id,
-            security: &security,
-        };
-
-        let oneshot = PolicyService
-            .create(&mut conn, origin(), oneshot_request(&["email_address"]))
-            .await?;
-
-        let (promoted, _) = PolicyService
-            .promote(&mut conn, origin(), oneshot.policy.slug.as_str())
-            .await?;
-        assert_eq!(promoted.item.kind, PolicyKind::Authored);
-        assert!(promoted.item.content_hash.is_none());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn label_only_edit_does_not_promote_a_one_shot() -> anyhow::Result<()> {
-        let db = TestDatabase::start().await;
-        let seeded = db.seed_account_and_workspace().await;
-        let mut conn = db.client.get_connection().await?;
-        let security = security();
-        let origin = || event::EventOrigin {
-            workspace_id: seeded.workspace_id,
-            account_id: seeded.account_id,
-            security: &security,
-        };
-
-        let oneshot = PolicyService
-            .create(&mut conn, origin(), oneshot_request(&["person_name"]))
+        let oneshot = service
+            .create(origin(), oneshot_request(&["person_name"]))
             .await?;
         let slug = oneshot.policy.slug.as_str().to_owned();
 
-        let request = UpdateWorkspacePolicy {
+        // A label-only edit is rejected: a one-shot is immutable.
+        let label_edit = UpdatePolicyInput {
             display_name: Some("Renamed".to_owned()),
             description: None,
             definition: None,
         };
-        let (updated, _) = PolicyService
-            .update(&mut conn, origin(), &slug, request)
-            .await?;
-        assert_eq!(updated.item.kind, PolicyKind::Oneshot);
-        assert!(updated.item.content_hash.is_some());
-        assert_eq!(updated.item.display_name, "Renamed");
-        Ok(())
-    }
+        let err = service
+            .update(origin(), &slug, label_edit)
+            .await
+            .expect_err("a one-shot rejects a label edit");
+        assert_eq!(err.kind(), ErrorKind::BadRequest);
 
-    #[tokio::test]
-    async fn definition_edit_promotes_a_one_shot() -> anyhow::Result<()> {
-        let db = TestDatabase::start().await;
-        let seeded = db.seed_account_and_workspace().await;
-        let mut conn = db.client.get_connection().await?;
-        let security = security();
-        let origin = || event::EventOrigin {
-            workspace_id: seeded.workspace_id,
-            account_id: seeded.account_id,
-            security: &security,
-        };
-
-        let oneshot = PolicyService
-            .create(&mut conn, origin(), oneshot_request(&["person_name"]))
-            .await?;
-        let slug = oneshot.policy.slug.as_str().to_owned();
-
-        let request = UpdateWorkspacePolicy {
+        // A definition edit is rejected too.
+        let definition_edit = UpdatePolicyInput {
             display_name: None,
             description: None,
-            definition: Some(PolicyDraft {
+            definition: Some(PolicyDraftInput {
                 name: "Edited".to_owned(),
                 description: None,
                 scopes: Vec::new(),
@@ -637,11 +513,48 @@ mod tests {
                 fallback: None,
             }),
         };
-        let (updated, version) = PolicyService
-            .update(&mut conn, origin(), &slug, request)
+        let err = service
+            .update(origin(), &slug, definition_edit)
+            .await
+            .expect_err("a one-shot rejects a definition edit");
+        assert_eq!(err.kind(), ErrorKind::BadRequest);
+
+        // The one-shot is unchanged.
+        let (found, _) = service.find(seeded.workspace_id, &slug).await?;
+        assert_eq!(found.item.kind, PolicyKind::Oneshot);
+        assert!(found.item.content_hash.is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn editing_an_authored_policy_mints_a_version() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let service = WorkspacePolicyService::new(db.client.clone());
+        let security = security();
+        let origin = || event::EventOrigin {
+            workspace_id: seeded.workspace_id,
+            account_id: seeded.account_id,
+            security: &security,
+        };
+
+        service
+            .create(origin(), authored_request("editable"))
             .await?;
+
+        let request = UpdatePolicyInput {
+            display_name: None,
+            description: None,
+            definition: Some(PolicyDraftInput {
+                name: "Edited".to_owned(),
+                description: None,
+                scopes: Vec::new(),
+                rules: Vec::new(),
+                fallback: None,
+            }),
+        };
+        let (updated, version) = service.update(origin(), "editable", request).await?;
         assert_eq!(updated.item.kind, PolicyKind::Authored);
-        assert!(updated.item.content_hash.is_none());
         assert_eq!(version.version_number, 2);
         Ok(())
     }
