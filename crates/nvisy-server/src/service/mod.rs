@@ -84,7 +84,7 @@ const TRACING_TARGET: &str = "nvisy_server::service";
 ///
 /// [`State`]: axum::extract::State
 /// [`FromRef`]: axum::extract::FromRef
-#[derive(Clone)]
+#[derive(Clone, axum::extract::FromRef)]
 #[must_use = "state does nothing unless you use it"]
 pub struct ServiceState {
     // Shared infrastructure (Postgres, NATS, blob store):
@@ -106,11 +106,16 @@ pub struct ServiceState {
     pub engine: EngineService,
 
     // In-process wake signal from the detection enqueue path to the outbox
-    // drainer, shared by the per-request `DetectionQueue` and the drainer.
+    // drainer, shared by the per-request `DetectionQueue` and the drainer. Not
+    // extracted directly (and shares its type with `assistant`), so it is skipped;
+    // `DetectionQueue`'s `FromRef` reads it.
+    #[from_ref(skip)]
     pub detection: Coordinator,
 
     // In-process wake signal from the assistant enqueue path to its outbox
-    // drainer, shared by the per-request `AssistantQueue` and the drainer.
+    // drainer, shared by the per-request `AssistantQueue` and the drainer. Skipped
+    // for the same reason as `detection`.
+    #[from_ref(skip)]
     pub assistant: Coordinator,
 
     // Operational: the app-wide shutdown signal (cancelled once on Ctrl+C/SIGTERM
@@ -129,6 +134,8 @@ pub struct ServiceState {
     // per-request `OidcService` is composed from this plus the ambient
     // collaborators in its `FromRef` — the one service that is composed rather than
     // stored, because it pairs an expensive immutable core with per-request handles.
+    // Not extracted directly (only `OidcService` is), so it is skipped.
+    #[from_ref(skip)]
     pub oidc: OidcConfigured,
     pub user_agent_parser: UserAgentParser,
 
@@ -286,19 +293,6 @@ impl ServiceState {
     }
 }
 
-/// Derives [`FromRef`] by cloning a stored [`ServiceState`] field.
-///
-/// [`FromRef`]: axum::extract::FromRef
-macro_rules! impl_di_field {
-    ($($f:ident: $t:ty),+ $(,)?) => {$(
-        impl axum::extract::FromRef<ServiceState> for $t {
-            fn from_ref(state: &ServiceState) -> Self {
-                state.$f.clone()
-            }
-        }
-    )+};
-}
-
 /// Derives [`FromRef`] by composing a stateless service from [`Infra`]. The body
 /// is a pure move over `Arc`-backed handles, so per-request construction is free.
 ///
@@ -364,26 +358,10 @@ impl_di_infra!(
     blobs: BlobStore,
 );
 
-// Stored fields, in the struct's domain order (infra, crypto, integrations,
-// engine, operational, security, limits):
-impl_di_field!(
-    infra: Infra,
-    crypto: CryptoService,
-    file_service: FileService,
-    file_service_redirect: FileServiceRedirect,
-    connection_sync: ConnectionSyncService,
-    webhook: WebhookService,
-    endpoint_policy: EndpointPolicy,
-    engine: EngineService,
-    shutdown: CancellationToken,
-    health_cache: HealthCache,
-    password: PasswordService,
-    session_keys: SessionKeys,
-    sign_in: SignInService,
-    user_agent_parser: UserAgentParser,
-    upload: UploadConfig,
-    cookie: CookieConfig,
-);
+// Stored fields get their `FromRef` from the `#[derive(FromRef)]` on
+// `ServiceState` (each is a field clone); the fields skipped there
+// (`detection`/`assistant` coordinators and the `oidc` config) are read by the
+// composed impls below instead of extracted directly.
 
 // Stateless services, composed from `Infra` on extraction:
 impl_di_compose!(
