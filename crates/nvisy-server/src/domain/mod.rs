@@ -7,9 +7,10 @@
 //! A service holds the Postgres client and acquires its own connection per call,
 //! so its methods take no connection and each is a self-contained transaction; a
 //! service that also needs an ambient client (crypto, a queue, the engine) holds
-//! it as a field too. [`Domain`] bundles the services the way
-//! [`Infra`](crate::service::Infra) bundles the ambient clients; every field is an
-//! `Arc`-backed handle, so cloning is cheap.
+//! it as a field too. Each is resolved per request from
+//! [`ServiceState`](crate::service::ServiceState) via its `FromRef` impl, so a
+//! handler extracts exactly the services it uses; every field is an `Arc`-backed
+//! handle, so cloning is cheap.
 
 pub mod input;
 pub mod output;
@@ -45,38 +46,3 @@ pub use workspace_providers::WorkspaceProviderService;
 pub use workspace_threads::WorkspaceThreadService;
 pub use workspace_webhooks::WorkspaceWebhookService;
 pub use workspaces::WorkspaceService;
-
-/// The per-resource domain services handlers call.
-#[derive(Clone)]
-pub struct Domain {
-    /// Account profile domain logic.
-    pub accounts: AccountService,
-    /// Account API-token domain logic.
-    pub account_api_tokens: AccountApiTokenService,
-    /// Account identity (credential) domain logic.
-    pub account_identities: AccountIdentityService,
-    /// Account notification domain logic.
-    pub account_notifications: AccountNotificationService,
-    /// Workspace connection domain logic.
-    pub connections: WorkspaceConnectionService,
-    /// Workspace detection request-side domain logic.
-    pub detections: WorkspaceDetectionService,
-    /// Workspace document metadata domain logic.
-    pub documents: WorkspaceDocumentService,
-    /// Workspace invite domain logic.
-    pub invites: WorkspaceInviteService,
-    /// Workspace member domain logic.
-    pub members: WorkspaceMemberService,
-    /// Workspace pipeline domain logic.
-    pub pipelines: WorkspacePipelineService,
-    /// Workspace policy domain logic.
-    pub policies: WorkspacePolicyService,
-    /// Workspace provider domain logic.
-    pub providers: WorkspaceProviderService,
-    /// Workspace thread and comment domain logic.
-    pub threads: WorkspaceThreadService,
-    /// Workspace webhook domain logic.
-    pub webhooks: WorkspaceWebhookService,
-    /// Workspace CRUD domain logic.
-    pub workspaces: WorkspaceService,
-}
