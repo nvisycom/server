@@ -42,8 +42,9 @@ key_of() {
     echo "$1" | sed -nE 's/^#? ?([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p'
 }
 
-# Every key currently set (uncommented) in the existing .env.
-existing_keys=$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV" | sed -E 's/=.*//' | sort -u)
+# Every key currently set (uncommented) in the existing .env. `|| true` so a
+# .env with no set keys (grep finds nothing, exits 1) does not trip the errexit.
+existing_keys=$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV" | sed -E 's/=.*//' | sort -u || true)
 
 added=0
 removed=0
@@ -72,8 +73,9 @@ while IFS= read -r line || [ -n "$line" ]; do
     fi
 done < "$EXAMPLE"
 
-# Report keys dropped: set locally but absent from the template.
-template_keys=$(grep -E '^#? ?[A-Za-z_][A-Za-z0-9_]*=' "$EXAMPLE" | sed -E 's/^#? ?//; s/=.*//' | sort -u)
+# Report keys dropped: set locally but absent from the template. `|| true` so an
+# empty template does not trip the errexit.
+template_keys=$(grep -E '^#? ?[A-Za-z_][A-Za-z0-9_]*=' "$EXAMPLE" | sed -E 's/^#? ?//; s/=.*//' | sort -u || true)
 for key in $existing_keys; do
     if ! echo "$template_keys" | grep -qx "$key"; then
         log_remove "$key"
@@ -81,7 +83,12 @@ for key in $existing_keys; do
     fi
 done
 
-printf '%s' "$output" > "$ENV"
+# Write to a temporary file in the same directory, then rename over .env, so an
+# interrupted run never leaves a truncated .env: the original stays intact until
+# the atomic rename swaps in the fully-written replacement.
+tmp=$(mktemp "${ENV}.XXXXXX")
+printf '%s' "$output" > "$tmp"
+mv "$tmp" "$ENV"
 
 if [ "$added" -eq 0 ] && [ "$removed" -eq 0 ]; then
     log_info "$ENV is already up to date"

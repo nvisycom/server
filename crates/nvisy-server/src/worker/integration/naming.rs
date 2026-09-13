@@ -1,25 +1,30 @@
 //! File-name and remote-key helpers shared by the import and export paths.
 
-use std::path::Path as StdPath;
-
 use nvisy_postgres::model::WorkspaceDocument;
 
 /// The final path segment of a key (its file name), or the whole key when it
 /// contains no separator.
+///
+/// Object-store keys use `/` as their only delimiter (see
+/// [`object_store::path::Path`]), so the split is on `/` alone rather than
+/// [`std::path::Path`], whose host-specific rules would treat a backslash as a
+/// separator on Windows and mis-split a key like `dir\name`.
 pub(super) fn object_basename(key: &str) -> String {
-    StdPath::new(key)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(key)
+    key.rsplit_once('/')
+        .map_or(key, |(_, name)| name)
         .to_string()
 }
 
-/// The lowercased extension of a key, if any.
+/// The lowercased extension of a key (the part after the last `.` in its base
+/// name), if any.
+///
+/// Splits on `/` for the base name, then on `.`, so parsing is identical on every
+/// platform. A leading-dot name (`.env`) or a name with no dot has no extension.
 pub(super) fn object_extension(key: &str) -> Option<String> {
-    StdPath::new(key)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase)
+    let name = object_basename(key);
+    name.rsplit_once('.')
+        .filter(|(stem, _)| !stem.is_empty())
+        .map(|(_, ext)| ext.to_ascii_lowercase())
 }
 
 /// The remote key an exported document is written under.
@@ -82,6 +87,23 @@ mod tests {
         );
         assert_eq!(object_basename("flat"), "flat");
         assert_eq!(object_extension("flat"), None);
+        // A leading-dot name is all-extension-no-stem, i.e. no extension.
+        assert_eq!(object_extension(".env"), None);
+    }
+
+    #[test]
+    fn a_backslash_is_part_of_the_key_not_a_separator() {
+        // Object-store keys delimit only on `/`. A backslash is an ordinary key
+        // byte, so it must parse identically on every platform (on Windows,
+        // std::path would wrongly split on it).
+        // The backslash never splits the basename: `a\b` is one segment, so the
+        // basename of `dir/a\b` is `a\b`, not `b`.
+        assert_eq!(object_basename(r"dir/a\b"), r"a\b");
+        assert_eq!(object_basename(r"a\b"), r"a\b");
+        // Extension is still the part after the last `.`, and a backslash is an
+        // ordinary character within it — parsed the same on every platform.
+        assert_eq!(object_extension(r"a\b.txt").as_deref(), Some("txt"));
+        assert_eq!(object_extension(r"a\b").as_deref(), None);
     }
 
     #[test]

@@ -38,7 +38,9 @@ pub trait WorkspaceRedactionRepository {
     ///
     /// A [`RedactionId`](crate::types::RedactionId) is globally unique, so a
     /// redaction is addressable by id alone; this resolves it only within the
-    /// given workspace by joining through its detection's pipeline.
+    /// given workspace by joining through its detection's own workspace, so an
+    /// ad-hoc detection (no pipeline) or one whose pipeline was deleted still
+    /// resolves.
     fn find_redaction_in_workspace(
         &mut self,
         workspace_id: Uuid,

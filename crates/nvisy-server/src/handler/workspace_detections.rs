@@ -554,6 +554,16 @@ async fn redact_detection(
     let (detection, pipeline) = detections
         .find(workspace.id, path_params.detection_id.as_uuid())
         .await?;
+
+    // Redaction derives from this detection's base audit, so it re-redacts with
+    // the exact policy versions the detection pinned when it ran, not the
+    // policies' current versions. Resolved through the service (which manages its
+    // own connection) before the pre-flight `conn` is acquired, so the two
+    // connections never overlap and a burst of redacts cannot deadlock the pool.
+    let policies = detections
+        .resolve_pinned_policies(workspace.id, detection.id)
+        .await?;
+
     let inputs = {
         let mut conn = pg_client.get_connection().await?;
 
@@ -597,13 +607,6 @@ async fn redact_detection(
                     .with_message("The analysis for this detection has been deleted")
                     .with_resource("detection")
             })?;
-        // Redaction derives from this detection's base audit, so it re-redacts
-        // with the exact policy versions the detection pinned when it ran, not the
-        // policies' current versions.
-        let policies = detections
-            .resolve_pinned_policies(workspace.id, detection.id)
-            .await?;
-
         RedactInputs {
             detection,
             pipeline,

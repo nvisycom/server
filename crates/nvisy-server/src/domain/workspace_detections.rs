@@ -78,6 +78,21 @@ impl WorkspaceDetectionService {
         let workspace_id = origin.workspace_id;
         let mut conn = self.postgres.get_connection().await?;
 
+        // Idempotent replay, checked before touching the pipeline: a repeated key
+        // returns the detection created the first time, attributed to whoever
+        // originally triggered it, even if the URL's pipeline has since been
+        // deleted or disabled. The reported pipeline is the existing detection's
+        // own — an idempotency key is workspace-scoped, so a replay may resolve a
+        // detection created by a different pipeline (or none), and reporting this
+        // URL's pipeline would misattribute it.
+        if let Some(key) = &idempotency_key
+            && let Some(existing) = conn
+                .find_detection_by_idempotency_key(workspace_id, key)
+                .await?
+        {
+            return self.replay(&mut conn, workspace_id, existing).await;
+        }
+
         let pipeline = find_pipeline(&mut conn, workspace_id, pipeline_slug).await?;
 
         // Only an enabled pipeline runs: a draft (still being configured) or a
@@ -86,20 +101,6 @@ impl WorkspaceDetectionService {
             return Err(ErrorKind::Conflict
                 .with_message("Pipeline is not enabled")
                 .with_resource("pipeline"));
-        }
-
-        // Idempotent replay: a repeated key returns the detection created the first
-        // time, attributed to whoever originally triggered it. The reported
-        // pipeline is the existing detection's own — an idempotency key is
-        // workspace-scoped, so a replay may resolve a detection created by a
-        // different pipeline (or none), and reporting this URL's pipeline would
-        // misattribute it.
-        if let Some(key) = &idempotency_key
-            && let Some(existing) = conn
-                .find_detection_by_idempotency_key(workspace_id, key)
-                .await?
-        {
-            return self.replay(&mut conn, workspace_id, existing).await;
         }
 
         // Validate synchronously so a bad request fails fast (4xx) rather than as a
