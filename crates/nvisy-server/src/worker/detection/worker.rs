@@ -300,7 +300,10 @@ impl DetectionWorker {
                 FailDetection {
                     workspace_id: job.workspace_id,
                     detection_id: detection.id,
-                    pipeline_id: pipeline.as_ref().map(|p| p.id),
+                    // The detection's own `pipeline_id` is durable across a
+                    // pipeline soft-delete, whereas the `pipeline` lookup excludes
+                    // a soft-deleted row and would drop the id from the event.
+                    pipeline_id: detection.pipeline_id,
                     triggered_by: detection.account_id,
                     reason: &err.to_string(),
                     metadata: detection.metadata.or_default(),
@@ -538,7 +541,8 @@ impl DetectionWorker {
         let completed_event =
             event::WorkspaceEvent::DetectionCompleted(event::DetectionCompleted {
                 detection_id: detection.id,
-                pipeline_id: pipeline.map(|p| p.id),
+                // Durable across a pipeline soft-delete; see the fail path.
+                pipeline_id: detection.pipeline_id,
                 input_document_name: Some(document.display_name.clone()),
                 notify: detection.account_id,
             });

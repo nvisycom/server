@@ -169,9 +169,7 @@ fn list_threads_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List threads")
         .description(
             "Returns the workspace's threads, most recent first, with optional \
-             document, author, assignee, review-status, and open/closed filters. \
-             Pass `assignedToMe=true` for the caller's own review assignments \
-             (it takes precedence over an explicit `assignee`).",
+             document, author, assignee, review-status, and open/closed filters.",
         )
         .response::<200, Json<WorkspaceThreadsPage>>()
         .response::<401, Json<ErrorResponse>>()

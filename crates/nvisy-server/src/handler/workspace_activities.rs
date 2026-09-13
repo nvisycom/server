@@ -152,7 +152,7 @@ fn list_activities_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List workspace activities")
         .description(
             "Returns the workspace's activity log, most recent first, cursor-paginated. \
-             Optional filters: `type` (repeatable, e.g. `file.created`), `actor` (a username), \
+             Optional filters: `type` (repeatable, e.g. `file.created`), `actor` (an account ID), \
              and a `from`/`to` day range (each bound narrows only when given; the feed is \
              otherwise all-time).",
         )
