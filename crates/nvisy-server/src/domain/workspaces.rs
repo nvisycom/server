@@ -8,7 +8,7 @@ use nvisy_postgres::model::{Workspace, WorkspaceMember};
 use nvisy_postgres::query::{
     AccountWorkspaceCursor, WorkspaceMemberRepository, WorkspaceRepository,
 };
-use nvisy_postgres::types::{AccountRefRow, CursorPage, CursorPagination, Handle, WithAccountRef};
+use nvisy_postgres::types::{AccountRefRow, CursorPage, CursorPagination};
 use nvisy_postgres::{AsyncConnection, PgClient, model};
 use uuid::Uuid;
 
@@ -62,7 +62,6 @@ impl WorkspaceService {
                     },
                     event::WorkspaceEvent::WorkspaceCreated(event::WorkspaceCreated {
                         workspace_id: workspace.id,
-                        workspace_slug: workspace.slug.clone(),
                     }),
                 )
                 .await?;
@@ -90,15 +89,6 @@ impl WorkspaceService {
             .await?)
     }
 
-    /// Finds the account that created the workspace addressed by `slug`, with its
-    /// public identity, or a NotFound.
-    pub async fn find_with_creator(&self, slug: &str) -> Result<WithAccountRef<Workspace>> {
-        let mut conn = self.postgres.get_connection().await?;
-        conn.find_workspace_by_slug(slug)
-            .await?
-            .ok_or_else(|| Error::not_found("workspace"))
-    }
-
     /// Updates a workspace's configuration, recording the event atomically, and
     /// returns the updated workspace.
     pub async fn update(
@@ -116,7 +106,6 @@ impl WorkspaceService {
                     origin,
                     event::WorkspaceEvent::WorkspaceUpdated(event::WorkspaceUpdated {
                         workspace_id: updated.id,
-                        workspace_slug: updated.slug.clone(),
                     }),
                 )
                 .await?;
@@ -129,11 +118,7 @@ impl WorkspaceService {
     }
 
     /// Soft-deletes a workspace, recording the event atomically.
-    pub async fn delete(
-        &self,
-        origin: event::EventOrigin<'_>,
-        workspace_slug: &Handle,
-    ) -> Result<()> {
+    pub async fn delete(&self, origin: event::EventOrigin<'_>) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         let workspace_id = origin.workspace_id;
 
@@ -141,10 +126,7 @@ impl WorkspaceService {
             conn.delete_workspace(workspace_id).await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::WorkspaceDeleted(event::WorkspaceDeleted {
-                    workspace_id,
-                    workspace_slug: workspace_slug.clone(),
-                }),
+                event::WorkspaceEvent::WorkspaceDeleted(event::WorkspaceDeleted { workspace_id }),
             )
             .await?;
             Ok::<(), Error>(())
@@ -230,15 +212,7 @@ mod tests {
             security: &security,
         };
 
-        let mut conn = db.client.get_connection().await?;
-        let slug = conn
-            .find_workspace_by_id(seeded.workspace_id)
-            .await?
-            .expect("workspace present")
-            .slug;
-        drop(conn);
-
-        service.delete(origin, &slug).await?;
+        service.delete(origin).await?;
 
         let mut conn = db.client.get_connection().await?;
         assert!(

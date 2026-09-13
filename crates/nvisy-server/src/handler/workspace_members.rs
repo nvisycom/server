@@ -89,7 +89,7 @@ async fn get_member(
     tracing::debug!(target: TRACING_TARGET, "Retrieving workspace member details");
 
     let workspace = authz.workspace;
-    let (member, account) = members.find(workspace.id, &path_params.username).await?;
+    let (member, account) = members.find(workspace.id, path_params.account_id).await?;
 
     Ok((
         StatusCode::OK,
@@ -134,7 +134,7 @@ async fn delete_member(
                 account_id: authz.account_id,
                 security: &security,
             },
-            &path_params.username,
+            path_params.account_id,
         )
         .await?;
 
@@ -183,7 +183,7 @@ async fn update_member(
                 account_id: authz.account_id,
                 security: &security,
             },
-            &path_params.username,
+            path_params.account_id,
             request.into_model(),
         )
         .await?;
@@ -255,15 +255,15 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/members/",
+            "/workspaces/{workspaceId}/members/",
             get_with(list_members, list_members_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/members/leave/",
+            "/workspaces/{workspaceId}/members/leave/",
             post_with(leave_workspace, leave_workspace_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/members/{username}/",
+            "/workspaces/{workspaceId}/members/{accountId}/",
             get_with(get_member, get_member_docs)
                 .patch_with(update_member, update_member_docs)
                 .delete_with(delete_member, delete_member_docs),

@@ -52,7 +52,7 @@ struct OAuthFlowState {
     /// Workspace the connection will be created in.
     workspace_id: Uuid,
     /// The workspace's slug, carried so the post-auth redirect can substitute a
-    /// `{workspaceSlug}` placeholder without a lookup in the callback.
+    /// `{workspaceId}` placeholder without a lookup in the callback.
     workspace_slug: String,
     /// Account that started the flow; the connection is attributed to it.
     account_id: Uuid,
@@ -273,7 +273,7 @@ async fn complete_callback(
 pub fn private_routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/connections/oauth/{provider}/start/",
+            "/workspaces/{workspaceId}/connections/oauth/{provider}/start/",
             post_with(start_oauth, start_oauth_docs),
         )
         .with_path_items(|item| item.tag("Connections"))

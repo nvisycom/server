@@ -267,6 +267,7 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
         .select((
             WorkspaceConnectionSync::as_select(),
             (
+                accounts::id,
                 accounts::username,
                 accounts::display_name,
                 accounts::avatar_url,
@@ -338,6 +339,7 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
             WorkspaceConnectionSync::as_select(),
             connections::id,
             (
+                accounts::id,
                 accounts::username,
                 accounts::display_name,
                 accounts::avatar_url,

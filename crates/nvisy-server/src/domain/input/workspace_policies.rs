@@ -4,7 +4,6 @@ use elide_pipeline::entity::LabelRef;
 use elide_pipeline::governance::policy::{LabelScope, Policy, PolicyRule, TemplateOrigin};
 use elide_pipeline::governance::redaction::{ModalityRedactions, TextRedaction};
 use elide_pipeline::template::PolicyTemplate;
-use nvisy_postgres::types::Handle;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -115,8 +114,6 @@ impl PolicyBodyInput {
 pub struct CreatePolicyInput {
     /// Optional display name override; ignored for a one-shot body.
     pub display_name: Option<String>,
-    /// URL slug; required for a template or inline body, generated for a one-shot.
-    pub slug: Option<Handle>,
     /// Optional description override.
     pub description: Option<String>,
     /// The source of the policy body.

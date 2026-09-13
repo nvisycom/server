@@ -16,7 +16,9 @@ use super::{AccountRef, Page};
 pub struct WorkspaceDocument {
     /// Unique document identifier.
     pub id: Uuid,
-    /// Handle of the workspace this document belongs to.
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub workspace_slug: Handle,
     /// Display name.
     pub display_name: String,
@@ -45,11 +47,13 @@ impl WorkspaceDocument {
     pub fn from_model(
         document: DocumentModel,
         blob: &Blob,
+        workspace_id: Uuid,
         workspace_slug: Handle,
         uploaded_by: AccountRef,
     ) -> Self {
         Self {
             id: document.id,
+            workspace_id,
             workspace_slug,
             display_name: document.display_name,
             original_filename: document.original_filename,

@@ -18,7 +18,9 @@ use super::{AccountRef, Page};
 pub struct WorkspaceActivity {
     /// Unique activity identifier.
     pub id: Uuid,
-    /// Handle of the workspace this activity belongs to.
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub workspace_slug: Handle,
     /// Account that performed the activity.
     pub performed_by: AccountRef,
@@ -36,11 +38,13 @@ pub type WorkspaceActivitiesPage = Page<WorkspaceActivity>;
 impl WorkspaceActivity {
     pub fn from_model(
         activity: WorkspaceActivityModel,
+        workspace_id: Uuid,
         workspace_slug: Handle,
         performed_by: AccountRef,
     ) -> Self {
         Self {
             id: activity.id,
+            workspace_id,
             workspace_slug,
             performed_by,
             payload: activity.params.optional(),

@@ -9,17 +9,17 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::Json;
-use crate::types::{ConnectionId, DetectionId, Handle, NotificationEvent, RedactionId};
+use crate::types::{ConnectionId, DetectionId, NotificationEvent, RedactionId};
 
 /// Params of a `member.joined` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MemberJoinedParams {
-    /// Slug of the workspace the member joined.
-    pub workspace_slug: Handle,
-    /// Username of the member that joined.
-    pub member_username: Handle,
+    /// Id of the workspace the member joined.
+    pub workspace_id: Uuid,
+    /// Id of the member's account.
+    pub member_id: Uuid,
 }
 
 /// Params of a `connection.sync.completed` notification.
@@ -57,9 +57,9 @@ pub struct ConnectionSyncFailedParams {
 pub struct DetectionCompletedParams {
     /// Id of the detection.
     pub detection_id: DetectionId,
-    /// Slug of the owning pipeline; absent for an ad-hoc detection.
+    /// Id of the owning pipeline; absent for an ad-hoc detection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pipeline_slug: Option<Handle>,
+    pub pipeline_id: Option<Uuid>,
     /// Display name of the analyzed document, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_document_name: Option<String>,
@@ -74,9 +74,9 @@ pub struct RedactionCreatedParams {
     pub redaction_id: RedactionId,
     /// Id of the detection the redaction was produced from.
     pub detection_id: DetectionId,
-    /// Slug of the owning pipeline; absent for an ad-hoc detection.
+    /// Id of the owning pipeline; absent for an ad-hoc detection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pipeline_slug: Option<Handle>,
+    pub pipeline_id: Option<Uuid>,
     /// Display name of the redacted document, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_document_name: Option<String>,
@@ -89,9 +89,9 @@ pub struct RedactionCreatedParams {
 pub struct DetectionFailedParams {
     /// Id of the detection.
     pub detection_id: DetectionId,
-    /// Slug of the owning pipeline; absent for an ad-hoc detection.
+    /// Id of the owning pipeline; absent for an ad-hoc detection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pipeline_slug: Option<Handle>,
+    pub pipeline_id: Option<Uuid>,
     /// Display name of the analyzed document, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_document_name: Option<String>,
@@ -128,8 +128,8 @@ pub struct CommentMentionedParams {
     /// a workspace-level thread.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub document_id: Option<Uuid>,
-    /// Username of the account that wrote the comment (the mentioner).
-    pub author_username: Handle,
+    /// Id of the account that wrote the comment (the mentioner).
+    pub author_id: Uuid,
 }
 
 /// The typed payload of a notification, tagged by `type` with its params under
@@ -204,8 +204,6 @@ impl NotificationPayload {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use uuid::Uuid;
 
     use super::*;
@@ -214,9 +212,10 @@ mod tests {
     #[test]
     fn serializes_as_a_type_data_envelope_and_round_trips() {
         let detection_id = DetectionId::from_uuid(Uuid::now_v7());
+        let pipeline_id = Uuid::now_v7();
         let payload = NotificationPayload::DetectionCompleted(DetectionCompletedParams {
             detection_id,
-            pipeline_slug: Some(Handle::from_str("redact-invoices").unwrap()),
+            pipeline_id: Some(pipeline_id),
             input_document_name: Some("invoice.pdf".to_owned()),
         });
 
@@ -225,7 +224,7 @@ mod tests {
         // the activity payload and outbox event. Stored rows depend on it.
         assert_eq!(value["type"], "pipeline.detection.completed");
         assert_eq!(value["data"]["detectionId"], detection_id.to_string());
-        assert_eq!(value["data"]["pipelineSlug"], "redact-invoices");
+        assert_eq!(value["data"]["pipelineId"], pipeline_id.to_string());
         assert!(
             value.get("detectionId").is_none(),
             "params must nest under `data`"

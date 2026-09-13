@@ -1,7 +1,7 @@
 //! Workspace activity request types.
 
 use nvisy_postgres::query::ActivityFilter;
-use nvisy_postgres::types::{ActivityType, Handle};
+use nvisy_postgres::types::ActivityType;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -30,9 +30,9 @@ pub struct WorkspaceActivityFilterQuery {
     // Named `types` because `type` is a reserved word; exposed as `type`.
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub types: Option<Vec<ActivityType>>,
-    /// Username of the account whose activities to keep. Omit for any actor.
+    /// Account id whose activities to keep. Omit for any actor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor: Option<Handle>,
+    pub actor: Option<Uuid>,
 }
 
 /// The export-only query parameter: the output format. Kept separate from the
@@ -50,7 +50,7 @@ impl WorkspaceActivityFilterQuery {
     /// Builds the repository filter for the paginated feed, folding in the actor
     /// resolved by the handler and the optional date window.
     ///
-    /// `actor_id` is the account the [`actor`](Self::actor) username resolved to;
+    /// `actor` is the account id to constrain to;
     /// `None` means no actor constraint. The window narrows the feed only where its
     /// bounds are given.
     pub fn to_filter(&self, actor_id: Option<Uuid>, window: &DateWindow) -> Result<ActivityFilter> {
@@ -66,7 +66,7 @@ impl WorkspaceActivityFilterQuery {
     /// Builds the repository filter for the export, folding in the actor resolved
     /// by the handler and the resolved, bounded date window.
     ///
-    /// `actor_id` is the account the [`actor`](Self::actor) username resolved to;
+    /// `actor` is the account id to constrain to;
     /// `None` means no actor constraint. Unlike the feed, the export's window is
     /// always applied (defaulted and capped) so the result stays bounded.
     pub fn to_export_filter(
@@ -139,9 +139,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn actor_is_parsed_as_a_username_handle() {
-        let query: WorkspaceActivityFilterQuery = extract("actor=alice").await;
-        assert_eq!(query.actor.map(|h| h.to_string()), Some("alice".to_owned()));
+    async fn actor_is_parsed_as_an_account_id() {
+        let id = uuid::Uuid::now_v7();
+        let query: WorkspaceActivityFilterQuery = extract(&format!("actor={id}")).await;
+        assert_eq!(query.actor, Some(id));
     }
 
     #[tokio::test]

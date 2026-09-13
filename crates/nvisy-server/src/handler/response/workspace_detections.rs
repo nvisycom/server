@@ -23,11 +23,13 @@ use super::{AccountRef, Page};
 pub struct WorkspaceDetection {
     /// Opaque identifier of the detection.
     pub id: DetectionId,
-    /// Handle of the pipeline this detection belongs to; absent for an ad-hoc
-    /// detection or once its pipeline was deleted.
+    /// Unique identifier of the pipeline this detection belongs to; absent for an
+    /// ad-hoc detection.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub pipeline_slug: Option<Handle>,
-    /// Handle of the workspace this detection belongs to.
+    pub pipeline_id: Option<Uuid>,
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub workspace_slug: Handle,
     /// Source document this detection analyzes.
     pub input_document_id: Uuid,
@@ -60,12 +62,12 @@ pub struct WorkspaceDetection {
 pub type WorkspaceDetectionsPage = Page<WorkspaceDetection>;
 
 impl WorkspaceDetection {
-    /// Creates a detection response from the database model, the slugs of its
-    /// owning pipeline and workspace, the triggering account, and the resolved
-    /// input file display name.
+    /// Creates a detection response from the database model, the owning workspace
+    /// id and slug, the triggering account, and the resolved input file display
+    /// name. The owning pipeline id is read from the model.
     pub fn from_model(
         detection: DetectionModel,
-        pipeline_slug: Option<Handle>,
+        workspace_id: Uuid,
         workspace_slug: Handle,
         triggered_by: AccountRef,
         files: DetectionDocuments,
@@ -74,10 +76,12 @@ impl WorkspaceDetection {
         // enqueue-failure path) as a dedicated field for a failed detection.
         let metadata = detection.metadata.or_default();
         let error = metadata.error.clone();
+        let pipeline_id = detection.pipeline_id;
 
         Self {
             id: DetectionId::from_uuid(detection.id),
-            pipeline_slug,
+            pipeline_id,
+            workspace_id,
             workspace_slug,
             input_document_id: detection.input_document_id,
             input_document_name: files.input,

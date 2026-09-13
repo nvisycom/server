@@ -347,14 +347,6 @@ async fn accept_invite_as_member(
                     PgError::Unexpected("WorkspaceMember not found after insert".into())
                 })?;
 
-            // The workspace slug names the joined workspace in the member.joined
-            // notification that `MemberAdded` fans out to owners and admins.
-            let workspace_slug = conn
-                .find_workspace_by_id(workspace_id)
-                .await?
-                .ok_or_else(|| PgError::Unexpected("Workspace not found for invite".into()))?
-                .slug;
-
             conn.emit_event(
                 origin,
                 event::WorkspaceEvent::InviteAccepted(event::InviteAccepted { invite_id, email }),
@@ -364,8 +356,7 @@ async fn accept_invite_as_member(
                 origin,
                 event::WorkspaceEvent::MemberAdded(event::MemberAdded {
                     member_id: account_id,
-                    member_username: account.username.clone(),
-                    workspace_slug,
+                    workspace_id,
                 }),
             )
             .await?;

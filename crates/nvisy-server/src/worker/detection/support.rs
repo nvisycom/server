@@ -6,7 +6,7 @@ use nvisy_postgres::model::{NewWorkspaceDetectionUsage, UpdateWorkspaceDetection
 use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspaceDetectionRepository, WorkspacePolicyRepository,
 };
-use nvisy_postgres::types::{DetectionMetadata, DetectionStatus, Handle, Json};
+use nvisy_postgres::types::{DetectionMetadata, DetectionStatus, Json};
 use uuid::Uuid;
 
 use crate::extract::SecurityContext;
@@ -112,9 +112,9 @@ pub(crate) struct FailDetection<'a> {
     pub workspace_id: Uuid,
     /// The detection to fail.
     pub detection_id: Uuid,
-    /// Slug of the detection's pipeline, for the emitted event; `None` for an
+    /// Id of the detection's pipeline, for the emitted event; `None` for an
     /// ad-hoc detection.
-    pub pipeline_slug: Option<Handle>,
+    pub pipeline_id: Option<Uuid>,
     /// The account that triggered the detection (the failure's actor and notify
     /// target).
     pub triggered_by: Uuid,
@@ -149,7 +149,7 @@ pub(crate) async fn fail_detection(
     let FailDetection {
         workspace_id,
         detection_id,
-        pipeline_slug,
+        pipeline_id,
         triggered_by,
         reason,
         mut metadata,
@@ -203,7 +203,7 @@ pub(crate) async fn fail_detection(
             },
             event::WorkspaceEvent::DetectionFailed(event::DetectionFailed {
                 detection_id,
-                pipeline_slug,
+                pipeline_id,
                 input_document_name: None,
                 error: Some(reason.to_owned()),
                 notify: triggered_by,
@@ -284,28 +284,28 @@ pub(crate) async fn resolve_policies(
     Ok(policies)
 }
 
-/// Resolves an explicit list of policy slugs to their current versions, for an
+/// Resolves an explicit list of policy ids to their current versions, for an
 /// ad-hoc detection that names its policies directly rather than through a
 /// pipeline.
 ///
-/// Each slug must resolve to a live policy of any kind (authored or one-shot) in
-/// the workspace; an unknown slug fails the run. Returns the same
+/// Each id must resolve to a live policy of any kind (authored or one-shot) in
+/// the workspace; an unknown id fails the run. Returns the same
 /// [`ResolvedPolicy`] shape as [`resolve_policies`], so the caller pins versions
 /// identically.
-pub(crate) async fn resolve_policies_by_slugs(
+pub(crate) async fn resolve_policies_by_ids(
     conn: &mut nvisy_postgres::PgConn,
     workspace_id: Uuid,
-    slugs: &[Handle],
+    policy_ids: &[Uuid],
 ) -> Result<Vec<ResolvedPolicy>> {
-    let mut policies = Vec::with_capacity(slugs.len());
-    for slug in slugs {
+    let mut policies = Vec::with_capacity(policy_ids.len());
+    for policy_id in policy_ids {
         let policy = conn
-            .find_policy_in_workspace_by_slug(workspace_id, slug.as_str())
+            .find_policy_in_workspace_by_id(workspace_id, *policy_id)
             .await?
             .ok_or_else(|| {
                 ErrorKind::InternalServerError
                     .with_message("Referenced policy is no longer available")
-                    .with_context(format!("policy_slug: {slug}"))
+                    .with_context(format!("policy_id: {policy_id}"))
             })?;
         let found = conn
             .find_policy_with_version(workspace_id, policy.item.id)
@@ -313,7 +313,7 @@ pub(crate) async fn resolve_policies_by_slugs(
             .ok_or_else(|| {
                 ErrorKind::InternalServerError
                     .with_message("Referenced policy is no longer available")
-                    .with_context(format!("policy_slug: {slug}"))
+                    .with_context(format!("policy_id: {policy_id}"))
             })?;
         let definition = parse_definition(found.version.id, found.version.definition)?;
         policies.push(ResolvedPolicy {

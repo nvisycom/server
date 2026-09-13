@@ -77,6 +77,7 @@ async fn list_documents(
         WorkspaceDocument::from_model(
             wc.item.document,
             &wc.item.blob,
+            workspace.id,
             workspace.slug.clone(),
             wc.account.into(),
         )
@@ -423,6 +424,7 @@ async fn upload_document(
         uploaded_documents.push(response::WorkspaceDocument::from_model(
             entry.document,
             &entry.blob,
+            workspace.id,
             workspace.slug.clone(),
             uploaded_by.clone(),
         ));
@@ -475,6 +477,7 @@ async fn read_document(
         Json(WorkspaceDocument::from_model(
             found.item.document,
             &found.item.blob,
+            workspace.id,
             workspace.slug,
             found.account.into(),
         )),
@@ -525,6 +528,7 @@ async fn update_document(
         Json(response::WorkspaceDocument::from_model(
             found.item.document,
             &found.item.blob,
+            workspace.id,
             workspace.slug,
             found.account.into(),
         )),
@@ -767,7 +771,7 @@ pub fn routes(max_file_body_bytes: usize) -> ApiRouter<ServiceState> {
     ApiRouter::new()
         // Workspace-scoped routes (require workspace context)
         .api_route(
-            "/workspaces/{workspaceSlug}/documents/",
+            "/workspaces/{workspaceId}/documents/",
             post_with(upload_document, upload_document_docs)
                 // Raise this route's default body limit to the upload ceiling; the
                 // global `RequestBodyLimitLayer` still caps every route at the same
@@ -776,17 +780,17 @@ pub fn routes(max_file_body_bytes: usize) -> ApiRouter<ServiceState> {
                 .get_with(list_documents, list_documents_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/documents/delete/",
+            "/workspaces/{workspaceId}/documents/delete/",
             post_with(bulk_delete_documents, bulk_delete_documents_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/documents/{documentId}/",
+            "/workspaces/{workspaceId}/documents/{documentId}/",
             get_with(read_document, read_document_docs)
                 .patch_with(update_document, update_document_docs)
                 .delete_with(delete_document, delete_document_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/documents/{documentId}/content/",
+            "/workspaces/{workspaceId}/documents/{documentId}/content/",
             get_with(download_document, download_document_docs),
         )
         .with_path_items(|item| item.tag("WorkspaceDocuments"))

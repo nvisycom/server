@@ -365,6 +365,9 @@ impl WorkspaceThreadRepository for PgConnection {
             if let Some(author_account_id) = filter.author_account_id {
                 query = query.filter(dsl::author_account_id.eq(author_account_id));
             }
+            if let Some(assignee_account_id) = filter.assignee_account_id {
+                query = query.filter(dsl::assignee_account_id.eq(assignee_account_id));
+            }
             if let Some(closed) = filter.closed {
                 query = if closed {
                     query.filter(dsl::closed_at.is_not_null())
@@ -393,6 +396,7 @@ impl WorkspaceThreadRepository for PgConnection {
         let selection = (
             WorkspaceThread::as_select(),
             (
+                accounts::id,
                 accounts::username,
                 accounts::display_name,
                 accounts::avatar_url,

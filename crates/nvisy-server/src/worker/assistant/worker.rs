@@ -379,9 +379,7 @@ impl AssistantWorker {
                 comment_id: comment.id,
                 thread_id: thread.id,
                 document_id: thread.document_id,
-                author_username: nvisy_postgres::ASSISTANT_HANDLE.parse().map_err(|_| {
-                    ErrorKind::InternalServerError.with_message("Invalid assistant handle")
-                })?,
+                author_id: ASSISTANT_ACCOUNT_ID,
                 mentioned: Vec::new(),
             });
             let row = event::event_outbox_row(

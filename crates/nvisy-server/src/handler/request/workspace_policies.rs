@@ -5,7 +5,7 @@ use elide_pipeline::governance::policy::{LabelScope, PolicyRule};
 use elide_pipeline::governance::redaction::ModalityRedactions;
 use elide_pipeline::template::PolicyTemplate;
 use garde::Validate;
-use nvisy_postgres::types::{Handle, PolicyKind};
+use nvisy_postgres::types::PolicyKind;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -27,15 +27,15 @@ pub struct WorkspacePoliciesQuery {
 /// Path parameters for policy operations.
 ///
 /// The workspace is resolved by the [`WorkspaceContext`] extractor from the
-/// `{workspaceSlug}` path segment.
+/// `{workspaceId}` path segment.
 ///
 /// [`WorkspaceContext`]: crate::extract::WorkspaceContext
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePolicyPathParams {
-    /// URL slug of the policy, unique within its workspace.
-    pub policy_slug: String,
+    /// Id of the policy.
+    pub policy_id: uuid::Uuid,
 }
 
 /// A client-authored policy body: the parts of a policy definition a caller may
@@ -137,11 +137,6 @@ pub struct CreateWorkspacePolicy {
     /// for a one-shot (labels) body, whose name is generated.
     #[garde(length(chars, min = 1, max = 255))]
     pub display_name: Option<String>,
-    /// URL slug, unique within the workspace and immutable after creation.
-    /// Required for a template or inline body; ignored (and generated) for a
-    /// one-shot (labels) body.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slug: Option<Handle>,
     /// Optional description override. Defaults to the policy's own description.
     #[garde(length(chars, max = 4096))]
     pub description: Option<String>,
@@ -155,7 +150,6 @@ impl From<CreateWorkspacePolicy> for CreatePolicyInput {
     fn from(request: CreateWorkspacePolicy) -> Self {
         CreatePolicyInput {
             display_name: request.display_name,
-            slug: request.slug,
             description: request.description,
             body: request.body.into(),
         }

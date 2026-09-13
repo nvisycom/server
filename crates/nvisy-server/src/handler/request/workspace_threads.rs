@@ -73,27 +73,33 @@ pub struct RenameWorkspaceThread {
 
 /// Query parameters for listing a workspace's threads.
 ///
-/// Every field is an optional filter; unset fields impose no constraint.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+/// Every field is an optional filter; unset fields impose no constraint. Accounts
+/// are addressed by id.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceThreadsQuery {
     /// Filter by the document the thread reviews.
     pub document_id: Option<Uuid>,
-    /// Filter by the thread's opening author.
+    /// Filter by the thread's opening author (account id).
     pub author: Option<Uuid>,
+    /// Filter document reviews by their assigned reviewer (account id).
+    pub assignee: Option<Uuid>,
     /// Filter by open/closed state: `true` = closed only, `false` = open only.
     pub closed: Option<bool>,
     /// Filter document reviews by their derived review status.
     pub review_status: Option<ReviewStatus>,
 }
 
-impl From<WorkspaceThreadsQuery> for ThreadFilter {
-    fn from(query: WorkspaceThreadsQuery) -> Self {
+impl WorkspaceThreadsQuery {
+    /// Builds the repository filter. All fields are ids passed straight through; a
+    /// nonexistent id simply matches no rows.
+    pub fn into_filter(self) -> ThreadFilter {
         ThreadFilter {
-            document_id: query.document_id,
-            author_account_id: query.author,
-            closed: query.closed,
-            review_status: query.review_status,
+            document_id: self.document_id,
+            author_account_id: self.author,
+            assignee_account_id: self.assignee,
+            closed: self.closed,
+            review_status: self.review_status,
         }
     }
 }

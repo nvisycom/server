@@ -4,7 +4,7 @@ use elide_pipeline::entity::EditSet;
 use elide_pipeline::provider::DocumentContext;
 use garde::Validate;
 use nvisy_postgres::types::{
-    DetectionFilter, DetectionStatus, Handle, PipelineTriggerType, RetentionOverride,
+    DetectionFilter, DetectionStatus, PipelineTriggerType, RetentionOverride,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -111,9 +111,9 @@ impl From<CreateWorkspaceDetection> for CreateDetectionInput {
 pub struct CreateAdhocWorkspaceDetection {
     /// The document to analyze.
     pub document_id: Uuid,
-    /// The policies to run against, by slug. At least one is required.
+    /// The policies to run against, by id. At least one is required.
     #[garde(length(min = 1, max = 64))]
-    pub policy_slugs: Vec<Handle>,
+    pub policy_ids: Vec<Uuid>,
     /// Per-document scope (languages, jurisdictions, document labels).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<DocumentContext>,
@@ -127,7 +127,7 @@ impl From<CreateAdhocWorkspaceDetection> for CreateAdhocDetectionInput {
     fn from(request: CreateAdhocWorkspaceDetection) -> Self {
         CreateAdhocDetectionInput {
             document_id: request.document_id,
-            policy_slugs: request.policy_slugs,
+            policy_ids: request.policy_ids,
             scope: request.scope,
             retention_override: request.retention_override,
         }

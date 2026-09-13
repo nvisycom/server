@@ -141,6 +141,7 @@ impl WorkspaceProviderRepository for PgConnection {
             .select((
                 WorkspaceProvider::as_select(),
                 (
+                    accounts::id,
                     accounts::username,
                     accounts::display_name,
                     accounts::avatar_url,
@@ -224,6 +225,7 @@ impl WorkspaceProviderRepository for PgConnection {
                 .select((
                     WorkspaceProvider::as_select(),
                     (
+                        accounts::id,
                         accounts::username,
                         accounts::display_name,
                         accounts::avatar_url,

@@ -15,8 +15,6 @@ pub enum WorkspaceConnectionConstraints {
     MetadataSize,
     #[strum(serialize = "workspace_connection_schedule_cron_length")]
     ScheduleCronLength,
-    #[strum(serialize = "workspace_connection_schedule_import_only")]
-    ScheduleImportOnly,
     #[strum(serialize = "workspace_connections_workspace_id_id_key")]
     WorkspaceIdIdUnique,
     #[strum(serialize = "workspace_connections_display_name_unique_idx")]

@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::types::{
-    ActivityType, ConnectionId, DetectionId, Handle, ProviderId, RedactionId, WebhookEvent,
-    WebhookId,
+    ActivityType, ConnectionId, DetectionId, ProviderId, RedactionId, WebhookEvent, WebhookId,
 };
 
 /// Params of a workspace-scoped activity (`workspace.*`).
@@ -19,8 +18,8 @@ use crate::types::{
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceActivityParams {
-    /// Slug of the workspace acted on.
-    pub workspace_slug: Handle,
+    /// Id of the workspace acted on.
+    pub workspace_id: Uuid,
 }
 
 /// Params of a member activity (`member.*`).
@@ -28,8 +27,8 @@ pub struct WorkspaceActivityParams {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MemberActivityParams {
-    /// Username of the member acted on.
-    pub member_username: Handle,
+    /// Id of the member's account.
+    pub member_id: Uuid,
 }
 
 /// Params of an invite activity (`invite.*`).
@@ -99,10 +98,10 @@ pub struct ReviewActivityParams {
     pub thread_id: Uuid,
     /// Id of the document under review.
     pub document_id: Uuid,
-    /// Username of the reviewer the review is assigned to; omitted for
-    /// verification or when clearing the assignee.
+    /// Id of the reviewer the review is assigned to; omitted for verification or
+    /// when clearing the assignee.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub assignee_username: Option<Handle>,
+    pub assignee_id: Option<Uuid>,
 }
 
 /// Params of a pipeline activity (`pipeline.*`, non-run).
@@ -110,8 +109,8 @@ pub struct ReviewActivityParams {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PipelineActivityParams {
-    /// Slug of the pipeline.
-    pub pipeline_slug: Handle,
+    /// Id of the pipeline.
+    pub pipeline_id: Uuid,
 }
 
 /// Params of a detection activity (`pipeline.detection.*`).
@@ -119,9 +118,9 @@ pub struct PipelineActivityParams {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DetectionActivityParams {
-    /// Slug of the owning pipeline; absent for an ad-hoc detection.
+    /// Id of the owning pipeline; absent for an ad-hoc detection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pipeline_slug: Option<Handle>,
+    pub pipeline_id: Option<Uuid>,
     /// Id of the detection.
     pub detection_id: DetectionId,
 }
@@ -131,9 +130,9 @@ pub struct DetectionActivityParams {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RedactionActivityParams {
-    /// Slug of the owning pipeline; absent when the detection was ad-hoc.
+    /// Id of the owning pipeline; absent when the detection was ad-hoc.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pipeline_slug: Option<Handle>,
+    pub pipeline_id: Option<Uuid>,
     /// Id of the redaction.
     pub redaction_id: RedactionId,
 }
@@ -145,8 +144,6 @@ pub struct RedactionActivityParams {
 pub struct PolicyActivityParams {
     /// Id of the policy.
     pub policy_id: Uuid,
-    /// Slug of the policy.
-    pub policy_slug: Handle,
 }
 
 /// Params of a comment-thread activity (`thread.*`).
@@ -439,14 +436,26 @@ impl ActivityPayload {
     }
 
     /// The stable identifier of the object this activity acted on, when it has
-    /// one. `None` for objects addressed only by a human-readable handle (a
-    /// workspace, member, or pipeline, whose slug/username is the
-    /// [`object_label`](Self::object_label)).
+    /// one. `None` only for the ad-hoc detection/redaction case where the owning
+    /// pipeline id is absent — every addressable object is identified by id.
     ///
-    /// Paired with `object_label`, this flattens the per-variant params into two
-    /// export columns without a per-object-type column explosion.
+    /// Paired with [`object_label`](Self::object_label), this flattens the
+    /// per-variant params into two export columns without a per-object-type column
+    /// explosion.
     pub fn object_id(&self) -> Option<String> {
         match self {
+            ActivityPayload::WorkspaceCreated(p)
+            | ActivityPayload::WorkspaceUpdated(p)
+            | ActivityPayload::WorkspaceDeleted(p) => Some(p.workspace_id.to_string()),
+
+            ActivityPayload::MemberAdded(p)
+            | ActivityPayload::MemberUpdated(p)
+            | ActivityPayload::MemberDeleted(p) => Some(p.member_id.to_string()),
+
+            ActivityPayload::PipelineCreated(p)
+            | ActivityPayload::PipelineUpdated(p)
+            | ActivityPayload::PipelineDeleted(p) => Some(p.pipeline_id.to_string()),
+
             ActivityPayload::InviteCreated(p)
             | ActivityPayload::InviteAccepted(p)
             | ActivityPayload::InviteDeclined(p)
@@ -492,32 +501,14 @@ impl ActivityPayload {
             | ActivityPayload::ThreadDeleted(p) => Some(p.thread_id.to_string()),
 
             ActivityPayload::ThreadCommentCreated(p) => Some(p.comment_id.to_string()),
-
-            ActivityPayload::WorkspaceCreated(_)
-            | ActivityPayload::WorkspaceUpdated(_)
-            | ActivityPayload::WorkspaceDeleted(_)
-            | ActivityPayload::MemberAdded(_)
-            | ActivityPayload::MemberUpdated(_)
-            | ActivityPayload::MemberDeleted(_)
-            | ActivityPayload::PipelineCreated(_)
-            | ActivityPayload::PipelineUpdated(_)
-            | ActivityPayload::PipelineDeleted(_) => None,
         }
     }
 
     /// The human-readable name of the object this activity acted on, when it has
-    /// one: a slug, username, filename, or email. `None` for objects identified
-    /// only by an [`object_id`](Self::object_id).
+    /// one: a display name, filename, or email. `None` for objects identified only
+    /// by an [`object_id`](Self::object_id).
     pub fn object_label(&self) -> Option<String> {
         match self {
-            ActivityPayload::WorkspaceCreated(p)
-            | ActivityPayload::WorkspaceUpdated(p)
-            | ActivityPayload::WorkspaceDeleted(p) => Some(p.workspace_slug.to_string()),
-
-            ActivityPayload::MemberAdded(p)
-            | ActivityPayload::MemberUpdated(p)
-            | ActivityPayload::MemberDeleted(p) => Some(p.member_username.to_string()),
-
             ActivityPayload::InviteCreated(p)
             | ActivityPayload::InviteAccepted(p)
             | ActivityPayload::InviteDeclined(p)
@@ -526,26 +517,6 @@ impl ActivityPayload {
             ActivityPayload::DocumentCreated(p)
             | ActivityPayload::DocumentUpdated(p)
             | ActivityPayload::DocumentDeleted(p) => Some(p.document_name.clone()),
-
-            ActivityPayload::ReviewVerified(p)
-            | ActivityPayload::ReviewAssigned(p)
-            | ActivityPayload::ReviewUnassigned(p) => {
-                p.assignee_username.as_ref().map(ToString::to_string)
-            }
-
-            ActivityPayload::PipelineCreated(p)
-            | ActivityPayload::PipelineUpdated(p)
-            | ActivityPayload::PipelineDeleted(p) => Some(p.pipeline_slug.to_string()),
-
-            ActivityPayload::DetectionStarted(p)
-            | ActivityPayload::DetectionCompleted(p)
-            | ActivityPayload::DetectionFailed(p) => {
-                p.pipeline_slug.as_ref().map(ToString::to_string)
-            }
-
-            ActivityPayload::RedactionCreated(p) => {
-                p.pipeline_slug.as_ref().map(ToString::to_string)
-            }
 
             ActivityPayload::ConnectionCreated(p)
             | ActivityPayload::ConnectionUpdated(p)
@@ -562,12 +533,27 @@ impl ActivityPayload {
             | ActivityPayload::WebhookUpdated(p)
             | ActivityPayload::WebhookDeleted(p) => Some(p.webhook_name.clone()),
 
-            ActivityPayload::PolicyCreated(p)
-            | ActivityPayload::PolicyUpdated(p)
-            | ActivityPayload::PolicyDeleted(p) => Some(p.policy_slug.to_string()),
-
-            // A thread/comment has no human-readable name; addressed by id only.
-            ActivityPayload::ThreadOpened(_)
+            // Objects addressed by id alone carry no human-readable label.
+            ActivityPayload::WorkspaceCreated(_)
+            | ActivityPayload::WorkspaceUpdated(_)
+            | ActivityPayload::WorkspaceDeleted(_)
+            | ActivityPayload::MemberAdded(_)
+            | ActivityPayload::MemberUpdated(_)
+            | ActivityPayload::MemberDeleted(_)
+            | ActivityPayload::ReviewVerified(_)
+            | ActivityPayload::ReviewAssigned(_)
+            | ActivityPayload::ReviewUnassigned(_)
+            | ActivityPayload::PipelineCreated(_)
+            | ActivityPayload::PipelineUpdated(_)
+            | ActivityPayload::PipelineDeleted(_)
+            | ActivityPayload::DetectionStarted(_)
+            | ActivityPayload::DetectionCompleted(_)
+            | ActivityPayload::DetectionFailed(_)
+            | ActivityPayload::RedactionCreated(_)
+            | ActivityPayload::PolicyCreated(_)
+            | ActivityPayload::PolicyUpdated(_)
+            | ActivityPayload::PolicyDeleted(_)
+            | ActivityPayload::ThreadOpened(_)
             | ActivityPayload::ThreadClosed(_)
             | ActivityPayload::ThreadReopened(_)
             | ActivityPayload::ThreadRenamed(_)
@@ -579,8 +565,6 @@ impl ActivityPayload {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use super::*;
 
     #[test]
@@ -599,12 +583,11 @@ mod tests {
     }
 
     #[test]
-    fn label_only_object_has_label_no_id() {
-        let p = ActivityPayload::MemberAdded(MemberActivityParams {
-            member_username: Handle::from_str("alice").unwrap(),
-        });
-        assert_eq!(p.object_id(), None);
-        assert_eq!(p.object_label(), Some("alice".to_owned()));
+    fn id_only_object_has_id_no_label() {
+        let member_id = Uuid::now_v7();
+        let p = ActivityPayload::MemberAdded(MemberActivityParams { member_id });
+        assert_eq!(p.object_id(), Some(member_id.to_string()));
+        assert_eq!(p.object_label(), None);
     }
 
     /// A small sample of payloads spanning every mapping shape (id-only,
@@ -624,7 +607,7 @@ mod tests {
             ActivityPayload::ProviderDeleted(provider()),
             ActivityPayload::ConnectionCreated(connection()),
             ActivityPayload::MemberAdded(MemberActivityParams {
-                member_username: Handle::from_str("alice").unwrap(),
+                member_id: Uuid::now_v7(),
             }),
         ]
     }
@@ -684,7 +667,7 @@ mod tests {
         // The workspace lifecycle is not a webhook event; `webhook_event` returns
         // `None` so the drainer does not emit one.
         let p = ActivityPayload::WorkspaceCreated(WorkspaceActivityParams {
-            workspace_slug: Handle::from_str("acme").unwrap(),
+            workspace_id: Uuid::now_v7(),
         });
         assert_eq!(p.webhook_event(), None);
     }

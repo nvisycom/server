@@ -20,7 +20,9 @@ use super::Page;
 pub struct WorkspaceInvite {
     /// Unique identifier of the invitation.
     pub invite_id: Uuid,
-    /// Handle of the workspace the invitation is for.
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub workspace_slug: Handle,
     /// Email address of the invitee (omitted for open invite codes).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -41,9 +43,14 @@ impl WorkspaceInvite {
     /// Builds the invite summary. The invite token is deliberately absent: it is
     /// delivered only by the dedicated generate-invite-code endpoint, never in a
     /// list or detail response.
-    pub fn from_model(invite: WorkspaceInviteModel, workspace_slug: Handle) -> Self {
+    pub fn from_model(
+        invite: WorkspaceInviteModel,
+        workspace_id: Uuid,
+        workspace_slug: Handle,
+    ) -> Self {
         Self {
             invite_id: invite.id,
+            workspace_id,
             workspace_slug,
             invitee_email: invite.invitee_email,
             invited_role: invite.invited_role,
@@ -93,7 +100,9 @@ impl Default for WorkspaceInviteSent {
 pub struct WorkspaceInviteCode {
     /// The generated invite code that can be shared.
     pub invite_code: String,
-    /// Handle of the workspace this invite code is for.
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub workspace_slug: Handle,
     /// Role assigned when someone joins via this code.
     pub role: WorkspaceRole,
@@ -103,9 +112,14 @@ pub struct WorkspaceInviteCode {
 
 impl WorkspaceInviteCode {
     /// Creates a new invite code response from a workspace invite.
-    pub fn from_invite(invite: &model::WorkspaceInvite, workspace_slug: Handle) -> Self {
+    pub fn from_invite(
+        invite: &model::WorkspaceInvite,
+        workspace_id: Uuid,
+        workspace_slug: Handle,
+    ) -> Self {
         Self {
             invite_code: invite.invite_token.clone(),
+            workspace_id,
             workspace_slug,
             role: invite.invited_role,
             expires_at: invite.expires_at.into(),
@@ -121,7 +135,9 @@ impl WorkspaceInviteCode {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct InvitePreview {
-    /// Handle of the workspace.
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub workspace_slug: Handle,
     /// Display name of the workspace.
     pub display_name: String,
@@ -140,6 +156,7 @@ impl InvitePreview {
     /// Creates an invite preview from workspace and invite models.
     pub fn from_models(workspace: model::Workspace, invite: model::WorkspaceInvite) -> Self {
         Self {
+            workspace_id: workspace.id,
             workspace_slug: workspace.slug,
             display_name: workspace.display_name,
             description: workspace.description,

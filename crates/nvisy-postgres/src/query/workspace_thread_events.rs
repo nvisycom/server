@@ -121,6 +121,7 @@ impl WorkspaceThreadEventRepository for PgConnection {
             .select((
                 WorkspaceThreadEvent::as_select(),
                 (
+                    accounts::id,
                     accounts::username,
                     accounts::display_name,
                     accounts::avatar_url,
@@ -173,6 +174,7 @@ impl WorkspaceThreadEventRepository for PgConnection {
             .select((
                 WorkspaceThreadEvent::as_select(),
                 (
+                    accounts::id,
                     accounts::username,
                     accounts::display_name,
                     accounts::avatar_url,

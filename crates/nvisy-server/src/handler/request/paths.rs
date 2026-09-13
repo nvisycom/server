@@ -1,6 +1,6 @@
 //! Path parameter types for HTTP handlers.
 
-use nvisy_postgres::types::{DetectionId, Handle, RedactionId, WebhookId};
+use nvisy_postgres::types::{DetectionId, RedactionId, WebhookId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -10,8 +10,8 @@ use uuid::Uuid;
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceMemberPathParams {
-    /// Public handle of the member's account.
-    pub username: Handle,
+    /// Id of the member's account.
+    pub account_id: Uuid,
 }
 
 /// Path parameters for invite operations.
@@ -64,14 +64,14 @@ pub struct AccountApiTokenPathParams {
 
 /// Path parameters for account operations.
 ///
-/// Used when retrieving account information by handle. Access is granted
-/// if the requester shares at least one workspace with the target account.
+/// Used when retrieving account information by id. Access is granted if the
+/// requester shares at least one workspace with the target account.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountPathParams {
-    /// Public handle of the account.
-    pub username: Handle,
+    /// Id of the account.
+    pub account_id: Uuid,
 }
 
 /// Path parameters for pipeline operations.
@@ -79,8 +79,8 @@ pub struct AccountPathParams {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePipelinePathParams {
-    /// URL slug of the pipeline, unique within its workspace.
-    pub pipeline_slug: String,
+    /// Id of the pipeline.
+    pub pipeline_id: Uuid,
 }
 
 /// Path parameters for detection operations.

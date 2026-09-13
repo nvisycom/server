@@ -10,7 +10,7 @@ use crate::service::ProviderConfig;
 
 /// Path parameters for provider operations.
 ///
-/// The workspace is resolved separately from the `{workspaceSlug}` segment by the
+/// The workspace is resolved separately from the `{workspaceId}` segment by the
 /// [`WorkspaceContext`] extractor.
 ///
 /// [`WorkspaceContext`]: crate::extract::WorkspaceContext

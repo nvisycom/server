@@ -14,7 +14,7 @@
 use nvisy_postgres::types::{
     ActivityPayload, CommentMentionedParams, ConnectionActivityParams, ConnectionId,
     ConnectionSyncCompletedParams, ConnectionSyncFailedParams, DetectionActivityParams,
-    DetectionCompletedParams, DetectionFailedParams, DetectionId, DocumentActivityParams, Handle,
+    DetectionCompletedParams, DetectionFailedParams, DetectionId, DocumentActivityParams,
     InviteActivityParams, MemberActivityParams, MemberJoinedParams, NotificationPayload,
     PipelineActivityParams, PolicyActivityParams, ProviderActivityParams, ProviderId,
     RedactionActivityParams, RedactionCreatedParams, RedactionId, ReviewActivityParams,
@@ -108,7 +108,7 @@ struct DocumentCreatedWebhookBody<'a> {
 struct ReviewWebhookBody<'a> {
     display_name: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    assignee: Option<&'a Handle>,
+    assignee_id: Option<Uuid>,
 }
 
 /// Serializes a webhook body to JSON, failing closed to `None` (no body) rather
@@ -119,9 +119,9 @@ fn webhook_body<T: Serialize>(body: &T) -> Option<serde_json::Value> {
 
 // Workspace lifecycle events.
 crud_events! {
-    fields { workspace_id: Uuid, workspace_slug: Handle }
+    fields { workspace_id: Uuid }
     id = workspace_id;
-    activity(this) = WorkspaceActivityParams { workspace_slug: this.workspace_slug.clone() };
+    activity(this) = WorkspaceActivityParams { workspace_id: this.workspace_id };
     webhook = no;
 
     /// A workspace was created.
@@ -136,12 +136,11 @@ crud_events! {
 ///
 /// `MemberAdded` also raises the `member.joined` in-app notification to the
 /// workspace's owners and admins (excluding the joiner), so it carries the
-/// workspace slug and the joiner's account id the notification needs.
+/// workspace id and the joiner's account id the notification needs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemberAdded {
     pub member_id: Uuid,
-    pub member_username: Handle,
-    pub workspace_slug: Handle,
+    pub workspace_id: Uuid,
 }
 
 impl EventKind for MemberAdded {
@@ -153,7 +152,7 @@ impl EventKind for MemberAdded {
 
     fn activity(&self) -> ActivityPayload {
         ActivityPayload::MemberAdded(MemberActivityParams {
-            member_username: self.member_username.clone(),
+            member_id: self.member_id,
         })
     }
 
@@ -173,8 +172,8 @@ impl EventKind for MemberAdded {
                 exclude: Some(self.member_id),
             },
             payload: NotificationPayload::MemberJoined(MemberJoinedParams {
-                workspace_slug: self.workspace_slug,
-                member_username: self.member_username,
+                workspace_id: self.workspace_id,
+                member_id: self.member_id,
             }),
         }]
     }
@@ -183,9 +182,9 @@ impl EventKind for MemberAdded {
 // Member update/removal. (MemberAdded is hand-written above: it also raises the
 // member.joined notification and carries the fields that needs.)
 crud_events! {
-    fields { member_id: Uuid, member_username: Handle }
+    fields { member_id: Uuid }
     id = member_id;
-    activity(this) = MemberActivityParams { member_username: this.member_username.clone() };
+    activity(this) = MemberActivityParams { member_id: this.member_id };
     webhook = yes;
 
     /// A member's role or notification preferences were updated.
@@ -482,7 +481,7 @@ impl EventKind for ReviewVerified {
         ActivityPayload::ReviewVerified(ReviewActivityParams {
             thread_id: self.thread_id,
             document_id: self.document_id,
-            assignee_username: None,
+            assignee_id: None,
         })
     }
 
@@ -491,7 +490,7 @@ impl EventKind for ReviewVerified {
             event: WebhookEvent::ReviewVerified,
             body: webhook_body(&ReviewWebhookBody {
                 display_name: &self.document_name,
-                assignee: None,
+                assignee_id: None,
             }),
         })
     }
@@ -505,7 +504,7 @@ pub struct ReviewAssigned {
     pub thread_id: Uuid,
     pub document_id: Uuid,
     pub document_name: String,
-    pub assignee_username: Handle,
+    pub assignee_id: Uuid,
     pub notify: Option<Uuid>,
 }
 
@@ -520,7 +519,7 @@ impl EventKind for ReviewAssigned {
         ActivityPayload::ReviewAssigned(ReviewActivityParams {
             thread_id: self.thread_id,
             document_id: self.document_id,
-            assignee_username: Some(self.assignee_username.clone()),
+            assignee_id: Some(self.assignee_id),
         })
     }
 
@@ -529,7 +528,7 @@ impl EventKind for ReviewAssigned {
             event: WebhookEvent::ReviewAssigned,
             body: webhook_body(&ReviewWebhookBody {
                 display_name: &self.document_name,
-                assignee: Some(&self.assignee_username),
+                assignee_id: Some(self.assignee_id),
             }),
         })
     }
@@ -566,7 +565,7 @@ impl EventKind for ReviewUnassigned {
         ActivityPayload::ReviewUnassigned(ReviewActivityParams {
             thread_id: self.thread_id,
             document_id: self.document_id,
-            assignee_username: None,
+            assignee_id: None,
         })
     }
 
@@ -575,7 +574,7 @@ impl EventKind for ReviewUnassigned {
             event: WebhookEvent::ReviewUnassigned,
             body: webhook_body(&ReviewWebhookBody {
                 display_name: self.document_name.as_deref().unwrap_or_default(),
-                assignee: None,
+                assignee_id: None,
             }),
         })
     }
@@ -584,9 +583,9 @@ impl EventKind for ReviewUnassigned {
 // Pipeline lifecycle events. (Detection/redaction run events are hand-written
 // below: they carry run-specific fields and notifications.)
 crud_events! {
-    fields { pipeline_id: Uuid, pipeline_slug: Handle }
+    fields { pipeline_id: Uuid }
     id = pipeline_id;
-    activity(this) = PipelineActivityParams { pipeline_slug: this.pipeline_slug.clone() };
+    activity(this) = PipelineActivityParams { pipeline_id: this.pipeline_id };
     webhook = yes;
 
     /// A pipeline was created.
@@ -600,9 +599,9 @@ crud_events! {
 // A detection started: a plain activity + webhook event, no notification. (The
 // completed/failed events below notify the triggering account.)
 crud_events! {
-    fields { detection_id: Uuid, pipeline_slug: Option<Handle> }
+    fields { detection_id: Uuid, pipeline_id: Option<Uuid> }
     id = detection_id;
-    activity(this) = detection_activity(this.detection_id, this.pipeline_slug.clone());
+    activity(this) = detection_activity(this.detection_id, this.pipeline_id);
     webhook = yes;
 
     /// A detection was started.
@@ -613,7 +612,7 @@ crud_events! {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionCompleted {
     pub detection_id: Uuid,
-    pub pipeline_slug: Option<Handle>,
+    pub pipeline_id: Option<Uuid>,
     pub input_document_name: Option<String>,
     pub notify: Uuid,
 }
@@ -626,10 +625,7 @@ impl EventKind for DetectionCompleted {
     }
 
     fn activity(&self) -> ActivityPayload {
-        ActivityPayload::DetectionCompleted(detection_activity(
-            self.detection_id,
-            self.pipeline_slug.clone(),
-        ))
+        ActivityPayload::DetectionCompleted(detection_activity(self.detection_id, self.pipeline_id))
     }
 
     fn webhook(&self) -> Option<WebhookDelivery> {
@@ -644,7 +640,7 @@ impl EventKind for DetectionCompleted {
             target: NotifyTarget::Account(self.notify),
             payload: NotificationPayload::DetectionCompleted(DetectionCompletedParams {
                 detection_id: DetectionId::from_uuid(self.detection_id),
-                pipeline_slug: self.pipeline_slug,
+                pipeline_id: self.pipeline_id,
                 input_document_name: self.input_document_name,
             }),
         }]
@@ -655,7 +651,7 @@ impl EventKind for DetectionCompleted {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionFailed {
     pub detection_id: Uuid,
-    pub pipeline_slug: Option<Handle>,
+    pub pipeline_id: Option<Uuid>,
     pub input_document_name: Option<String>,
     pub error: Option<String>,
     pub notify: Uuid,
@@ -669,10 +665,7 @@ impl EventKind for DetectionFailed {
     }
 
     fn activity(&self) -> ActivityPayload {
-        ActivityPayload::DetectionFailed(detection_activity(
-            self.detection_id,
-            self.pipeline_slug.clone(),
-        ))
+        ActivityPayload::DetectionFailed(detection_activity(self.detection_id, self.pipeline_id))
     }
 
     fn webhook(&self) -> Option<WebhookDelivery> {
@@ -687,7 +680,7 @@ impl EventKind for DetectionFailed {
             target: NotifyTarget::Account(self.notify),
             payload: NotificationPayload::DetectionFailed(DetectionFailedParams {
                 detection_id: DetectionId::from_uuid(self.detection_id),
-                pipeline_slug: self.pipeline_slug,
+                pipeline_id: self.pipeline_id,
                 input_document_name: self.input_document_name,
                 error: self.error,
             }),
@@ -696,12 +689,9 @@ impl EventKind for DetectionFailed {
 }
 
 /// Builds the shared detection activity params.
-fn detection_activity(
-    detection_id: Uuid,
-    pipeline_slug: Option<Handle>,
-) -> DetectionActivityParams {
+fn detection_activity(detection_id: Uuid, pipeline_id: Option<Uuid>) -> DetectionActivityParams {
     DetectionActivityParams {
-        pipeline_slug,
+        pipeline_id,
         detection_id: DetectionId::from_uuid(detection_id),
     }
 }
@@ -710,7 +700,7 @@ fn detection_activity(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RedactionCreated {
     pub detection_id: Uuid,
-    pub pipeline_slug: Option<Handle>,
+    pub pipeline_id: Option<Uuid>,
     /// The redaction that was produced (its own id, distinct from the detection's
     /// — a detection can produce many redactions).
     pub redaction_id: Uuid,
@@ -729,7 +719,7 @@ impl EventKind for RedactionCreated {
 
     fn activity(&self) -> ActivityPayload {
         ActivityPayload::RedactionCreated(RedactionActivityParams {
-            pipeline_slug: self.pipeline_slug.clone(),
+            pipeline_id: self.pipeline_id,
             redaction_id: RedactionId::from_uuid(self.redaction_id),
         })
     }
@@ -747,7 +737,7 @@ impl EventKind for RedactionCreated {
             payload: NotificationPayload::RedactionCreated(RedactionCreatedParams {
                 redaction_id: RedactionId::from_uuid(self.redaction_id),
                 detection_id: DetectionId::from_uuid(self.detection_id),
-                pipeline_slug: self.pipeline_slug,
+                pipeline_id: self.pipeline_id,
                 input_document_name: self.input_document_name,
             }),
         }]
@@ -756,9 +746,9 @@ impl EventKind for RedactionCreated {
 
 // Policy lifecycle events.
 crud_events! {
-    fields { policy_id: Uuid, policy_slug: Handle }
+    fields { policy_id: Uuid }
     id = policy_id;
-    activity(this) = policy_activity(this.policy_id, &this.policy_slug);
+    activity(this) = PolicyActivityParams { policy_id: this.policy_id };
     webhook = yes;
 
     /// A policy was created.
@@ -767,14 +757,6 @@ crud_events! {
     PolicyUpdated => "policy.updated",
     /// A policy was deleted.
     PolicyDeleted => "policy.deleted",
-}
-
-/// Builds the shared policy activity params.
-fn policy_activity(policy_id: Uuid, policy_slug: &Handle) -> PolicyActivityParams {
-    PolicyActivityParams {
-        policy_id,
-        policy_slug: policy_slug.clone(),
-    }
 }
 
 /// A thread was opened with its first message. Feeds activity + webhook,
@@ -786,8 +768,8 @@ pub struct ThreadOpened {
     /// Id of the thread's opening comment, referenced by mention notifications.
     pub opening_comment_id: Uuid,
     pub document_id: Option<Uuid>,
-    /// Username of the thread's opener, shown in the mention notification.
-    pub author_username: Handle,
+    /// Id of the thread's opener, shown in the mention notification.
+    pub author_id: Uuid,
     /// Accounts mentioned in the opening body, to notify. Empty when none.
     pub mentioned: Vec<Uuid>,
 }
@@ -824,7 +806,7 @@ impl EventKind for ThreadOpened {
                     comment_id: self.opening_comment_id,
                     thread_id: self.thread_id,
                     document_id: self.document_id,
-                    author_username: self.author_username.clone(),
+                    author_id: self.author_id,
                 }),
             })
             .collect()
@@ -866,8 +848,8 @@ pub struct ThreadCommentCreated {
     pub comment_id: Uuid,
     pub thread_id: Uuid,
     pub document_id: Option<Uuid>,
-    /// Username of the comment's author, shown in the mention notification.
-    pub author_username: Handle,
+    /// Id of the comment's author, shown in the mention notification.
+    pub author_id: Uuid,
     /// Accounts mentioned in the comment body, to notify. Empty when none.
     pub mentioned: Vec<Uuid>,
 }
@@ -897,7 +879,7 @@ impl EventKind for ThreadCommentCreated {
                     comment_id: self.comment_id,
                     thread_id: self.thread_id,
                     document_id: self.document_id,
-                    author_username: self.author_username.clone(),
+                    author_id: self.author_id,
                 }),
             })
             .collect()

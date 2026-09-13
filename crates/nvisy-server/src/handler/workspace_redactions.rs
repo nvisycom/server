@@ -66,6 +66,7 @@ async fn list_detection_redactions(
         let requested_by = resolve_account_ref(&mut conn, redaction.account_id).await?;
         items.push(WorkspaceRedactionResult::from_model(
             redaction,
+            workspace.id,
             workspace.slug.clone(),
             requested_by,
         ));
@@ -162,11 +163,11 @@ async fn find_redaction(
 pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceSlug}/detections/{detectionId}/redactions/",
+            "/workspaces/{workspaceId}/detections/{detectionId}/redactions/",
             get_with(list_detection_redactions, list_detection_redactions_docs),
         )
         .api_route(
-            "/workspaces/{workspaceSlug}/redactions/{redactionId}/review",
+            "/workspaces/{workspaceId}/redactions/{redactionId}/review",
             get_with(get_redaction_review, get_redaction_review_docs),
         )
         .with_path_items(|item| item.tag("Redactions"))

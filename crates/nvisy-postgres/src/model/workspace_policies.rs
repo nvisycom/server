@@ -6,13 +6,14 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::schema::workspace_policies;
-use crate::types::{Handle, PolicyKind};
+use crate::types::PolicyKind;
 
 /// Workspace policy: the logical identity of a redaction governance policy.
 ///
-/// The policy is a stable identity (slug, display name); its content is
-/// versioned. `current_version_id` names the live [`WorkspacePolicyVersion`]
-/// whose encrypted `definition` the redaction engine consumes.
+/// The policy is a stable identity (addressed by id, with a display name); its
+/// content is versioned. `current_version_id` names the live
+/// [`WorkspacePolicyVersion`] whose encrypted `definition` the redaction engine
+/// consumes.
 ///
 /// [`WorkspacePolicyVersion`]: crate::model::WorkspacePolicyVersion
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
@@ -25,8 +26,6 @@ pub struct WorkspacePolicy {
     pub workspace_id: Uuid,
     /// Reference to the account that created this policy.
     pub account_id: Uuid,
-    /// URL-safe policy identifier, unique within the workspace.
-    pub slug: Handle,
     /// Human-readable policy display name.
     pub display_name: String,
     /// Policy description.
@@ -65,8 +64,6 @@ pub struct NewWorkspacePolicy {
     pub workspace_id: Uuid,
     /// Account ID (required).
     pub account_id: Uuid,
-    /// URL-safe policy identifier, unique within the workspace.
-    pub slug: Handle,
     /// Policy display name.
     pub display_name: String,
     /// Policy description.
@@ -83,9 +80,8 @@ pub struct NewWorkspacePolicy {
 impl NewWorkspacePolicy {
     /// A minimal logical policy for `workspace_id`, for tests.
     ///
-    /// Both the slug and the display name are unique per call, so several test
-    /// policies fit in one workspace without colliding on the per-workspace
-    /// unique indexes.
+    /// The display name is unique per call, so several test policies fit in one
+    /// workspace without colliding on the per-workspace unique display-name index.
     #[cfg(any(feature = "test_util", test))]
     pub fn test(workspace_id: Uuid, account_id: Uuid) -> Self {
         let hex = Uuid::now_v7().simple().to_string();
@@ -93,7 +89,6 @@ impl NewWorkspacePolicy {
         Self {
             workspace_id,
             account_id,
-            slug: Handle::test(),
             display_name: format!("Test Policy {suffix}"),
             description: None,
             kind: PolicyKind::Authored,

@@ -9,7 +9,7 @@ use nvisy_postgres::model::WorkspacePipeline;
 use nvisy_postgres::query::{
     PipelineCursor, PipelineReferenceRepository, WorkspacePipelineRepository,
 };
-use nvisy_postgres::types::{CursorPage, CursorPagination, Handle, PipelineStatus, WithAccountRef};
+use nvisy_postgres::types::{CursorPage, CursorPagination, PipelineStatus, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
@@ -39,9 +39,9 @@ impl WorkspacePipelineService {
     }
 
     /// Creates a pipeline: the row, its policy references, and the creation event
-    /// commit together. Returns the pipeline with the slugs it now references.
+    /// commit together. Returns the pipeline with the ids it now references.
     ///
-    /// An unknown policy slug rejects the whole request before any write.
+    /// An unknown referenced policy rejects the whole request before any write.
     pub async fn create(
         &self,
         origin: event::EventOrigin<'_>,
@@ -67,7 +67,6 @@ impl WorkspacePipelineService {
                     origin,
                     event::WorkspaceEvent::PipelineCreated(event::PipelineCreated {
                         pipeline_id: pipeline.id,
-                        pipeline_slug: pipeline.slug.clone(),
                     }),
                 )
                 .await?;
@@ -75,10 +74,10 @@ impl WorkspacePipelineService {
             })
             .await?;
 
-        tracing::info!(target: TRACING_TARGET, pipeline_slug = %pipeline.slug, "Pipeline created");
+        tracing::info!(target: TRACING_TARGET, pipeline_id = %pipeline.id, "Pipeline created");
         Ok(PipelineWithReferences {
             pipeline,
-            policy_slugs: references.policy_slugs,
+            policy_ids: references.policy_ids,
         })
     }
 
@@ -97,36 +96,35 @@ impl WorkspacePipelineService {
             .await?)
     }
 
-    /// Finds a pipeline by slug with its creator and referenced policy slugs, or a
+    /// Finds a pipeline by id with its creator and referenced policy ids, or a
     /// NotFound.
     pub async fn find(
         &self,
         workspace_id: Uuid,
-        pipeline_slug: &str,
-    ) -> Result<(WithAccountRef<WorkspacePipeline>, Vec<Handle>)> {
+        pipeline_id: Uuid,
+    ) -> Result<(WithAccountRef<WorkspacePipeline>, Vec<Uuid>)> {
         let mut conn = self.postgres.get_connection().await?;
-        let found = find_pipeline(&mut conn, workspace_id, pipeline_slug).await?;
-        let policy_slugs = conn.list_pipeline_policy_slugs(found.item.id).await?;
-        Ok((found, policy_slugs))
+        let found = find_pipeline(&mut conn, workspace_id, pipeline_id).await?;
+        let policy_ids = conn.list_pipeline_policy_ids(found.item.id).await?;
+        Ok((found, policy_ids))
     }
 
     /// Updates a pipeline, returning it with its current policy references.
     ///
     /// Only provided fields change. Supplying a definition replaces the policy
     /// references too; omitting it leaves them untouched. The write and its event
-    /// commit together. An unknown policy slug rejects the request before any
+    /// commit together. An unknown referenced policy rejects the request before any
     /// write.
     pub async fn update(
         &self,
         origin: event::EventOrigin<'_>,
-        pipeline_slug: &str,
+        pipeline_id: Uuid,
         input: UpdatePipelineInput,
     ) -> Result<PipelineWithReferences> {
         let mut conn = self.postgres.get_connection().await?;
-        let existing = find_pipeline(&mut conn, origin.workspace_id, pipeline_slug)
+        let existing = find_pipeline(&mut conn, origin.workspace_id, pipeline_id)
             .await?
             .item;
-        let pipeline_id = existing.id;
 
         let (update_data, references) = input
             .into_parts(existing.metadata.or_default())
@@ -156,10 +154,7 @@ impl WorkspacePipelineService {
                 }
                 conn.emit_event(
                     origin,
-                    event::WorkspaceEvent::PipelineUpdated(event::PipelineUpdated {
-                        pipeline_id,
-                        pipeline_slug: pipeline.slug.clone(),
-                    }),
+                    event::WorkspaceEvent::PipelineUpdated(event::PipelineUpdated { pipeline_id }),
                 )
                 .await?;
                 Ok::<_, Error>(pipeline)
@@ -168,35 +163,29 @@ impl WorkspacePipelineService {
 
         // A supplied definition wrote fresh references; otherwise the live ones
         // are read back so the response reflects the pipeline's current state.
-        let policy_slugs = match references {
-            Some(references) => references.policy_slugs,
-            None => conn.list_pipeline_policy_slugs(pipeline.id).await?,
+        let policy_ids = match references {
+            Some(references) => references.policy_ids,
+            None => conn.list_pipeline_policy_ids(pipeline.id).await?,
         };
 
         tracing::info!(target: TRACING_TARGET, "Pipeline updated");
         Ok(PipelineWithReferences {
             pipeline,
-            policy_slugs,
+            policy_ids,
         })
     }
 
     /// Soft-deletes a pipeline from its workspace, recording the event atomically.
-    pub async fn delete(&self, origin: event::EventOrigin<'_>, pipeline_slug: &str) -> Result<()> {
+    pub async fn delete(&self, origin: event::EventOrigin<'_>, pipeline_id: Uuid) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
-        let existing = find_pipeline(&mut conn, origin.workspace_id, pipeline_slug)
-            .await?
-            .item;
-        let pipeline_id = existing.id;
-        let pipeline_slug = existing.slug.clone();
+        // Confirm the pipeline exists in the workspace before deleting.
+        find_pipeline(&mut conn, origin.workspace_id, pipeline_id).await?;
 
         conn.transaction(async |conn| {
             conn.delete_workspace_pipeline(pipeline_id).await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::PipelineDeleted(event::PipelineDeleted {
-                    pipeline_id,
-                    pipeline_slug,
-                }),
+                event::WorkspaceEvent::PipelineDeleted(event::PipelineDeleted { pipeline_id }),
             )
             .await?;
             Ok::<(), Error>(())
@@ -208,25 +197,25 @@ impl WorkspacePipelineService {
     }
 }
 
-/// Finds a pipeline within a workspace by slug, with its creator, or a NotFound.
+/// Finds a pipeline within a workspace by id, with its creator, or a NotFound.
 async fn find_pipeline(
     conn: &mut PgConn,
     workspace_id: Uuid,
-    pipeline_slug: &str,
+    pipeline_id: Uuid,
 ) -> Result<WithAccountRef<WorkspacePipeline>> {
-    conn.find_pipeline_in_workspace_by_slug(workspace_id, pipeline_slug)
+    conn.find_pipeline_in_workspace_by_id(workspace_id, pipeline_id)
         .await?
         .ok_or_else(|| Error::not_found("pipeline"))
 }
 
-/// Resolves a set of policy slugs to their ids within a workspace, rejecting the
-/// whole request with a NotFound if any slug is unknown.
+/// Validates a set of policy ids as live authored policies within a workspace,
+/// rejecting the whole request with a NotFound if any id is unknown.
 async fn resolve_references(
     conn: &mut PgConn,
     workspace_id: Uuid,
     references: &PipelineReferences,
 ) -> Result<Vec<Uuid>> {
-    conn.resolve_policy_slugs(workspace_id, &references.policy_slugs)
+    conn.validate_policy_ids(workspace_id, &references.policy_ids)
         .await?
         .ok_or_else(|| Error::not_found("policy"))
 }
@@ -244,7 +233,6 @@ fn serialize_error(error: serde_json::Error) -> Error<'static> {
 #[cfg(test)]
 mod tests {
     use nvisy_postgres::test_util::TestDatabase;
-    use nvisy_postgres::types::Handle;
 
     use super::*;
     use crate::domain::input::PipelineDefinitionInput;
@@ -254,14 +242,13 @@ mod tests {
         SecurityContext::default()
     }
 
-    fn create_request(slug: &str, policy_slugs: Vec<Handle>) -> CreatePipelineInput {
+    fn create_request(policy_ids: Vec<Uuid>) -> CreatePipelineInput {
         CreatePipelineInput {
             display_name: "Test pipeline".to_owned(),
-            slug: Handle::parse(slug.to_owned()).expect("valid slug"),
             description: None,
             definition: Some(PipelineDefinitionInput {
                 default_scope: None,
-                policy_slugs,
+                policy_ids,
             }),
             status: None,
             retention: None,
@@ -279,16 +266,14 @@ mod tests {
             security: &security(),
         };
 
-        let created = service
-            .create(origin, create_request("audit-run", Vec::new()))
-            .await?;
-        assert_eq!(created.pipeline.slug.as_str(), "audit-run");
-        assert!(created.policy_slugs.is_empty());
+        let created = service.create(origin, create_request(Vec::new())).await?;
+        assert_eq!(created.pipeline.display_name, "Test pipeline");
+        assert!(created.policy_ids.is_empty());
         Ok(())
     }
 
     #[tokio::test]
-    async fn find_returns_the_pipeline_and_its_slugs() -> anyhow::Result<()> {
+    async fn find_returns_the_pipeline_and_its_reference_ids() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_pipeline_and_document().await;
         let service = WorkspacePipelineService::new(db.client.clone());
@@ -298,13 +283,13 @@ mod tests {
             security: &security(),
         };
 
-        service
-            .create(origin, create_request("findable", Vec::new()))
-            .await?;
+        let created = service.create(origin, create_request(Vec::new())).await?;
 
-        let (found, slugs) = service.find(seeded.workspace_id, "findable").await?;
-        assert_eq!(found.item.slug.as_str(), "findable");
-        assert!(slugs.is_empty());
+        let (found, ids) = service
+            .find(seeded.workspace_id, created.pipeline.id)
+            .await?;
+        assert_eq!(found.item.id, created.pipeline.id);
+        assert!(ids.is_empty());
         Ok(())
     }
 
@@ -320,12 +305,11 @@ mod tests {
             security: &security,
         };
 
-        service
-            .create(origin(), create_request("temporary", Vec::new()))
-            .await?;
-        service.delete(origin(), "temporary").await?;
+        let created = service.create(origin(), create_request(Vec::new())).await?;
+        let pipeline_id = created.pipeline.id;
+        service.delete(origin(), pipeline_id).await?;
 
-        let missing = service.find(seeded.workspace_id, "temporary").await;
+        let missing = service.find(seeded.workspace_id, pipeline_id).await;
         assert!(missing.is_err());
         Ok(())
     }

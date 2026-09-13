@@ -120,12 +120,12 @@ pub trait WorkspacePolicyRepository {
         policy_id: Uuid,
     ) -> impl Future<Output = Result<Option<WorkspacePolicy>>> + Send;
 
-    /// Finds a policy by slug within a specific workspace, with the handle and
+    /// Finds a policy by id within a specific workspace, with the handle and
     /// avatar of the account that created it.
-    fn find_policy_in_workspace_by_slug(
+    fn find_policy_in_workspace_by_id(
         &mut self,
         workspace_id: Uuid,
-        slug: &str,
+        policy_id: Uuid,
     ) -> impl Future<Output = Result<Option<WithAccountRef<WorkspacePolicy>>>> + Send;
 
     /// Lists a workspace's policies with cursor pagination, each paired with the
@@ -356,10 +356,10 @@ impl WorkspacePolicyRepository for PgConnection {
         Ok(policy)
     }
 
-    async fn find_policy_in_workspace_by_slug(
+    async fn find_policy_in_workspace_by_id(
         &mut self,
         workspace_id: Uuid,
-        slug: &str,
+        policy_id: Uuid,
     ) -> Result<Option<WithAccountRef<WorkspacePolicy>>> {
         use schema::workspace_policies::dsl;
         use schema::{accounts, workspace_policies};
@@ -367,11 +367,12 @@ impl WorkspacePolicyRepository for PgConnection {
         let row = workspace_policies::table
             .inner_join(accounts::table)
             .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::slug.eq(slug))
+            .filter(dsl::id.eq(policy_id))
             .filter(dsl::deleted_at.is_null())
             .select((
                 WorkspacePolicy::as_select(),
                 (
+                    accounts::id,
                     accounts::username,
                     accounts::display_name,
                     accounts::avatar_url,
@@ -432,6 +433,7 @@ impl WorkspacePolicyRepository for PgConnection {
                 .select((
                     WorkspacePolicy::as_select(),
                     (
+                        accounts::id,
                         accounts::username,
                         accounts::display_name,
                         accounts::avatar_url,
@@ -540,18 +542,17 @@ mod tests {
                 seeded.account_id,
             ))
             .await?;
-        let slug = policy.slug.as_str().to_owned();
 
-        // Found by id and by slug within the workspace.
+        // Found by id (bare and with the creator handle) within the workspace.
         assert!(
             conn.find_policy_in_workspace(seeded.workspace_id, policy.id)
                 .await?
                 .is_some()
         );
-        let by_slug = conn
-            .find_policy_in_workspace_by_slug(seeded.workspace_id, &slug)
+        let by_id = conn
+            .find_policy_in_workspace_by_id(seeded.workspace_id, policy.id)
             .await?;
-        assert_eq!(by_slug.map(|p| p.item.id), Some(policy.id));
+        assert_eq!(by_id.map(|p| p.item.id), Some(policy.id));
 
         // Not found in another workspace.
         assert!(
@@ -580,7 +581,7 @@ mod tests {
                 .is_none()
         );
         assert!(
-            conn.find_policy_in_workspace_by_slug(seeded.workspace_id, &slug)
+            conn.find_policy_in_workspace_by_id(seeded.workspace_id, policy.id)
                 .await?
                 .is_none()
         );

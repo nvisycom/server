@@ -61,14 +61,15 @@ async fn create_pipeline(
 
     let domain::output::PipelineWithReferences {
         pipeline,
-        policy_slugs,
+        policy_ids,
     } = pipelines.create(origin, request.into()).await?;
 
     let mut conn = pg_client.get_connection().await?;
     let creator = resolve_account_ref(&mut conn, account_id).await?;
 
-    let response = WorkspacePipeline::from_model(pipeline, workspace.slug, creator, policy_slugs)
-        .map_err(serialize_error)?;
+    let response =
+        WorkspacePipeline::from_model(pipeline, workspace.id, workspace.slug, creator, policy_ids)
+            .map_err(serialize_error)?;
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -113,7 +114,12 @@ async fn list_pipelines(
         .await?;
 
     let response = Page::from_cursor_page(page, |wc| {
-        WorkspacePipelineSummary::from_model(wc.item, workspace.slug.clone(), wc.account.into())
+        WorkspacePipelineSummary::from_model(
+            wc.item,
+            workspace.id,
+            workspace.slug.clone(),
+            wc.account.into(),
+        )
     });
 
     Ok((StatusCode::OK, Json(response)))
@@ -127,13 +133,13 @@ fn list_pipelines_docs(op: TransformOperation) -> TransformOperation {
         .response::<403, Json<ErrorResponse>>()
 }
 
-/// Retrieves a pipeline by slug.
+/// Retrieves a pipeline by id.
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %authz.account_id,
         workspace_id = %authz.workspace.id,
-        pipeline_slug = %path_params.pipeline_slug,
+        pipeline_id = %path_params.pipeline_id,
     )
 )]
 async fn get_pipeline(
@@ -145,15 +151,16 @@ async fn get_pipeline(
 
     let workspace = authz.workspace;
 
-    let (found, policy_slugs) = pipelines
-        .find(workspace.id, &path_params.pipeline_slug)
+    let (found, policy_ids) = pipelines
+        .find(workspace.id, path_params.pipeline_id)
         .await?;
 
     let response = WorkspacePipeline::from_model(
         found.item,
+        workspace.id,
         workspace.slug,
         found.account.into(),
-        policy_slugs,
+        policy_ids,
     )
     .map_err(serialize_error)?;
 
@@ -162,7 +169,7 @@ async fn get_pipeline(
 
 fn get_pipeline_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get pipeline")
-        .description("Returns a pipeline by its slug.")
+        .description("Returns a pipeline by its id.")
         .response::<200, Json<WorkspacePipeline>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
@@ -177,7 +184,7 @@ fn get_pipeline_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %authz.account_id,
         workspace_id = %authz.workspace.id,
-        pipeline_slug = %path_params.pipeline_slug,
+        pipeline_id = %path_params.pipeline_id,
     )
 )]
 async fn update_pipeline(
@@ -199,16 +206,17 @@ async fn update_pipeline(
 
     let domain::output::PipelineWithReferences {
         pipeline,
-        policy_slugs,
+        policy_ids,
     } = pipelines
-        .update(origin, &path_params.pipeline_slug, request.into())
+        .update(origin, path_params.pipeline_id, request.into())
         .await?;
 
     let mut conn = pg_client.get_connection().await?;
     let creator = resolve_account_ref(&mut conn, pipeline.account_id).await?;
 
-    let response = WorkspacePipeline::from_model(pipeline, workspace.slug, creator, policy_slugs)
-        .map_err(serialize_error)?;
+    let response =
+        WorkspacePipeline::from_model(pipeline, workspace.id, workspace.slug, creator, policy_ids)
+            .map_err(serialize_error)?;
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -232,7 +240,7 @@ fn update_pipeline_docs(op: TransformOperation) -> TransformOperation {
     fields(
         account_id = %authz.account_id,
         workspace_id = %authz.workspace.id,
-        pipeline_slug = %path_params.pipeline_slug,
+        pipeline_id = %path_params.pipeline_id,
     )
 )]
 async fn delete_pipeline(
@@ -250,7 +258,7 @@ async fn delete_pipeline(
         security: &security,
     };
 
-    pipelines.delete(origin, &path_params.pipeline_slug).await?;
+    pipelines.delete(origin, path_params.pipeline_id).await?;
 
     Ok(StatusCode::OK)
 }
@@ -273,13 +281,13 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         // Workspace-scoped routes for listing and creating
         .api_route(
-            "/workspaces/{workspaceSlug}/pipelines/",
+            "/workspaces/{workspaceId}/pipelines/",
             post_with(create_pipeline, create_pipeline_docs)
                 .get_with(list_pipelines, list_pipelines_docs),
         )
-        // Pipeline operations by slug
+        // Pipeline operations by id
         .api_route(
-            "/workspaces/{workspaceSlug}/pipelines/{pipelineSlug}/",
+            "/workspaces/{workspaceId}/pipelines/{pipelineId}/",
             get_with(get_pipeline, get_pipeline_docs)
                 .patch_with(update_pipeline, update_pipeline_docs)
                 .delete_with(delete_pipeline, delete_pipeline_docs),

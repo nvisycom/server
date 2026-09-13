@@ -7,6 +7,7 @@ use nvisy_postgres::model;
 use nvisy_postgres::types::{Handle, WebhookEvent, WebhookId, WebhookStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::{AccountRef, Page};
 
@@ -17,7 +18,9 @@ use super::{AccountRef, Page};
 pub struct WorkspaceWebhook {
     /// Opaque identifier of the webhook.
     pub id: WebhookId,
-    /// Handle of the workspace this webhook belongs to.
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
     pub workspace_slug: Handle,
     /// Human-readable name for the webhook.
     pub display_name: String,
@@ -50,6 +53,7 @@ pub struct WorkspaceWebhook {
 impl WorkspaceWebhook {
     pub fn from_model(
         webhook: model::WorkspaceWebhook,
+        workspace_id: Uuid,
         workspace_slug: Handle,
         created_by: AccountRef,
     ) -> Self {
@@ -58,6 +62,7 @@ impl WorkspaceWebhook {
 
         Self {
             id: WebhookId::from_uuid(webhook.id),
+            workspace_id,
             workspace_slug,
             display_name: webhook.display_name,
             description: webhook.description,
@@ -97,12 +102,18 @@ pub struct WorkspaceWebhookCreated {
 impl WorkspaceWebhookCreated {
     pub fn from_model(
         webhook: model::WorkspaceWebhook,
+        workspace_id: Uuid,
         workspace_slug: Handle,
         created_by: AccountRef,
         secret: String,
     ) -> Self {
         Self {
-            webhook: WorkspaceWebhook::from_model(webhook, workspace_slug, created_by),
+            webhook: WorkspaceWebhook::from_model(
+                webhook,
+                workspace_id,
+                workspace_slug,
+                created_by,
+            ),
             secret,
         }
     }
