@@ -57,7 +57,7 @@ pub const TRACING_TARGET_CONFIG: &str = "nvisy_cli::config";
 #[command(version)]
 pub struct Cli {
     /// Server network and lifecycle configuration.
-    #[clap(flatten)]
+    #[clap(flatten, next_help_heading = "Server")]
     pub server: ServerConfig,
 
     /// HTTP middleware configuration (CORS, OpenAPI, recovery/timeouts).
@@ -70,7 +70,7 @@ pub struct Cli {
     pub service: ServiceArgs,
 
     /// HTTP client configuration for webhook delivery.
-    #[clap(flatten)]
+    #[clap(flatten, next_help_heading = "Webhook HTTP client")]
     pub reqwest: ReqwestConfig,
 }
 

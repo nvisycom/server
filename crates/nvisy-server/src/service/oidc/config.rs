@@ -35,6 +35,7 @@ macro_rules! oidc_provider_config {
         $(#[$meta:meta])*
         $name:ident,
         provider = $provider:expr,
+        display = $display:literal,
         default_issuer = $default_issuer:expr,
         $id_long:literal, $id_env:literal,
         $secret_long:literal, $secret_env:literal,
@@ -45,27 +46,48 @@ macro_rules! oidc_provider_config {
         #[derive(Debug, Clone, Default)]
         #[cfg_attr(feature = "cli", derive(clap::Args))]
         pub struct $name {
-            /// OIDC client id.
-            #[cfg_attr(feature = "cli", arg(id = $id_long, long = $id_long, env = $id_env))]
-            pub client_id: Option<String>,
-            /// OIDC client secret.
+            #[doc = concat!($display, " sign-in OIDC client id. Set with the client secret and redirect URI to enable sign-in.")]
             #[cfg_attr(
                 feature = "cli",
-                arg(id = $secret_long, long = $secret_long, env = $secret_env)
+                arg(
+                    id = $id_long,
+                    long = $id_long,
+                    env = $id_env,
+                    help = concat!($display, " sign-in OIDC client id. Set with the client secret and redirect URI to enable sign-in."),
+                )
+            )]
+            pub client_id: Option<String>,
+            #[doc = concat!($display, " sign-in OIDC client secret.")]
+            #[cfg_attr(
+                feature = "cli",
+                arg(
+                    id = $secret_long,
+                    long = $secret_long,
+                    env = $secret_env,
+                    help = concat!($display, " sign-in OIDC client secret."),
+                )
             )]
             pub client_secret: Option<String>,
-            /// OIDC redirect URI (the sign-in callback registered with the provider).
+            #[doc = concat!($display, " sign-in callback URI, registered with the provider (the route the callback is served at).")]
             #[cfg_attr(
                 feature = "cli",
-                arg(id = $redirect_long, long = $redirect_long, env = $redirect_env)
+                arg(
+                    id = $redirect_long,
+                    long = $redirect_long,
+                    env = $redirect_env,
+                    help = concat!($display, " sign-in callback URI, registered with the provider (the route the callback is served at)."),
+                )
             )]
             pub redirect_uri: Option<String>,
-            /// OIDC issuer URL (for discovery). Falls back to the provider's
-            /// default issuer when unset; a provider with no default (e.g.
-            /// Microsoft) requires this to be set explicitly.
+            #[doc = concat!($display, " OIDC issuer URL, used for discovery. Falls back to the provider default when unset; one without a default must set it explicitly.")]
             #[cfg_attr(
                 feature = "cli",
-                arg(id = $issuer_long, long = $issuer_long, env = $issuer_env)
+                arg(
+                    id = $issuer_long,
+                    long = $issuer_long,
+                    env = $issuer_env,
+                    help = concat!($display, " OIDC issuer URL, used for discovery. Falls back to the provider default when unset; one without a default must set it explicitly."),
+                )
             )]
             pub issuer: Option<String>,
         }
@@ -106,6 +128,7 @@ oidc_provider_config!(
     /// Google sign-in credentials.
     GoogleOidcConfig,
     provider = IdentityProvider::Google,
+    display = "Google",
     default_issuer = Some("https://accounts.google.com"),
     "google-client-id",
     "GOOGLE_CLIENT_ID",
@@ -129,6 +152,7 @@ oidc_provider_config!(
     /// should opt into explicitly rather than inherit.
     MicrosoftOidcConfig,
     provider = IdentityProvider::Microsoft,
+    display = "Microsoft (Entra)",
     default_issuer = None,
     "microsoft-client-id",
     "MICROSOFT_CLIENT_ID",
@@ -173,8 +197,8 @@ pub struct OidcConfig {
     pub allowed_redirect_origins: Vec<String>,
 
     /// Allowed custom URL schemes the sign-in callback may deep-link to for
-    /// **native app** (desktop) auth, as a comma-separated list of bare scheme
-    /// names (e.g. `nvisy`).
+    /// native (desktop) app auth, as a comma-separated list of bare scheme names
+    /// (e.g. `nvisy`).
     ///
     /// A desktop app opens the system browser to sign in and receives an API
     /// token via a custom-scheme deep-link (`nvisy://auth/callback?token=…`)

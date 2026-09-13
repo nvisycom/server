@@ -43,11 +43,17 @@ install-all: install-tools ## Installs all dependencies.
 	@chmod +x scripts/*.sh
 	@$(call log,Scripts made executable!)
 
+.PHONY: generate-env-example
+generate-env-example: ## Regenerates .env.example from the config structs.
+	@$(call log,Regenerating .env.example from the clap config tree...)
+	@ENV_EXAMPLE_WRITE=1 cargo test -p nvisy-cli --all-features env_example
+	@$(call log,.env.example regenerated successfully.)
+
 .PHONY: generate-env
-generate-env: ## Copies .env.example to .env.
-	@$(call log,Copying .env.example to .env...)
-	@cp ./.env.example ./.env
-	@$(call log,.env file created successfully.)
+generate-env: ## Migrates .env to match .env.example (adds new, keeps existing, prunes legacy).
+	@$(call log,Migrating .env from .env.example...)
+	@./scripts/migrate-env.sh
+	@$(call log,.env migration complete.)
 
 .PHONY: generate-keys
 generate-keys: ## Generates auth key pair and encryption key.

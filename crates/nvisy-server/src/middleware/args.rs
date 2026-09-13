@@ -30,29 +30,29 @@ use crate::middleware::{
 #[must_use = "config does nothing unless you use it"]
 pub struct MiddlewareArgs {
     /// CORS (Cross-Origin Resource Sharing) configuration.
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "CORS"))]
     pub cors: CorsConfig,
 
     /// OpenAPI documentation configuration.
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "OpenAPI"))]
     pub openapi: OpenApiConfig,
 
     /// Recovery (timeout/panic-handling) middleware configuration.
-    #[cfg_attr(feature = "cli", clap(flatten))]
+    #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "Recovery"))]
     pub recovery: RecoveryConfig,
 
-    /// Where the client-IP extractor reads the caller's IP from (feeding
-    /// [`SecurityContext`](crate::extract::SecurityContext)). Defaults to the
-    /// connection peer (`ConnectInfo`), which cannot be spoofed; a deployment
-    /// behind a proxy that sets a forwarding header must set this to the matching
-    /// source (e.g. `RightmostXForwardedFor`) or the recorded IP will be the
-    /// proxy's.
+    /// Where the caller's IP is read from for security and audit records.
+    ///
+    /// Defaults to the connection peer (`ConnectInfo`), which cannot be spoofed.
+    /// Behind a proxy that sets a forwarding header, set the matching source
+    /// (e.g. `RightmostXForwardedFor`) or the recorded IP is the proxy's.
     #[cfg_attr(
         feature = "cli",
         arg(
             long,
             env = "CLIENT_IP_SOURCE",
             default_value = "ConnectInfo",
+            help_heading = "Client IP source",
             value_parser = <ClientIpSource as std::str::FromStr>::from_str,
         )
     )]

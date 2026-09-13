@@ -52,7 +52,7 @@ pub struct ServerConfig {
     /// Must be in the range 1024-65535. Ports below 1024 require root privileges.
     ///
     /// Common choices: 3000 (development), 8080 (alternative HTTP), 443 (HTTPS).
-    #[arg(short = 'p', long, env = "PORT", default_value_t = 3000)]
+    #[arg(short = 'p', long, env = "PORT", default_value_t = 8080)]
     pub port: u16,
 
     /// Maximum time to wait for graceful shutdown (e.g. `30s`, `2m`).
