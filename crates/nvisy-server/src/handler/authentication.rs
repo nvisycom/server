@@ -9,90 +9,26 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use nvisy_postgres::model::{NewAccount, NewAccountIdentity};
-use nvisy_postgres::query::{
-    AccountApiTokenRepository, AccountIdentityRepository, AccountRepository,
-};
-use nvisy_postgres::types::IdentityProvider;
-use nvisy_postgres::{AsyncConnection, Error as PgError, PgClient};
 
 use super::request::{Login, Signup};
 use crate::extract::{AuthState, Json, SecurityContext, ValidateJson};
-use crate::handler::utility::build_password_user_inputs;
-use crate::response::{ClearedSession, CookieConfig, ErrorKind, ErrorResponse, Result, WebSession};
-use crate::service::{AuthIssuer, PasswordService, ServiceState};
+use crate::response::{ClearedSession, CookieConfig, ErrorResponse, Result, WebSession};
+use crate::service::{ServiceState, SignInService};
 
 /// Tracing target for authentication operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::authentication";
 
-/// Tracing target for authentication cleanup operations.
-const TRACING_TARGET_CLEANUP: &str = "nvisy_server::handler::authentication::cleanup";
-
 /// Creates a new account API token (login).
 #[tracing::instrument(skip_all)]
 async fn login(
-    State(pg_client): State<PgClient>,
-    State(password): State<PasswordService>,
-    State(issuer): State<AuthIssuer>,
+    State(sign_in): State<SignInService>,
     State(cookie): State<CookieConfig>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<Login>,
 ) -> Result<WebSession> {
     tracing::debug!(target: TRACING_TARGET, "Login attempt");
 
-    let mut conn = pg_client.get_connection().await?;
-    let account = conn.find_account_by_identifier(&request.identifier).await?;
-
-    // The password hash lives on the account's password identity, not the account.
-    // An account with no password identity (OIDC-only) cannot log in by password.
-    let password_secret = match &account {
-        Some(acc) => conn
-            .find_account_identity(acc.id, IdentityProvider::Password)
-            .await?
-            .and_then(|identity| identity.secret),
-        None => None,
-    };
-
-    // Always perform a hash verification (a dummy when there is no account or no
-    // password identity) to keep timing constant and prevent account enumeration.
-    let password_valid = match &password_secret {
-        Some(secret) => password.verify(&request.password, secret).is_ok(),
-        None => password.verify_dummy(&request.password),
-    };
-
-    // Check for login failures and return appropriate errors
-    let account = match account {
-        None => {
-            tracing::warn!(target: TRACING_TARGET, reason = "account_not_found", "Login failed");
-            return Err(ErrorKind::Unauthorized
-                .with_resource("credentials")
-                .with_message("Invalid credentials"));
-        }
-        Some(_) if !password_valid => {
-            tracing::warn!(target: TRACING_TARGET, reason = "invalid_password", "Login failed");
-            return Err(ErrorKind::Unauthorized
-                .with_resource("credentials")
-                .with_message("Invalid credentials"));
-        }
-        Some(acc) if acc.is_suspended() => {
-            tracing::warn!(target: TRACING_TARGET, reason = "account_suspended", "Login failed");
-            return Err(ErrorKind::Forbidden
-                .with_resource("account")
-                .with_message("Account is suspended"));
-        }
-        Some(acc) if acc.is_deleted() => {
-            tracing::warn!(target: TRACING_TARGET, reason = "account_deleted", "Login failed");
-            return Err(ErrorKind::Forbidden
-                .with_resource("account")
-                .with_message("Account has been deleted"));
-        }
-        Some(acc) => acc,
-    };
-
-    let jwt = issuer
-        .issue_web_session(&mut conn, &account, request.remember_me, security)
-        .await?;
-
+    let jwt = sign_in.login(request, security).await?;
     Ok(WebSession::new(jwt, cookie))
 }
 
@@ -111,67 +47,14 @@ fn login_docs(op: TransformOperation) -> TransformOperation {
 /// Creates a new account and API token (signup).
 #[tracing::instrument(skip_all)]
 async fn signup(
-    State(pg_client): State<PgClient>,
-    State(password): State<PasswordService>,
-    State(issuer): State<AuthIssuer>,
+    State(sign_in): State<SignInService>,
     State(cookie): State<CookieConfig>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<Signup>,
 ) -> Result<WebSession> {
     tracing::debug!(target: TRACING_TARGET, "Signing up");
 
-    // Validate password strength and hash
-    let user_inputs = build_password_user_inputs(
-        request.username.as_str(),
-        request.display_name.as_deref(),
-        &request.email_address,
-    );
-    let password_hash = password.validate_and_hash(&request.password, &user_inputs)?;
-
-    let mut conn = pg_client.get_connection().await?;
-
-    // Reject duplicate email or username before insert for a clear error;
-    // the unique indexes remain the race-safe backstop.
-    if conn.email_exists(&request.email_address).await? {
-        tracing::warn!(target: TRACING_TARGET, "Signup failed: email already exists");
-        return Err(ErrorKind::Conflict.with_message("Email is already registered"));
-    }
-    if conn.username_exists(&request.username).await? {
-        tracing::warn!(target: TRACING_TARGET, "Signup failed: username already taken");
-        return Err(ErrorKind::Conflict.with_message("Handle is already taken"));
-    }
-
-    let new_account = NewAccount {
-        username: request.username,
-        display_name: request.display_name,
-        email_address: request.email_address,
-        avatar_url: None,
-        timezone: None,
-        locale: None,
-    };
-
-    // Create the account and its password identity together: an account must
-    // never exist without a way to authenticate, and the password hash lives on
-    // the identity, not the account.
-    let account = conn
-        .transaction(async |conn| {
-            let account = conn.create_account(new_account).await?;
-            conn.create_account_identity(NewAccountIdentity::password(account.id, password_hash))
-                .await?;
-            Ok::<_, PgError>(account)
-        })
-        .await?;
-
-    tracing::info!(
-        target: TRACING_TARGET,
-        account_id = %account.id,
-        "Account created",
-    );
-
-    let jwt = issuer
-        .issue_web_session(&mut conn, &account, request.remember_me, security)
-        .await?;
-
+    let jwt = sign_in.signup(request, security).await?;
     Ok(WebSession::new(jwt, cookie))
 }
 
@@ -195,52 +78,21 @@ fn signup_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn logout(
-    State(pg_client): State<PgClient>,
+    State(sign_in): State<SignInService>,
     State(cookie): State<CookieConfig>,
     auth_state: AuthState,
 ) -> Result<Response> {
     tracing::debug!(target: TRACING_TARGET, "Logging out");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    // Verify API token exists before attempting to delete
-    let token_exists = conn
-        .find_account_api_token_by_id(auth_state.token_id)
-        .await?
-        .is_some();
+    // Revoke the session server-side (the token row is the authority). A logout on
+    // a token that no longer exists is still a success — there is nothing to
+    // revoke — so the outcome does not change the response.
+    sign_in.logout(auth_state.token_id).await?;
 
     // Whatever the outcome, clear the browser session and CSRF cookies. A bearer
     // client simply has no cookies to clear and ignores them; a cookie client is
-    // logged out on the client side too. Revocation is authoritative server-side
-    // via the token soft-delete below.
+    // logged out on the client side too.
     let cleared = ClearedSession::new(cookie).into_jar();
-
-    if !token_exists {
-        tracing::warn!(target: TRACING_TARGET, "Logout attempted on non-existent token");
-        // Consider it successful if the token doesn't exist.
-        return Ok((StatusCode::OK, cleared).into_response());
-    }
-
-    // Delete the API token (revocation: the row is the session authority).
-    let deleted = conn.delete_account_api_token(auth_state.token_id).await?;
-
-    if deleted {
-        tracing::info!(target: TRACING_TARGET, "Logout successful");
-    } else {
-        tracing::warn!(target: TRACING_TARGET, "Logout completed but token was not found");
-    }
-
-    // Opportunistically clean up expired sessions for this account. Run inline on
-    // the request's connection so a pooled slot is not pinned to a detached task;
-    // this is best-effort, so a failure is only logged.
-    if let Err(e) = conn.cleanup_expired_account_api_tokens().await {
-        tracing::debug!(
-            target: TRACING_TARGET_CLEANUP,
-            error = %e,
-            "Failed to cleanup expired sessions during logout"
-        );
-    }
-
     Ok((StatusCode::OK, cleared).into_response())
 }
 

@@ -23,16 +23,14 @@ use aide::axum::routing::{get_with, post_with, put_with};
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_nats::NatsClient;
 use nvisy_postgres::types::IdentityProvider;
 
-use super::consume_reauth_proof;
 use crate::domain::{AccountIdentityService, ReauthVerified};
 use crate::extract::{AuthState, Json, Path, ValidateJson};
 use crate::handler::request::{IdentityPathParams, SetPassword};
 use crate::handler::response::AccountIdentities;
 use crate::response::{ErrorKind, ErrorResponse, Result};
-use crate::service::ServiceState;
+use crate::service::{OidcService, ServiceState};
 
 /// Tracing target for identity operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::identities";
@@ -70,7 +68,7 @@ fn list_identities_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
 async fn set_password(
     State(identities): State<AccountIdentityService>,
-    State(nats): State<NatsClient>,
+    State(oidc): State<OidcService>,
     auth_state: AuthState,
     ValidateJson(request): ValidateJson<SetPassword>,
 ) -> Result<StatusCode> {
@@ -96,7 +94,7 @@ async fn set_password(
                 .with_message("Re-authentication required to set a password")
                 .with_resource("account")
         })?;
-        consume_reauth_proof(&nats, account_id, proof).await?;
+        oidc.consume_reauth_proof(account_id, proof).await?;
         identities
             .set_first_password(account_id, &request.new_password, ReauthVerified)
             .await?;

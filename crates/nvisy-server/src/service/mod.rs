@@ -1,6 +1,7 @@
 //! Application state and dependency injection.
 
 mod account_provisioner;
+mod auth_flow;
 mod auth_issuer;
 mod avatar;
 mod crypto;
@@ -33,6 +34,7 @@ use tokio_util::sync::CancellationToken;
 use crate::middleware::UploadConfig;
 use crate::response::CookieConfig;
 pub use crate::service::account_provisioner::AccountProvisioner;
+pub use crate::service::auth_flow::SignInService;
 pub use crate::service::auth_issuer::AuthIssuer;
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
@@ -47,7 +49,8 @@ pub use crate::service::integration::{
     persist_refreshed_tokens,
 };
 pub use crate::service::oidc::{
-    OidcAuthorization, OidcConfig, OidcError, OidcIdentity, OidcService, RedirectKind,
+    CallbackOutcome, ConsumedFlow, OidcAuthorization, OidcConfig, OidcConfigured, OidcError,
+    OidcIdentity, OidcPurpose, OidcService, RedirectKind,
 };
 pub use crate::service::password::PasswordService;
 pub use crate::service::queue::{AssistantQueue, DetectionQueue};
@@ -119,7 +122,14 @@ pub struct ServiceState {
     // Security services:
     pub password: PasswordService,
     pub session_keys: SessionKeys,
-    pub oidc: OidcService,
+    // Password login/signup/logout orchestration. Holds only cheap `Arc`-backed
+    // handles, so it is stored (its `FromRef` is a field clone).
+    pub sign_in: SignInService,
+    // The startup-loaded OIDC configuration (HTTP client + parsed providers). The
+    // per-request `OidcService` is composed from this plus the ambient
+    // collaborators in its `FromRef` — the one service that is composed rather than
+    // stored, because it pairs an expensive immutable core with per-request handles.
+    pub oidc: OidcConfigured,
     pub user_agent_parser: UserAgentParser,
 
     // Request body size limits (server-wide hard caps):
@@ -158,7 +168,7 @@ impl ServiceState {
         let crypto = CryptoService::from_config(&crypto_config).await?;
         let engine = EngineService::from_config(engine_config).await?;
         let session_keys = SessionKeys::from_config(&session_config).await?;
-        let oidc = OidcService::from_config(&oidc_config)?;
+        let oidc = OidcConfigured::from_config(&oidc_config)?;
 
         // Session cookies without `Secure` are only safe over plain HTTP on a
         // trusted network (local development or trusted-network self-hosting); a
@@ -195,6 +205,15 @@ impl ServiceState {
             integration_config.export_concurrency,
         );
 
+        // The security services and the sign-in orchestration built over them. The
+        // auth issuer (JWT keys + user-agent parser) is also the collaborator
+        // `SignInService` mints sessions through, so it is assembled here and the
+        // two parts are stored separately (each has its own `FromRef`).
+        let password = PasswordService::new();
+        let user_agent_parser = UserAgentParser::new();
+        let issuer = AuthIssuer::new(session_keys.clone(), user_agent_parser.clone());
+        let sign_in = SignInService::new(infra.postgres.clone(), password.clone(), issuer);
+
         let service_state = Self {
             infra,
             crypto,
@@ -208,10 +227,11 @@ impl ServiceState {
             assistant: Coordinator::new(),
             shutdown: CancellationToken::new(),
             health_cache: HealthCache::new(&health_config, health_checkers),
-            password: PasswordService::new(),
+            password,
             session_keys,
+            sign_in,
             oidc,
-            user_agent_parser: UserAgentParser::new(),
+            user_agent_parser,
             upload: upload_config,
             cookie: cookie_config,
         };
@@ -359,7 +379,7 @@ impl_di_field!(
     health_cache: HealthCache,
     password: PasswordService,
     session_keys: SessionKeys,
-    oidc: OidcService,
+    sign_in: SignInService,
     user_agent_parser: UserAgentParser,
     upload: UploadConfig,
     cookie: CookieConfig,
@@ -409,6 +429,21 @@ impl axum::extract::FromRef<ServiceState> for ExternalObjectStore {
 impl axum::extract::FromRef<ServiceState> for AuthIssuer {
     fn from_ref(state: &ServiceState) -> Self {
         AuthIssuer::new(state.session_keys.clone(), state.user_agent_parser.clone())
+    }
+}
+
+// `OidcService` is composed per request from the stored startup configuration
+// (`OidcConfigured`, holding the expensive HTTP client and parsed providers) plus
+// the ambient collaborators its flow drives — no field of it is rebuilt here, only
+// `Arc`-backed handles are cloned.
+impl axum::extract::FromRef<ServiceState> for OidcService {
+    fn from_ref(state: &ServiceState) -> Self {
+        state.oidc.service(
+            state.infra.postgres.clone(),
+            state.infra.nats.clone(),
+            AuthIssuer::from_ref(state),
+            AccountProvisioner,
+        )
     }
 }
 
