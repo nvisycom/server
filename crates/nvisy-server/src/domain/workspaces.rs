@@ -18,7 +18,7 @@ use crate::service::event;
 use crate::service::event::EventEmitter;
 
 /// Tracing target for workspace domain operations.
-const TRACING_TARGET: &str = "nvisy_server::service::workspace";
+const TRACING_TARGET: &str = "nvisy_server::domain::workspace";
 
 /// Creates, reads, updates, deletes, and lists workspaces.
 ///

@@ -38,7 +38,7 @@ use crate::service::{DetectionQueue, event};
 use crate::worker::detection::DetectionJob;
 
 /// Tracing target for detection domain operations.
-const TRACING_TARGET: &str = "nvisy_server::service::detection";
+const TRACING_TARGET: &str = "nvisy_server::domain::detection";
 
 /// Creates and enqueues detections, and reads them back.
 ///

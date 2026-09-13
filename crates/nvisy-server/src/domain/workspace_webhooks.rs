@@ -23,7 +23,7 @@ use crate::service::event::EventEmitter;
 use crate::service::{CryptoService, event};
 
 /// Tracing target for webhook domain operations.
-const TRACING_TARGET: &str = "nvisy_server::service::webhook";
+const TRACING_TARGET: &str = "nvisy_server::domain::webhook";
 
 /// Creates, reads, updates, deletes, and tests workspace webhooks.
 ///

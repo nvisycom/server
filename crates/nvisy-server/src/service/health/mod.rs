@@ -12,7 +12,7 @@ mod snapshot;
 pub use cache::HealthCache;
 
 /// Tracing target for health monitoring operations.
-const TRACING_TARGET: &str = "nvisy_server::health";
+const TRACING_TARGET: &str = "nvisy_server::service::health";
 
 /// Default cache duration for health checks.
 pub const DEFAULT_CACHE_DURATION: Duration = Duration::from_secs(30);

@@ -26,7 +26,7 @@ use crate::response::{Error, ErrorKind, Result};
 use crate::service::SessionKeys;
 
 /// Tracing target for authentication operations.
-const TRACING_TARGET: &str = "nvisy_server::authentication";
+const TRACING_TARGET: &str = "nvisy_server::extract::auth";
 
 /// Authenticated user state with comprehensive database verification.
 ///

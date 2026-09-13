@@ -12,7 +12,7 @@ use jsonwebtoken::{DecodingKey, EncodingKey};
 use crate::{Error, Result};
 
 /// Tracing target for session key operations.
-const TRACING_TARGET: &str = "nvisy_server::session_keys";
+const TRACING_TARGET: &str = "nvisy_server::service::session_keys";
 
 /// Authentication key file paths configuration.
 #[derive(Debug, Clone)]

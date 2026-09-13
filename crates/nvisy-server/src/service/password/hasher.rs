@@ -12,7 +12,7 @@ use rand::distr::Alphanumeric;
 use crate::response::{ErrorKind, Result};
 
 /// Tracing target for password hashing operations.
-const TRACING_TARGET: &str = "nvisy_server::password_hasher";
+const TRACING_TARGET: &str = "nvisy_server::service::password";
 
 /// Secure password hashing and verification service using Argon2id.
 ///

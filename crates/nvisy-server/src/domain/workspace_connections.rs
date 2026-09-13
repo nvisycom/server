@@ -27,7 +27,7 @@ use crate::service::event::EventEmitter;
 use crate::service::{ConnectionConfig, CryptoService, StandardCronSchedule, event};
 
 /// Tracing target for connection domain operations.
-const TRACING_TARGET: &str = "nvisy_server::service::connection";
+const TRACING_TARGET: &str = "nvisy_server::domain::connection";
 
 /// Creates, reads, updates, and deletes workspace connections.
 ///

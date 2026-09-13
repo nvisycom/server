@@ -22,7 +22,7 @@ use crate::service::event::EventEmitter;
 use crate::service::{EngineService, event};
 
 /// Tracing target for document domain operations.
-const TRACING_TARGET: &str = "nvisy_server::service::document";
+const TRACING_TARGET: &str = "nvisy_server::domain::document";
 
 /// Lists, reads, updates, and deletes workspace document metadata.
 ///

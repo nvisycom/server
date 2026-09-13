@@ -18,11 +18,8 @@ use tower_http::catch_panic::CatchPanicLayer;
 
 use crate::response::{Error, ErrorKind};
 
-/// Tracing target for error recovery.
-const TRACING_TARGET_ERROR: &str = "nvisy_server::recovery::error";
-
-/// Tracing target for panic recovery.
-const TRACING_TARGET_PANIC: &str = "nvisy_server::recovery::panic";
+/// Tracing target for error and panic recovery.
+const TRACING_TARGET: &str = "nvisy_server::middleware::recovery";
 
 type ResponseFut = BoxFuture<'static, Response>;
 type Panic = Box<dyn Any + Send + 'static>;
@@ -101,7 +98,7 @@ fn handle_error(err: BoxError) -> ResponseFut {
 
     let error = if let Some(_elapsed) = err.downcast_ref::<Elapsed>() {
         tracing::error!(
-            target: TRACING_TARGET_ERROR,
+            target: TRACING_TARGET,
             error = %err,
             "request timeout exceeded"
         );
@@ -111,7 +108,7 @@ fn handle_error(err: BoxError) -> ResponseFut {
             .with_context("The request took too long to process and was terminated")
     } else if let Some(_ip_rejection) = err.downcast_ref::<IpRejection>() {
         tracing::error!(
-            target: TRACING_TARGET_ERROR,
+            target: TRACING_TARGET,
             error = %err,
             "failed to extract client IP address"
         );
@@ -121,7 +118,7 @@ fn handle_error(err: BoxError) -> ResponseFut {
             .with_context("Could not determine client IP address")
     } else {
         tracing::error!(
-            target: TRACING_TARGET_ERROR,
+            target: TRACING_TARGET,
             error = %err,
             "unknown middleware error"
         );
@@ -138,7 +135,7 @@ fn catch_panic(err: Panic) -> Response {
     // If the panic is an Error, return it directly.
     if let Some(error) = err.downcast_ref::<Error>() {
         tracing::error!(
-            target: TRACING_TARGET_PANIC,
+            target: TRACING_TARGET,
             error = %error,
             "service panic"
         );
@@ -152,7 +149,7 @@ fn catch_panic(err: Panic) -> Response {
         .unwrap_or("unknown panic type");
 
     tracing::error!(
-        target: TRACING_TARGET_PANIC,
+        target: TRACING_TARGET,
         message = %message,
         "service panic"
     );

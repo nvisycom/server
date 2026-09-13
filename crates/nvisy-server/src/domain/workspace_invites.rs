@@ -22,7 +22,7 @@ use crate::service::event;
 use crate::service::event::EventEmitter;
 
 /// Tracing target for invite domain operations.
-const TRACING_TARGET: &str = "nvisy_server::service::invite";
+const TRACING_TARGET: &str = "nvisy_server::domain::invite";
 
 /// Sends, lists, cancels, and replies to workspace invites, and mints and
 /// consumes invite codes.

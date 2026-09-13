@@ -4,19 +4,18 @@ mod account_provisioner;
 mod auth_issuer;
 mod avatar;
 mod crypto;
+mod emitter;
 mod engine;
 pub mod event;
 mod health;
 mod infra;
 mod integration;
-mod notification;
 mod oidc;
 mod password;
 mod queue;
 mod run_blob_store;
 mod session_keys;
 mod user_agent;
-mod webhook;
 
 use std::sync::Arc;
 
@@ -38,6 +37,7 @@ pub use crate::service::auth_issuer::AuthIssuer;
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
+pub use crate::service::emitter::{NotificationEmitter, UnreadCountEvent, WebhookEmitter};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
 pub use crate::service::health::{HealthCache, HealthConfig};
 pub use crate::service::infra::Infra;
@@ -46,7 +46,6 @@ pub use crate::service::integration::{
     IntegrationConfig, ProviderConfig, StandardCronSchedule, TransferKind, TransferRequest,
     persist_refreshed_tokens,
 };
-pub use crate::service::notification::{NotificationEmitter, UnreadCountEvent};
 pub use crate::service::oidc::{
     OidcAuthorization, OidcConfig, OidcError, OidcIdentity, OidcService, RedirectKind,
 };
@@ -55,7 +54,6 @@ pub use crate::service::queue::{AssistantQueue, DetectionQueue};
 pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
 pub use crate::service::user_agent::UserAgentParser;
-pub use crate::service::webhook::WebhookEmitter;
 use crate::worker::assistant::{AssistantOutboxDrainer, AssistantWorker};
 use crate::worker::detection::{DetectionOutboxDrainer, DetectionWorker};
 use crate::worker::event::EventOutboxDrainer;

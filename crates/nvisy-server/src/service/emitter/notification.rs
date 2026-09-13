@@ -13,7 +13,7 @@ use crate::Result;
 use crate::service::Infra;
 
 /// Tracing target for notification emission.
-const TRACING_TARGET: &str = "nvisy_server::service::notification";
+const TRACING_TARGET: &str = "nvisy_server::service::emitter";
 
 /// An account's current unread-notification count, broadcast on the account's
 /// core-NATS unread subject.

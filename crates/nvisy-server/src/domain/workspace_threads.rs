@@ -28,7 +28,7 @@ use crate::service::{AssistantQueue, event};
 use crate::worker::assistant::AssistantJob;
 
 /// Tracing target for thread domain operations.
-const TRACING_TARGET: &str = "nvisy_server::service::thread";
+const TRACING_TARGET: &str = "nvisy_server::domain::thread";
 
 /// Manages workspace threads, document-review transitions, and comments.
 ///

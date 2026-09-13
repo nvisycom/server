@@ -23,7 +23,7 @@ use crate::service::{
 };
 
 /// Tracing target for configuration echoes emitted by the config aggregates.
-pub(crate) const TRACING_TARGET_CONFIG: &str = "nvisy_server::config";
+pub(crate) const TRACING_TARGET_CONFIG: &str = "nvisy_server::args";
 
 /// Every external-service and resource config [`ServiceState`] is built from.
 ///

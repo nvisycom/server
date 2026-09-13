@@ -12,7 +12,7 @@ use nvisy_postgres::{Error as PgError, TimeoutType};
 use super::{Error, ErrorKind};
 
 /// Tracing target for account operations.
-const TRACING_TARGET: &str = "nvisy_server::postgres_constraints";
+const TRACING_TARGET: &str = "nvisy_server::response::error";
 
 impl From<ConstraintViolation> for Error<'static> {
     fn from(constraint: ConstraintViolation) -> Self {

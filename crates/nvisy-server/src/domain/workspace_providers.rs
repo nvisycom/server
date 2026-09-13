@@ -19,7 +19,7 @@ use crate::service::event::EventEmitter;
 use crate::service::{CryptoService, ProviderConfig, event};
 
 /// Tracing target for provider domain operations.
-const TRACING_TARGET: &str = "nvisy_server::service::provider";
+const TRACING_TARGET: &str = "nvisy_server::domain::provider";
 
 /// Creates, reads, updates, and deletes workspace inference providers.
 ///

@@ -12,7 +12,7 @@ use zxcvbn::zxcvbn;
 use crate::response::{ErrorKind, Result};
 
 /// Tracing target for password strength operations.
-const TRACING_TARGET: &str = "nvisy_server::password_strength";
+const TRACING_TARGET: &str = "nvisy_server::service::password";
 
 /// Password strength evaluator using the zxcvbn algorithm.
 #[derive(Debug, Clone)]

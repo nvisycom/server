@@ -21,7 +21,7 @@ use crate::service::event;
 use crate::service::event::EventEmitter;
 
 /// Tracing target for policy domain operations.
-const TRACING_TARGET: &str = "nvisy_server::service::policy";
+const TRACING_TARGET: &str = "nvisy_server::domain::policy";
 
 /// Creates, reads, updates, and deletes workspace policies.
 ///

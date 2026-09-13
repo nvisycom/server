@@ -15,7 +15,7 @@ use crate::service::event;
 use crate::service::event::EventEmitter;
 
 /// Tracing target for member domain operations.
-const TRACING_TARGET: &str = "nvisy_server::service::member";
+const TRACING_TARGET: &str = "nvisy_server::domain::member";
 
 /// Lists, reads, updates, and removes workspace members.
 ///

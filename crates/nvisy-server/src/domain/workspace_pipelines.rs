@@ -20,7 +20,7 @@ use crate::service::event;
 use crate::service::event::EventEmitter;
 
 /// Tracing target for pipeline domain operations.
-const TRACING_TARGET: &str = "nvisy_server::service::pipeline";
+const TRACING_TARGET: &str = "nvisy_server::domain::pipeline";
 
 /// Creates, reads, updates, and deletes workspace pipelines.
 ///

@@ -13,7 +13,7 @@ use crate::worker::webhook::{WebhookJob, WebhookStream};
 type WebhookPublisher = EventPublisher<WebhookStream>;
 
 /// Tracing target for webhook event emission.
-const TRACING_TARGET: &str = "nvisy_server::service::webhook";
+const TRACING_TARGET: &str = "nvisy_server::service::emitter";
 
 /// Webhook event emitter for publishing domain events.
 ///
