@@ -3,7 +3,6 @@
 mod account_provisioner;
 mod auth_issuer;
 mod avatar;
-mod blob_reaper;
 mod crypto;
 mod engine;
 pub mod event;
@@ -37,7 +36,6 @@ use crate::response::CookieConfig;
 pub use crate::service::account_provisioner::AccountProvisioner;
 pub use crate::service::auth_issuer::AuthIssuer;
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
-pub use crate::service::blob_reaper::BlobReaper;
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
@@ -57,11 +55,14 @@ pub use crate::service::queue::{AssistantQueue, DetectionQueue};
 pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
 pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
 pub use crate::service::user_agent::UserAgentParser;
-pub use crate::service::webhook::{WebhookDeliveryWorker, WebhookEmitter};
+pub use crate::service::webhook::WebhookEmitter;
 use crate::worker::assistant::{AssistantOutboxDrainer, AssistantWorker};
 use crate::worker::detection::{DetectionOutboxDrainer, DetectionWorker};
+use crate::worker::event::EventOutboxDrainer;
 use crate::worker::integration::ConnectionSyncWorker;
-use crate::worker::{Coordinator, WorkerSet};
+use crate::worker::reaper::BlobReaper;
+use crate::worker::webhook::WebhookDeliveryWorker;
+use crate::worker::{Coordinator, WorkerSet, ensure_streams};
 use crate::{Result, domain};
 
 /// Tracing target for service-state initialization.
@@ -150,6 +151,11 @@ impl ServiceState {
         s3_config: S3Config,
     ) -> Result<Self> {
         let infra = Infra::from_config(postgres_config, nats_config, s3_config).await?;
+
+        // Reconcile every JetStream stream once, up front, so the publishers and
+        // subscribers built per use later are cheap handles that assume their
+        // stream already exists.
+        ensure_streams(&infra.nats).await?;
 
         let crypto = CryptoService::from_config(&crypto_config).await?;
         let engine = EngineService::from_config(engine_config).await?;
@@ -240,7 +246,7 @@ impl ServiceState {
             self.connection_sync.clone(),
         ));
         workers.spawn(BlobReaper::new(self.infra.clone(), self.crypto.clone()));
-        workers.spawn(event::EventOutboxDrainer::new(self.infra.clone()));
+        workers.spawn(EventOutboxDrainer::new(self.infra.clone()));
         workers.spawn(DetectionOutboxDrainer::new(
             self.infra.clone(),
             self.detection.clone(),

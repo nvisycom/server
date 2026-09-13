@@ -24,7 +24,7 @@ use crate::response::{ErrorKind, Result};
 use crate::service::{ConnectionConfig, CryptoService, Infra};
 
 /// Tracing target for connection sync operations.
-const TRACING_TARGET: &str = "nvisy_server::worker::sync";
+const TRACING_TARGET: &str = "nvisy_server::worker::integration";
 
 /// Object-store key prefix for scheduled redacted exports, keeping them apart
 /// from imported originals.

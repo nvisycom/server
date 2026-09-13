@@ -140,8 +140,7 @@ impl WebhookDeliveryWorker {
 
     /// Internal run loop.
     async fn run_inner(&self, cancel: CancellationToken) -> Result<()> {
-        let subscriber: WebhookSubscriber =
-            self.infra.nats.event_subscriber::<WebhookStream>().await?;
+        let subscriber: WebhookSubscriber = self.infra.nats.event_subscriber::<WebhookStream>();
 
         let mut stream = subscriber.subscribe().await?;
 

@@ -1,13 +1,10 @@
-//! Webhook event emission and delivery services.
+//! Webhook event emission.
 //!
-//! Provides helpers for emitting domain events to webhooks via NATS JetStream
-//! ([`WebhookEmitter`]) and the background worker that delivers them
-//! ([`WebhookDeliveryWorker`]).
+//! The request-side [`WebhookEmitter`] queries the webhooks subscribed to an
+//! event and publishes a slim delivery job per webhook onto NATS JetStream. The
+//! background worker that delivers them ([`WebhookDeliveryWorker`]) and the job
+//! and stream types live in [`worker::webhook`](crate::worker::webhook).
 
 mod emitter;
-mod job;
-mod worker;
 
 pub use emitter::WebhookEmitter;
-pub use job::{WebhookJob, WebhookStream};
-pub use worker::WebhookDeliveryWorker;

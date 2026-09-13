@@ -30,7 +30,7 @@ use crate::response::Result;
 use crate::service::{ConnectionConfig, CryptoService, HashingReader, Infra, Measurements};
 
 /// Tracing target for connection sync operations.
-const TRACING_TARGET: &str = "nvisy_server::worker::sync";
+const TRACING_TARGET: &str = "nvisy_server::worker::integration";
 
 /// Imports files from a connection into the workspace file store.
 #[derive(Clone)]

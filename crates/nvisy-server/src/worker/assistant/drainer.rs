@@ -21,7 +21,7 @@ use crate::service::Infra;
 use crate::worker::{Coordinator, Worker};
 
 /// Tracing target for the assistant-job drainer.
-const TRACING_TARGET: &str = "nvisy_server::worker::assistant::drainer";
+const TRACING_TARGET: &str = "nvisy_server::worker::assistant";
 
 /// How often the drainer polls for due jobs. Short, since it is the enqueue
 /// latency between addressing the assistant and the worker picking it up.
@@ -149,11 +149,7 @@ impl AssistantOutboxDrainer {
     /// there is no domain entity to fail here.
     async fn drain_batch(&self) -> Result<DrainPass> {
         let mut conn = self.infra.postgres.get_connection().await?;
-
-        // Build the stream publisher once per pass rather than per row: it runs the
-        // JetStream stream lookup/reconciliation on construction, which need not
-        // repeat for each of the (up to `DRAIN_BATCH`) rows.
-        let publisher = self.infra.nats.event_publisher::<AssistantStream>().await?;
+        let publisher = self.infra.nats.event_publisher::<AssistantStream>();
 
         conn.transaction(async |conn| {
             let batch = conn.claim_assistant_job_batch(DRAIN_BATCH).await?;

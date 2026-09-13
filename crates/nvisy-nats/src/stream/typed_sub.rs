@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use async_nats::jetstream::{Context, consumer};
 
-use super::core::{EventStream, ensure_stream};
+use super::core::EventStream;
 use super::typed_stream::TypedMessageStream;
 use crate::{Error, Result, TRACING_TARGET_STREAM};
 
@@ -28,15 +28,18 @@ pub struct EventSubscriber<S: EventStream> {
 }
 
 impl<S: EventStream> EventSubscriber<S> {
-    /// Create a subscriber for the stream, creating the stream if it is absent.
-    pub(crate) async fn new(jetstream: &Context) -> Result<Self> {
-        ensure_stream::<S>(jetstream).await?;
-        Ok(Self {
+    /// Create a subscriber for the stream.
+    ///
+    /// The stream is not reconciled here — that is a startup concern done once via
+    /// [`NatsClient::ensure_stream`](crate::NatsClient::ensure_stream). The durable
+    /// consumer is still upserted lazily in [`subscribe`](Self::subscribe).
+    pub(crate) fn new(jetstream: &Context) -> Self {
+        Self {
             inner: Arc::new(EventSubscriberInner {
                 jetstream: jetstream.clone(),
             }),
             _stream: PhantomData,
-        })
+        }
     }
 
     /// Open (creating or updating) the stream's durable pull consumer and return

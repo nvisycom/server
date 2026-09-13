@@ -20,7 +20,7 @@ use crate::service::Infra;
 use crate::worker::{Coordinator, Worker};
 
 /// Tracing target for the detection-job drainer.
-const TRACING_TARGET: &str = "nvisy_server::worker::detection::drainer";
+const TRACING_TARGET: &str = "nvisy_server::worker::detection";
 
 /// How often the drainer polls for due jobs. Short, since it is the enqueue
 /// latency between creating a detection and the worker picking it up.

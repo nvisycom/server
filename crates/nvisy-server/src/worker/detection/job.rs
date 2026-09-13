@@ -66,7 +66,7 @@ pub fn detection_subject(detection_id: Uuid) -> String {
 /// Publishes a detection job onto the `DetectionStream` work-queue for the worker
 /// to pick up.
 pub async fn enqueue(infra: &Infra, job: DetectionJob) -> Result<()> {
-    let publisher = infra.nats.event_publisher::<DetectionStream>().await?;
+    let publisher = infra.nats.event_publisher::<DetectionStream>();
     publisher.publish(&job).await?;
     Ok(())
 }

@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 
 use async_nats::jetstream::Context;
 
-use super::core::{EventStream, ensure_stream};
+use super::core::EventStream;
 use crate::{Error, Result, TRACING_TARGET_STREAM};
 
 /// Publishes a stream's typed events to its configured subject.
@@ -20,13 +20,16 @@ pub struct EventPublisher<S: EventStream> {
 }
 
 impl<S: EventStream> EventPublisher<S> {
-    /// Create a publisher for the stream, creating the stream if it is absent.
-    pub(crate) async fn new(jetstream: &Context) -> Result<Self> {
-        ensure_stream::<S>(jetstream).await?;
-        Ok(Self {
+    /// Create a publisher for the stream.
+    ///
+    /// The stream is not reconciled here — that is a startup concern done once via
+    /// [`NatsClient::ensure_stream`](crate::NatsClient::ensure_stream) — so this is
+    /// a cheap handle over the JetStream context and can be built per use.
+    pub(crate) fn new(jetstream: &Context) -> Self {
+        Self {
             jetstream: jetstream.clone(),
             _stream: PhantomData,
-        })
+        }
     }
 
     /// Publish an event to the stream's configured subject.

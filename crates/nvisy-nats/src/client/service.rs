@@ -41,6 +41,7 @@ use tokio::time::timeout;
 
 use super::config::NatsConfig;
 use crate::kv::{KvBucket, KvStore};
+use crate::stream::core::ensure_stream;
 use crate::stream::{BroadcastStream, EventPublisher, EventStream, EventSubscriber};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
 
@@ -183,16 +184,33 @@ impl NatsClient {
 
 // Stream getters
 impl NatsClient {
-    /// Create an event publisher for the specified stream type.
+    /// Ensures the JetStream stream backing `S` exists and matches `S`'s config,
+    /// creating it if absent and reconciling subjects/retention if present.
+    ///
+    /// This is a per-deployment concern: call it once at startup for each stream,
+    /// so that publishers and subscribers built later are cheap handles that do no
+    /// reconciliation of their own.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn event_publisher<S: EventStream>(&self) -> Result<EventPublisher<S>> {
-        EventPublisher::new(&self.inner.jetstream).await
+    pub async fn ensure_stream<S: EventStream>(&self) -> Result<()> {
+        ensure_stream::<S>(&self.inner.jetstream).await
+    }
+
+    /// Create an event publisher for the specified stream type.
+    ///
+    /// A cheap handle over the JetStream context; the stream must already have
+    /// been reconciled at startup via [`ensure_stream`](Self::ensure_stream).
+    pub fn event_publisher<S: EventStream>(&self) -> EventPublisher<S> {
+        EventPublisher::new(&self.inner.jetstream)
     }
 
     /// Create an event subscriber for the specified stream type.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn event_subscriber<S: EventStream>(&self) -> Result<EventSubscriber<S>> {
-        EventSubscriber::new(&self.inner.jetstream).await
+    ///
+    /// A cheap handle over the JetStream context; the stream must already have
+    /// been reconciled at startup via [`ensure_stream`](Self::ensure_stream). The
+    /// durable consumer is upserted when [`subscribe`](EventSubscriber::subscribe)
+    /// is called.
+    pub fn event_subscriber<S: EventStream>(&self) -> EventSubscriber<S> {
+        EventSubscriber::new(&self.inner.jetstream)
     }
 }
 

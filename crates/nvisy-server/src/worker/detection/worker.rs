@@ -120,11 +120,7 @@ impl DetectionWorker {
     /// state. The claim (`claim_detection`) makes redelivery idempotent: a
     /// detection already being analyzed under a fresh lease is skipped.
     async fn run_inner(&self, cancel: CancellationToken) -> Result<()> {
-        let subscriber = self
-            .infra
-            .nats
-            .event_subscriber::<DetectionStream>()
-            .await?;
+        let subscriber = self.infra.nats.event_subscriber::<DetectionStream>();
         let mut stream = subscriber.subscribe().await?;
 
         // In-flight per-job tasks are owned here rather than detached, so shutdown

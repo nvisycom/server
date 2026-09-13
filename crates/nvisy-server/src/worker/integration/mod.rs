@@ -19,4 +19,4 @@ mod worker;
 
 pub use engine::TransferEngine;
 pub use file_source::SourceEntry;
-pub use worker::{ConnectionSyncJob, ConnectionSyncWorker};
+pub use worker::{ConnectionSyncJob, ConnectionSyncWorker, SyncStream};

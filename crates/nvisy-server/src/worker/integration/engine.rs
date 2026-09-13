@@ -30,7 +30,7 @@ use crate::service::{
 };
 
 /// Tracing target for connection sync operations.
-const TRACING_TARGET: &str = "nvisy_server::worker::sync";
+const TRACING_TARGET: &str = "nvisy_server::worker::integration";
 
 /// Maximum wall-clock time for a single sync transfer before it is failed.
 const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);

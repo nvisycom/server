@@ -5,9 +5,9 @@ use nvisy_postgres::query::WorkspaceWebhookRepository;
 use nvisy_postgres::types::WebhookEvent;
 use uuid::Uuid;
 
-use super::{WebhookJob, WebhookStream};
 use crate::Result;
 use crate::service::Infra;
+use crate::worker::webhook::{WebhookJob, WebhookStream};
 
 /// Type alias for webhook publisher.
 type WebhookPublisher = EventPublisher<WebhookStream>;
@@ -95,7 +95,7 @@ impl WebhookEmitter {
 
         // Publish every job before surfacing any error, so one failing publish
         // does not silently drop the webhooks that follow it in the batch.
-        let publisher: WebhookPublisher = self.infra.nats.event_publisher().await?;
+        let publisher: WebhookPublisher = self.infra.nats.event_publisher();
         let subject = format!("{workspace_id}.{event_subject}");
 
         let mut published = 0usize;

@@ -39,7 +39,7 @@ use crate::service::{
 use crate::worker::Worker;
 
 /// Tracing target for the connection sync worker.
-const TRACING_TARGET: &str = "nvisy_server::worker::connection_sync";
+const TRACING_TARGET: &str = "nvisy_server::worker::integration";
 
 /// How often the scheduler tick runs.
 const TICK_INTERVAL: Duration = Duration::from_secs(60);
@@ -80,7 +80,7 @@ fn first_attempt() -> i32 {
 }
 
 /// The connection-sync JetStream stream, carrying [`ConnectionSyncJob`] payloads.
-type SyncStream = ConnectionSyncStream<ConnectionSyncJob>;
+pub type SyncStream = ConnectionSyncStream<ConnectionSyncJob>;
 type JobPublisher = EventPublisher<SyncStream>;
 type JobSubscriber = EventSubscriber<SyncStream>;
 
@@ -222,7 +222,7 @@ impl ConnectionSyncWorker {
             due
         };
 
-        let publisher: JobPublisher = self.infra.nats.event_publisher().await?;
+        let publisher: JobPublisher = self.infra.nats.event_publisher();
         for (workspace_id, connection_id) in due {
             let job = ConnectionSyncJob {
                 workspace_id,
@@ -243,7 +243,7 @@ impl ConnectionSyncWorker {
 
     /// Consumer loop: drain the work queue, running each job as a scheduled sync.
     async fn run_consumer(&self, cancel: CancellationToken) -> Result<()> {
-        let subscriber: JobSubscriber = self.infra.nats.event_subscriber().await?;
+        let subscriber: JobSubscriber = self.infra.nats.event_subscriber();
         let mut stream = subscriber.subscribe().await?;
 
         loop {
@@ -400,13 +400,7 @@ impl ConnectionSyncWorker {
                 connection_id,
                 attempt: next_attempt,
             };
-            let publisher: JobPublisher = match nats.event_publisher().await {
-                Ok(publisher) => publisher,
-                Err(err) => {
-                    tracing::error!(target: TRACING_TARGET, %connection_id, error = %err, "Failed to build publisher for retry");
-                    return;
-                }
-            };
+            let publisher: JobPublisher = nats.event_publisher();
             if let Err(err) = publisher.publish(&job).await {
                 tracing::error!(target: TRACING_TARGET, %connection_id, error = %err, "Failed to re-enqueue failed sync");
             } else {

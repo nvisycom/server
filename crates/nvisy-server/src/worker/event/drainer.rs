@@ -30,7 +30,7 @@ use crate::service::{Infra, NotificationEmitter, WebhookEmitter};
 use crate::worker::Worker;
 
 /// Tracing target for the outbox drainer.
-const TRACING_TARGET: &str = "nvisy_server::service::event::drainer";
+const TRACING_TARGET: &str = "nvisy_server::worker::event";
 
 /// How often the drainer polls for due events. Short, since it is the delivery
 /// latency for the activity log, webhooks, and notifications.

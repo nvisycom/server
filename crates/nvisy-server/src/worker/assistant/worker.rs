@@ -105,11 +105,7 @@ impl AssistantWorker {
     /// error (a DB/pool blip). Redelivery is idempotent because a job whose reply
     /// already landed is detected and skipped before a second reply is posted.
     async fn run_inner(&self, cancel: CancellationToken) -> Result<()> {
-        let subscriber = self
-            .infra
-            .nats
-            .event_subscriber::<AssistantStream>()
-            .await?;
+        let subscriber = self.infra.nats.event_subscriber::<AssistantStream>();
         let mut stream = subscriber.subscribe().await?;
 
         // In-flight per-job tasks are owned here rather than detached, so shutdown

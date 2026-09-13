@@ -18,7 +18,7 @@ mod worker;
 
 pub use drainer::DetectionOutboxDrainer;
 pub use job::{
-    DetectionJob, DetectionStatusEvent, broadcast_status, detection_subject, enqueue,
-    subscribe_status,
+    DetectionJob, DetectionStatusEvent, DetectionStream, broadcast_status, detection_subject,
+    enqueue, subscribe_status,
 };
 pub use worker::DetectionWorker;
