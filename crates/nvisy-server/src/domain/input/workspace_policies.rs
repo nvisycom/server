@@ -77,7 +77,7 @@ impl PolicyBodyInput {
 
         let mut hasher = Sha256::new();
         for id in ids {
-            hasher.update((id.len() as u32).to_le_bytes());
+            hasher.update(u32::try_from(id.len()).unwrap_or(u32::MAX).to_le_bytes());
             hasher.update(id.as_bytes());
         }
         Some(hasher.finalize().to_vec())

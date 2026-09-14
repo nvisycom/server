@@ -72,7 +72,7 @@ impl DateWindow {
         // Inclusive date count is the day difference plus one, so a difference of
         // `MAX_WINDOW_DAYS` would be one date too many.
         let span = to.since(from).map_err(|_| invalid("Invalid window"))?;
-        if span.get_days() as i64 >= MAX_WINDOW_DAYS {
+        if i64::from(span.get_days()) >= MAX_WINDOW_DAYS {
             return Err(invalid(format!(
                 "Window is too wide (max {MAX_WINDOW_DAYS} days)"
             )));
@@ -248,7 +248,7 @@ mod tests {
         .resolve()
         .expect("resolves");
         assert_eq!(
-            w.to.since(w.from).unwrap().get_days() as i64,
+            i64::from(w.to.since(w.from).unwrap().get_days()),
             DEFAULT_WINDOW_DAYS - 1
         );
     }

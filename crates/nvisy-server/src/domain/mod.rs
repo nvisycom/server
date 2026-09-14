@@ -7,10 +7,11 @@
 //! A service holds the Postgres client and acquires its own connection per call,
 //! so its methods take no connection and each is a self-contained transaction; a
 //! service that also needs an ambient client (crypto, a queue, the engine) holds
-//! it as a field too. Each is resolved per request from
-//! [`ServiceState`](crate::service::ServiceState) via its `FromRef` impl, so a
-//! handler extracts exactly the services it uses; every field is an `Arc`-backed
-//! handle, so cloning is cheap.
+//! it as a field too. Each is resolved per request from [`ServiceState`] via its
+//! `FromRef` impl, so a handler extracts exactly the services it uses; every
+//! field is an `Arc`-backed handle, so cloning is cheap.
+//!
+//! [`ServiceState`]: crate::service::ServiceState
 
 pub mod input;
 pub mod output;

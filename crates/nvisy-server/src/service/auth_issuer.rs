@@ -41,6 +41,7 @@ pub struct AuthIssuer {
 impl AuthIssuer {
     /// Composes the issuer from its collaborators.
     #[inline]
+    #[must_use]
     pub const fn new(session_keys: SessionKeys, user_agent_parser: UserAgentParser) -> Self {
         Self {
             session_keys,
@@ -109,8 +110,7 @@ impl AuthIssuer {
         account: &Account,
         security: SecurityContext,
     ) -> Result<String> {
-        let expired_at =
-            Timestamp::now() + Span::new().seconds(session::APP_TOKEN_LIFETIME.as_secs() as i64);
+        let expired_at = Timestamp::now() + Span::new().seconds(session::APP_TOKEN_LIFETIME_SECS);
         let jwt = self
             .issue_session(
                 conn,

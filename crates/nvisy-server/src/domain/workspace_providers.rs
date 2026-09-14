@@ -26,7 +26,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::provider";
 /// Holds the Postgres client (acquiring its own connection per call), the crypto
 /// service (to encrypt and decrypt the provider config), and the endpoint policy
 /// (to validate custom endpoints at write time). Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct WorkspaceProviderService {
     postgres: PgClient,
@@ -36,6 +38,7 @@ pub struct WorkspaceProviderService {
 
 impl WorkspaceProviderService {
     /// Creates a [`WorkspaceProviderService`] over its clients.
+    #[must_use]
     pub fn new(postgres: PgClient, crypto: CryptoService, endpoint_policy: EndpointPolicy) -> Self {
         Self {
             postgres,
@@ -116,7 +119,7 @@ impl WorkspaceProviderService {
             .await?)
     }
 
-    /// Finds a provider by id with its creator, or a NotFound.
+    /// Finds a provider by id with its creator, or a `NotFound`.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -129,7 +132,7 @@ impl WorkspaceProviderService {
     /// Updates a provider, returning it with its creator.
     ///
     /// A replacement config must keep the same provider — changing it would desync
-    /// the provider/provider_type columns — so a differing provider is rejected
+    /// the `provider/provider_type` columns — so a differing provider is rejected
     /// rather than silently migrated. A disallowed custom endpoint is rejected
     /// before store. The update and its event commit together.
     pub async fn update(
@@ -227,7 +230,7 @@ impl WorkspaceProviderService {
     }
 }
 
-/// Finds a provider within a workspace by id, with its creator, or a NotFound.
+/// Finds a provider within a workspace by id, with its creator, or a `NotFound`.
 async fn find_provider(
     conn: &mut PgConn,
     workspace_id: Uuid,

@@ -63,5 +63,5 @@ where
 
     const DESCRIPTION: &'static str = "Step-up re-authentication proofs";
     const NAME: &'static str = "reauth_proof";
-    const TTL: Option<Duration> = Some(Duration::from_secs(5 * 60)); // 5 minutes
+    const TTL: Option<Duration> = Some(Duration::from_mins(5)); // 5 minutes
 }

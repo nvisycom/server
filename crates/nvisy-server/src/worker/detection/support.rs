@@ -45,11 +45,6 @@ pub(crate) fn extract_detection_usage(
 ) -> Option<DetectionUsage> {
     use std::collections::BTreeMap;
 
-    let usage = &analyzed.usage;
-    if usage.is_empty() {
-        return None;
-    }
-
     /// Running per-model totals; each token field stays `None` until a recognizer
     /// reports it, so "not reported" is preserved rather than coerced to 0.
     #[derive(Default)]
@@ -65,6 +60,11 @@ pub(crate) fn extract_detection_usage(
         if let Some(v) = reported {
             *acc = Some(acc.unwrap_or(0).saturating_add(v));
         }
+    }
+
+    let usage = &analyzed.usage;
+    if usage.is_empty() {
+        return None;
     }
 
     let mut by_model: BTreeMap<(String, Option<String>), Acc> = BTreeMap::new();

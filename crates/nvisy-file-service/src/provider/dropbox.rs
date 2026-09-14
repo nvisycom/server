@@ -6,6 +6,8 @@
 //! the per-call argument for transfers in a `Dropbox-API-Arg` header whose JSON
 //! must be ASCII-safe. Files are addressed by a stable `id:...` key.
 
+use std::fmt::Write;
+
 use reqwest::header::CONTENT_LENGTH;
 
 use super::{ProviderRequest, response_stream};
@@ -89,7 +91,7 @@ fn api_arg(value: &serde_json::Value) -> String {
             escaped.push(ch);
         } else {
             for unit in ch.encode_utf16(&mut [0u16; 2]) {
-                escaped.push_str(&format!("\\u{unit:04x}"));
+                let _ = write!(escaped, "\\u{unit:04x}");
             }
         }
     }

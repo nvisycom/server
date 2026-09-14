@@ -1,4 +1,4 @@
-//! Account API token model for PostgreSQL database operations.
+//! Account API token model for `PostgreSQL` database operations.
 
 use diesel::prelude::*;
 use ipnet::IpNet;

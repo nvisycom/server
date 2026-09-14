@@ -58,9 +58,11 @@ pub struct DetectionOutboxDrainer {
     coordinator: Coordinator,
 }
 
-/// The tally of one [`drain_batch`](DetectionOutboxDrainer::drain_batch) pass: of
-/// the rows claimed, how many published, how many were deferred for a later retry,
-/// and how many were dead-lettered.
+/// The tally of one [`drain_batch`] pass: of the rows claimed, how many
+/// published, how many were deferred for a later retry, and how many were
+/// dead-lettered.
+///
+/// [`drain_batch`]: DetectionOutboxDrainer::drain_batch
 struct DrainPass {
     claimed: usize,
     processed: usize,
@@ -86,9 +88,9 @@ impl Worker for DetectionOutboxDrainer {
         let mut ticker = tokio::time::interval(TICK_INTERVAL);
         loop {
             tokio::select! {
-                _ = cancel.cancelled() => break,
+                () = cancel.cancelled() => break,
                 _ = ticker.tick() => self.tick(&cancel).await,
-                _ = self.coordinator.notified() => self.tick(&cancel).await,
+                () = self.coordinator.notified() => self.tick(&cancel).await,
             }
         }
 
@@ -100,9 +102,11 @@ impl Worker for DetectionOutboxDrainer {
 impl DetectionOutboxDrainer {
     /// Creates a new [`DetectionOutboxDrainer`].
     ///
-    /// Shares the [`Coordinator`] with the enqueue-side
-    /// [`DetectionQueue`](crate::service::DetectionQueue) so a job committed on this
-    /// instance wakes this drainer at once.
+    /// Shares the [`Coordinator`] with the enqueue-side [`DetectionQueue`] so a
+    /// job committed on this instance wakes this drainer at once.
+    ///
+    /// [`DetectionQueue`]: crate::service::DetectionQueue
+    #[must_use]
     pub fn new(infra: Infra, coordinator: Coordinator) -> Self {
         Self { infra, coordinator }
     }
@@ -131,7 +135,7 @@ impl DetectionOutboxDrainer {
                     } else if pass.claimed > 0 {
                         tracing::debug!(target: TRACING_TARGET, processed = pass.processed, "Detection-job drain pass published jobs");
                     }
-                    if pass.claimed < DRAIN_BATCH as usize {
+                    if i64::try_from(pass.claimed).unwrap_or(i64::MAX) < DRAIN_BATCH {
                         break;
                     }
                 }

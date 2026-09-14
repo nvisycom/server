@@ -4,9 +4,11 @@
 //! shared-workspace visibility gate for a public profile and the email/username
 //! uniqueness checks on update. Account CRUD carries no workspace events, so there
 //! is no event emission here. Credentials (password, linked providers) are managed
-//! by [`AccountIdentityService`](super::AccountIdentityService), not here, and
-//! avatar upload/delete stay in the handler over
-//! [`AvatarService`](crate::service::AvatarService).
+//! by [`AccountIdentityService`], not here, and avatar upload/delete stay in the
+//! handler over [`AvatarService`].
+//!
+//! [`AccountIdentityService`]: super::AccountIdentityService
+//! [`AvatarService`]: crate::service::AvatarService
 
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Account, UpdateAccount};
@@ -22,7 +24,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::account";
 ///
 /// Holds the Postgres client and acquires its own connection per call, so each
 /// mutation is a self-contained transaction. Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct AccountService {
     postgres: PgClient,
@@ -30,11 +34,12 @@ pub struct AccountService {
 
 impl AccountService {
     /// Creates an [`AccountService`] over the given connection pool.
+    #[must_use]
     pub fn new(postgres: PgClient) -> Self {
         Self { postgres }
     }
 
-    /// Finds an account by id, or a NotFound.
+    /// Finds an account by id, or a `NotFound`.
     pub async fn find(&self, account_id: Uuid) -> Result<Account> {
         let mut conn = self.postgres.get_connection().await?;
         conn.find_account_by_id(account_id)
@@ -94,7 +99,7 @@ impl AccountService {
         Ok(account)
     }
 
-    /// Soft-deletes an account, or a NotFound if it does not exist.
+    /// Soft-deletes an account, or a `NotFound` if it does not exist.
     pub async fn delete(&self, account_id: Uuid) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         conn.delete_account(account_id)
@@ -133,8 +138,8 @@ mod tests {
             display_name: Some(Some("Renamed".to_owned())),
             ..Default::default()
         };
-        let updated = service.update(account_id, updates).await?;
-        assert_eq!(updated.display_name.as_deref(), Some("Renamed"));
+        let updated_account = service.update(account_id, updates).await?;
+        assert_eq!(updated_account.display_name.as_deref(), Some("Renamed"));
         Ok(())
     }
 

@@ -45,11 +45,13 @@ pub trait RouterObservabilityExt<S> {
     /// This middleware stack generates unique request IDs, adds structured
     /// logging spans for each request, propagates request IDs to responses,
     /// and marks sensitive headers for redaction in logs.
+    #[must_use]
     fn with_observability(self) -> Self;
 
     /// Layers metrics middleware for request tracking and performance monitoring.
     ///
     /// This middleware tracks response times and request/response body sizes.
+    #[must_use]
     fn with_metrics(self) -> Self;
 }
 
@@ -115,7 +117,7 @@ pub async fn track_request_metrics(request: Request, next: Next) -> Response {
             method = %method,
             uri = %uri,
             status = %status,
-            duration_ms = duration.as_millis() as u64,
+            duration_ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
             request_size = request_size,
             response_size = response_size,
             "request completed"

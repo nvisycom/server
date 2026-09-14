@@ -35,6 +35,8 @@ pub struct PasswordStrengthResult {
 }
 
 /// Time estimates for cracking a password.
+// reason: the `_seconds` suffix is part of the serialized field names and units.
+#[allow(clippy::struct_field_names)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrackTimes {
     /// Offline attack, fast hashing (10B guesses/sec).
@@ -79,6 +81,8 @@ impl PasswordStrength {
     ///
     /// * `password` - The password to evaluate
     /// * `user_inputs` - Optional user-specific words to penalize (e.g., username, email)
+    // reason: `&self` keeps a uniform service API alongside `validate_password`.
+    #[allow(clippy::unused_self)]
     pub fn evaluate(&self, password: &str, user_inputs: &[&str]) -> PasswordStrengthResult {
         tracing::debug!(
             target: TRACING_TARGET,
@@ -151,7 +155,7 @@ impl PasswordStrength {
                 score = result.score,
                 min_score = self.min_score,
                 has_warning = result.feedback.as_ref().and_then(|f| f.warning.as_ref()).is_some(),
-                suggestions_count = result.feedback.as_ref().map(|f| f.suggestions.len()).unwrap_or(0),
+                suggestions_count = result.feedback.as_ref().map_or(0, |f| f.suggestions.len()),
                 "password validation failed: insufficient strength"
             );
 
@@ -206,7 +210,7 @@ impl PasswordStrength {
             suggestions: feedback
                 .suggestions()
                 .iter()
-                .map(|s| s.to_string())
+                .map(ToString::to_string)
                 .collect(),
         }
     }

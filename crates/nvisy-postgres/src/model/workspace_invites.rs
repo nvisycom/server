@@ -1,4 +1,4 @@
-//! Workspace invite model for PostgreSQL database operations.
+//! Workspace invite model for `PostgreSQL` database operations.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
@@ -91,17 +91,20 @@ pub struct UpdateWorkspaceInvite {
 
 impl WorkspaceInvite {
     /// Returns whether the invitation is still valid.
+    #[must_use]
     pub fn is_valid(&self) -> bool {
         self.invite_status == InviteStatus::Pending
             && jiff::Timestamp::from(self.expires_at) > jiff::Timestamp::now()
     }
 
     /// Returns whether the invitation has expired.
+    #[must_use]
     pub fn is_expired(&self) -> bool {
         jiff::Timestamp::from(self.expires_at) <= jiff::Timestamp::now()
     }
 
     /// Returns whether the invitation can still be used.
+    #[must_use]
     pub fn can_be_used(&self) -> bool {
         self.is_valid() && !self.is_expired()
     }

@@ -21,7 +21,7 @@ use crate::{Error, Result};
 pub struct Infra {
     /// The Postgres client (connection pool handle).
     pub postgres: PgClient,
-    /// The NATS client (JetStream, KV, messaging).
+    /// The NATS client (`JetStream`, KV, messaging).
     pub nats: NatsClient,
     /// The S3-compatible blob store (files, audits, avatars).
     pub blobs: BlobStore,

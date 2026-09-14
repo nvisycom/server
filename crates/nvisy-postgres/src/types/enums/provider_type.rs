@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// The inference model type backing a workspace provider.
     ///
-    /// Corresponds to the `PROVIDER_TYPE` PostgreSQL enum. A workspace provider is
+    /// Corresponds to the `PROVIDER_TYPE` `PostgreSQL` enum. A workspace provider is
     /// an inference service the platform calls; this says which kind of model it
     /// is — a language model for chat, or a named-entity-recognition model for
     /// extraction. The concrete vendor (the `provider` column, e.g. `openai`) is

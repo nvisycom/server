@@ -1,7 +1,7 @@
 //! Enhanced query parameter extractor with improved error handling.
 //!
 //! This module provides [`Query`], a query parameter extractor with detailed
-//! error messages and OpenAPI documentation support. Repeated keys
+//! error messages and `OpenAPI` documentation support. Repeated keys
 //! (`?f=a&f=b`) deserialize into a sequence.
 
 use aide::OperationInput;

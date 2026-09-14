@@ -1,8 +1,11 @@
 //! Workspace thread model: a discussion thread, either a workspace-level
 //! discussion or a document's review. Its messages are
-//! [`WorkspaceThreadComment`](super::WorkspaceThreadComment)s and its lifecycle
-//! history [`WorkspaceThreadEvent`](super::WorkspaceThreadEvent)s. A document
-//! thread also carries an assignee and a derived [`ReviewStatus`].
+//! [`WorkspaceThreadComment`]s and its lifecycle history
+//! [`WorkspaceThreadEvent`]s. A document thread also carries an assignee and a
+//! derived [`ReviewStatus`].
+//!
+//! [`WorkspaceThreadComment`]: super::WorkspaceThreadComment
+//! [`WorkspaceThreadEvent`]: super::WorkspaceThreadEvent
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;

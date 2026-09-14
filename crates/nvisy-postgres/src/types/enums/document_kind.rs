@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// The kind of a human-facing document.
     ///
-    /// Corresponds to the `DOCUMENT_KIND` PostgreSQL enum. Machine byproducts
+    /// Corresponds to the `DOCUMENT_KIND` `PostgreSQL` enum. Machine byproducts
     /// (detection audits, review audits, enrichment intermediates) are not
     /// documents — they reference blobs directly from their own tables.
     pub enum DocumentKind: Default = Original, "crate::schema::sql_types::DocumentKind" {

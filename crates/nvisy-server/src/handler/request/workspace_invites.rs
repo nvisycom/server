@@ -64,6 +64,7 @@ impl InviteExpiration {
     ///
     /// Uses hours instead of days because `jiff::Timestamp` only supports
     /// units of hours or smaller for arithmetic operations.
+    #[must_use]
     pub fn to_span(self) -> jiff::Span {
         match self {
             Self::In24Hours => jiff::Span::new().hours(24),
@@ -73,6 +74,7 @@ impl InviteExpiration {
     }
 
     /// Returns the expiry timestamp from now.
+    #[must_use]
     pub fn to_expiry_timestamp(self) -> Option<jiff::Timestamp> {
         jiff::Timestamp::now().checked_add(self.to_span()).ok()
     }
@@ -117,11 +119,13 @@ pub struct ListWorkspaceInvites {
 
 impl ListWorkspaceInvites {
     /// Converts to filter model.
+    #[must_use]
     pub fn to_filter(&self) -> InviteFilter {
         InviteFilter { role: self.role }
     }
 
     /// Converts to sort model.
+    #[must_use]
     pub fn to_sort(&self) -> InviteSortBy {
         let order = self.order.unwrap_or_default();
         let field = self.sort_by.unwrap_or_default();

@@ -1,6 +1,6 @@
 //! Advanced database connection pool configuration.
 //!
-//! The module provides comprehensive configuration options for PostgreSQL connection pools,
+//! The module provides comprehensive configuration options for `PostgreSQL` connection pools,
 //! with built-in validation, sensible defaults, and optimization presets for different
 //! deployment scenarios.
 
@@ -11,7 +11,7 @@ use crate::{Error, PgClient, Result, TRACING_TARGET_CONNECTION};
 
 /// Complete database configuration including connection string and pool settings.
 ///
-/// This configuration system provides type-safe, validated settings for PostgreSQL
+/// This configuration system provides type-safe, validated settings for `PostgreSQL`
 /// connections and connection pools with optimization presets for different
 /// deployment scenarios.
 ///
@@ -27,7 +27,7 @@ use crate::{Error, PgClient, Result, TRACING_TARGET_CONNECTION};
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 #[must_use = "database configurations must be used to create connection pools"]
 pub struct PgConfig {
-    /// PostgreSQL connection URL
+    /// `PostgreSQL` connection URL
     #[cfg_attr(feature = "cli", arg(long = "postgres-url", env = "POSTGRES_URL"))]
     pub postgres_url: String,
 
@@ -86,7 +86,7 @@ impl PgConfig {
     ///
     /// # Arguments
     ///
-    /// * `database_url` - PostgreSQL connection string
+    /// * `database_url` - `PostgreSQL` connection string
     #[tracing::instrument(
         skip(database_url),
         target = TRACING_TARGET_CONNECTION
@@ -115,12 +115,14 @@ impl PgConfig {
     ///
     /// This removes sensitive information like passwords from the URL.
     #[inline]
+    #[must_use]
     pub fn database_url_masked(&self) -> String {
         Self::mask_url(&self.postgres_url)
     }
 
     /// Returns the database URL.
     #[inline]
+    #[must_use]
     pub fn database_url(&self) -> &str {
         &self.postgres_url
     }
@@ -180,7 +182,7 @@ impl PgConfig {
             postgres_url: database_url.into(),
             postgres_max_connections: 20,
             postgres_connection_timeout: Some(Duration::from_secs(30)),
-            postgres_idle_timeout: Some(Duration::from_secs(600)),
+            postgres_idle_timeout: Some(Duration::from_mins(10)),
         }
     }
 
@@ -190,7 +192,7 @@ impl PgConfig {
             postgres_url: database_url.into(),
             postgres_max_connections: 10,
             postgres_connection_timeout: Some(Duration::from_secs(30)),
-            postgres_idle_timeout: Some(Duration::from_secs(300)),
+            postgres_idle_timeout: Some(Duration::from_mins(5)),
         }
     }
 
@@ -211,8 +213,7 @@ impl PgConfig {
         // Validate connection count
         if !(MIN_CONNECTIONS..=MAX_CONNECTIONS).contains(&self.postgres_max_connections) {
             return Err(Error::Config(format!(
-                "max_connections must be between {} and {}",
-                MIN_CONNECTIONS, MAX_CONNECTIONS
+                "max_connections must be between {MIN_CONNECTIONS} and {MAX_CONNECTIONS}"
             )));
         }
 
@@ -221,8 +222,7 @@ impl PgConfig {
             && !(MIN_CONN_TIMEOUT_SECS..=MAX_CONN_TIMEOUT_SECS).contains(&timeout.as_secs())
         {
             return Err(Error::Config(format!(
-                "connection timeout must be between {}s and {}s",
-                MIN_CONN_TIMEOUT_SECS, MAX_CONN_TIMEOUT_SECS
+                "connection timeout must be between {MIN_CONN_TIMEOUT_SECS}s and {MAX_CONN_TIMEOUT_SECS}s"
             )));
         }
 
@@ -231,8 +231,7 @@ impl PgConfig {
             && !(MIN_IDLE_TIMEOUT_SECS..=MAX_IDLE_TIMEOUT_SECS).contains(&timeout.as_secs())
         {
             return Err(Error::Config(format!(
-                "idle timeout must be between {}s and {}s",
-                MIN_IDLE_TIMEOUT_SECS, MAX_IDLE_TIMEOUT_SECS
+                "idle timeout must be between {MIN_IDLE_TIMEOUT_SECS}s and {MAX_IDLE_TIMEOUT_SECS}s"
             )));
         }
 
@@ -291,7 +290,7 @@ mod tests {
             config.postgres_connection_timeout,
             Some(Duration::from_secs(30))
         );
-        assert_eq!(config.postgres_idle_timeout, Some(Duration::from_secs(600)));
+        assert_eq!(config.postgres_idle_timeout, Some(Duration::from_mins(10)));
     }
 
     #[test]
@@ -311,15 +310,15 @@ mod tests {
     fn test_config_builder() {
         let config = PgConfig::new("postgresql://localhost/db")
             .with_max_connections(8)
-            .with_connection_timeout(Duration::from_secs(60))
-            .with_idle_timeout(Duration::from_secs(300));
+            .with_connection_timeout(Duration::from_mins(1))
+            .with_idle_timeout(Duration::from_mins(5));
 
         assert_eq!(config.postgres_max_connections, 8);
         assert_eq!(
             config.postgres_connection_timeout,
-            Some(Duration::from_secs(60))
+            Some(Duration::from_mins(1))
         );
-        assert_eq!(config.postgres_idle_timeout, Some(Duration::from_secs(300)));
+        assert_eq!(config.postgres_idle_timeout, Some(Duration::from_mins(5)));
     }
 
     #[test]
@@ -361,12 +360,12 @@ mod tests {
     fn test_duration_helpers() {
         let config = PgConfig::new("postgresql://localhost/db")
             .with_connection_timeout(Duration::from_secs(45))
-            .with_idle_timeout(Duration::from_secs(120));
+            .with_idle_timeout(Duration::from_mins(2));
 
         assert_eq!(
             config.postgres_connection_timeout,
             Some(Duration::from_secs(45))
         );
-        assert_eq!(config.postgres_idle_timeout, Some(Duration::from_secs(120)));
+        assert_eq!(config.postgres_idle_timeout, Some(Duration::from_mins(2)));
     }
 }

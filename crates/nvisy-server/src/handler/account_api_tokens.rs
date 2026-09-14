@@ -1,8 +1,9 @@
 //! API token management handlers for user API token operations.
 //!
 //! These handlers are thin: they authenticate, parse the request, delegate the
-//! token rules to [`AccountApiTokenService`](crate::domain::AccountApiTokenService),
-//! and map the result to a response.
+//! token rules to [`AccountApiTokenService`], and map the result to a response.
+//!
+//! [`AccountApiTokenService`]: crate::domain::AccountApiTokenService
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
@@ -164,7 +165,7 @@ fn revoke_api_token_docs(op: TransformOperation) -> TransformOperation {
 
 /// Returns routes for API token management.
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, post_with};
 
     ApiRouter::new()
         .api_route(

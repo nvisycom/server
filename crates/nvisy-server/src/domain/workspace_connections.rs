@@ -6,7 +6,9 @@
 //! onto a replacement config) — in one place, factored out of the handler. The
 //! service owns the crypto service and the endpoint policy. The external-store
 //! actions (verify, picker token) stay in the handler; they load a connection
-//! through [`find`](WorkspaceConnectionService::find).
+//! through [`find`].
+//!
+//! [`find`]: WorkspaceConnectionService::find
 
 use nvisy_core::net::EndpointPolicy;
 use nvisy_postgres::model::{
@@ -34,7 +36,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::connection";
 /// Holds the Postgres client (acquiring its own connection per call), the crypto
 /// service (to encrypt and decrypt the connection config), and the endpoint policy
 /// (to validate custom endpoints at write time). Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct WorkspaceConnectionService {
     postgres: PgClient,
@@ -44,6 +48,7 @@ pub struct WorkspaceConnectionService {
 
 impl WorkspaceConnectionService {
     /// Creates a [`WorkspaceConnectionService`] over its clients.
+    #[must_use]
     pub fn new(postgres: PgClient, crypto: CryptoService, endpoint_policy: EndpointPolicy) -> Self {
         Self {
             postgres,
@@ -173,7 +178,7 @@ impl WorkspaceConnectionService {
     }
 
     /// Finds a connection by id with its creator, schedule, and last successful
-    /// sync time, or a NotFound.
+    /// sync time, or a `NotFound`.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -334,7 +339,7 @@ fn validate_sync_input(sync: &SyncScheduleInput) -> Result<()> {
 }
 
 /// Finds a connection within a workspace by id, with its creator, schedule, and
-/// last successful sync time, or a NotFound error.
+/// last successful sync time, or a `NotFound` error.
 async fn find_connection(
     conn: &mut PgConn,
     workspace_id: Uuid,

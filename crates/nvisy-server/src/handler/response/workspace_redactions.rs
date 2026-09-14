@@ -18,7 +18,7 @@ use super::{AccountRef, Page};
 ///
 /// Named `WorkspaceRedactionResult` rather than `Redaction` because the engine's audit
 /// schema already carries a `Redaction` (an audit event), and the two must not
-/// collide in the generated OpenAPI.
+/// collide in the generated `OpenAPI`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceRedactionResult {
@@ -46,8 +46,9 @@ pub type WorkspaceRedactionsPage = Page<WorkspaceRedactionResult>;
 impl WorkspaceRedactionResult {
     /// Creates a redaction response from the database model, the owning workspace
     /// id and handle, and the requesting account.
+    #[must_use]
     pub fn from_model(
-        redaction: RedactionModel,
+        redaction: &RedactionModel,
         workspace_id: Uuid,
         workspace_handle: Handle,
         requested_by: AccountRef,

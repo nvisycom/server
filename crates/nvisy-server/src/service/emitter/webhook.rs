@@ -28,6 +28,7 @@ pub struct WebhookEmitter {
 
 impl WebhookEmitter {
     /// Create a new webhook emitter.
+    #[must_use]
     pub fn new(infra: Infra) -> Self {
         Self { infra }
     }
@@ -98,11 +99,11 @@ impl WebhookEmitter {
         let publisher: WebhookPublisher = self.infra.nats.event_publisher();
         let subject = format!("{workspace_id}.{event_subject}");
 
-        let mut published = 0usize;
+        let mut publish_count = 0usize;
         let mut first_error = None;
         for job in &jobs {
             match publisher.publish_to(&subject, job).await {
-                Ok(()) => published += 1,
+                Ok(()) => publish_count += 1,
                 Err(err) => {
                     tracing::error!(
                         target: TRACING_TARGET,
@@ -121,10 +122,10 @@ impl WebhookEmitter {
 
         tracing::info!(
             target: TRACING_TARGET,
-            published,
+            published = publish_count,
             "Published webhook jobs"
         );
 
-        Ok(published)
+        Ok(publish_count)
     }
 }

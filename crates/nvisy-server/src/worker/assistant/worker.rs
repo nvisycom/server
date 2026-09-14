@@ -7,6 +7,7 @@
 //! comment flows through the normal comment-created event, so the thread's
 //! timeline and mention notifications need no special handling here.
 
+use std::num::NonZero;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -46,7 +47,7 @@ const DEFAULT_ASSISTANT_CONCURRENCY: usize = 4;
 
 /// Upper bound on one inference call, so a hung provider cannot pin a worker
 /// task indefinitely. A timeout is transient — the job is redelivered.
-const INFERENCE_TIMEOUT: Duration = Duration::from_secs(120);
+const INFERENCE_TIMEOUT: Duration = Duration::from_mins(2);
 
 /// Background worker that answers assistant mentions off the request thread.
 ///
@@ -77,7 +78,7 @@ impl Worker for AssistantWorker {
         match &result {
             Ok(()) => tracing::info!(target: TRACING_TARGET, "Assistant worker stopped"),
             Err(err) => {
-                tracing::error!(target: TRACING_TARGET, error = %err, "Assistant worker failed")
+                tracing::error!(target: TRACING_TARGET, error = %err, "Assistant worker failed");
             }
         }
 
@@ -87,10 +88,10 @@ impl Worker for AssistantWorker {
 
 impl AssistantWorker {
     /// Creates a new `AssistantWorker`.
+    #[must_use]
     pub fn new(infra: Infra, crypto: CryptoService) -> Self {
         let concurrency = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(DEFAULT_ASSISTANT_CONCURRENCY);
+            .map_or(DEFAULT_ASSISTANT_CONCURRENCY, NonZero::get);
         Self {
             infra,
             crypto,
@@ -118,7 +119,7 @@ impl AssistantWorker {
             // `concurrency` turns are ever in flight; the pull, and thus the
             // stream's redelivery lease, does not advance while every slot is busy.
             let permit = tokio::select! {
-                _ = cancel.cancelled() => {
+                () = cancel.cancelled() => {
                     tracing::info!(target: TRACING_TARGET, "Assistant worker shutdown requested");
                     break;
                 }
@@ -130,7 +131,7 @@ impl AssistantWorker {
             };
 
             tokio::select! {
-                _ = cancel.cancelled() => {
+                () = cancel.cancelled() => {
                     tracing::info!(target: TRACING_TARGET, "Assistant worker shutdown requested");
                     break;
                 }
@@ -260,7 +261,7 @@ impl AssistantWorker {
             let mut prompt = String::new();
             for row in &comments {
                 if row.item.id == job.comment_id {
-                    prompt = row.item.body.clone();
+                    prompt.clone_from(&row.item.body);
                     continue;
                 }
                 history.push(turn_for(&row.item));

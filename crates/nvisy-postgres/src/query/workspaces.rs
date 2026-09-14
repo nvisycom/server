@@ -91,7 +91,7 @@ impl WorkspaceRepository for PgConnection {
     }
 
     async fn delete_workspace(&mut self, workspace_id: Uuid) -> Result<()> {
-        use schema::workspaces::dsl::*;
+        use schema::workspaces::dsl::{deleted_at, id, workspaces};
 
         diesel::update(workspaces)
             .filter(id.eq(workspace_id))

@@ -85,7 +85,7 @@ impl Worker for EventOutboxDrainer {
         let mut ticker = tokio::time::interval(TICK_INTERVAL);
         loop {
             tokio::select! {
-                _ = cancel.cancelled() => break,
+                () = cancel.cancelled() => break,
                 _ = ticker.tick() => self.tick(&cancel).await,
             }
         }
@@ -97,6 +97,7 @@ impl Worker for EventOutboxDrainer {
 
 impl EventOutboxDrainer {
     /// Creates a new [`EventOutboxDrainer`].
+    #[must_use]
     pub fn new(infra: Infra) -> Self {
         Self {
             webhook: WebhookEmitter::new(infra.clone()),
@@ -133,7 +134,7 @@ impl EventOutboxDrainer {
                     } else if pass.claimed > 0 {
                         tracing::debug!(target: TRACING_TARGET, processed = pass.processed, "Outbox drain pass processed events");
                     }
-                    if pass.claimed < DRAIN_BATCH as usize {
+                    if i64::try_from(pass.claimed).unwrap_or(i64::MAX) < DRAIN_BATCH {
                         break;
                     }
                 }

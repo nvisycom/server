@@ -67,6 +67,7 @@ impl WebhookHeaders {
     }
 
     /// Whether there are no headers.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -75,6 +76,7 @@ impl WebhookHeaders {
     ///
     /// An empty set stores nothing (the column defaults to an empty object), so a
     /// webhook without custom headers carries no stored value.
+    #[must_use]
     pub fn into_column(self) -> Option<Json<Self>> {
         if self.is_empty() {
             None
@@ -89,11 +91,13 @@ impl WebhookHeaders {
     }
 
     /// Borrows the underlying ordered name → value map.
+    #[must_use]
     pub fn as_map(&self) -> &BTreeMap<String, String> {
         &self.0
     }
 
     /// Consumes into the underlying ordered name → value map.
+    #[must_use]
     pub fn into_map(self) -> BTreeMap<String, String> {
         self.0
     }

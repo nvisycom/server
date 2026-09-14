@@ -7,7 +7,7 @@ use super::db_enum;
 db_enum! {
     /// The role and permission level of a workspace member.
     ///
-    /// Corresponds to the `WORKSPACE_ROLE` PostgreSQL enum and provides
+    /// Corresponds to the `WORKSPACE_ROLE` `PostgreSQL` enum and provides
     /// hierarchical access control for workspace members with clearly defined
     /// capabilities.
     pub enum WorkspaceRole: Default = Reviewer, "crate::schema::sql_types::WorkspaceRole" {
@@ -29,6 +29,7 @@ impl WorkspaceRole {
     /// Returns the hierarchical level of this role (higher number = more
     /// permissions).
     #[inline]
+    #[must_use]
     pub const fn hierarchy_level(self) -> u8 {
         match self {
             WorkspaceRole::Reviewer => 1,
@@ -41,6 +42,7 @@ impl WorkspaceRole {
     /// Returns whether this role has equal or higher permissions than the other
     /// role.
     #[inline]
+    #[must_use]
     pub const fn has_permission_level_of(self, other: WorkspaceRole) -> bool {
         self.hierarchy_level() >= other.hierarchy_level()
     }
@@ -48,6 +50,7 @@ impl WorkspaceRole {
     /// Returns whether this is the workspace owner — the single top role that
     /// cannot be removed or demoted except by an ownership transfer.
     #[inline]
+    #[must_use]
     pub const fn is_owner(self) -> bool {
         matches!(self, WorkspaceRole::Owner)
     }

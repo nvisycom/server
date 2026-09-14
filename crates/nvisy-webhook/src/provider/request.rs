@@ -73,6 +73,7 @@ impl WebhookRequest {
     }
 
     /// Creates a test request for webhook testing.
+    #[must_use]
     pub fn test(url: Url, webhook_id: Uuid, workspace_id: Uuid) -> Self {
         Self::new(
             url,
@@ -83,30 +84,35 @@ impl WebhookRequest {
     }
 
     /// Sets the request timeout.
+    #[must_use]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 
     /// Adds a custom header to the request.
+    #[must_use]
     pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.insert(name.into(), value.into());
         self
     }
 
     /// Sets multiple custom headers.
+    #[must_use]
     pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
         self.headers.extend(headers);
         self
     }
 
     /// Sets the signing secret for HMAC-SHA256 authentication.
+    #[must_use]
     pub fn with_secret(mut self, secret: impl Into<String>) -> Self {
         self.secret = Some(secret.into());
         self
     }
 
     /// Creates a payload from this request without consuming it.
+    #[must_use]
     pub fn to_payload(&self) -> WebhookPayload {
         WebhookPayload {
             event: self.event.clone(),

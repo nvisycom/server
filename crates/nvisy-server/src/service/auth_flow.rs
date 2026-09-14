@@ -3,13 +3,15 @@
 //! The cross-cutting authentication logic a handler would otherwise inline —
 //! account lookup with constant-time anti-enumeration, the account-status gating,
 //! the signup account+identity transaction, and session revocation — factored out
-//! of [`authentication`](crate::handler::authentication) so the handler stays thin
-//! transport (cookies, request/response shaping).
+//! of [`authentication`] so the handler stays thin transport (cookies,
+//! request/response shaping).
 //!
-//! Session *minting* itself lives in [`AuthIssuer`](crate::service::AuthIssuer);
-//! this service orchestrates the surrounding rules and delegates the mint. It
-//! returns the signed JWT for the handler to wrap in a session cookie, and never
-//! touches cookies itself.
+//! Session *minting* itself lives in [`AuthIssuer`]; this service orchestrates
+//! the surrounding rules and delegates the mint. It returns the signed JWT for
+//! the handler to wrap in a session cookie, and never touches cookies itself.
+//!
+//! [`authentication`]: crate::handler::authentication
+//! [`AuthIssuer`]: crate::service::AuthIssuer
 
 use nvisy_postgres::model::{NewAccount, NewAccountIdentity};
 use nvisy_postgres::query::{
@@ -34,7 +36,9 @@ const TRACING_TARGET_CLEANUP: &str = "nvisy_server::service::auth_flow::cleanup"
 ///
 /// Holds the Postgres client (own-connection-per-call), the password service (to
 /// strength-check, hash, and verify), and the auth issuer (to mint the session).
-/// Resolved per request from [`ServiceState`](crate::service::ServiceState).
+/// Resolved per request from [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct SignInService {
     postgres: PgClient,
@@ -44,6 +48,7 @@ pub struct SignInService {
 
 impl SignInService {
     /// Creates a [`SignInService`] over its clients.
+    #[must_use]
     pub fn new(postgres: PgClient, password: PasswordService, issuer: AuthIssuer) -> Self {
         Self {
             postgres,

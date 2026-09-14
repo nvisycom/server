@@ -164,7 +164,7 @@ fn delete_comment_docs(op: TransformOperation) -> TransformOperation {
 
 /// Returns an [`ApiRouter`] with the comment routes.
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{patch_with, post_with};
 
     ApiRouter::new()
         .api_route(

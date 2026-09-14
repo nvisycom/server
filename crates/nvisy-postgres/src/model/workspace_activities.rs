@@ -1,4 +1,4 @@
-//! Workspace activity model for PostgreSQL database operations.
+//! Workspace activity model for `PostgreSQL` database operations.
 //!
 //! This module provides models for tracking and managing workspace activity logs,
 //! which record all significant actions performed within workspaces.

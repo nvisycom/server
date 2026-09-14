@@ -78,7 +78,7 @@ impl<R: AsyncRead> AsyncRead for LimitedReader<R> {
         let before = buf.filled().len();
         let poll = this.inner.poll_read(cx, buf);
         if let Poll::Ready(Ok(())) = &poll {
-            *this.read += (buf.filled().len() - before) as u64;
+            *this.read += u64::try_from(buf.filled().len() - before).unwrap_or(u64::MAX);
             if *this.read > *this.limit {
                 this.state.exceeded.store(true, Ordering::Relaxed);
                 // Roll the just-read bytes back out of the buffer: an `AsyncRead`

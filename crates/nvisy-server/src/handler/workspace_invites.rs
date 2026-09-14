@@ -212,7 +212,7 @@ async fn reply_to_invite(
 
     if request.accept_invite {
         let accepted = invites.accept(origin, path_params.invite_id).await?;
-        let member = WorkspaceMember::from_model(accepted.member, accepted.account);
+        let member = WorkspaceMember::from_model(&accepted.member, accepted.account);
         Ok((StatusCode::CREATED, Json(Some(member))))
     } else {
         invites.decline(origin, path_params.invite_id).await?;
@@ -299,7 +299,7 @@ async fn preview_invite_code(
         StatusCode::OK,
         Json(InvitePreview::from_models(
             preview.workspace,
-            preview.invite,
+            &preview.invite,
         )),
     ))
 }
@@ -325,7 +325,7 @@ async fn reply_to_invite_code(
     Path(path_params): Path<InviteCodePathParams>,
     request: Option<Json<ReplyWorkspaceInvite>>,
 ) -> Result<(StatusCode, Json<Option<WorkspaceMember>>)> {
-    let accept = request.map(|Json(r)| r.accept_invite).unwrap_or(true);
+    let accept = request.is_none_or(|Json(r)| r.accept_invite);
 
     tracing::info!(target: TRACING_TARGET, accept, "Responding to invite code");
 
@@ -333,7 +333,7 @@ async fn reply_to_invite_code(
         let accepted = invites
             .accept_code(auth_state.account_id, &security, &path_params.invite_code)
             .await?;
-        let member = WorkspaceMember::from_model(accepted.member, accepted.account);
+        let member = WorkspaceMember::from_model(&accepted.member, accepted.account);
         Ok((StatusCode::CREATED, Json(Some(member))))
     } else {
         invites
@@ -358,7 +358,7 @@ fn reply_to_invite_code_docs(op: TransformOperation) -> TransformOperation {
 ///
 /// [`Router`]: axum::routing::Router
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{delete_with, get_with, post_with};
 
     ApiRouter::new()
         .api_route(

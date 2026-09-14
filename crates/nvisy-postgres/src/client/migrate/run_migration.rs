@@ -19,7 +19,7 @@ use crate::{Error, MIGRATIONS, PgClient, Result, TRACING_TARGET_MIGRATION};
 /// migrations while the rest wait, then find nothing pending.
 ///
 /// The value is arbitrary but must stay stable forever: every instance has to
-/// contend on the same key. (`0x_6E76_6973_795F_6D69` — "nvisy_mi".) The same
+/// contend on the same key. (`0x_6E76_6973_795F_6D69` — "`nvisy_mi`".) The same
 /// key guards every source, so a downstream's [`run_migrations`] serializes
 /// against upstream's boot too.
 const MIGRATION_LOCK_KEY: i64 = 0x6E76_6973_795F_6D69;

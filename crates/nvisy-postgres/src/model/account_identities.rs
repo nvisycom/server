@@ -1,4 +1,4 @@
-//! Account identity model for PostgreSQL database operations.
+//! Account identity model for `PostgreSQL` database operations.
 //!
 //! An account identity is one way an account authenticates: a local password
 //! (an Argon2 hash in [`secret`](AccountIdentity::secret)) or a linked OIDC

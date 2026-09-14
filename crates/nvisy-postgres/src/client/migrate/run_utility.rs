@@ -58,7 +58,7 @@ pub async fn verify_schema_integrity(conn: &mut AsyncPgConnection) -> Result<()>
     )
     .get_result::<ExistsResult>(conn)
     .await
-    .map_err(|e| Error::Migration(format!("Failed to check migration table: {}", e).into()))?
+    .map_err(|e| Error::Migration(format!("Failed to check migration table: {e}").into()))?
     .exists;
 
     if !migration_table_exists {
@@ -102,7 +102,7 @@ async fn get_applied_migrations(conn: &mut AsyncPgConnection) -> Result<Vec<Stri
     )
     .get_result::<TableExists>(conn)
     .await
-    .map_err(|e| Error::Migration(format!("Failed to check migration table: {}", e).into()))?
+    .map_err(|e| Error::Migration(format!("Failed to check migration table: {e}").into()))?
     .exists;
 
     if !migration_table_exists {
@@ -118,7 +118,7 @@ async fn get_applied_migrations(conn: &mut AsyncPgConnection) -> Result<Vec<Stri
     let versions = sql_query("SELECT version FROM __diesel_schema_migrations ORDER BY version")
         .get_results::<MigrationVersion>(conn)
         .await
-        .map_err(|e| Error::Migration(format!("Failed to get applied migrations: {}", e).into()))?
+        .map_err(|e| Error::Migration(format!("Failed to get applied migrations: {e}").into()))?
         .into_iter()
         .map(|row| row.version)
         .collect();

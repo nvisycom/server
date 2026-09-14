@@ -36,7 +36,7 @@ type HmacSha256 = Hmac<Sha256>;
 /// use url::Url;
 ///
 /// let config = ReqwestConfig::default();
-/// let client = ReqwestClient::new(config);
+/// let client = ReqwestClient::new(&config);
 ///
 /// let url = Url::parse("https://example.com/webhook")?;
 /// let request = WebhookRequest::test(url, webhook_id, workspace_id);
@@ -55,7 +55,7 @@ impl fmt::Debug for ReqwestClient {
 
 impl ReqwestClient {
     /// Creates a new reqwest client with the given configuration.
-    pub fn new(config: ReqwestConfig) -> Self {
+    pub fn new(config: &ReqwestConfig) -> Self {
         let timeout = config.effective_timeout();
         let user_agent = config.effective_user_agent();
 
@@ -96,6 +96,7 @@ impl ReqwestClient {
     }
 
     /// Converts this client into a [`WebhookService`] for use with dependency injection.
+    #[must_use]
     pub fn into_service(self) -> WebhookService {
         WebhookService::new(self)
     }
@@ -119,7 +120,7 @@ impl ReqwestClient {
 
 impl Default for ReqwestClient {
     fn default() -> Self {
-        Self::new(ReqwestConfig::default())
+        Self::new(&ReqwestConfig::default())
     }
 }
 
@@ -242,7 +243,7 @@ mod tests {
     #[test]
     fn test_sign_payload() {
         let secret = "test_secret";
-        let timestamp = 1234567890i64;
+        let timestamp = 1_234_567_890i64;
         let payload = b"{\"event\":\"test\"}";
 
         let signature = ReqwestClient::sign_payload(secret, timestamp, payload);

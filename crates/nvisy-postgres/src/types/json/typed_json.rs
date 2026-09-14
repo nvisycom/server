@@ -69,6 +69,7 @@ impl<T> Json<T> {
     /// This is how a stored blob enters the type (mirroring `FromSql`); a value
     /// that does not match `T` is caught later by the chosen read policy
     /// (`strict`/`or_default`/`typed`), never here.
+    #[must_use]
     pub fn from_raw(value: serde_json::Value) -> Self {
         Self {
             value,
@@ -77,13 +78,15 @@ impl<T> Json<T> {
     }
 
     /// The raw stored value.
+    #[must_use]
     pub fn as_value(&self) -> &serde_json::Value {
         &self.value
     }
 
     /// Whether the stored object is non-empty.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.value.as_object().is_none_or(|obj| obj.is_empty())
+        self.value.as_object().is_none_or(serde_json::Map::is_empty)
     }
 }
 
@@ -113,6 +116,7 @@ impl<T: DeserializeOwned> Json<T> {
     /// For a response that presents the typed value when the stored blob decodes
     /// and omits it otherwise — the row is preserved by the surrounding DTO, so a
     /// list can never silently disagree with a count over the same rows.
+    #[must_use]
     pub fn optional(&self) -> Option<T> {
         serde_json::from_value(self.value.clone()).ok()
     }
@@ -122,6 +126,7 @@ impl<T: DeserializeOwned + Default> Json<T> {
     /// Decodes the stored value into `T`, falling back to `T::default()` when it
     /// does not match — for configuration that must stay usable across shape
     /// changes rather than error or surface a raw blob.
+    #[must_use]
     pub fn or_default(&self) -> T {
         serde_json::from_value(self.value.clone()).unwrap_or_default()
     }

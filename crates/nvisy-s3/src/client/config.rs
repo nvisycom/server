@@ -3,10 +3,11 @@
 /// Connection settings for the first-party S3-compatible blob store.
 ///
 /// A single S3 bucket holds every logical store (files, audits, avatars);
-/// [`Bucket`](crate::Bucket) prefixes keep them apart within it, so a deployment
-/// provisions one bucket rather than one per kind. `endpoint` selects the
-/// backend: unset targets AWS S3, set targets an S3-compatible server (RustFS,
-/// MinIO, R2, …).
+/// [`Bucket`] prefixes keep them apart within it, so a deployment provisions one
+/// bucket rather than one per kind. `endpoint` selects the backend: unset targets
+/// AWS S3, set targets an S3-compatible server (`RustFS`, `MinIO`, R2, …).
+///
+/// [`Bucket`]: crate::Bucket
 #[derive(Clone)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 #[must_use = "config does nothing unless you use it"]

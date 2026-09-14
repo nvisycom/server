@@ -57,6 +57,7 @@ impl AccountApiToken {
 
 impl AccountApiToken {
     /// Creates an `ApiTokenWithJWT` by adding a JWT token string.
+    #[must_use]
     pub fn with_jwt(self, jwt: String) -> AccountApiTokenWithJwt {
         AccountApiTokenWithJwt {
             id: self.id,

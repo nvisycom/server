@@ -2,24 +2,26 @@
 //! downstream binary that embeds this server.
 //!
 //! [`ServiceArgs`] flattens every config [`ServiceState`] needs into one
-//! `clap::Args` group, and [`ServiceState::from_args`] turns it into a running
+//! `clap::Args` group, and [`ServiceState::from_config`] turns it into a running
 //! state. A wrapping binary can `#[clap(flatten)]` this struct instead of
 //! re-declaring the individual config types.
 //!
 //! The webhook client is deliberately *not* part of the aggregate: it is a
-//! pluggable [`WebhookService`], passed to [`from_args`](ServiceState::from_args)
-//! so a caller can choose its own implementation.
+//! pluggable [`WebhookService`], passed to [`ServiceState::from_config`] so a
+//! caller can choose its own implementation.
+//!
+//! [`ServiceState`]: crate::service::ServiceState
+//! [`ServiceState::from_config`]: crate::service::ServiceState::from_config
+//! [`WebhookService`]: nvisy_webhook::WebhookService
 
 use nvisy_nats::NatsConfig;
 use nvisy_postgres::PgConfig;
-use nvisy_webhook::WebhookService;
 
-use crate::Result;
 use crate::middleware::UploadConfig;
 use crate::response::CookieConfig;
 use crate::service::{
     CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig, IntegrationConfig, OidcConfig,
-    S3Config, ServiceState, SessionKeysConfig,
+    S3Config, SessionKeysConfig,
 };
 
 /// Tracing target for configuration echoes emitted by the config aggregates.
@@ -28,8 +30,11 @@ pub(crate) const TRACING_TARGET_CONFIG: &str = "nvisy_server::args";
 /// Every external-service and resource config [`ServiceState`] is built from.
 ///
 /// Grouped so a binary flattens one struct rather than the ten configs it wraps;
-/// [`ServiceState::from_args`] consumes it. The `clap::Args` derive is gated on
+/// [`ServiceState::from_config`] consumes it. The `clap::Args` derive is gated on
 /// the `cli` feature.
+///
+/// [`ServiceState`]: crate::service::ServiceState
+/// [`ServiceState::from_config`]: crate::service::ServiceState::from_config
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 #[must_use = "config does nothing unless you use it"]
@@ -116,39 +121,13 @@ impl ServiceArgs {
     }
 }
 
-impl ServiceState {
-    /// Initializes application state from an aggregated [`ServiceArgs`] and a
-    /// caller-provided [`WebhookService`].
-    ///
-    /// Centralizes the full config-to-state wiring so a binary need not repeat
-    /// it. The webhook client is injected rather than derived from config, so a
-    /// caller can supply any implementation (the first-party CLI uses the
-    /// reqwest-based one).
-    pub async fn from_args(args: ServiceArgs, webhook: WebhookService) -> Result<Self> {
-        Self::from_config(
-            args.postgres,
-            args.nats,
-            args.session_keys,
-            args.crypto,
-            args.engine,
-            args.health,
-            args.integration,
-            args.file_service,
-            args.oidc,
-            webhook,
-            args.upload,
-            args.cookie,
-            args.s3,
-        )
-        .await
-    }
-}
-
 /// Compile-time guard for the downstream-embedding contract: a wrapping state
 /// `S` that embeds [`ServiceState`] (via [`FromRef`]) can carry its own
 /// `ApiRouter<S>` routes through [`CustomRoutes<S>`] and compose them with the
-/// built-ins via [`routes`](crate::routes). Never executed; it exists so this
-/// contract cannot regress silently.
+/// built-ins via [`routes`]. Never executed; it exists so this contract cannot
+/// regress silently.
+///
+/// [`routes`]: crate::routes
 #[cfg(test)]
 mod embed_contract {
     use aide::axum::ApiRouter;

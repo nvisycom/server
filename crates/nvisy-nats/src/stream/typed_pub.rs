@@ -1,8 +1,8 @@
-//! Type-safe JetStream publisher.
+//! Type-safe `JetStream` publisher.
 //!
 //! A stream selects both its configuration and its payload type (see
 //! [`EventStream`]), so [`EventPublisher`] is generic over `S` alone; the message
-//! type is `S::Message`. It wraps the raw JetStream context directly, publishing
+//! type is `S::Message`. It wraps the raw `JetStream` context directly, publishing
 //! a serialized `S::Message` to the stream's subject.
 
 use std::marker::PhantomData;
@@ -23,8 +23,10 @@ impl<S: EventStream> EventPublisher<S> {
     /// Create a publisher for the stream.
     ///
     /// The stream is not reconciled here — that is a startup concern done once via
-    /// [`NatsClient::ensure_stream`](crate::NatsClient::ensure_stream) — so this is
-    /// a cheap handle over the JetStream context and can be built per use.
+    /// [`NatsClient::ensure_stream`] — so this is a cheap handle over the
+    /// `JetStream` context and can be built per use.
+    ///
+    /// [`NatsClient::ensure_stream`]: crate::NatsClient::ensure_stream
     pub(crate) fn new(jetstream: &Context) -> Self {
         Self {
             jetstream: jetstream.clone(),
@@ -68,12 +70,14 @@ impl<S: EventStream> EventPublisher<S> {
 
     /// Returns the stream name.
     #[inline]
+    #[must_use]
     pub fn stream_name(&self) -> &'static str {
         S::NAME
     }
 
     /// Returns the subject.
     #[inline]
+    #[must_use]
     pub fn subject(&self) -> &'static str {
         S::SUBJECT
     }

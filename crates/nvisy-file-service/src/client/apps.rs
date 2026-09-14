@@ -11,7 +11,7 @@ pub struct OAuthApps {
     pub google_drive: Option<OAuthApp>,
     /// The Dropbox OAuth app, if configured.
     pub dropbox: Option<OAuthApp>,
-    /// The OneDrive OAuth app, if configured.
+    /// The `OneDrive` OAuth app, if configured.
     pub onedrive: Option<OAuthApp>,
     /// The Box OAuth app, if configured.
     pub box_app: Option<OAuthApp>,

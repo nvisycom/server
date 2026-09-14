@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// The operational status of a workspace webhook.
     ///
-    /// Corresponds to the `WEBHOOK_STATUS` PostgreSQL enum. The user controls
+    /// Corresponds to the `WEBHOOK_STATUS` `PostgreSQL` enum. The user controls
     /// `Enabled` / `Disabled`; `Suspended` is set by the system when a webhook
     /// fails repeatedly, and the user can re-enable it.
     pub enum WebhookStatus: Default = Enabled, "crate::schema::sql_types::WebhookStatus" {
@@ -21,12 +21,14 @@ db_enum! {
 impl WebhookStatus {
     /// Returns whether the webhook is enabled and receiving events.
     #[inline]
+    #[must_use]
     pub fn is_enabled(self) -> bool {
         matches!(self, WebhookStatus::Enabled)
     }
 
     /// Returns whether the webhook was suspended by the system.
     #[inline]
+    #[must_use]
     pub fn is_suspended(self) -> bool {
         matches!(self, WebhookStatus::Suspended)
     }

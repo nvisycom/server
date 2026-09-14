@@ -17,11 +17,13 @@ pub const MAX_EXPORT_ROWS: usize = 100_000;
 /// whose activities to keep.
 ///
 /// This is its own query struct so an endpoint composes it alongside the shared
-/// [`CursorPagination`](crate::handler::request::CursorPagination) and
-/// [`DateWindow`] as separate query extractors, rather than `#[serde(flatten)]`ing
-/// them into one struct: the query extractor (`serde_html_form`) mis-handles
-/// flattened sub-structs — a flattened pagination struct fails to deserialize even
-/// a bare `?limit=` — so each concern is extracted on its own.
+/// [`CursorPagination`] and [`DateWindow`] as separate query extractors, rather
+/// than `#[serde(flatten)]`ing them into one struct: the query extractor
+/// (`serde_html_form`) mis-handles flattened sub-structs — a flattened pagination
+/// struct fails to deserialize even a bare `?limit=` — so each concern is
+/// extracted on its own.
+///
+/// [`CursorPagination`]: crate::handler::request::CursorPagination
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceActivityFilterQuery {

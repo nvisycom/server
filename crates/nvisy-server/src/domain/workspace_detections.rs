@@ -8,7 +8,9 @@
 //! worker, not here; the service only owns the request side and meets the worker
 //! at the outbox job and the [`DetectionQueue`]. The streaming (SSE) and
 //! inference-and-staging (redact) actions stay in the handler, loading a detection
-//! through [`find`](WorkspaceDetectionService::find).
+//! through [`find`].
+//!
+//! [`find`]: WorkspaceDetectionService::find
 
 use elide_pipeline::governance::policy::Policy;
 use elide_pipeline::provider::DocumentContext;
@@ -38,12 +40,33 @@ use crate::worker::detection::DetectionJob;
 /// Tracing target for detection domain operations.
 const TRACING_TARGET: &str = "nvisy_server::domain::detection";
 
+/// The detection to commit, bundling the row and the analysis-job inputs that
+/// [`commit_detection`] persists in one transaction.
+///
+/// [`commit_detection`]: WorkspaceDetectionService::commit_detection
+struct CommitDetection {
+    /// Workspace the detection belongs to.
+    workspace_id: Uuid,
+    /// Document being analyzed.
+    document_id: Uuid,
+    /// The detection row to insert.
+    new_detection: NewWorkspaceDetection,
+    /// Pipeline the detection runs, if any.
+    pipeline_id: Option<Uuid>,
+    /// Effective document scope for the analysis job.
+    scope: Option<DocumentContext>,
+    /// Policies the analysis job resolves.
+    policy_ids: Vec<Uuid>,
+}
+
 /// Creates and enqueues detections, and reads them back.
 ///
 /// Holds the Postgres client (acquiring its own connection per call) and the
 /// detection queue (to broadcast the initial status and wake the outbox drainer
 /// after a create commits). Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct WorkspaceDetectionService {
     postgres: PgClient,
@@ -52,6 +75,7 @@ pub struct WorkspaceDetectionService {
 
 impl WorkspaceDetectionService {
     /// Creates a [`WorkspaceDetectionService`] over its clients.
+    #[must_use]
     pub fn new(postgres: PgClient, detection: DetectionQueue) -> Self {
         Self {
             postgres,
@@ -146,12 +170,14 @@ impl WorkspaceDetectionService {
             .commit_detection(
                 &mut conn,
                 origin,
-                workspace_id,
-                document.id,
-                new_detection,
-                Some(pipeline.id),
-                input.scope,
-                Vec::new(),
+                CommitDetection {
+                    workspace_id,
+                    document_id: document.id,
+                    new_detection,
+                    pipeline_id: Some(pipeline.id),
+                    scope: input.scope,
+                    policy_ids: Vec::new(),
+                },
             )
             .await?;
 
@@ -171,8 +197,10 @@ impl WorkspaceDetectionService {
     /// Starts an ad-hoc detection against an explicit policy list, with no pipeline.
     ///
     /// Validates the document and every named policy synchronously, then commits and
-    /// enqueues the detection the same way as [`create`](Self::create). An
-    /// idempotency key replays an existing detection.
+    /// enqueues the detection the same way as [`create`]. An idempotency key replays
+    /// an existing detection.
+    ///
+    /// [`create`]: Self::create
     pub async fn create_adhoc(
         &self,
         origin: event::EventOrigin<'_>,
@@ -226,12 +254,14 @@ impl WorkspaceDetectionService {
             .commit_detection(
                 &mut conn,
                 origin,
-                workspace_id,
-                document.id,
-                new_detection,
-                None,
-                input.scope,
-                input.policy_ids,
+                CommitDetection {
+                    workspace_id,
+                    document_id: document.id,
+                    new_detection,
+                    pipeline_id: None,
+                    scope: input.scope,
+                    policy_ids: input.policy_ids,
+                },
             )
             .await?;
 
@@ -372,21 +402,18 @@ impl WorkspaceDetectionService {
         &self,
         conn: &mut PgConn,
         origin: event::EventOrigin<'_>,
-        workspace_id: Uuid,
-        document_id: Uuid,
-        new_detection: NewWorkspaceDetection,
-        pipeline_id: Option<Uuid>,
-        scope: Option<DocumentContext>,
-        policy_ids: Vec<Uuid>,
+        detection: CommitDetection,
     ) -> Result<WorkspaceDetectionModel> {
         let account_id = origin.account_id;
         conn.transaction(async |conn| {
-            let detection_row = conn.create_workspace_detection(new_detection).await?;
+            let detection_row = conn
+                .create_workspace_detection(detection.new_detection)
+                .await?;
             conn.emit_event(
                 origin,
                 event::WorkspaceEvent::DetectionStarted(event::DetectionStarted {
                     detection_id: detection_row.id,
-                    pipeline_id,
+                    pipeline_id: detection.pipeline_id,
                 }),
             )
             .await?;
@@ -395,15 +422,19 @@ impl WorkspaceDetectionService {
             // per document) so this detection has somewhere to be reviewed, and
             // reopen it if a prior review had resolved.
             let thread = conn
-                .find_or_create_document_thread(workspace_id, document_id, account_id)
+                .find_or_create_document_thread(
+                    detection.workspace_id,
+                    detection.document_id,
+                    account_id,
+                )
                 .await?;
             conn.reopen_review(thread.id, account_id).await?;
 
             let job = DetectionJob {
-                workspace_id,
+                workspace_id: detection.workspace_id,
                 detection_id: detection_row.id,
-                scope,
-                policy_ids,
+                scope: detection.scope,
+                policy_ids: detection.policy_ids,
             };
             conn.insert_detection_job(NewWorkspaceDetectionJob {
                 detection_id: detection_row.id,
@@ -443,7 +474,7 @@ fn parse_definition(version_id: Uuid, definition: serde_json::Value) -> Result<P
     })
 }
 
-/// Finds a pipeline within a workspace by id or returns NotFound.
+/// Finds a pipeline within a workspace by id or returns `NotFound`.
 async fn find_pipeline(
     conn: &mut PgConn,
     workspace_id: Uuid,

@@ -7,12 +7,14 @@
 //! One authorization concern stays in the handler because it is transport, not
 //! domain: obtaining a step-up re-authentication proof (an OIDC/NATS-KV round-trip)
 //! before a *first* password is set. The handler consumes that proof and calls
-//! [`set_first_password`](AccountIdentityService::set_first_password) with a
-//! [`ReauthVerified`] marker; a change instead goes through
-//! [`change_password`](AccountIdentityService::change_password), which verifies the
-//! current password. The service reads [`has_password`](AccountIdentityService::has_password)
-//! so the handler knows which path to take and consumes the single-use proof only
-//! when one is actually required.
+//! [`set_first_password`] with a [`ReauthVerified`] marker; a change instead goes
+//! through [`change_password`], which verifies the current password. The service
+//! reads [`has_password`] so the handler knows which path to take and consumes
+//! the single-use proof only when one is actually required.
+//!
+//! [`set_first_password`]: AccountIdentityService::set_first_password
+//! [`change_password`]: AccountIdentityService::change_password
+//! [`has_password`]: AccountIdentityService::has_password
 
 use nvisy_postgres::model::{AccountIdentity, UpdateAccount};
 use nvisy_postgres::query::{AccountIdentityRepository, AccountRepository, DeleteIdentityOutcome};
@@ -38,7 +40,9 @@ pub struct ReauthVerified;
 ///
 /// Holds the Postgres client (own-connection-per-call) and the password service
 /// (to strength-check, hash, and verify). Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct AccountIdentityService {
     postgres: PgClient,
@@ -47,6 +51,7 @@ pub struct AccountIdentityService {
 
 impl AccountIdentityService {
     /// Creates an [`AccountIdentityService`] over its clients.
+    #[must_use]
     pub fn new(postgres: PgClient, password: PasswordService) -> Self {
         Self { postgres, password }
     }
@@ -113,7 +118,9 @@ impl AccountIdentityService {
     /// re-authentication proof.
     ///
     /// Refuses (409) if the account already has a password — that path is
-    /// [`change_password`](Self::change_password), which verifies the current one.
+    /// [`change_password`], which verifies the current one.
+    ///
+    /// [`change_password`]: Self::change_password
     pub async fn set_first_password(
         &self,
         account_id: Uuid,

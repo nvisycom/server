@@ -1,6 +1,6 @@
-//! OpenAI provider, backed by rig's OpenAI client.
+//! `OpenAI` provider, backed by rig's `OpenAI` client.
 //!
-//! Works with OpenAI and any OpenAI-compatible endpoint (Azure OpenAI, a proxy).
+//! Works with `OpenAI` and any OpenAI-compatible endpoint (Azure `OpenAI`, a proxy).
 
 use derive_more::Deref;
 use rig::providers::openai;
@@ -13,7 +13,7 @@ use crate::error::{Error, Result};
 pub struct OpenAiProvider(openai::Client);
 
 impl Client for OpenAiProvider {
-    /// The OpenAI API key.
+    /// The `OpenAI` API key.
     type Credentials = str;
 
     const ID: &str = "openai";

@@ -43,8 +43,10 @@
 //! }
 //! ```
 //!
-//! Authentication is applied by the route composition in
-//! [`handler::routes`](crate::handler::routes), not through a router extension.
+//! Authentication is applied by the route composition in [`handler::routes`],
+//! not through a router extension.
+//!
+//! [`handler::routes`]: crate::handler::routes
 
 mod args;
 mod auth;

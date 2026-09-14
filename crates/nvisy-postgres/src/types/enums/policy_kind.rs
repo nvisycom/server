@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// The kind of a redaction policy.
     ///
-    /// Corresponds to the `POLICY_KIND` PostgreSQL enum. An authored policy is a
+    /// Corresponds to the `POLICY_KIND` `PostgreSQL` enum. An authored policy is a
     /// normal, editable policy created from a template or an inline definition. A
     /// one-shot policy is minted inline from a bare label list (the ad-hoc redact
     /// flow): it is content-addressed and deduplicated, and immutable once minted.

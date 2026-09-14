@@ -84,7 +84,7 @@ where
             // A data frame: add its length to the running total.
             Poll::Ready(Some(Ok(frame))) => {
                 if let Some(data) = frame.data_ref() {
-                    *this.bytes += data.remaining() as u64;
+                    *this.bytes += u64::try_from(data.remaining()).unwrap_or(u64::MAX);
                 }
             }
             // End of stream: report the total once (drop reports it otherwise).
@@ -128,7 +128,7 @@ mod tests {
         let mut total = 0;
         while let Some(frame) = poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await {
             if let Some(data) = frame.unwrap().data_ref() {
-                total += data.remaining() as u64;
+                total += u64::try_from(data.remaining()).unwrap_or(u64::MAX);
             }
         }
         total
@@ -141,7 +141,7 @@ mod tests {
         let sink = Arc::clone(&reported);
 
         let body = CountingBody::new(AxumBody::from("hello world"), move |n| {
-            sink.store(n, Ordering::SeqCst)
+            sink.store(n, Ordering::SeqCst);
         });
 
         assert_eq!(drain(body).await, 11);
@@ -170,7 +170,7 @@ mod tests {
         // `CountingBody` is `Unpin` here, so dropping the owned value runs its
         // `PinnedDrop` and fires the callback with the bytes seen so far (none).
         let body = CountingBody::new(AxumBody::from("partial"), move |n| {
-            sink.store(n, Ordering::SeqCst)
+            sink.store(n, Ordering::SeqCst);
         });
         drop(body);
 

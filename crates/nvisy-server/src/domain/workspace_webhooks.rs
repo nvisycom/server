@@ -30,7 +30,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::webhook";
 /// Holds the Postgres client (acquiring its own connection per call), the crypto
 /// service (to mint, encrypt, and decrypt the signing secret), and the delivery
 /// client (to send a test request). Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct WorkspaceWebhookService {
     postgres: PgClient,
@@ -40,6 +42,7 @@ pub struct WorkspaceWebhookService {
 
 impl WorkspaceWebhookService {
     /// Creates a [`WorkspaceWebhookService`] over its clients.
+    #[must_use]
     pub fn new(postgres: PgClient, crypto: CryptoService, webhook: WebhookService) -> Self {
         Self {
             postgres,
@@ -99,7 +102,7 @@ impl WorkspaceWebhookService {
             .await?)
     }
 
-    /// Finds a webhook by id with its creator, or a NotFound.
+    /// Finds a webhook by id with its creator, or a `NotFound`.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -260,7 +263,7 @@ fn check_webhook_url(url: &str) -> Result<()> {
     })
 }
 
-/// Finds a webhook within a workspace by id, with its creator, or a NotFound.
+/// Finds a webhook within a workspace by id, with its creator, or a `NotFound`.
 async fn find_webhook(
     conn: &mut PgConn,
     workspace_id: Uuid,

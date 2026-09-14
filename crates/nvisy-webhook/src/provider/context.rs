@@ -31,6 +31,7 @@ pub struct WebhookContext {
 
 impl WebhookContext {
     /// Creates a new context with required fields.
+    #[must_use]
     pub fn new(webhook_id: Uuid, workspace_id: Uuid, resource_id: Uuid) -> Self {
         Self {
             webhook_id,
@@ -43,6 +44,7 @@ impl WebhookContext {
     }
 
     /// Creates a test context for webhook testing.
+    #[must_use]
     pub fn test(webhook_id: Uuid, workspace_id: Uuid) -> Self {
         Self {
             webhook_id,
@@ -57,18 +59,21 @@ impl WebhookContext {
     }
 
     /// Sets the resource type.
+    #[must_use]
     pub fn with_resource_type(mut self, resource_type: impl Into<String>) -> Self {
         self.resource_type = Some(resource_type.into());
         self
     }
 
     /// Sets the account ID.
+    #[must_use]
     pub fn with_account(mut self, account_id: Uuid) -> Self {
         self.account_id = Some(account_id);
         self
     }
 
     /// Sets additional metadata.
+    #[must_use]
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.metadata = metadata;
         self

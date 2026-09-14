@@ -27,6 +27,7 @@ impl StandardCronSchedule {
     ///
     /// Returns `false` if the cron expression fails to parse or its next
     /// occurrence cannot be computed, so a malformed schedule never fires.
+    #[must_use]
     pub fn is_due(&self, cron: &str, last_sync: Option<Timestamp>, now: Timestamp) -> bool {
         let Ok(schedule) = Cron::from_str(cron) else {
             return false;
@@ -44,6 +45,7 @@ impl StandardCronSchedule {
     }
 
     /// Validates a cron expression, returning whether it parses.
+    #[must_use]
     pub fn is_valid(&self, cron: &str) -> bool {
         Cron::from_str(cron).is_ok()
     }
@@ -86,7 +88,7 @@ mod tests {
 
     #[test]
     fn malformed_cron_never_due() {
-        assert!(!StandardCronSchedule.is_due("not a cron", Some(ts(0)), ts(999999)));
+        assert!(!StandardCronSchedule.is_due("not a cron", Some(ts(0)), ts(999_999)));
         assert!(!StandardCronSchedule.is_valid("nope"));
         assert!(StandardCronSchedule.is_valid("0 0 * * *"));
     }

@@ -4,11 +4,12 @@
 //! [`EventEmitter::emit_event`] — a trait on the connection — records it by
 //! inserting a single outbox row, so wrapping the action and the emit in one
 //! transaction makes them atomic: the event is never lost, nor recorded for an
-//! action that rolled back. The
-//! [`EventOutboxDrainer`](crate::worker::event::EventOutboxDrainer) then projects
-//! each pending event onto the sinks that care — the activity log, the webhook
-//! stream, and notifications — asynchronously and with retries. The event → sink
-//! projection lives in the drainer alone, off the request path.
+//! action that rolled back. The [`EventOutboxDrainer`] then projects each pending
+//! event onto the sinks that care — the activity log, the webhook stream, and
+//! notifications — asynchronously and with retries. The event → sink projection
+//! lives in the drainer alone, off the request path.
+//!
+//! [`EventOutboxDrainer`]: crate::worker::event::EventOutboxDrainer
 
 mod emitter;
 mod kind;

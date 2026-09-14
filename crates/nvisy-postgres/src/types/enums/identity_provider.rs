@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// How an account authenticates.
     ///
-    /// Corresponds to the `IDENTITY_PROVIDER` PostgreSQL enum. [`Password`] is a
+    /// Corresponds to the `IDENTITY_PROVIDER` `PostgreSQL` enum. [`Password`] is a
     /// locally-held Argon2 secret; the rest are external OIDC providers keyed by
     /// the provider's subject claim.
     ///

@@ -1,6 +1,6 @@
 //! Constraint violation to HTTP error conversion handlers.
 //!
-//! This module provides organized handlers for converting PostgreSQL constraint
+//! This module provides organized handlers for converting `PostgreSQL` constraint
 //! violations into appropriate HTTP error responses. Each submodule handles
 //! constraints for a specific domain (accounts, workspaces, documents, etc.).
 //!

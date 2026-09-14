@@ -118,7 +118,9 @@ impl<P: RequiredPermission> OperationInput for Authorized<P> {
 macro_rules! authz_permissions {
     ($($marker:ident => $permission:expr),+ $(,)?) => {
         /// Generated [`RequiredPermission`] marker types, one per [`Permission`]
-        /// variant, used as the `P` in [`Authorized<P>`](super::Authorized).
+        /// variant, used as the `P` in [`Authorized<P>`].
+        ///
+        /// [`Authorized<P>`]: super::Authorized
         pub mod markers {
             use super::{Permission, RequiredPermission};
 

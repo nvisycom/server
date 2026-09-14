@@ -4,9 +4,11 @@
 //! [`ConnectionSyncService`] owns the request-time surface — opening a run,
 //! cancelling a locally-running one, and the process-local cancel registry that
 //! ties the two together — and delegates the transfer itself to the
-//! [`TransferEngine`](crate::worker::integration::TransferEngine), which races the
-//! transfer against a timeout and finalizes the run. Both the manual endpoint and
-//! the scheduled worker drive a transfer through this handle.
+//! [`TransferEngine`], which races the transfer against a timeout and finalizes
+//! the run. Both the manual endpoint and the scheduled worker drive a transfer
+//! through this handle.
+//!
+//! [`TransferEngine`]: crate::worker::integration::TransferEngine
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -88,7 +90,9 @@ pub struct ConnectionSyncService {
 impl ConnectionSyncService {
     /// Creates a new [`ConnectionSyncService`]. `import_concurrency` and
     /// `export_concurrency` bound the in-flight imports and exports per sync (see
-    /// [`IntegrationConfig`](crate::service::IntegrationConfig)).
+    /// [`IntegrationConfig`]).
+    ///
+    /// [`IntegrationConfig`]: crate::service::IntegrationConfig
     pub fn new(
         infra: Infra,
         crypto: CryptoService,
@@ -144,6 +148,7 @@ impl ConnectionSyncService {
     /// it. Returns whether a token was found and cancelled. This is best-effort:
     /// a run executing on another instance is not reached here and relies on the
     /// DB status flip instead.
+    #[must_use]
     pub fn cancel_local(&self, run_id: Uuid) -> bool {
         let guard = self.running.lock().expect("sync cancel registry poisoned");
         if let Some(token) = guard.get(&run_id) {
@@ -155,9 +160,11 @@ impl ConnectionSyncService {
     }
 
     /// Runs a sync transfer to completion, registering it in the process-local
-    /// cancel registry for the duration so [`cancel_local`](Self::cancel_local)
-    /// can reach it, and delegating the transfer mechanics to the
-    /// [`TransferEngine`]. Shared by the manual endpoint and the scheduled worker.
+    /// cancel registry for the duration so [`cancel_local`] can reach it, and
+    /// delegating the transfer mechanics to the [`TransferEngine`]. Shared by the
+    /// manual endpoint and the scheduled worker.
+    ///
+    /// [`cancel_local`]: Self::cancel_local
     pub async fn run_transfer(&self, request: TransferRequest) {
         let run_id = request.run_id;
         let token = CancellationToken::new();

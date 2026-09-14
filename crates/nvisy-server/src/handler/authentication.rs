@@ -106,7 +106,7 @@ fn logout_docs(op: TransformOperation) -> TransformOperation {
 /// Public authentication routes: login and signup, which a caller with no
 /// session reaches before authenticating.
 pub fn public_routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::post_with;
 
     ApiRouter::new()
         .api_route("/auth/login/", post_with(login, login_docs))
@@ -118,7 +118,7 @@ pub fn public_routes() -> ApiRouter<ServiceState> {
 /// session and so must sit behind the authentication and CSRF layers (it is a
 /// cookie-driven state change).
 pub fn private_routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::post_with;
 
     ApiRouter::new()
         .api_route("/auth/logout/", post_with(logout, logout_docs))
@@ -267,7 +267,7 @@ mod tests {
         let mut fixture = SessionFixture::create().await?;
         let now = Timestamp::now();
 
-        let beyond_cap = now - Span::new().seconds(session::MAX_AGE.as_secs() as i64 + 3600);
+        let beyond_cap = now - Span::new().seconds(session::MAX_AGE_SECS + 3600);
         fixture.set_times(beyond_cap, now + days(1), None).await?;
         assert!(
             !fixture.is_active().await?,
@@ -291,7 +291,7 @@ mod tests {
             "a session used within the throttle window does not slide"
         );
 
-        let stale = now - Span::new().seconds(session::SLIDE_THROTTLE.as_secs() as i64 + 60);
+        let stale = now - Span::new().seconds(session::SLIDE_THROTTLE_SECS + 60);
         fixture
             .set_times(now, now + Span::new().hours(1), Some(stale))
             .await?;
@@ -313,7 +313,7 @@ mod tests {
 
     /// An `app` (desktop) token does not slide and is not subject to the browser
     /// absolute cap: it stays valid on its own long `expired_at` even when it was
-    /// issued far longer ago than the web MAX_AGE and never used.
+    /// issued far longer ago than the web `MAX_AGE` and never used.
     #[tokio::test]
     #[ignore = "requires database and key files"]
     async fn app_token_does_not_slide_and_ignores_absolute_cap() -> anyhow::Result<()> {

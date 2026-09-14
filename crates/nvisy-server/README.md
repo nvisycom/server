@@ -10,7 +10,7 @@ with Axum and Tokio.
 The core HTTP API layer implementing REST endpoints for workspaces,
 pipelines, connections, files, and accounts. It provides JWT
 authentication with Ed25519, role-based authorization, request
-validation, a Tower middleware stack, and auto-generated OpenAPI
+validation, a Tower middleware stack, and auto-generated `OpenAPI`
 documentation via Aide. Depends on all other workspace crates for
 persistence, messaging, storage, and webhook delivery.
 

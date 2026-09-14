@@ -1,5 +1,5 @@
 //! Optional authentication extractor for endpoints that vary by whether a caller
-//! authenticated, without marking themselves auth-required in the OpenAPI spec.
+//! authenticated, without marking themselves auth-required in the `OpenAPI` spec.
 
 use aide::OperationInput;
 use aide::generate::GenContext;
@@ -17,7 +17,7 @@ use crate::service::SessionKeys;
 /// Optional [`AuthState`] for an endpoint that runs with or without a token.
 ///
 /// Extracting a bare `Option<AuthState>` authenticates the same way, but its
-/// generated OpenAPI security comes from the blanket `Option<T>` `OperationInput`,
+/// generated `OpenAPI` security comes from the blanket `Option<T>` `OperationInput`,
 /// which delegates to [`AuthState`] and so wrongly marks the operation
 /// auth-required. This wrapper carries the same optional value while declaring the
 /// token as *optional* in the spec (an empty requirement alongside the Bearer one,
@@ -66,10 +66,13 @@ mod tests {
 
     use super::OptionalAuth;
 
-    /// The OpenAPI security for an optional-auth operation must offer an
+    /// The `OpenAPI` security for an optional-auth operation must offer an
     /// unauthenticated alternative (an empty requirement) alongside the Bearer
     /// one, so the endpoint is not documented as requiring a token — a public
     /// probe hitting the health check must not appear to need credentials.
+    // reason: `is_empty` method path would require naming the foreign `IndexMap`
+    // behind the `SecurityRequirement` alias, which is not a direct dependency.
+    #[allow(clippy::redundant_closure_for_method_calls)]
     #[test]
     fn documents_auth_as_optional_not_required() {
         let mut operation = Operation::default();

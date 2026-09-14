@@ -24,7 +24,7 @@ const MAX_OFFSET: u32 = 100_000;
 #[garde(allow_unvalidated)]
 pub struct OffsetPagination {
     /// The number of records to skip before starting to return results.
-    #[garde(range(max = 100000))]
+    #[garde(range(max = 100_000))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offset: Option<u32>,
 
@@ -37,12 +37,14 @@ pub struct OffsetPagination {
 impl OffsetPagination {
     /// Returns the pagination offset.
     #[inline]
+    #[must_use]
     pub fn offset(&self) -> u32 {
         self.offset.unwrap_or(0).min(MAX_OFFSET)
     }
 
     /// Returns the pagination limit.
     #[inline]
+    #[must_use]
     pub fn limit(&self) -> u32 {
         self.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT)
     }
@@ -50,7 +52,7 @@ impl OffsetPagination {
 
 impl From<OffsetPagination> for types::OffsetPagination {
     fn from(query: OffsetPagination) -> Self {
-        Self::new(query.limit() as i64, query.offset() as i64)
+        Self::new(i64::from(query.limit()), i64::from(query.offset()))
     }
 }
 
@@ -84,6 +86,7 @@ pub struct CursorPagination {
 impl CursorPagination {
     /// Returns the pagination limit.
     #[inline]
+    #[must_use]
     pub fn limit(&self) -> u32 {
         self.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT)
     }
@@ -91,14 +94,18 @@ impl CursorPagination {
     /// Converts to typed database pagination, decoding the opaque `after` cursor
     /// against the query's keyset `K`. An `after` that does not decode to `K` is
     /// treated as no cursor (a fresh first page). Defaults to descending; a caller
-    /// that walks ascending sets it with
-    /// [`with_direction`](types::CursorPagination::with_direction).
+    /// that walks ascending sets it with [`with_direction`].
+    ///
+    /// [`with_direction`]: types::CursorPagination::with_direction
+    #[must_use]
     pub fn into_cursor<K>(self) -> types::CursorPagination<K>
     where
         K: types::CursorKey,
     {
-        let pagination =
-            types::CursorPagination::from_cursor_string(self.limit() as i64, self.after.as_deref());
+        let pagination = types::CursorPagination::from_cursor_string(
+            i64::from(self.limit()),
+            self.after.as_deref(),
+        );
         if self.include_count {
             pagination.with_count()
         } else {

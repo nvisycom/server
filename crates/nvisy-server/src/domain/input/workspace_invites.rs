@@ -18,6 +18,7 @@ pub struct CreateInviteInput {
 impl CreateInviteInput {
     /// The invitee email, normalized (trimmed and lowercased) so lookups and the
     /// stored value are consistent regardless of how the caller cased it.
+    #[must_use]
     pub fn normalized_email(&self) -> String {
         self.invitee_email.trim().to_lowercase()
     }

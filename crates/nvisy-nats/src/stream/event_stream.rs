@@ -32,7 +32,7 @@ where
     const ACK_WAIT: Option<Duration> = Some(Duration::from_secs(90));
     const CONSUMER_NAME: &'static str = "webhook-worker";
     const DESCRIPTION: &'static str = "Webhook delivery jobs";
-    const MAX_AGE: Option<Duration> = Some(Duration::from_secs(24 * 60 * 60));
+    const MAX_AGE: Option<Duration> = Some(Duration::from_hours(24));
     const MAX_DELIVER: Option<i64> = Some(3);
     const NAME: &'static str = "WEBHOOKS";
     const SUBJECT: &'static str = "webhooks";
@@ -60,10 +60,10 @@ where
 
     // A sync transfer is bounded by a 30-minute timeout; allow ack time to
     // exceed that so a slow-but-healthy job is not redelivered mid-run.
-    const ACK_WAIT: Option<Duration> = Some(Duration::from_secs(35 * 60));
+    const ACK_WAIT: Option<Duration> = Some(Duration::from_mins(35));
     const CONSUMER_NAME: &'static str = "connection-sync-worker";
     const DESCRIPTION: &'static str = "Connection sync jobs";
-    const MAX_AGE: Option<Duration> = Some(Duration::from_secs(60 * 60));
+    const MAX_AGE: Option<Duration> = Some(Duration::from_hours(1));
     const NAME: &'static str = "CONNECTION_SYNCS";
     const SUBJECT: &'static str = "connection.sync.jobs";
 }
@@ -91,10 +91,10 @@ where
 
     // Detection can be slow (LLM/OCR); allow ack time to exceed the longest
     // expected analyze so a slow-but-healthy job is not redelivered mid-run.
-    const ACK_WAIT: Option<Duration> = Some(Duration::from_secs(15 * 60));
+    const ACK_WAIT: Option<Duration> = Some(Duration::from_mins(15));
     const CONSUMER_NAME: &'static str = "detection-worker";
     const DESCRIPTION: &'static str = "Pipeline detection jobs";
-    const MAX_AGE: Option<Duration> = Some(Duration::from_secs(60 * 60));
+    const MAX_AGE: Option<Duration> = Some(Duration::from_hours(1));
     const NAME: &'static str = "DETECTIONS";
     const SUBJECT: &'static str = "pipeline.detection.jobs";
 }
@@ -122,10 +122,10 @@ where
 {
     type Message = M;
 
-    const ACK_WAIT: Option<Duration> = Some(Duration::from_secs(5 * 60));
+    const ACK_WAIT: Option<Duration> = Some(Duration::from_mins(5));
     const CONSUMER_NAME: &'static str = "assistant-worker";
     const DESCRIPTION: &'static str = "Assistant reply jobs";
-    const MAX_AGE: Option<Duration> = Some(Duration::from_secs(60 * 60));
+    const MAX_AGE: Option<Duration> = Some(Duration::from_hours(1));
     const MAX_DELIVER: Option<i64> = Some(5);
     const NAME: &'static str = "ASSISTANT";
     const SUBJECT: &'static str = "assistant.replies";
@@ -142,7 +142,7 @@ mod tests {
     fn test_webhook_stream() {
         assert_eq!(Stream::NAME, "WEBHOOKS");
         assert_eq!(Stream::SUBJECT, "webhooks");
-        assert_eq!(Stream::MAX_AGE, Some(Duration::from_secs(24 * 60 * 60)));
+        assert_eq!(Stream::MAX_AGE, Some(Duration::from_hours(24)));
         assert_eq!(Stream::CONSUMER_NAME, "webhook-worker");
     }
 }

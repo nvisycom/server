@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn test_debug_redacts_key() {
         let key = EncryptionKey::generate();
-        let debug = format!("{:?}", key);
+        let debug = format!("{key:?}");
         assert!(debug.contains("REDACTED"));
         assert!(!debug.contains(&format!("{:?}", key.as_bytes())));
     }

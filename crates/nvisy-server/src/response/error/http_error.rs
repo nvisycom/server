@@ -130,7 +130,7 @@ impl fmt::Display for Error<'_> {
         write!(f, "{} ({}): {}", response.name, response.status, message)?;
 
         if let Some(ref context) = self.context {
-            write!(f, " - {}", context)?;
+            write!(f, " - {context}")?;
         }
 
         Ok(())
@@ -305,6 +305,7 @@ impl ErrorKind {
 
     /// Returns the HTTP status code for this error kind.
     #[inline]
+    #[must_use]
     pub fn status_code(self) -> StatusCode {
         self.response().status
     }
@@ -323,7 +324,7 @@ impl IntoResponse for ErrorKind {
     }
 }
 
-impl<'a> OperationOutput for Error<'a> {
+impl OperationOutput for Error<'_> {
     type Inner = ErrorResponse<'static>;
 
     fn operation_response(
@@ -392,7 +393,7 @@ mod tests {
             .with_message("Resource not found")
             .with_context("ID: 123");
 
-        let display = format!("{}", error);
+        let display = format!("{error}");
         assert!(display.contains("not_found"));
         assert!(display.contains("404"));
         assert!(display.contains("Resource not found"));
@@ -405,7 +406,7 @@ mod tests {
             .with_message("Access denied")
             .with_context("User lacks permissions");
 
-        let debug = format!("{:?}", error);
+        let debug = format!("{error:?}");
         assert!(debug.contains("Forbidden"));
         assert!(debug.contains("Access denied"));
     }

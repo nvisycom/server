@@ -65,7 +65,7 @@ impl Default for CookieConfig {
 /// The idle bound is enforced server-side against the session row, so the cookie
 /// itself only needs to survive up to the hard age limit.
 fn cookie_max_age() -> time::Duration {
-    time::Duration::seconds(session::MAX_AGE.as_secs() as i64)
+    time::Duration::seconds(session::MAX_AGE_SECS)
 }
 
 /// Builds the `HttpOnly` session cookie carrying `jwt`.

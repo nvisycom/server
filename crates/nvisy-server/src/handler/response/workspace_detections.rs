@@ -1,4 +1,4 @@
-//! WorkspaceDetection response types.
+//! `WorkspaceDetection` response types.
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceDetection as DetectionModel;
@@ -66,7 +66,7 @@ impl WorkspaceDetection {
     /// id and handle, the triggering account, and the resolved input file display
     /// name. The owning pipeline id is read from the model.
     pub fn from_model(
-        detection: DetectionModel,
+        detection: &DetectionModel,
         workspace_id: Uuid,
         workspace_handle: Handle,
         triggered_by: AccountRef,

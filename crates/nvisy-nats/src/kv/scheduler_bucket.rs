@@ -39,7 +39,7 @@ impl KvBucket for SchedulerLocksBucket {
     const NAME: &'static str = "scheduler_locks";
     // Comfortably above the scheduler tick interval so a period's lock outlives
     // its period despite clock skew; per-period keys expire on their own.
-    const TTL: Option<Duration> = Some(Duration::from_secs(5 * 60));
+    const TTL: Option<Duration> = Some(Duration::from_mins(5));
 }
 
 #[cfg(test)]

@@ -46,10 +46,12 @@ impl GetObject {
 
 /// A first-party blob store backed by an S3-compatible service.
 ///
-/// One S3 bucket holds every logical [`Bucket`](crate::Bucket); each object is
-/// addressed by `"{bucket.prefix()}/{key}"`, and the bucket is derived from the
-/// key's [`ObjectKey::BUCKET`]. Cloneable and cheap to pass around — it wraps an
+/// One S3 bucket holds every logical [`Bucket`]; each object is addressed by
+/// `"{bucket.prefix()}/{key}"`, and the bucket is derived from the key's
+/// [`ObjectKey::BUCKET`]. Cloneable and cheap to pass around — it wraps an
 /// `Arc`-backed SDK client.
+///
+/// [`Bucket`]: crate::Bucket
 #[derive(Clone)]
 pub struct BlobStore {
     client: Client,
@@ -69,11 +71,13 @@ impl BlobStore {
 
     /// Streams `reader` into `key`'s store, returning the number of bytes written.
     ///
-    /// The target store is [`K::BUCKET`](ObjectKey::BUCKET), so a key can only be
-    /// written to its own store. Uploads as a single S3 object when the content
-    /// fits one part, and as a multipart upload otherwise, so an object of unknown
-    /// length streams without being buffered whole in memory. A failure after the
-    /// multipart upload begins aborts it so no partial upload lingers.
+    /// The target store is [`K::BUCKET`], so a key can only be written to its own
+    /// store. Uploads as a single S3 object when the content fits one part, and as
+    /// a multipart upload otherwise, so an object of unknown length streams without
+    /// being buffered whole in memory. A failure after the multipart upload begins
+    /// aborts it so no partial upload lingers.
+    ///
+    /// [`K::BUCKET`]: ObjectKey::BUCKET
     pub async fn put<K, R>(&self, key: &K, reader: R) -> Result<u64>
     where
         K: ObjectKey,
@@ -86,8 +90,8 @@ impl BlobStore {
         let first = read_part(&mut reader).await?;
 
         // Small object: one PutObject, no multipart bookkeeping.
-        if (first.len() as u64) < PART_SIZE as u64 {
-            let size = first.len() as u64;
+        if first.len() < PART_SIZE {
+            let size = u64::try_from(first.len()).unwrap_or(u64::MAX);
             self.client
                 .put_object()
                 .bucket(&self.bucket)
@@ -187,7 +191,7 @@ impl BlobStore {
                 ));
             }
 
-            total += part.len() as u64;
+            total += u64::try_from(part.len()).unwrap_or(u64::MAX);
             let uploaded = self
                 .client
                 .upload_part()
@@ -263,7 +267,7 @@ impl BlobStore {
             }
         };
 
-        let size = output.content_length().unwrap_or_default().max(0) as u64;
+        let size = u64::try_from(output.content_length().unwrap_or_default().max(0)).unwrap_or(0);
         let reader = output.body.into_async_read();
         Ok(Some(GetObject {
             reader: Box::new(reader),

@@ -1,7 +1,7 @@
 //! Enhanced JSON extractor with improved error handling.
 //!
 //! This module provides [`Json`], an enhanced version of [`axum::Json`] with
-//! better error messages, size limits, and OpenAPI documentation support.
+//! better error messages, size limits, and `OpenAPI` documentation support.
 
 use aide::generate::GenContext;
 use aide::openapi::Operation;

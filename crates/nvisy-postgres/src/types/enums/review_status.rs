@@ -6,7 +6,7 @@ db_enum! {
     /// The review state of a file thread (a file thread is the review of its
     /// file). `None` on the thread means a workspace thread, which has no review.
     ///
-    /// Corresponds to the `REVIEW_STATUS` PostgreSQL enum. It is derived from the
+    /// Corresponds to the `REVIEW_STATUS` `PostgreSQL` enum. It is derived from the
     /// review's events, never set by a user: a detection makes it `NeedsReview`, a
     /// redaction `InReview`, and verification `Resolved`; a later detection reopens
     /// it to `NeedsReview`.
@@ -23,6 +23,7 @@ db_enum! {
 impl ReviewStatus {
     /// Whether the review has been verified.
     #[inline]
+    #[must_use]
     pub fn is_resolved(self) -> bool {
         matches!(self, ReviewStatus::Resolved)
     }

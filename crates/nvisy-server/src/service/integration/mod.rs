@@ -7,13 +7,15 @@
 //! import concurrency), and [`FileConnectorsConfig`] the cloud file-service OAuth
 //! apps.
 //!
-//! Built on top of [`ExternalObjectStore`](crate::service::ExternalObjectStore)
-//! (bare object-store access): [`ConnectionSyncService`] is the request-side handle
-//! that opens runs and delegates transfers to the
-//! [`TransferEngine`](crate::worker::integration::TransferEngine), which the
-//! [`ConnectionSyncWorker`](crate::worker::integration::ConnectionSyncWorker)
-//! schedules; [`StandardCronSchedule`] decides when a cron-scheduled connection is
-//! due.
+//! Built on top of [`ExternalObjectStore`] (bare object-store access):
+//! [`ConnectionSyncService`] is the request-side handle that opens runs and
+//! delegates transfers to the [`TransferEngine`], which the
+//! [`ConnectionSyncWorker`] schedules; [`StandardCronSchedule`] decides when a
+//! cron-scheduled connection is due.
+//!
+//! [`ExternalObjectStore`]: crate::service::ExternalObjectStore
+//! [`TransferEngine`]: crate::worker::integration::TransferEngine
+//! [`ConnectionSyncWorker`]: crate::worker::integration::ConnectionSyncWorker
 
 mod connection_config;
 mod connectors;

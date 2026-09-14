@@ -91,7 +91,7 @@ pub mod sql_types {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Text, Nullable, Inet, Bool, Timestamptz};
     use super::sql_types::ApiTokenType;
 
     account_api_tokens (id) {
@@ -110,7 +110,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Nullable, Text, Timestamptz};
     use super::sql_types::IdentityProvider;
 
     account_identities (id) {
@@ -126,7 +126,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Nullable, Timestamptz, Jsonb};
     use super::sql_types::NotificationEvent;
 
     account_notifications (id) {
@@ -141,7 +141,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Bool, Text, Nullable, Timestamptz};
 
     accounts (id) {
         id -> Uuid,
@@ -161,7 +161,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Jsonb, Nullable, Inet, Text, Timestamptz};
     use super::sql_types::ActivityType;
 
     workspace_activities (id) {
@@ -177,7 +177,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Jsonb, Int4, Timestamptz, Nullable};
     use super::sql_types::OutboxStatus;
 
     workspace_assistant_jobs (id) {
@@ -193,7 +193,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Nullable, Timestamptz};
 
     workspace_audits (id) {
         id -> Uuid,
@@ -207,7 +207,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Bytea, Int8, Text, Int4, Timestamptz, Nullable};
 
     workspace_blobs (id) {
         id -> Uuid,
@@ -225,7 +225,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Nullable, Text};
     use super::sql_types::SyncMode;
     use super::sql_types::SyncDeletionPolicy;
 
@@ -238,7 +238,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Int8, Int4, Nullable, Text, Jsonb, Timestamptz};
     use super::sql_types::SyncTriggerType;
     use super::sql_types::SyncStatus;
 
@@ -258,7 +258,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Text, Bytea, Bool, Jsonb, Timestamptz, Nullable};
     use super::sql_types::ConnectionType;
 
     workspace_connections (id) {
@@ -278,7 +278,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Jsonb, Int4, Timestamptz, Nullable};
     use super::sql_types::OutboxStatus;
 
     workspace_detection_jobs (id) {
@@ -294,7 +294,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::Uuid;
 
     workspace_detection_policy_versions (detection_id, policy_version_id) {
         detection_id -> Uuid,
@@ -303,7 +303,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Text, Nullable, Int8};
 
     workspace_detection_usage (id) {
         id -> Uuid,
@@ -318,7 +318,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Nullable, Text, Jsonb, Timestamptz};
     use super::sql_types::PipelineTriggerType;
     use super::sql_types::DetectionStatus;
 
@@ -341,7 +341,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Text, Timestamptz};
 
     workspace_document_exports (document_id, connection_id) {
         document_id -> Uuid,
@@ -352,7 +352,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Text, Timestamptz};
 
     workspace_document_imports (document_id) {
         document_id -> Uuid,
@@ -363,7 +363,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Text, Jsonb, Timestamptz, Nullable};
     use super::sql_types::DocumentKind;
 
     workspace_documents (id) {
@@ -383,7 +383,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Jsonb, Nullable, Inet, Text, Int4, Timestamptz};
     use super::sql_types::OutboxStatus;
 
     workspace_event_outbox (id) {
@@ -402,7 +402,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Nullable, Text, Timestamptz};
     use super::sql_types::WorkspaceRole;
     use super::sql_types::InviteStatus;
 
@@ -423,7 +423,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Bool, Array, Nullable, Timestamptz};
     use super::sql_types::WorkspaceRole;
     use super::sql_types::NotificationEvent;
 
@@ -442,7 +442,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::Uuid;
 
     workspace_pipeline_policies (pipeline_id, policy_id) {
         workspace_id -> Uuid,
@@ -452,7 +452,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Text, Nullable, Jsonb, Timestamptz};
     use super::sql_types::PipelineStatus;
 
     workspace_pipelines (id) {
@@ -471,7 +471,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Text, Nullable, Bytea, Jsonb, Timestamptz};
     use super::sql_types::PolicyKind;
 
     workspace_policies (id) {
@@ -491,7 +491,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Int4, Jsonb, Timestamptz};
 
     workspace_policy_versions (id) {
         id -> Uuid,
@@ -506,7 +506,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Text, Bytea, Bool, Jsonb, Timestamptz, Nullable};
     use super::sql_types::ProviderType;
 
     workspace_providers (id) {
@@ -526,7 +526,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Nullable, Timestamptz};
 
     workspace_redactions (id) {
         id -> Uuid,
@@ -538,7 +538,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Nullable, Text, Timestamptz};
 
     workspace_thread_comments (id) {
         id -> Uuid,
@@ -554,7 +554,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Nullable, Jsonb, Timestamptz};
     use super::sql_types::ThreadEventKind;
 
     workspace_thread_events (id) {
@@ -569,7 +569,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Nullable, Text, Timestamptz};
     use super::sql_types::ReviewStatus;
 
     workspace_threads (id) {
@@ -589,7 +589,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Text, Array, Nullable, Jsonb, Bytea, Timestamptz, Int4};
     use super::sql_types::WebhookEvent;
     use super::sql_types::WebhookStatus;
 
@@ -614,7 +614,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
+    use diesel::sql_types::{Uuid, Text, Nullable, Jsonb, Timestamptz};
 
     workspaces (id) {
         id -> Uuid,

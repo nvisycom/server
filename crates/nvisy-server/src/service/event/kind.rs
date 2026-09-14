@@ -55,6 +55,7 @@ impl Notification {
     /// when it is `Some`, or empty when it is `None` (e.g. an actor acting on
     /// their own resource, who is not notified). Collapses the common
     /// `notify.map(...).into_iter().collect()` at an event's notification site.
+    #[must_use]
     pub fn to_account(recipient: Option<Uuid>, payload: NotificationPayload) -> Vec<Self> {
         recipient
             .map(|recipient| Self {

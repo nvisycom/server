@@ -154,7 +154,7 @@ pub struct InvitePreview {
 
 impl InvitePreview {
     /// Creates an invite preview from workspace and invite models.
-    pub fn from_models(workspace: model::Workspace, invite: model::WorkspaceInvite) -> Self {
+    pub fn from_models(workspace: model::Workspace, invite: &model::WorkspaceInvite) -> Self {
         Self {
             workspace_id: workspace.id,
             workspace_handle: workspace.handle,

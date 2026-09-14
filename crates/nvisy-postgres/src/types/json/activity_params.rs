@@ -1,10 +1,11 @@
 //! Activity payloads stored in `workspace_activities.params`.
 //!
 //! An activity stores its `activity_type` (indexed column) plus a self-describing
-//! [`Json`](super::Json) body. [`ActivityPayload`] is that body — a
-//! `{type, data}`-tagged enum, one variant per event, each carrying its own
-//! params. No rendered text is stored; the client localizes copy from `type` and
-//! the params.
+//! [`Json`] body. [`ActivityPayload`] is that body — a `{type, data}`-tagged
+//! enum, one variant per event, each carrying its own params. No rendered text is
+//! stored; the client localizes copy from `type` and the params.
+//!
+//! [`Json`]: super::Json
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -332,6 +333,7 @@ pub enum ActivityPayload {
 impl ActivityPayload {
     /// The [`ActivityType`] this payload records, so a caller logs an activity
     /// from the payload alone and the two can never disagree.
+    #[must_use]
     pub fn activity_type(&self) -> ActivityType {
         match self {
             ActivityPayload::WorkspaceCreated(_) => ActivityType::WorkspaceCreated,
@@ -384,6 +386,7 @@ impl ActivityPayload {
     /// The webhook event this activity also raises, when the webhook vocabulary
     /// carries it. `None` for activities with no webhook counterpart — webhook
     /// CRUD (a webhook does not fire on its own management) and invite lifecycle.
+    #[must_use]
     pub fn webhook_event(&self) -> Option<WebhookEvent> {
         use WebhookEvent as W;
         Some(match self {
@@ -439,9 +442,11 @@ impl ActivityPayload {
     /// one. `None` only for the ad-hoc detection/redaction case where the owning
     /// pipeline id is absent — every addressable object is identified by id.
     ///
-    /// Paired with [`object_label`](Self::object_label), this flattens the
-    /// per-variant params into two export columns without a per-object-type column
-    /// explosion.
+    /// Paired with [`object_label`], this flattens the per-variant params into two
+    /// export columns without a per-object-type column explosion.
+    ///
+    /// [`object_label`]: Self::object_label
+    #[must_use]
     pub fn object_id(&self) -> Option<String> {
         match self {
             ActivityPayload::WorkspaceCreated(p)
@@ -506,7 +511,10 @@ impl ActivityPayload {
 
     /// The human-readable name of the object this activity acted on, when it has
     /// one: a display name, filename, or email. `None` for objects identified only
-    /// by an [`object_id`](Self::object_id).
+    /// by an [`object_id`].
+    ///
+    /// [`object_id`]: Self::object_id
+    #[must_use]
     pub fn object_label(&self) -> Option<String> {
         match self {
             ActivityPayload::InviteCreated(p)

@@ -6,8 +6,10 @@
 //! its origin into one outbox row. Because it writes through the same connection
 //! as the action, wrapping the action and the emit in one transaction makes the
 //! two atomic — the event can never be lost, nor recorded for an action that
-//! rolled back. Emission does no projection; the [drainer](super::drainer) fans
-//! each event out to the activity log, webhook stream, and notifications later.
+//! rolled back. Emission does no projection; the [drainer] fans each event out
+//! to the activity log, webhook stream, and notifications later.
+//!
+//! [drainer]: super::drainer
 
 use std::future::Future;
 

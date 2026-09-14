@@ -1,8 +1,8 @@
 //! OAuth authorization flow for cloud file-service connections.
 //!
-//! A cloud file provider (Google Drive, ...) is connected over OAuth2, not with
+//! A cloud file provider (Google Drive, ...) is connected over `OAuth2`, not with
 //! static credentials, so it cannot be created through the ordinary
-//! [`create_connection`](super::connections) endpoint. Instead:
+//! [`create_connection`] endpoint. Instead:
 //!
 //! 1. `POST .../connections/oauth/{provider}/start` — authorizes the caller,
 //!    stashes the CSRF state and PKCE verifier (with the target workspace and the
@@ -16,6 +16,8 @@
 //! The PKCE verifier must stay server-side (putting it in the round-tripped
 //! `state` would defeat PKCE), so the flow state is stored rather than encoded in
 //! the redirect. It is ephemeral, single-use, and TTL-expired.
+//!
+//! [`create_connection`]: super::connections
 
 use std::str::FromStr;
 

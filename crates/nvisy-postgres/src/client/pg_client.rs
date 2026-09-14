@@ -26,7 +26,10 @@ pub struct PgPoolStatus {
 
 impl PgPoolStatus {
     /// Returns the utilization percentage of the pool (0.0 to 1.0).
+    // reason: a utilization ratio is inherently floating-point; the operands are small pool counts.
+    #[allow(clippy::cast_precision_loss)]
     #[inline]
+    #[must_use]
     pub fn utilization(&self) -> f64 {
         if self.max_size == 0 {
             0.0
@@ -37,6 +40,7 @@ impl PgPoolStatus {
 
     /// Returns whether the pool is under pressure (high utilization or waiting requests).
     #[inline]
+    #[must_use]
     pub fn is_under_pressure(&self) -> bool {
         self.waiting > 0 || self.utilization() > 0.8
     }
@@ -51,7 +55,7 @@ pub struct PgClient {
     inner: Arc<PgClientInner>,
 }
 
-/// Inner data for PgClient
+/// Inner data for `PgClient`
 struct PgClientInner {
     pool: ConnectionPool,
     config: PgConfig,
@@ -96,7 +100,7 @@ impl PgClient {
             .build()
             .map_err(|e| {
                 tracing::error!(target: TRACING_TARGET_CONNECTION, error = %e, "Failed to create connection pool");
-                Error::Unexpected(format!("Failed to build connection pool: {}", e).into())
+                Error::Unexpected(format!("Failed to build connection pool: {e}").into())
             })?;
 
         Ok(Self {
@@ -225,6 +229,7 @@ impl PgClient {
     /// This method provides insights into the connection pool state for monitoring
     /// and debugging purposes.
     #[inline]
+    #[must_use]
     pub fn pool_status(&self) -> PgPoolStatus {
         let status = self.inner.pool.status();
         PgPoolStatus {

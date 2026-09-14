@@ -75,7 +75,7 @@ impl ActivityExportRow {
             actor,
             object_id: payload
                 .as_ref()
-                .and_then(|p| p.object_id())
+                .and_then(nvisy_postgres::types::ActivityPayload::object_id)
                 .unwrap_or_default(),
             object_label: payload.and_then(|p| p.object_label()).unwrap_or_default(),
             ip_address: item.ip_address.map(|ip| ip.to_string()).unwrap_or_default(),
@@ -132,7 +132,7 @@ async fn list_activities(
 
     let response = WorkspaceActivitiesPage::from_cursor_page(page, |wc| {
         WorkspaceActivity::from_model(
-            wc.item,
+            &wc.item,
             workspace.id,
             workspace.handle.clone(),
             wc.account.into(),
@@ -186,7 +186,7 @@ async fn export_activities(
     // A nonexistent actor id simply narrows the export to no rows.
     let filter = filter_query.to_export_filter(filter_query.actor, &window)?;
     // Fetch one past the cap so a full result signals truncation.
-    let fetch_limit = (MAX_EXPORT_ROWS + 1) as i64;
+    let fetch_limit = i64::try_from(MAX_EXPORT_ROWS + 1).unwrap_or(i64::MAX);
     let mut rows = conn
         .list_workspace_activity_for_export(workspace.id, filter, fetch_limit)
         .await?;
@@ -222,7 +222,11 @@ async fn export_activities(
     };
 
     let filename = format!("activities-{}_{}.{extension}", window.from, window.to);
-    let mut headers = attachment_headers(&filename, content_type, body.len() as u64);
+    let mut headers = attachment_headers(
+        &filename,
+        content_type,
+        u64::try_from(body.len()).unwrap_or(u64::MAX),
+    );
     // A truncated export is still a valid file; flag the drop in a header so a
     // client can surface it without having to parse the body.
     if truncated {

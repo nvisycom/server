@@ -1,4 +1,4 @@
-//! Workspace detection model for PostgreSQL database operations.
+//! Workspace detection model for `PostgreSQL` database operations.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
@@ -12,13 +12,15 @@ use crate::types::{
 /// A detection: one analysis pass of a document, optionally through a pipeline.
 ///
 /// Detect creates the detection and stores the engine's `Audit` as a
-/// [`WorkspaceAudit`](crate::model::WorkspaceAudit) row (the base audit) pointing
-/// back via `detection_id`; the detection then stays `Complete` and can be
-/// redacted any number of times (each redaction is its own row).
+/// [`WorkspaceAudit`] row (the base audit) pointing back via `detection_id`; the
+/// detection then stays `Complete` and can be redacted any number of times (each
+/// redaction is its own row).
 ///
 /// A detection is workspace-scoped directly. A pipeline detection names the
 /// pipeline whose config drove it; an ad-hoc detection names its policies at
 /// create time and carries no pipeline.
+///
+/// [`WorkspaceAudit`]: crate::model::WorkspaceAudit
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_detections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]

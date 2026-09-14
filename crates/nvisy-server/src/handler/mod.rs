@@ -70,7 +70,7 @@ async fn handler(method: Method, uri: Uri) -> Response {
 /// Returns an [`ApiRouter`] with all built-in private routes. Downstream routes
 /// are merged separately by [`routes`], after this built-in router is erased to
 /// the caller's state type.
-fn private_routes(service_state: ServiceState) -> ApiRouter<ServiceState> {
+fn private_routes(service_state: &ServiceState) -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .merge(accounts::routes(service_state.clone()))
         .merge(workspaces::routes())
@@ -157,7 +157,7 @@ where
     // downstream's private routes. The auth `route_layer`s are applied to the
     // *combined* router, so custom private routes are authenticated too — a
     // `route_layer` only covers routes already present when it runs.
-    let private_router = private_routes(service_state.clone());
+    let private_router = private_routes(&service_state);
     let mut private_router: ApiRouter<S> = private_router.with_state(service_state.clone());
     if let Some(additional) = routes.private_routes.take() {
         private_router = private_router.merge(additional);
@@ -200,6 +200,7 @@ mod test {
     use nvisy_postgres::PgConfig;
     use nvisy_webhook::reqwest::ReqwestClient;
 
+    use crate::args::ServiceArgs;
     use crate::handler::{CustomRoutes, routes};
     use crate::middleware::UploadConfig;
     use crate::response::CookieConfig;
@@ -256,27 +257,29 @@ mod test {
     ) -> anyhow::Result<TestServer> {
         let (postgres, nats, session, crypto, s3) = configs_from_env()?;
         let webhook_service = ReqwestClient::default().into_service();
-        let state = ServiceState::from_config(
+        let args = ServiceArgs {
             postgres,
             nats,
-            session,
-            crypto,
-            EngineConfig::default(),
-            HealthConfig::default(),
-            IntegrationConfig::default(),
-            FileConnectorsConfig::default(),
-            OidcConfig::default(),
-            webhook_service,
-            UploadConfig::default(),
-            CookieConfig::default(),
             s3,
-        )
-        .await?;
+            session_keys: session,
+            crypto,
+            engine: EngineConfig::default(),
+            health: HealthConfig::default(),
+            integration: IntegrationConfig::default(),
+            file_service: FileConnectorsConfig::default(),
+            oidc: OidcConfig::default(),
+            upload: UploadConfig::default(),
+            cookie: CookieConfig::default(),
+        };
+        let state = ServiceState::from_config(args, webhook_service).await?;
         let router = router(state.clone());
         create_test_server_with_state(router, state).await
     }
 
     /// Returns a new [`TestServer`] with the given router and state.
+    // reason: part of the uniform async test-helper API alongside
+    // create_test_server and create_test_server_with_router.
+    #[allow(clippy::unused_async)]
     pub async fn create_test_server_with_state(
         router: ApiRouter<ServiceState>,
         state: ServiceState,

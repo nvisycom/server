@@ -1,10 +1,12 @@
-//! Workspace document model for PostgreSQL database operations.
+//! Workspace document model for `PostgreSQL` database operations.
 //!
 //! A document is the human-facing file: an uploaded/imported original, or a
-//! redacted output. Its bytes live in a [`Blob`](crate::model::Blob); the
-//! document row carries the human-facing metadata (name, kind, creator) and the
-//! soft-delete lifecycle. Machine byproducts (audits, intermediates) are not
-//! documents — they reference blobs from their own tables.
+//! redacted output. Its bytes live in a [`Blob`]; the document row carries the
+//! human-facing metadata (name, kind, creator) and the soft-delete lifecycle.
+//! Machine byproducts (audits, intermediates) are not documents — they reference
+//! blobs from their own tables.
+//!
+//! [`Blob`]: crate::model::Blob
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;

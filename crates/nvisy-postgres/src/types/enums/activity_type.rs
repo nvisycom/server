@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// The type of activity performed in a workspace, for audit logging.
     ///
-    /// Corresponds to the `ACTIVITY_TYPE` PostgreSQL enum and categorizes the
+    /// Corresponds to the `ACTIVITY_TYPE` `PostgreSQL` enum and categorizes the
     /// activities that occur within workspaces for a comprehensive audit trail.
     pub enum ActivityType = "crate::schema::sql_types::ActivityType" {
         /// Workspace was created.
@@ -103,6 +103,7 @@ impl ActivityType {
     /// The canonical dotted tag for this type, e.g. `document.created` or
     /// `pipeline.redaction.created` — the same string used on the wire and in the
     /// DB, from the variant's `strum(serialize)`.
+    #[must_use]
     pub fn as_tag(self) -> &'static str {
         self.into()
     }
@@ -111,6 +112,7 @@ impl ActivityType {
     /// `document` for `document.created`, `pipeline.redaction` for
     /// `pipeline.redaction.created`, `connection.sync` for
     /// `connection.sync.failed`.
+    #[must_use]
     pub fn object_type(self) -> &'static str {
         let tag = self.as_tag();
         match tag.rsplit_once('.') {
@@ -121,6 +123,7 @@ impl ActivityType {
 
     /// The action half of the tag: the final segment, e.g. `created` for
     /// `document.created`, `created` for `pipeline.redaction.created`.
+    #[must_use]
     pub fn action_type(self) -> &'static str {
         let tag = self.as_tag();
         match tag.rsplit_once('.') {

@@ -4,7 +4,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-/// The OAuth2 endpoints and scopes for one provider (e.g. Google).
+/// The `OAuth2` endpoints and scopes for one provider (e.g. Google).
 #[derive(Debug, Clone)]
 pub struct OAuthProvider {
     /// Authorization endpoint (where the user is sent to grant access).

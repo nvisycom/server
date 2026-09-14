@@ -36,8 +36,9 @@ pub struct WorkspaceActivity {
 pub type WorkspaceActivitiesPage = Page<WorkspaceActivity>;
 
 impl WorkspaceActivity {
+    #[must_use]
     pub fn from_model(
-        activity: WorkspaceActivityModel,
+        activity: &WorkspaceActivityModel,
         workspace_id: Uuid,
         workspace_handle: Handle,
         performed_by: AccountRef,

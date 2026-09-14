@@ -19,11 +19,11 @@ pub enum Error {
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
-    /// JetStream publish error
+    /// `JetStream` publish error
     #[error("JetStream publish error: {0}")]
     JetstreamPublish(async_nats::error::Error<async_nats::jetstream::context::PublishErrorKind>),
 
-    /// JetStream message error
+    /// `JetStream` message error
     #[error("JetStream message error: {0}")]
     JetstreamMessage(Box<dyn std::error::Error + Send + Sync>),
 
@@ -157,22 +157,24 @@ impl Error {
     }
 
     /// Create a timeout error with the given duration
+    #[must_use]
     pub fn timeout(duration: Duration) -> Self {
         Self::Timeout { timeout: duration }
     }
 
     /// Get a user-friendly error message suitable for display
+    #[must_use]
     pub fn user_message(&self) -> String {
         match self {
             Error::Connection(_) => {
                 "Connection to NATS server failed. Please check your connection.".to_string()
             }
             Error::Timeout { timeout } => {
-                format!("Operation timed out after {:?}. Please try again.", timeout)
+                format!("Operation timed out after {timeout:?}. Please try again.")
             }
-            Error::KvKeyNotFound { key, .. } => format!("Key '{}' not found.", key),
+            Error::KvKeyNotFound { key, .. } => format!("Key '{key}' not found."),
             Error::Serialization(_) => "Data format error. Please check your input.".to_string(),
-            Error::InvalidConfig { reason } => format!("Configuration error: {}", reason),
+            Error::InvalidConfig { reason } => format!("Configuration error: {reason}"),
             _ => "An unexpected error occurred. Please try again.".to_string(),
         }
     }

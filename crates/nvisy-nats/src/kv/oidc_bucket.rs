@@ -62,5 +62,5 @@ where
 
     const DESCRIPTION: &'static str = "In-flight OIDC sign-in state";
     const NAME: &'static str = "oidc_state";
-    const TTL: Option<Duration> = Some(Duration::from_secs(10 * 60)); // 10 minutes
+    const TTL: Option<Duration> = Some(Duration::from_mins(10)); // 10 minutes
 }

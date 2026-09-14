@@ -55,7 +55,7 @@ async fn list_members(
         .await?;
 
     let response = Page::from_cursor_page(page, |(member, account)| {
-        WorkspaceMember::from_model(member, account)
+        WorkspaceMember::from_model(&member, account)
     });
 
     Ok((StatusCode::OK, Json(response)))
@@ -93,7 +93,7 @@ async fn get_member(
 
     Ok((
         StatusCode::OK,
-        Json(WorkspaceMember::from_model(member, account)),
+        Json(WorkspaceMember::from_model(&member, account)),
     ))
 }
 
@@ -190,7 +190,7 @@ async fn update_member(
 
     Ok((
         StatusCode::OK,
-        Json(WorkspaceMember::from_model(member, account)),
+        Json(WorkspaceMember::from_model(&member, account)),
     ))
 }
 
@@ -251,7 +251,7 @@ fn leave_workspace_docs(op: TransformOperation) -> TransformOperation {
 ///
 /// [`Router`]: axum::routing::Router
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, post_with};
 
     ApiRouter::new()
         .api_route(

@@ -12,7 +12,7 @@ pub const TRACING_TARGET_CLIENT: &str = "nvisy_nats::client";
 /// Use this target for logging KV bucket operations, key operations, and KV-related errors.
 pub const TRACING_TARGET_KV: &str = "nvisy_nats::kv";
 
-/// Tracing target for NATS JetStream operations.
+/// Tracing target for NATS `JetStream` operations.
 ///
 /// Use this target for logging stream operations, consumer operations, and JetStream-related errors.
 pub const TRACING_TARGET_STREAM: &str = "nvisy_nats::stream";

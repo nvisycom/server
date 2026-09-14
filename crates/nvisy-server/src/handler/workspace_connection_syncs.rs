@@ -533,7 +533,7 @@ async fn cancel_connection_sync(
     // Signal the transfer to stop if it is running on this instance. A run on
     // another instance is stopped by the status flip above plus the
     // status-guarded finalizers.
-    connection_sync.cancel_local(run.id);
+    let _ = connection_sync.cancel_local(run.id);
 
     let trigger = resolve_account_ref(&mut conn, cancelled.account_id).await?;
 
@@ -553,7 +553,7 @@ fn cancel_connection_sync_docs(op: TransformOperation) -> TransformOperation {
         .response::<409, Json<ErrorResponse>>()
 }
 
-/// Finds a connection within a workspace by id, or returns a NotFound error.
+/// Finds a connection within a workspace by id, or returns a `NotFound` error.
 async fn find_connection(
     conn: &mut PgConn,
     workspace_id: Uuid,
@@ -566,7 +566,7 @@ async fn find_connection(
 
 /// Returns routes for connection sync operations.
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, post_with};
 
     ApiRouter::new()
         .api_route(

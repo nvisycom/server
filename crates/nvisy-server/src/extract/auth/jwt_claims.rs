@@ -69,6 +69,7 @@ impl AuthClaims<()> {
     /// # Returns
     ///
     /// Returns a new [`AuthClaims`] instance ready for JWT encoding.
+    #[must_use]
     pub fn new(account_model: &Account, account_api_token: &AccountApiToken) -> Self {
         Self::with_custom_claims(account_model, account_api_token, ())
     }
@@ -117,7 +118,7 @@ impl<T> AuthClaims<T> {
         let never_expires = || Timestamp::now() + Span::new().seconds(NEVER_EXPIRES_SECONDS);
         let expires_at = match account_api_token.session_type {
             ApiTokenType::Web => issued_at
-                .checked_add(Span::new().seconds(session::MAX_AGE.as_secs() as i64))
+                .checked_add(Span::new().seconds(session::MAX_AGE_SECS))
                 .unwrap_or_else(|_| never_expires()),
             ApiTokenType::Api | ApiTokenType::App => account_api_token
                 .expired_at
@@ -178,7 +179,7 @@ where
     /// it arrived on (session cookie or Authorization header).
     ///
     /// This method performs comprehensive validation including:
-    /// - Signature verification using EdDSA
+    /// - Signature verification using `EdDSA`
     /// - Standard JWT claims validation (iss, aud, exp, etc.)
     /// - Application-specific claim presence
     /// - Expiration checking with detailed logging
@@ -258,7 +259,7 @@ mod tests {
         // A web session's JWT `exp` is `issued_at + MAX_AGE`, independent of the
         // row's (sliding) `expired_at`.
         let issued = Timestamp::from(token.issued_at).as_second();
-        let expected = issued + session::MAX_AGE.as_secs() as i64;
+        let expected = issued + session::MAX_AGE_SECS;
         assert_eq!(claims.expires_at, expected);
         assert_eq!(claims.account_id, account.id);
         assert_eq!(claims.token_id, token.id);

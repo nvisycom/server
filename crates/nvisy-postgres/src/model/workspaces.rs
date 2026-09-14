@@ -1,4 +1,4 @@
-//! Main workspace model for PostgreSQL database operations.
+//! Main workspace model for `PostgreSQL` database operations.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;

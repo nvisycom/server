@@ -373,7 +373,7 @@ mod tests {
             desktop_allowed_redirect_schemes: vec![
                 " Nvisy ".to_owned(), // trimmed + lowercased
                 "myapp".to_owned(),
-                "".to_owned(),      // blank dropped
+                String::new(),      // blank dropped
                 "https".to_owned(), // web schemes are never desktop schemes
                 "http".to_owned(),
             ],

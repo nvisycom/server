@@ -24,7 +24,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::workspace";
 ///
 /// Holds the Postgres client and acquires its own connection per call, so each
 /// mutation is a self-contained transaction. Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct WorkspaceService {
     postgres: PgClient,
@@ -32,6 +34,7 @@ pub struct WorkspaceService {
 
 impl WorkspaceService {
     /// Creates a [`WorkspaceService`] over the given connection pool.
+    #[must_use]
     pub fn new(postgres: PgClient) -> Self {
         Self { postgres }
     }
@@ -99,22 +102,22 @@ impl WorkspaceService {
         let mut conn = self.postgres.get_connection().await?;
         let workspace_id = origin.workspace_id;
 
-        let updated = conn
+        let workspace = conn
             .transaction(async |conn| {
-                let updated = conn.update_workspace(workspace_id, updates).await?;
+                let workspace = conn.update_workspace(workspace_id, updates).await?;
                 conn.emit_event(
                     origin,
                     event::WorkspaceEvent::WorkspaceUpdated(event::WorkspaceUpdated {
-                        workspace_id: updated.id,
+                        workspace_id: workspace.id,
                     }),
                 )
                 .await?;
-                Ok::<_, Error>(updated)
+                Ok::<_, Error>(workspace)
             })
             .await?;
 
         tracing::info!(target: TRACING_TARGET, "Workspace updated");
-        Ok(updated)
+        Ok(workspace)
     }
 
     /// Soft-deletes a workspace, recording the event atomically.
@@ -195,8 +198,8 @@ mod tests {
             display_name: Some("Renamed".to_owned()),
             ..Default::default()
         };
-        let updated = service.update(origin, updates).await?;
-        assert_eq!(updated.display_name, "Renamed");
+        let updated_workspace = service.update(origin, updates).await?;
+        assert_eq!(updated_workspace.display_name, "Renamed");
         Ok(())
     }
 

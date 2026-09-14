@@ -59,7 +59,7 @@ impl AccountNotification {
     /// `notify_type` still appears, with `payload` absent rather than the row
     /// dropped. Dropping it would let the list silently disagree with the unread
     /// count.
-    pub fn from_model(notification: AccountNotificationModel) -> Self {
+    pub fn from_model(notification: &AccountNotificationModel) -> Self {
         Self {
             id: notification.id,
             payload: notification.params.optional(),

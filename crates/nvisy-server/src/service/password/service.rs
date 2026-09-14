@@ -18,6 +18,7 @@ pub struct PasswordService {
 
 impl PasswordService {
     /// Creates a new password service.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             hasher: PasswordHasher::new(),
@@ -53,6 +54,7 @@ impl PasswordService {
 
     /// Runs a dummy verification to keep login timing constant when the account
     /// does not exist, defeating account enumeration by timing.
+    #[must_use]
     pub fn verify_dummy(&self, password: &str) -> bool {
         self.hasher.verify_dummy_password(password)
     }

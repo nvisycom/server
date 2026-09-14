@@ -157,6 +157,8 @@ impl From<CreateWorkspacePolicy> for CreatePolicyInput {
 }
 
 /// A one-shot (labels) body must name at least one label and no more than 64.
+// reason: signature is fixed by garde's custom validator interface.
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn validate_body(body: &PolicyBody, _: &()) -> garde::Result {
     if let PolicyBody::Labels { labels } = body {
         if labels.is_empty() {

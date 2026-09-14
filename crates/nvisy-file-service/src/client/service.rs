@@ -165,7 +165,7 @@ impl FileService {
     ///
     /// FileServiceProvider-neutral entry point: the caller passes the connection config and,
     /// when the picker asked for a specific resource, that `resource`; this
-    /// dispatches to the provider's picker-token logic. OneDrive mints a
+    /// dispatches to the provider's picker-token logic. `OneDrive` mints a
     /// SharePoint-audience token (its picker requires one, distinct from the Graph
     /// token the connector uses); Google Drive and Box return their ordinary
     /// provider token. The connection's primary token is not disturbed; a rotated
@@ -174,7 +174,7 @@ impl FileService {
     /// # Errors
     ///
     /// Returns an error if the provider's picker does not use a server token, if
-    /// the account is unsupported (e.g. a personal OneDrive account), or if the
+    /// the account is unsupported (e.g. a personal `OneDrive` account), or if the
     /// token cannot be minted.
     pub async fn mint_picker_token(
         &self,

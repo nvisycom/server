@@ -29,6 +29,7 @@ pub trait RouterSecurityExt<S> {
     ///
     /// This middleware stack applies CORS rules, security headers including
     /// HSTS and CSP, response compression, and request body size limits.
+    #[must_use]
     fn with_security(
         self,
         cors: &CorsConfig,
@@ -42,6 +43,7 @@ pub trait RouterSecurityExt<S> {
     /// Uses development-friendly CORS settings and production-ready security
     /// headers. For production deployments, prefer `with_security` with
     /// explicit configuration.
+    #[must_use]
     fn with_default_security(self) -> Self;
 }
 
@@ -163,14 +165,15 @@ impl Default for CorsConfig {
     fn default() -> Self {
         Self {
             allowed_origins: Vec::new(),
-            max_age: Duration::from_secs(3600),
+            max_age: Duration::from_hours(1),
             allow_credentials: true,
         }
     }
 }
 
 impl CorsConfig {
-    /// Converts configured origins to HeaderValue list, falling back to localhost for development.
+    /// Converts configured origins to `HeaderValue` list, falling back to localhost for development.
+    #[must_use]
     pub fn to_header_values(&self) -> Vec<HeaderValue> {
         if self.allowed_origins.is_empty() {
             vec![
@@ -228,7 +231,7 @@ impl UploadConfig {
     /// against measured upload sizes and workspace caps.
     #[must_use]
     pub fn max_file_bytes(&self) -> u64 {
-        self.max_file_body_bytes as u64
+        u64::try_from(self.max_file_body_bytes).unwrap_or(u64::MAX)
     }
 
     /// The router-wide request-body ceiling: the larger of the two limits.
@@ -291,6 +294,7 @@ impl Default for SecurityHeadersConfig {
 
 impl SecurityHeadersConfig {
     /// Returns the HSTS header value as a string.
+    #[must_use]
     pub fn hsts_header_value(&self) -> String {
         if self.hsts_include_subdomains {
             format!("max-age={}; includeSubDomains", self.hsts_max_age_seconds)
@@ -311,6 +315,7 @@ pub enum FrameOptions {
 
 impl FrameOptions {
     /// Returns the header value string.
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Deny => "DENY",
@@ -332,6 +337,7 @@ pub enum ReferrerPolicy {
 
 impl ReferrerPolicy {
     /// Returns the header value string.
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::NoReferrer => "no-referrer",

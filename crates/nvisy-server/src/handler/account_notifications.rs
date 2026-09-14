@@ -50,7 +50,7 @@ async fn list_notifications(
         .await?;
 
     let response =
-        AccountNotificationsPage::from_cursor_page(page, AccountNotification::from_model);
+        AccountNotificationsPage::from_cursor_page(page, |n| AccountNotification::from_model(&n));
 
     tracing::debug!(
         target: TRACING_TARGET,
@@ -146,7 +146,7 @@ async fn stream_unread_status(
     let stream = stream! {
         // Emit the current count first so a client that connects between changes
         // still learns the present state.
-        yield unread_event(&UnreadCountEvent { unread_count: current });
+        yield unread_event(UnreadCountEvent { unread_count: current });
 
         loop {
             tokio::select! {
@@ -157,13 +157,13 @@ async fn stream_unread_status(
                     match result {
                         // A live broadcast arrived; forward it.
                         Ok(Some(event)) => {
-                            yield unread_event(&event);
+                            yield unread_event(event);
                         }
                         // The subscription ended; re-read once so the client is
                         // not left with a stale count, then stop.
                         Ok(None) => {
                             if let Some(unread_count) = reread_unread_count(&pg_client, account_id).await {
-                                yield unread_event(&UnreadCountEvent { unread_count });
+                                yield unread_event(UnreadCountEvent { unread_count });
                             }
                             break;
                         }
@@ -172,7 +172,7 @@ async fn stream_unread_status(
                         // broadcast (core NATS is at-most-once).
                         Err(_) => {
                             if let Some(unread_count) = reread_unread_count(&pg_client, account_id).await {
-                                yield unread_event(&UnreadCountEvent { unread_count });
+                                yield unread_event(UnreadCountEvent { unread_count });
                             }
                         }
                     }
@@ -198,14 +198,14 @@ async fn reread_unread_count(pg_client: &PgClient, account_id: Uuid) -> Option<i
 }
 
 /// Builds an `unread` SSE event carrying the account's current unread count.
-fn unread_event(event: &UnreadCountEvent) -> Event {
+fn unread_event(event: UnreadCountEvent) -> Event {
     Event::default()
         .event("unread")
         .json_data(event)
         .unwrap_or_else(|_| Event::default().event("unread"))
 }
 
-/// OpenAPI documentation for the unread-count SSE stream.
+/// `OpenAPI` documentation for the unread-count SSE stream.
 fn stream_unread_status_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Stream unread notifications count")
         .description(
@@ -286,7 +286,7 @@ fn mark_notification_read_docs(op: TransformOperation) -> TransformOperation {
 ///
 /// [`Router`]: axum::routing::Router
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, post_with};
 
     ApiRouter::new()
         .api_route(

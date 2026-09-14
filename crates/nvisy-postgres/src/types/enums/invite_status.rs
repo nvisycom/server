@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// The current status of a workspace invitation.
     ///
-    /// Corresponds to the `INVITE_STATUS` PostgreSQL enum and tracks the lifecycle
+    /// Corresponds to the `INVITE_STATUS` `PostgreSQL` enum and tracks the lifecycle
     /// of an invitation from creation to resolution.
     pub enum InviteStatus: Default = Pending, "crate::schema::sql_types::InviteStatus" {
         /// Sent and awaiting a response from the invitee.

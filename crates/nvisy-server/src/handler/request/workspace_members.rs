@@ -45,11 +45,13 @@ pub struct ListWorkspaceMembers {
 
 impl ListWorkspaceMembers {
     /// Converts to filter model.
+    #[must_use]
     pub fn to_filter(&self) -> MemberFilter {
         MemberFilter { role: self.role }
     }
 
     /// Converts to sort model.
+    #[must_use]
     pub fn to_sort(&self) -> MemberSortBy {
         let order = self.order.unwrap_or_default();
         let field = self.sort_by.unwrap_or_default();

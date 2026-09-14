@@ -1,4 +1,4 @@
-//! Main account model for PostgreSQL database operations.
+//! Main account model for `PostgreSQL` database operations.
 //!
 //! This module provides the core account model for user authentication and management.
 //! It handles all aspects of user accounts including authentication, profile management,
@@ -36,7 +36,7 @@ pub struct Account {
     pub email_address: String,
     /// Optional URL to profile avatar image.
     pub avatar_url: Option<String>,
-    /// Timezone identifier (e.g., "America/New_York", "UTC").
+    /// Timezone identifier (e.g., "`America/New_York`", "UTC").
     pub timezone: String,
     /// Preferred locale code (ISO 639-1, e.g., "en", "es", "fr").
     pub locale: String,
@@ -149,11 +149,13 @@ pub struct UpdateAccount {
 
 impl Account {
     /// Returns whether the account is suspended.
+    #[must_use]
     pub fn is_suspended(&self) -> bool {
         self.is_suspended
     }
 
     /// Returns whether the account has been soft-deleted.
+    #[must_use]
     pub fn is_deleted(&self) -> bool {
         self.deleted_at.is_some()
     }

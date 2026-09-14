@@ -72,24 +72,28 @@ impl NatsConfig {
 
     /// Returns the client name, using the default if not set.
     #[inline]
+    #[must_use]
     pub fn name(&self) -> &str {
         self.nats_client_name.as_deref().unwrap_or(DEFAULT_NAME)
     }
 
     /// Returns the reconnect delay as a Duration.
     #[inline]
+    #[must_use]
     pub fn reconnect_delay(&self) -> Duration {
         DEFAULT_RECONNECT_DELAY
     }
 
     /// Returns the ping interval as a Duration.
     #[inline]
+    #[must_use]
     pub fn ping_interval(&self) -> Duration {
         DEFAULT_PING_INTERVAL
     }
 
     /// Returns the max reconnects as Option (0 means unlimited).
     #[inline]
+    #[must_use]
     pub fn max_reconnects_option(&self) -> Option<usize> {
         let max = self.nats_max_reconnects.unwrap_or(DEFAULT_MAX_RECONNECTS);
         if max == 0 { None } else { Some(max) }

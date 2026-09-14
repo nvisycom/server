@@ -38,27 +38,24 @@ impl<B: KvBucket> KvStore<B> {
             ..Default::default()
         };
 
-        let store = match jetstream.get_key_value(B::NAME).await {
-            Ok(store) => {
-                tracing::trace!(
-                    target: TRACING_TARGET_KV,
-                    bucket = %B::NAME,
-                    "Using existing KV bucket"
-                );
-                store
-            }
-            Err(_) => {
-                tracing::debug!(
-                    target: TRACING_TARGET_KV,
-                    bucket = %B::NAME,
-                    ttl_secs = ttl.as_secs(),
-                    "Creating new KV bucket"
-                );
-                jetstream
-                    .create_key_value(config)
-                    .await
-                    .map_err(|e| Error::operation("kv_create", e.to_string()))?
-            }
+        let store = if let Ok(store) = jetstream.get_key_value(B::NAME).await {
+            tracing::trace!(
+                target: TRACING_TARGET_KV,
+                bucket = %B::NAME,
+                "Using existing KV bucket"
+            );
+            store
+        } else {
+            tracing::debug!(
+                target: TRACING_TARGET_KV,
+                bucket = %B::NAME,
+                ttl_secs = ttl.as_secs(),
+                "Creating new KV bucket"
+            );
+            jetstream
+                .create_key_value(config)
+                .await
+                .map_err(|e| Error::operation("kv_create", e.to_string()))?
         };
 
         Ok(Self {
@@ -69,6 +66,7 @@ impl<B: KvBucket> KvStore<B> {
 
     /// Returns the bucket name.
     #[inline]
+    #[must_use]
     pub fn bucket_name(&self) -> &'static str {
         B::NAME
     }
@@ -96,7 +94,7 @@ impl<B: KvBucket> KvStore<B> {
         Ok(KvEntry {
             key: key_str,
             revision,
-            size: size as u64,
+            size: u64::try_from(size).unwrap_or(u64::MAX),
         })
     }
 
@@ -142,7 +140,7 @@ impl<B: KvBucket> KvStore<B> {
                     key: key_str,
                     value: deserialized,
                     revision: entry.revision,
-                    size: size as u64,
+                    size: u64::try_from(size).unwrap_or(u64::MAX),
                     created: entry.created.into(),
                 }))
             }
@@ -322,7 +320,7 @@ impl<B: KvBucket> KvStore<B> {
         Ok(KvEntry {
             key: key_str,
             revision: new_revision,
-            size: size as u64,
+            size: u64::try_from(size).unwrap_or(u64::MAX),
         })
     }
 
@@ -344,6 +342,7 @@ impl<B: KvBucket> KvStore<B> {
     }
 
     /// Get the underlying store reference.
+    #[must_use]
     pub fn inner(&self) -> &kv::Store {
         &self.store
     }

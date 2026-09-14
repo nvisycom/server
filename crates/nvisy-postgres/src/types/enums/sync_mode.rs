@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// The direction a connection syncs data.
     ///
-    /// Corresponds to the `SYNC_MODE` PostgreSQL enum: `Import` fetches objects
+    /// Corresponds to the `SYNC_MODE` `PostgreSQL` enum: `Import` fetches objects
     /// from the connection into the workspace; `Export` pushes workspace files
     /// out.
     ///
@@ -24,6 +24,7 @@ db_enum! {
 impl SyncMode {
     /// Returns whether the connection exports data out of the workspace.
     #[inline]
+    #[must_use]
     pub fn is_export(self) -> bool {
         matches!(self, SyncMode::Export)
     }

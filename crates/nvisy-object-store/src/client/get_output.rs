@@ -14,6 +14,6 @@ pub struct GetOutput {
     pub data: Bytes,
     /// MIME content-type, if the backend provides one.
     pub content_type: Option<String>,
-    /// Object metadata (size, etag, last_modified, location).
+    /// Object metadata (size, etag, `last_modified`, location).
     pub meta: ObjectMeta,
 }

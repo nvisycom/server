@@ -1,4 +1,4 @@
-//! Workspace pipeline model for PostgreSQL database operations.
+//! Workspace pipeline model for `PostgreSQL` database operations.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
@@ -24,7 +24,7 @@ pub struct WorkspacePipeline {
     pub description: Option<String>,
     /// Pipeline lifecycle status.
     pub status: PipelineStatus,
-    /// Detection/redaction config (nvisy_schema plan as JSON).
+    /// Detection/redaction config (`nvisy_schema` plan as JSON).
     pub definition: serde_json::Value,
     /// Extended metadata.
     pub metadata: Json<PipelineMetadata>,

@@ -1,4 +1,4 @@
-//! OAuth2 authorization-code flow, driven through the shared `reqwest` client.
+//! `OAuth2` authorization-code flow, driven through the shared `reqwest` client.
 //!
 //! Provides the reusable pieces every OAuth file-service provider needs: the
 //! per-provider endpoint/scope description ([`OAuthProvider`]), the persisted

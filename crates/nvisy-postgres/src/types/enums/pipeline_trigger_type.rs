@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// How a pipeline run was initiated.
     ///
-    /// Corresponds to the `PIPELINE_TRIGGER_TYPE` PostgreSQL enum: a run is either
+    /// Corresponds to the `PIPELINE_TRIGGER_TYPE` `PostgreSQL` enum: a run is either
     /// started directly by a user or automatically by the system (for example, a
     /// file upload that the pipeline auto-redacts).
     pub enum PipelineTriggerType: Default = User, "crate::schema::sql_types::PipelineTriggerType" {

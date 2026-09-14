@@ -84,7 +84,7 @@ impl<R: AsyncRead> AsyncRead for HashingReader<R> {
             if !new.is_empty() {
                 let mut meter = this.measurements.meter.lock().expect("measurements lock");
                 meter.hasher.update(new);
-                meter.bytes += new.len() as u64;
+                meter.bytes += u64::try_from(new.len()).unwrap_or(u64::MAX);
             }
         }
         poll

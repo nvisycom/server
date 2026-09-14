@@ -1,9 +1,11 @@
 //! Authentication middleware.
 //!
-//! - [`session`] validates the session (via the [`AuthState`](crate::extract::AuthState)
-//!   extractor) and slides its idle bound forward on use.
+//! - [`session`] validates the session (via the [`AuthState`] extractor) and
+//!   slides its idle bound forward on use.
 //! - [`csrf`] enforces CSRF protection on cookie-authenticated state-changing
 //!   requests.
+//!
+//! [`AuthState`]: crate::extract::AuthState
 
 mod csrf;
 mod session;

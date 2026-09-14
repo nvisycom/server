@@ -118,7 +118,7 @@ fn encode_path_segment(segment: &str) -> String {
 
 /// A supported cloud file-service provider.
 ///
-/// The serialized form (snake_case) is the `provider` tag stored on a connection
+/// The serialized form (`snake_case`) is the `provider` tag stored on a connection
 /// and used in the API, so every provider name lives in exactly one place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, EnumIter)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
@@ -128,7 +128,7 @@ pub enum FileServiceProvider {
     GoogleDrive,
     /// Dropbox.
     Dropbox,
-    /// OneDrive (Microsoft Graph).
+    /// `OneDrive` (Microsoft Graph).
     OneDrive,
     /// Box.
     Box,
@@ -161,7 +161,7 @@ impl FileServiceProvider {
     /// Whether this provider's browser file picker consumes a user OAuth access
     /// token minted by the server.
     ///
-    /// Google Picker, the OneDrive file picker, and the Box picker each take a
+    /// Google Picker, the `OneDrive` file picker, and the Box picker each take a
     /// user access token. Dropbox's Chooser is keyed by a public app key instead,
     /// so it needs no server-minted token — a picker-token request for Dropbox is
     /// meaningless and should be rejected.
@@ -191,7 +191,7 @@ impl FileServiceProvider {
     /// Mints a browser file-picker token for a connection of this provider,
     /// dispatching to the provider's picker-token behavior.
     ///
-    /// OneDrive mints a SharePoint-audience token (its picker requires one,
+    /// `OneDrive` mints a SharePoint-audience token (its picker requires one,
     /// distinct from the Graph token the connector uses); Google Drive and Box
     /// return their ordinary access token, refreshed if stale; Dropbox's Chooser
     /// uses a client-side app key and has no server token.
@@ -204,7 +204,7 @@ impl FileServiceProvider {
     /// # Errors
     ///
     /// Returns an error if the provider's picker does not use a server token, the
-    /// account is unsupported (e.g. a personal OneDrive account), or the token
+    /// account is unsupported (e.g. a personal `OneDrive` account), or the token
     /// cannot be minted.
     pub(crate) async fn mint_picker_token(
         self,
@@ -239,7 +239,7 @@ impl FileServiceProvider {
 }
 
 /// The per-connection settings shared by every provider: the OAuth token set and
-/// an optional export root (a folder id for Drive, OneDrive, and Box, or a folder
+/// an optional export root (a folder id for Drive, `OneDrive`, and Box, or a folder
 /// path for Dropbox) that new exports are written into. `None` means the account
 /// root.
 #[derive(Debug, Clone, Deserialize, Serialize)]

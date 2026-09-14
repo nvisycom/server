@@ -1,4 +1,4 @@
-//! Workspace webhook model for PostgreSQL database operations.
+//! Workspace webhook model for `PostgreSQL` database operations.
 //!
 //! This module provides models for managing webhooks connected to workspaces.
 //! Webhooks enable workspaces to send event notifications to external services.
@@ -123,11 +123,13 @@ impl NewWorkspaceWebhook {
 
 impl WorkspaceWebhook {
     /// Returns the list of subscribed events.
+    #[must_use]
     pub fn subscribed_events(&self) -> Vec<WebhookEvent> {
         self.events.iter().filter_map(|e| *e).collect()
     }
 
     /// Returns the custom headers, or an empty set for an absent/older blob.
+    #[must_use]
     pub fn parsed_headers(&self) -> WebhookHeaders {
         self.headers.or_default()
     }

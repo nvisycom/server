@@ -22,7 +22,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::account";
 ///
 /// Holds the Postgres client (own-connection-per-call) and the notification
 /// emitter (to broadcast the unread count after a mark-read). Resolved per request
-/// from [`ServiceState`](crate::service::ServiceState).
+/// from [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct AccountNotificationService {
     postgres: PgClient,
@@ -31,6 +33,7 @@ pub struct AccountNotificationService {
 
 impl AccountNotificationService {
     /// Creates an [`AccountNotificationService`] over its clients.
+    #[must_use]
     pub fn new(postgres: PgClient, emitter: NotificationEmitter) -> Self {
         Self { postgres, emitter }
     }
@@ -58,9 +61,11 @@ impl AccountNotificationService {
     /// any were marked. Returns how many it marked.
     pub async fn mark_all_read(&self, account_id: Uuid) -> Result<i64> {
         let mut conn = self.postgres.get_connection().await?;
-        let marked_read = conn
-            .mark_all_account_notifications_as_read(account_id)
-            .await? as i64;
+        let marked_read = i64::try_from(
+            conn.mark_all_account_notifications_as_read(account_id)
+                .await?,
+        )
+        .unwrap_or(i64::MAX);
 
         // Push the now-zero unread count so a watching badge clears live.
         if marked_read > 0 {

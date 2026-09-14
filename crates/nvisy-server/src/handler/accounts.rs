@@ -1,10 +1,12 @@
 //! Account management handlers for user profile operations.
 //!
 //! These handlers are thin: they authenticate, parse the request, delegate the
-//! account rules to [`AccountService`](crate::domain::AccountService), and map the
-//! result to a response. Avatar upload/delete stay here over
-//! [`AvatarService`](crate::service::AvatarService), with the self-authorization
+//! account rules to [`AccountService`], and map the result to a response. Avatar
+//! upload/delete stay here over [`AvatarService`], with the self-authorization
 //! check inline.
+//!
+//! [`AccountService`]: crate::domain::AccountService
+//! [`AvatarService`]: crate::service::AvatarService
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
@@ -203,7 +205,7 @@ fn authorize_self(account: &AccountModel, account_id: Uuid) -> Result<()> {
 ///
 /// [`Router`]: axum::routing::Router
 pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, put_with};
 
     ApiRouter::new()
         .api_route(

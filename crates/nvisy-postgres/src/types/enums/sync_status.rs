@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// Defines the execution status of a connection sync run.
     ///
-    /// Corresponds to the `SYNC_STATUS` PostgreSQL enum and tracks the state of an
+    /// Corresponds to the `SYNC_STATUS` `PostgreSQL` enum and tracks the state of an
     /// individual synchronization run.
     pub enum SyncStatus: Default = Pending, "crate::schema::sql_types::SyncStatus" {
         /// Sync is queued.
@@ -24,12 +24,14 @@ db_enum! {
 impl SyncStatus {
     /// Returns whether the sync failed.
     #[inline]
+    #[must_use]
     pub fn is_failed(self) -> bool {
         matches!(self, SyncStatus::Failed)
     }
 
     /// Returns whether the sync is in progress (pending or running).
     #[inline]
+    #[must_use]
     pub fn is_in_progress(self) -> bool {
         matches!(self, SyncStatus::Pending | SyncStatus::Running)
     }

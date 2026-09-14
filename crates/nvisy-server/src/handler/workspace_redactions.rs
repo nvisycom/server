@@ -2,7 +2,9 @@
 //! review audit.
 //!
 //! A redaction is produced by `POST /detections/{detectionId}/redactions/` (in
-//! [`detections`](super::detections)); these endpoints read them back.
+//! [`detections`]); these endpoints read them back.
+//!
+//! [`detections`]: super::detections
 
 use aide::axum::ApiRouter;
 use aide::axum::routing::get_with;
@@ -65,7 +67,7 @@ async fn list_detection_redactions(
     for redaction in page.items {
         let requested_by = resolve_account_ref(&mut conn, redaction.account_id).await?;
         items.push(WorkspaceRedactionResult::from_model(
-            redaction,
+            &redaction,
             workspace.id,
             workspace.handle.clone(),
             requested_by,
@@ -142,9 +144,10 @@ fn get_redaction_review_docs(op: TransformOperation) -> TransformOperation {
 
 /// Loads a redaction scoped to the workspace, mapping a missing one to a 404.
 ///
-/// A [`RedactionId`](nvisy_postgres::types::RedactionId) is globally unique, so
-/// the redaction is addressed by id alone and resolved within the workspace via
-/// its detection's pipeline.
+/// A [`RedactionId`] is globally unique, so the redaction is addressed by id
+/// alone and resolved within the workspace via its detection's pipeline.
+///
+/// [`RedactionId`]: nvisy_postgres::types::RedactionId
 async fn find_redaction(
     conn: &mut PgConn,
     workspace_id: Uuid,

@@ -45,3 +45,6 @@ derive_more = { workspace = true, features = ["deref"] }
 [dev-dependencies]
 serde_json = { workspace = true, features = [] }
 tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

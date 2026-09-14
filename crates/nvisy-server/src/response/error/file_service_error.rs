@@ -7,7 +7,7 @@ use nvisy_file_service::{Error as FileServiceError, ErrorKind as FileServiceErro
 
 use super::http_error::{Error as HttpError, ErrorKind};
 
-impl<'a> From<FileServiceError> for HttpError<'a> {
+impl From<FileServiceError> for HttpError<'_> {
     fn from(error: FileServiceError) -> Self {
         let message = error.to_string();
         match error.kind() {

@@ -8,9 +8,12 @@
 //! The keyset is defined once per query as a [`CursorKey`] type `K`. The same
 //! `K` drives all three things that must agree — the `ORDER BY`, the keyset
 //! `WHERE` comparison, and the opaque cursor the client echoes back — so they
-//! cannot silently disagree. The [`keyset`](crate::keyset) macro applies the
-//! order, comparison, and limit to a query from a `K`'s columns and a
-//! [`Direction`](crate::types::Direction) direction, eliminating the hand-written comparison at each call site.
+//! cannot silently disagree. The [`keyset`] macro applies the order, comparison,
+//! and limit to a query from a `K`'s columns and a [`Direction`] direction,
+//! eliminating the hand-written comparison at each call site.
+//!
+//! [`keyset`]: crate::keyset
+//! [`Direction`]: crate::types::Direction
 
 use base64::prelude::*;
 use serde::Serialize;
@@ -59,6 +62,7 @@ impl<K: CursorKey> Cursor<K> {
 
     /// Decodes a cursor from a URL-safe base64 string, or `None` if it is not a
     /// valid encoding of this key type.
+    #[must_use]
     pub fn decode(encoded: &str) -> Option<Self> {
         let json = BASE64_URL_SAFE_NO_PAD.decode(encoded).ok()?;
         let key = serde_json::from_slice(&json).ok()?;
@@ -85,6 +89,7 @@ pub struct CursorPagination<K: CursorKey> {
 
 impl<K: CursorKey> CursorPagination<K> {
     /// A first page of `limit` rows, newest first, without a count.
+    #[must_use]
     pub fn new(limit: i64) -> Self {
         Self {
             limit: limit.clamp(1, MAX_LIMIT),
@@ -154,7 +159,7 @@ impl<T> CursorPage<T> {
         K: CursorKey,
         F: Fn(&T) -> K,
     {
-        let has_more = items.len() as i64 > limit;
+        let has_more = i64::try_from(items.len()).unwrap_or(i64::MAX) > limit;
         if has_more {
             items.pop();
         }
@@ -173,6 +178,7 @@ impl<T> CursorPage<T> {
     }
 
     /// An empty page (no rows, count zero, no next cursor).
+    #[must_use]
     pub fn empty() -> Self {
         Self {
             items: Vec::new(),
@@ -182,6 +188,7 @@ impl<T> CursorPage<T> {
     }
 
     /// Whether a further page exists.
+    #[must_use]
     pub fn has_more(&self) -> bool {
         self.next_cursor.is_some()
     }
@@ -210,9 +217,10 @@ impl<T> CursorPage<T> {
 ///
 /// Generic over the sort column's type: `sort_col` may be any orderable column
 /// (a timestamp, a text field, …) and `after`'s first element is its comparable
-/// value — nothing here assumes a timestamp. `direction` is a
-/// [`Direction`](crate::types::Direction); `after` is typically
-/// `pagination.after_key().map(|k| (k.field.into(), k.id))`.
+/// value — nothing here assumes a timestamp. `direction` is a [`Direction`];
+/// `after` is typically `pagination.after_key().map(|k| (k.field.into(), k.id))`.
+///
+/// [`Direction`]: crate::types::Direction
 macro_rules! keyset {
     ($query:expr, $sort:expr, $id:expr, $direction:expr, $after:expr) => {{
         use $crate::types::Direction;

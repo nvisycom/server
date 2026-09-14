@@ -95,3 +95,6 @@ nvisy-postgres = { workspace = true, features = ["test_util"] }
 
 # Derive macros & utilities
 anyhow = { workspace = true, features = [] }
+
+[lints]
+workspace = true

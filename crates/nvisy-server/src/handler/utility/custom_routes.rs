@@ -7,8 +7,8 @@ use crate::service::ServiceState;
 /// Custom routes a wrapping binary contributes alongside the built-in ones.
 ///
 /// A host embeds this crate's [`ServiceState`] in its own state `S` and adds its
-/// own private (authenticated) and public routes; [`routes`](crate::handler::routes)
-/// merges them with the built-ins under one final state type.
+/// own private (authenticated) and public routes; [`routes`] merges them with the
+/// built-ins under one final state type.
 ///
 /// # Examples
 ///
@@ -23,6 +23,8 @@ use crate::service::ServiceState;
 /// The type parameter `S` is the application state the custom routes are typed
 /// to — [`ServiceState`] for the first-party binary (the default), or a
 /// downstream state that embeds it.
+///
+/// [`routes`]: crate::handler::routes
 #[derive(Clone)]
 pub struct CustomRoutes<S = ServiceState> {
     /// Custom private routes that require authentication.
@@ -48,11 +50,13 @@ where
 {
     /// Creates a new empty `CustomRoutes` instance.
     #[inline]
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Adds custom private routes (authenticated), merging with any already set.
+    #[must_use]
     pub fn add_private_routes(mut self, routes: ApiRouter<S>) -> Self {
         self.private_routes = Some(match self.private_routes {
             Some(existing) => existing.merge(routes),
@@ -62,6 +66,7 @@ where
     }
 
     /// Adds custom public routes (unauthenticated), merging with any already set.
+    #[must_use]
     pub fn add_public_routes(mut self, routes: ApiRouter<S>) -> Self {
         self.public_routes = Some(match self.public_routes {
             Some(existing) => existing.merge(routes),
@@ -71,6 +76,7 @@ where
     }
 
     /// Returns true if no custom routes are configured.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.private_routes.is_none() && self.public_routes.is_none()
     }

@@ -21,7 +21,7 @@ use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use super::{ChatTurn, TokenStream};
 use crate::error::{Error, Result};
 
-/// Cloneable handle to any inference backend (OpenAI, Anthropic, Ollama, ...).
+/// Cloneable handle to any inference backend (`OpenAI`, Anthropic, Ollama, ...).
 ///
 /// Wraps a rig [`Agent`] — which erases its provider's completion-model type
 /// internally — behind a provider-agnostic interface, so callers issue prompts

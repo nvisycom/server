@@ -1,4 +1,4 @@
-//! Workspace member model for PostgreSQL database operations.
+//! Workspace member model for `PostgreSQL` database operations.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
@@ -97,6 +97,7 @@ pub struct UpdateWorkspaceMember {
 
 impl WorkspaceMember {
     /// Returns the in-app notification events (without None values).
+    #[must_use]
     pub fn app_notification_events(&self) -> Vec<NotificationEvent> {
         self.notification_events_app
             .iter()
@@ -105,6 +106,7 @@ impl WorkspaceMember {
     }
 
     /// Returns the email notification events (without None values).
+    #[must_use]
     pub fn email_notification_events(&self) -> Vec<NotificationEvent> {
         self.notification_events_email
             .iter()

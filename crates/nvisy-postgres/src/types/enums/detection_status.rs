@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// The execution status of a detection (one analysis pass of a file).
     ///
-    /// Corresponds to the `DETECTION_STATUS` PostgreSQL enum. A detection is
+    /// Corresponds to the `DETECTION_STATUS` `PostgreSQL` enum. A detection is
     /// `Pending` (enqueued, no worker yet), then `Executing` (a worker is actively
     /// analyzing), then settles into `Complete` (analysis done, ready to redact)
     /// or `Failed`. Redaction is a separate, repeatable action over a complete
@@ -35,6 +35,7 @@ impl DetectionStatus {
 
     /// Returns whether analysis is done and the detection is ready to redact.
     #[inline]
+    #[must_use]
     pub fn is_complete(self) -> bool {
         matches!(self, DetectionStatus::Complete)
     }
@@ -42,6 +43,7 @@ impl DetectionStatus {
     /// Returns whether the detection has not finished analysis yet (pending or
     /// executing).
     #[inline]
+    #[must_use]
     pub fn is_detecting(self) -> bool {
         matches!(self, DetectionStatus::Pending | DetectionStatus::Executing)
     }
@@ -55,6 +57,7 @@ impl DetectionStatus {
     /// share the top rank: a detection reaches exactly one, so they never need
     /// ordering against each other.
     #[inline]
+    #[must_use]
     pub fn phase(self) -> u8 {
         match self {
             DetectionStatus::Pending => 0,
