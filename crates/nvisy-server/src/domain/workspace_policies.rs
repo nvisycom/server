@@ -51,6 +51,7 @@ impl WorkspacePolicyService {
     /// together.
     ///
     /// # Errors
+    ///
     /// - `InternalServerError` if the policy definition cannot be serialized.
     /// - A database error if the query fails.
     pub async fn create(
@@ -176,6 +177,7 @@ impl WorkspacePolicyService {
     /// policy kind; `None` returns every kind.
     ///
     /// # Errors
+    ///
     /// A database error if the query fails.
     pub async fn list(
         &self,
@@ -192,6 +194,7 @@ impl WorkspacePolicyService {
     /// Finds a policy by id with its creator and current version, or a `NotFound`.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the policy does not exist in the workspace or has no current
     ///   version.
     /// - A database error if the query fails.
@@ -215,6 +218,7 @@ impl WorkspacePolicyService {
     /// to one is rejected; to change it, create a new policy.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the policy does not exist in the workspace or has no current
     ///   version.
     /// - `BadRequest` if the policy is a one-shot (immutable).
@@ -290,6 +294,7 @@ impl WorkspacePolicyService {
     /// Soft-deletes a policy from its workspace, recording the event atomically.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the policy does not exist in the workspace.
     /// - A database error if the query fails.
     pub async fn delete(&self, origin: event::EventOrigin<'_>, policy_id: Uuid) -> Result<()> {

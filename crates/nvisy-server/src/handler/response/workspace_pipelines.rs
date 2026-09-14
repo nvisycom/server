@@ -49,6 +49,7 @@ impl WorkspacePipeline {
     /// JSON does not decode to the current schema.
     ///
     /// # Errors
+    ///
     /// A deserialization error if the stored pipeline config does not decode to
     /// the current definition schema.
     pub fn from_model(

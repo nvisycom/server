@@ -105,6 +105,7 @@ impl WorkspacePolicy {
     /// version's plaintext definition.
     ///
     /// # Errors
+    ///
     /// A 500 if the stored version definition does not deserialize into a
     /// [`Policy`].
     pub fn from_model(

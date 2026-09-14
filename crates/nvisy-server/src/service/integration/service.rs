@@ -121,6 +121,7 @@ impl ConnectionSyncService {
     /// created. Returns the persisted run.
     ///
     /// # Errors
+    ///
     /// - A database error if inserting the run row or emitting the start event
     ///   fails, or the surrounding transaction cannot commit.
     pub async fn create_run(
@@ -154,6 +155,7 @@ impl ConnectionSyncService {
     /// DB status flip instead.
     ///
     /// # Panics
+    ///
     /// Panics if the process-local cancel-registry mutex is poisoned (a prior
     /// holder panicked while holding the lock).
     #[must_use]
@@ -175,6 +177,7 @@ impl ConnectionSyncService {
     /// [`cancel_local`]: Self::cancel_local
     ///
     /// # Panics
+    ///
     /// Panics if the process-local cancel-registry mutex is poisoned (a prior
     /// holder panicked while holding the lock).
     pub async fn run_transfer(&self, request: TransferRequest) {

@@ -39,6 +39,7 @@ impl InferenceClient {
     /// text response.
     ///
     /// # Errors
+    ///
     /// A `Prompt` error if the completion request fails at runtime.
     #[tracing::instrument(name = "inference.prompt", skip_all)]
     pub async fn prompt(&self, prompt: &str) -> Result<String> {
@@ -52,6 +53,7 @@ impl InferenceClient {
     /// `history` is the prior conversation as [`ChatTurn`]s.
     ///
     /// # Errors
+    ///
     /// A `Prompt` error if the completion request fails at runtime.
     #[tracing::instrument(name = "inference.chat", skip_all, fields(history_len = history.len()))]
     pub async fn chat(&self, prompt: &str, history: Vec<ChatTurn>) -> Result<String> {

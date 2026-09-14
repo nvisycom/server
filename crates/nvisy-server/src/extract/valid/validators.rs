@@ -15,6 +15,7 @@
 /// letting it reach the database's `trim()` constraint (a late failure).
 ///
 /// # Errors
+///
 /// A [`garde::Error`] if the value is empty once trimmed.
 pub fn validate_non_blank(value: &str, _: &()) -> garde::Result {
     if value.trim().is_empty() {
@@ -30,6 +31,7 @@ pub fn validate_non_blank(value: &str, _: &()) -> garde::Result {
 /// value is nothing to check; a present value must not be blank once trimmed.
 ///
 /// # Errors
+///
 /// A [`garde::Error`] if a present value is empty once trimmed.
 pub fn validate_non_blank_opt(value: &Option<String>, ctx: &()) -> garde::Result {
     match value {
@@ -47,6 +49,7 @@ pub fn validate_non_blank_opt(value: &Option<String>, ctx: &()) -> garde::Result
 /// check.
 ///
 /// # Errors
+///
 /// A [`garde::Error`] if a present name contains a character other than a letter,
 /// digit, whitespace, hyphen, or apostrophe.
 pub fn validate_display_name_format(name: &Option<String>, _: &()) -> garde::Result {

@@ -35,6 +35,7 @@ pub async fn require_authentication(_: AuthState, request: Request, next: Next) 
 /// be rejected for a missing CSRF token never reaches the session-extending write.
 ///
 /// # Errors
+///
 /// Never returns `Err`: the sliding write is best-effort, so a failure to acquire
 /// a connection or to slide is logged and swallowed, and the downstream response
 /// is always returned. The `Result` return type only mirrors the middleware

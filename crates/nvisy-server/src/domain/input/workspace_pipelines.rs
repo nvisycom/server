@@ -32,6 +32,7 @@ impl PipelineDefinitionInput {
     /// than swallowed so a bad config never gets silently persisted as empty.
     ///
     /// # Errors
+    ///
     /// - A serialization error if the definition cannot be encoded to JSON.
     pub fn into_parts(mut self) -> serde_json::Result<(serde_json::Value, Vec<Uuid>)> {
         let policy_ids = std::mem::take(&mut self.policy_ids);
@@ -47,6 +48,7 @@ impl PipelineDefinitionInput {
     /// config to return silently.
     ///
     /// # Errors
+    ///
     /// - A deserialization error if the stored config JSON does not match the
     ///   definition schema.
     pub fn from_parts(
@@ -89,6 +91,7 @@ impl CreatePipelineInput {
     /// join table.
     ///
     /// # Errors
+    ///
     /// - A serialization error if the definition cannot be encoded to JSON.
     pub fn into_parts(
         self,
@@ -140,6 +143,7 @@ impl UpdatePipelineInput {
     /// override is merged into the metadata column (preserving other fields).
     ///
     /// # Errors
+    ///
     /// - A serialization error if a supplied definition cannot be encoded to
     ///   JSON.
     pub fn into_parts(

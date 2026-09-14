@@ -534,6 +534,7 @@ impl OidcService {
     /// (or a reauth proof), so it must never be sent to a caller-chosen host.
     ///
     /// # Errors
+    ///
     /// - `BadRequest` if `redirect_uri` is set but is not an allow-listed origin.
     /// - An OIDC/provider error if building the authorization request fails (see
     ///   [`begin`](Self::begin)).
@@ -577,6 +578,7 @@ impl OidcService {
     /// step fails. Returns the caller's redirect target alongside the state.
     ///
     /// # Errors
+    ///
     /// - `BadRequest` if the `state` value is malformed, or if it matches no
     ///   stored flow (unknown, expired, or already consumed).
     /// - A messaging error if opening the KV store or the atomic take fails.
@@ -607,6 +609,7 @@ impl OidcService {
     /// succeeds or fails.
     ///
     /// # Errors
+    ///
     /// - `Unauthorized` if the provider returned an error/denial, if the
     ///   verified identity does not match a `Reauth` account's linked identity.
     /// - `BadRequest` if the callback carries no authorization code.
@@ -722,6 +725,7 @@ impl OidcService {
     /// token is minted — mirroring what password login gates on.
     ///
     /// # Errors
+    ///
     /// - `Forbidden` if the account is suspended or deleted.
     pub fn gate_account_status(account: &Account) -> Result<()> {
         if account.is_suspended() {
@@ -754,6 +758,7 @@ impl OidcService {
     /// credential.
     ///
     /// # Errors
+    ///
     /// - `Unauthorized` if the proof is malformed, missing/expired/already used,
     ///   or belongs to a different account.
     /// - A messaging error if opening the KV store or the atomic take fails.

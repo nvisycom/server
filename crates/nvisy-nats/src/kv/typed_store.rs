@@ -74,6 +74,7 @@ impl<B: KvBucket> KvStore<B> {
     /// Put a value into the store.
     ///
     /// # Errors
+    ///
     /// - `Serialization` if `value` cannot be serialized to JSON.
     /// - `Operation` if the KV put fails (e.g. the connection is down or the
     ///   server rejects the write).
@@ -114,6 +115,7 @@ impl<B: KvBucket> KvStore<B> {
     /// `Ok(false)`.
     ///
     /// # Errors
+    ///
     /// - `Serialization` if `value` cannot be serialized to JSON.
     /// - `Operation` if the create fails for any reason other than the key
     ///   already existing (e.g. network, ack, or publish failure).
@@ -137,6 +139,7 @@ impl<B: KvBucket> KvStore<B> {
     /// Get a value from the store.
     ///
     /// # Errors
+    ///
     /// - `Serialization` if a stored entry's bytes cannot be deserialized into
     ///   `B::Value`.
     /// - `Operation` if the KV read fails (e.g. the connection is down). A
@@ -178,6 +181,7 @@ impl<B: KvBucket> KvStore<B> {
     /// Get a value, returning just the data.
     ///
     /// # Errors
+    ///
     /// Propagates any error from [`get`](Self::get).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
     pub async fn get_value(&self, key: &B::Key) -> Result<Option<B::Value>> {
@@ -196,6 +200,7 @@ impl<B: KvBucket> KvStore<B> {
     /// a replay window.
     ///
     /// # Errors
+    ///
     /// - `Serialization` or `Operation` propagated from the initial
     ///   [`get`](Self::get).
     /// - `Operation` if the conditional purge fails for any reason other than a
@@ -236,6 +241,7 @@ impl<B: KvBucket> KvStore<B> {
     /// Delete a key from the store.
     ///
     /// # Errors
+    ///
     /// - `Operation` if the purge fails (e.g. the connection is down or the
     ///   server rejects the request). Purging an absent key is not an error.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
@@ -257,6 +263,7 @@ impl<B: KvBucket> KvStore<B> {
     /// Check if a key exists in the store.
     ///
     /// # Errors
+    ///
     /// - `Operation` if the KV read fails (e.g. the connection is down). A
     ///   missing key is not an error; it returns `Ok(false)`.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
@@ -272,6 +279,7 @@ impl<B: KvBucket> KvStore<B> {
     /// Touches a key to reset its TTL by re-putting the same value.
     ///
     /// # Errors
+    ///
     /// - `Operation` if the key does not exist (nothing to re-put), or if the
     ///   underlying [`get`](Self::get) or [`put`](Self::put) fails.
     /// - `Serialization` propagated from [`get`](Self::get)/[`put`](Self::put).
@@ -288,6 +296,7 @@ impl<B: KvBucket> KvStore<B> {
     /// Get all keys in the bucket with the expected prefix.
     ///
     /// # Errors
+    ///
     /// - `Operation` if opening the key stream fails (e.g. the connection is
     ///   down). Individual keys that fail to read or fail to parse into `B::Key`
     ///   are logged and skipped, not surfaced as errors.
@@ -329,6 +338,7 @@ impl<B: KvBucket> KvStore<B> {
     /// Purge all keys in the bucket.
     ///
     /// # Errors
+    ///
     /// - `Operation` if listing the keys via [`keys`](Self::keys) fails, or if
     ///   any per-key [`delete`](Self::delete) fails (deletion stops at the first
     ///   failure).
@@ -351,6 +361,7 @@ impl<B: KvBucket> KvStore<B> {
     /// Update a value only if the revision matches (optimistic concurrency).
     ///
     /// # Errors
+    ///
     /// - `Serialization` if `value` cannot be serialized to JSON.
     /// - `Operation` if the conditional update fails, including when `revision`
     ///   no longer matches the stored revision (the concurrency check lost).
@@ -384,6 +395,7 @@ impl<B: KvBucket> KvStore<B> {
     /// Get or compute a value using the cache-aside pattern.
     ///
     /// # Errors
+    ///
     /// - `Serialization` or `Operation` propagated from the [`get_value`](Self::get_value)
     ///   read or, on a miss, the [`put`](Self::put) that stores the computed value.
     /// - Any error returned by `compute_fn` when the key is absent.

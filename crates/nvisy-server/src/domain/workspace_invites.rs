@@ -58,6 +58,7 @@ impl WorkspaceInviteService {
     /// `UnknownEmail` however it chooses.
     ///
     /// # Errors
+    ///
     /// - `Conflict` if the email already belongs to a member, or already has a
     ///   pending invitation.
     /// - A database error if a connection or query fails.
@@ -124,6 +125,7 @@ impl WorkspaceInviteService {
     /// Lists a workspace's invitations, newest first.
     ///
     /// # Errors
+    ///
     /// A database error if a connection or query fails.
     pub async fn list(
         &self,
@@ -141,6 +143,7 @@ impl WorkspaceInviteService {
     /// Cancels a pending invitation in a workspace, recording the event atomically.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no invitation matches the id in the workspace.
     /// - A database error if a connection or query fails.
     pub async fn cancel(&self, origin: event::EventOrigin<'_>, invite_id: Uuid) -> Result<()> {
@@ -172,6 +175,7 @@ impl WorkspaceInviteService {
     /// and (if email-bound) addressed to the acting account.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no invitation matches the id in the workspace, or if the
     ///   acting account cannot be read.
     /// - `BadRequest` if the invitation has expired or been consumed.
@@ -195,6 +199,7 @@ impl WorkspaceInviteService {
     /// must be usable and (if email-bound) addressed to the acting account.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no invitation matches the id in the workspace, or if the
     ///   acting account cannot be read.
     /// - `BadRequest` if the invitation has expired or been consumed.
@@ -211,6 +216,7 @@ impl WorkspaceInviteService {
     /// Mints a shareable, single-use invite code for a workspace.
     ///
     /// # Errors
+    ///
     /// A database error if a connection or query fails.
     pub async fn generate_code(
         &self,
@@ -230,6 +236,7 @@ impl WorkspaceInviteService {
     /// usable. Requires no authentication.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no invite matches the code, or if the invite's workspace no
     ///   longer exists.
     /// - `BadRequest` if the code has expired or been consumed.
@@ -251,6 +258,7 @@ impl WorkspaceInviteService {
     /// (if email-bound) addressed to the acting account.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no invite matches the code, or if the acting account cannot
     ///   be read.
     /// - `BadRequest` if the code has expired or been consumed.
@@ -283,6 +291,7 @@ impl WorkspaceInviteService {
     /// usable and (if email-bound) addressed to the acting account.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no invite matches the code, or if the acting account cannot
     ///   be read.
     /// - `BadRequest` if the code has expired or been consumed.

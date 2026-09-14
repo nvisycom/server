@@ -57,6 +57,7 @@ impl WorkspaceActivityFilterQuery {
     /// bounds are given.
     ///
     /// # Errors
+    ///
     /// A 400 if the window's optional bounds are invalid (see
     /// [`DateWindow::resolve_optional_bounds`]).
     pub fn to_filter(&self, actor_id: Option<Uuid>, window: &DateWindow) -> Result<ActivityFilter> {
@@ -77,6 +78,7 @@ impl WorkspaceActivityFilterQuery {
     /// always applied (defaulted and capped) so the result stays bounded.
     ///
     /// # Errors
+    ///
     /// A 400 if either resolved window bound cannot be represented as a timestamp
     /// (see [`ResolvedWindow::from_timestamp`] and [`ResolvedWindow::to_timestamp`]).
     pub fn to_export_filter(

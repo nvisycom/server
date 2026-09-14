@@ -95,6 +95,7 @@ impl RunBlobStore {
     /// bytes.
     ///
     /// # Errors
+    ///
     /// - A database error if the claim query fails. Once the blob is claimed, the
     ///   object reclaim is folded into the returned [`PurgeOutcome`] (a failed
     ///   delete yields `Pending`, not an error).
@@ -196,6 +197,7 @@ impl RunBlobStore {
     /// construction.
     ///
     /// # Errors
+    ///
     /// - `InternalServerError` if the blob's storage path is not a valid document
     ///   key, if the object is missing from storage, if reading its bytes fails,
     ///   or if decrypting them with the workspace key fails.
@@ -255,6 +257,7 @@ impl RunBlobStore {
     /// [`discard_staged_object`]: Self::discard_staged_object
     ///
     /// # Errors
+    ///
     /// - `InternalServerError` if serializing or encrypting the audit fails.
     /// - A storage error if the object write fails.
     pub async fn stage_analyzed_document(
@@ -284,6 +287,7 @@ impl RunBlobStore {
     /// audit sets `redaction_id` and `derived_from`.
     ///
     /// # Errors
+    ///
     /// - `InternalServerError` if serializing or encrypting the audit fails.
     /// - A storage error if the object write fails.
     pub async fn stage_review_audit(
@@ -355,6 +359,7 @@ impl RunBlobStore {
     /// pipeline override if set).
     ///
     /// # Errors
+    ///
     /// - `InternalServerError` if serializing `artifacts` or encrypting them with
     ///   the workspace key fails.
     /// - A storage error if writing the object fails.
@@ -409,6 +414,7 @@ impl RunBlobStore {
     /// [`discard_staged_object`]: Self::discard_staged_object
     ///
     /// # Errors
+    ///
     /// - `InternalServerError` if encrypting the redacted bytes with the
     ///   workspace key fails.
     /// - A storage error if writing the object fails.
@@ -462,6 +468,7 @@ impl RunBlobStore {
     /// rather than propagate.
     ///
     /// # Errors
+    ///
     /// - `InternalServerError` if the staged blob names an unknown or non-purgeable
     ///   bucket, or its storage key does not parse.
     /// - A storage error if the object delete fails.
@@ -480,6 +487,7 @@ impl RunBlobStore {
     /// [`load_audit`]: Self::load_audit
     ///
     /// # Errors
+    ///
     /// - `Conflict` if the detection has no base audit yet.
     /// - `NotFound` if the audit's blob has been reclaimed.
     /// - A database error if either lookup fails.
@@ -510,6 +518,7 @@ impl RunBlobStore {
     /// back to concrete types.
     ///
     /// # Errors
+    ///
     /// - `InternalServerError` if the blob's storage path is not a valid audit
     ///   key, if the object is missing from storage, if reading its bytes fails,
     ///   if decrypting them fails, or if the engine cannot decode the audit.
@@ -564,6 +573,7 @@ impl RunBlobStore {
     /// [`load_intermediates`]: Self::load_intermediates
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the detection has no intermediates reference, or its blob
     ///   has been reclaimed.
     /// - A database error if the blob lookup fails.
@@ -593,6 +603,7 @@ impl RunBlobStore {
     /// artifact types.
     ///
     /// # Errors
+    ///
     /// - `InternalServerError` if the blob's storage path is not a valid
     ///   intermediates key, if the object is missing from storage, if reading its
     ///   bytes fails, if decrypting them fails, or if the engine cannot decode the
@@ -648,6 +659,7 @@ impl RunBlobStore {
     /// [`load_audit`]: Self::load_audit
     ///
     /// # Errors
+    ///
     /// - `Conflict` if the redaction has no review audit.
     /// - `NotFound` if the review audit's blob has been reclaimed.
     /// - A database error if either lookup fails.

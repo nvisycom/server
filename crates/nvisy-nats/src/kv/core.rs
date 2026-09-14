@@ -35,6 +35,7 @@ pub struct InvalidKvKey;
 /// `validate_kv_key(s).map(Self)`.
 ///
 /// # Errors
+///
 /// - `InvalidKvKey` if `value` is empty, contains a character outside the
 ///   allowed alphanumeric and `-/_=.` set, or has an empty dot-separated token
 ///   (a leading, trailing, or consecutive dot).

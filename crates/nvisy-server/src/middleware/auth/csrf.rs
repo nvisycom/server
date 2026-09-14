@@ -30,6 +30,7 @@ use crate::response::{ErrorKind, Result};
 /// [`SessionToken`] the auth layer verified and cached on the request).
 ///
 /// # Errors
+///
 /// A 403 if the check applies (cookie-authenticated, state-changing request) and
 /// the CSRF header and cookie tokens are missing or do not match.
 pub async fn csrf_protect(request: Request, next: Next) -> Result<Response> {

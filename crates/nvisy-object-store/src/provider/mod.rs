@@ -156,6 +156,7 @@ pub trait Client: Deref<Target = ObjectStoreClient> + Send + Sync + 'static {
 /// client is scoped under the config's root path.
 ///
 /// # Errors
+///
 /// An error if the credentials are invalid, a custom endpoint is rejected by
 /// `policy`, or the provider client cannot be constructed.
 pub async fn connect(

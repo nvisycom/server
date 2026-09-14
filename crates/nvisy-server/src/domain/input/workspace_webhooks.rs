@@ -34,6 +34,7 @@ impl CreateWebhookInput {
     /// so a caller-supplied `Suspended` is coerced to `Disabled`.
     ///
     /// # Errors
+    ///
     /// - `BadRequest` if a supplied header name or value is malformed.
     pub fn into_model(
         self,
@@ -84,6 +85,7 @@ impl UpdateWebhookInput {
     /// ignored. A caller-supplied `Suspended` is coerced to `Disabled`.
     ///
     /// # Errors
+    ///
     /// - `BadRequest` if a supplied header name or value is malformed.
     pub fn into_model(self, current_status: WebhookStatus) -> Result<UpdateWorkspaceWebhookModel> {
         let events = self.events.map(|e| e.into_iter().map(Some).collect());

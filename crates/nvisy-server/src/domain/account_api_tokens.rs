@@ -45,6 +45,7 @@ impl AccountApiTokenService {
     /// again.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no account has the given id.
     /// - An auth error if signing the token's JWT fails.
     /// - A database error if the connection or transaction fails.
@@ -80,6 +81,7 @@ impl AccountApiTokenService {
     /// Lists the account's API tokens with cursor pagination.
     ///
     /// # Errors
+    ///
     /// - A database error if the connection or query fails.
     pub async fn list(
         &self,
@@ -95,6 +97,7 @@ impl AccountApiTokenService {
     /// Reads one of the account's API tokens by id, or a `NotFound`.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the token does not exist or belongs to another account.
     /// - A database error if the connection or query fails.
     pub async fn read(&self, account_id: Uuid, token_id: Uuid) -> Result<AccountApiToken> {
@@ -108,6 +111,7 @@ impl AccountApiTokenService {
     /// user-facing name.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the token does not exist or belongs to another account.
     /// - `Forbidden` if the token is a session token rather than an API token.
     /// - A database error if the connection or query fails.
@@ -140,6 +144,7 @@ impl AccountApiTokenService {
     /// Revokes (soft-deletes) an API token, or a 400 if it was already revoked.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the token does not exist or belongs to another account.
     /// - `BadRequest` if the token was already revoked.
     /// - A database error if the connection or query fails.

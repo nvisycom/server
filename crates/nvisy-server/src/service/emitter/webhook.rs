@@ -49,6 +49,7 @@ impl WebhookEmitter {
     /// * `data` - Additional event-specific data
     ///
     /// # Errors
+    ///
     /// - A database error if acquiring the connection or querying the subscribed
     ///   webhooks fails.
     /// - A messaging error if publishing a delivery job to NATS fails; the first

@@ -39,6 +39,7 @@ impl WorkspaceMemberService {
     /// Lists a workspace's members with their accounts, newest first.
     ///
     /// # Errors
+    ///
     /// A database error if a connection or query fails.
     pub async fn list(
         &self,
@@ -56,6 +57,7 @@ impl WorkspaceMemberService {
     /// Finds a member by account id with their account, or a `NotFound`.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the account is not a member of the workspace.
     /// - A database error if a connection or query fails.
     pub async fn find(
@@ -75,6 +77,7 @@ impl WorkspaceMemberService {
     /// cannot be removed (an owner can only leave).
     ///
     /// # Errors
+    ///
     /// - `BadRequest` if the actor targets their own membership, or if the target
     ///   member is an owner.
     /// - `NotFound` if the target account is not a member of the workspace.
@@ -131,6 +134,7 @@ impl WorkspaceMemberService {
     /// owner can only leave).
     ///
     /// # Errors
+    ///
     /// - `BadRequest` if the actor targets their own membership, or if the update
     ///   would demote an owner to a non-owner role.
     /// - `NotFound` if the target account is not a member of the workspace, or if
@@ -194,6 +198,7 @@ impl WorkspaceMemberService {
     /// handler reads its settings from the returned row.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the account is not a member of the workspace.
     /// - A database error if a connection or query fails.
     pub async fn notification_settings(
@@ -212,6 +217,7 @@ impl WorkspaceMemberService {
     /// member of the workspace.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the account is not a member of the workspace.
     /// - A database error if a connection or query fails.
     pub async fn update_notification_settings(
@@ -243,6 +249,7 @@ impl WorkspaceMemberService {
     /// ownership first.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the acting account is not a member of the workspace.
     /// - `Conflict` if the account is the workspace's only owner.
     /// - A database error if a connection or query fails.

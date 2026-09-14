@@ -70,6 +70,7 @@ pub fn detection_subject(detection_id: Uuid) -> String {
 /// to pick up.
 ///
 /// # Errors
+///
 /// A NATS error if publishing the job to the work-queue fails.
 pub async fn enqueue(infra: &Infra, job: DetectionJob) -> Result<()> {
     let publisher = infra.nats.event_publisher::<DetectionStream>();
@@ -102,6 +103,7 @@ pub async fn broadcast_status(infra: &Infra, detection_id: Uuid, status: Detecti
 /// a watching client.
 ///
 /// # Errors
+///
 /// A NATS error if the broadcast subscription cannot be established.
 pub async fn subscribe_status(
     infra: &Infra,

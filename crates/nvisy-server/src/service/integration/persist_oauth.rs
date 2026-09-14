@@ -19,6 +19,7 @@ use crate::service::{ConnectionConfig, CryptoService};
 /// provider in the meantime is left untouched.
 ///
 /// # Errors
+///
 /// - A crypto error if decrypting the stored config or re-encrypting the merged
 ///   config fails.
 /// - A database error if the locking read or the connection update fails, or the

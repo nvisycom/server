@@ -95,6 +95,7 @@ impl Handle {
     /// integration tests; never in normal builds.
     ///
     /// # Panics
+    ///
     /// Never in practice: the composed `h-<suffix>` handle always satisfies the
     /// length and format invariants, so the internal parse cannot fail. A panic
     /// would signal a change to the invariants that broke this construction.

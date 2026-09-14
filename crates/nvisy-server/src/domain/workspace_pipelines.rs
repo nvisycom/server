@@ -47,6 +47,7 @@ impl WorkspacePipelineService {
     /// An unknown referenced policy rejects the whole request before any write.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if a referenced policy does not exist in the workspace.
     /// - `InternalServerError` if the pipeline definition cannot be serialized.
     /// - A database error if the query fails.
@@ -93,6 +94,7 @@ impl WorkspacePipelineService {
     /// and a name search.
     ///
     /// # Errors
+    ///
     /// A database error if the query fails.
     pub async fn list(
         &self,
@@ -111,6 +113,7 @@ impl WorkspacePipelineService {
     /// `NotFound`.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the pipeline does not exist in the workspace.
     /// - A database error if the query fails.
     pub async fn find(
@@ -132,6 +135,7 @@ impl WorkspacePipelineService {
     /// write.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the pipeline does not exist in the workspace, or a supplied
     ///   definition references a policy that does not.
     /// - `InternalServerError` if the pipeline definition cannot be serialized.
@@ -199,6 +203,7 @@ impl WorkspacePipelineService {
     /// Soft-deletes a pipeline from its workspace, recording the event atomically.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the pipeline does not exist in the workspace.
     /// - A database error if the query fails.
     pub async fn delete(&self, origin: event::EventOrigin<'_>, pipeline_id: Uuid) -> Result<()> {

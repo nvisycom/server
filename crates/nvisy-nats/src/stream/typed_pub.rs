@@ -37,6 +37,7 @@ impl<S: EventStream> EventPublisher<S> {
     /// Publish an event to the stream's configured subject.
     ///
     /// # Errors
+    ///
     /// - `Serialization` if `event` cannot be serialized to JSON.
     /// - `DeliveryFailed` if the publish is not accepted by the server (e.g. no
     ///   stream captures the subject, or the connection is down).
@@ -50,6 +51,7 @@ impl<S: EventStream> EventPublisher<S> {
     /// Events are published to `{stream_subject}.{sub_subject}`.
     ///
     /// # Errors
+    ///
     /// - `Serialization` if `event` cannot be serialized to JSON.
     /// - `DeliveryFailed` if the publish is not accepted by the server (e.g. no
     ///   stream captures the subject, or the connection is down).

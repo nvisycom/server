@@ -46,6 +46,7 @@ impl WebhookHeaders {
     /// so a value cannot inject a second header line).
     ///
     /// # Errors
+    ///
     /// An [`InvalidHeader`] if a name is not a valid HTTP header name, or a value
     /// contains control characters.
     pub fn try_new(

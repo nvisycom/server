@@ -66,6 +66,7 @@ impl NatsClient {
     /// Create a new NATS client and connect
     ///
     /// # Errors
+    ///
     /// - `Timeout` if the connection is not established within
     ///   `nats_connect_timeout` (defaulting to 30 seconds).
     /// - `Connection` if the TCP/handshake to the NATS server fails within the
@@ -149,6 +150,7 @@ impl NatsClient {
     /// Test connectivity with a ping
     ///
     /// # Errors
+    ///
     /// - `Timeout` if the server does not respond to the flush within 10 seconds.
     /// - `Connection` if flushing the connection fails (e.g. the socket is
     ///   disconnected).
@@ -185,6 +187,7 @@ impl NatsClient {
     /// value types, so it is the only type argument.
     ///
     /// # Errors
+    ///
     /// - `Operation` if the bucket does not exist and cannot be created (e.g. the
     ///   `JetStream` request fails or the server rejects the bucket config).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
@@ -195,6 +198,7 @@ impl NatsClient {
     /// Get or create the KV store for a bucket with a custom TTL.
     ///
     /// # Errors
+    ///
     /// - `Operation` if the bucket does not exist and cannot be created (e.g. the
     ///   `JetStream` request fails or the server rejects the bucket config).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
@@ -213,6 +217,7 @@ impl NatsClient {
     /// reconciliation of their own.
     ///
     /// # Errors
+    ///
     /// - `Operation` if the stream cannot be looked up, updated to match `S`'s
     ///   config, or created (the `JetStream` request fails or the server rejects
     ///   the stream config).
@@ -256,6 +261,7 @@ impl NatsClient {
     /// persistence or acknowledgement.
     ///
     /// # Errors
+    ///
     /// - `Serialization` if `message` cannot be serialized to JSON.
     /// - `Connection` if the message cannot be handed to the NATS connection
     ///   (e.g. the client is disconnected).
@@ -279,6 +285,7 @@ impl NatsClient {
     /// deserialize are skipped rather than ending the stream.
     ///
     /// # Errors
+    ///
     /// - `Connection` if the subscription cannot be established (e.g. the client
     ///   is disconnected or the subject is invalid).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]

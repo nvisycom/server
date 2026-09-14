@@ -175,6 +175,7 @@ impl CorsConfig {
     /// Converts configured origins to `HeaderValue` list, falling back to localhost for development.
     ///
     /// # Panics
+    ///
     /// Never in practice: the panic path is the parse of the hardcoded localhost
     /// fallback origins, which are always valid header values. Configured origins
     /// that fail to parse are skipped, not panicked on.

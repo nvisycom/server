@@ -69,6 +69,7 @@ impl SignInService {
     /// verify.
     ///
     /// # Errors
+    ///
     /// - `Unauthorized` if no account matches the identifier or the password does
     ///   not verify (the two are deliberately indistinguishable to the caller).
     /// - `Forbidden` if the account is suspended or deleted.
@@ -132,6 +133,7 @@ impl SignInService {
     /// the password hash lives on the identity, not the account.
     ///
     /// # Errors
+    ///
     /// - A password-strength error if the password fails the policy check (see
     ///   [`PasswordService::validate_and_hash`]).
     /// - `Conflict` if the email or username is already in use.
@@ -218,6 +220,7 @@ impl SignInService {
     /// sessions — best-effort, so a cleanup failure is only logged.
     ///
     /// # Errors
+    ///
     /// - A database error if acquiring the connection, the token lookup, or the
     ///   token delete fails. The best-effort expired-session cleanup never fails
     ///   the call (its error is only logged).

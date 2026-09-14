@@ -61,6 +61,7 @@ impl WorkspaceThreadService {
     /// queued.
     ///
     /// # Errors
+    ///
     /// - `InternalServerError` if the queued assistant job cannot be encoded.
     /// - A database error if the query fails.
     pub async fn open(
@@ -121,6 +122,7 @@ impl WorkspaceThreadService {
     /// event atomically.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the thread does not exist in the workspace.
     /// - A database error if the query fails.
     pub async fn delete(&self, origin: event::EventOrigin<'_>, thread_id: Uuid) -> Result<()> {
@@ -149,6 +151,7 @@ impl WorkspaceThreadService {
     /// nothing and emitting no duplicate event.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the thread does not exist in the workspace.
     /// - A database error if the query fails.
     pub async fn close(
@@ -186,6 +189,7 @@ impl WorkspaceThreadService {
     /// emitting no duplicate event.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the thread does not exist in the workspace.
     /// - A database error if the query fails.
     pub async fn reopen(
@@ -224,6 +228,7 @@ impl WorkspaceThreadService {
     /// sets it. Only an explicit value writes and emits a timeline event.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the thread does not exist in the workspace.
     /// - A database error if the query fails.
     pub async fn rename(
@@ -264,6 +269,7 @@ impl WorkspaceThreadService {
     /// raises the review-verified event.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the document, or its review thread, does not exist in the
     ///   workspace.
     /// - A database error if the query fails.
@@ -308,6 +314,7 @@ impl WorkspaceThreadService {
     /// assigned themselves.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the document or its review thread does not exist in the
     ///   workspace, or a set assignee is not a workspace member.
     /// - A database error if the query fails.
@@ -371,6 +378,7 @@ impl WorkspaceThreadService {
     /// job was queued.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the thread does not exist in the workspace.
     /// - `Conflict` if the thread is closed.
     /// - `InternalServerError` if the queued assistant job cannot be encoded.
@@ -448,6 +456,7 @@ impl WorkspaceThreadService {
     /// Edits a comment's body. Restricted to the comment's author.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the comment does not exist in the workspace.
     /// - `Forbidden` if the caller is not the comment's author.
     /// - A database error if the query fails.
@@ -478,6 +487,7 @@ impl WorkspaceThreadService {
     /// Soft-deletes a comment. Restricted to the comment's author.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the comment does not exist in the workspace.
     /// - `Forbidden` if the caller is not the comment's author.
     /// - A database error if the query fails.

@@ -59,6 +59,7 @@ impl AccountIdentityService {
     /// Lists the account's sign-in methods (its password and any linked providers).
     ///
     /// # Errors
+    ///
     /// - A database error if the connection or query fails.
     pub async fn list(&self, account_id: Uuid) -> Result<Vec<AccountIdentity>> {
         let mut conn = self.postgres.get_connection().await?;
@@ -72,6 +73,7 @@ impl AccountIdentityService {
     /// to consume that single-use proof only when one is actually needed.
     ///
     /// # Errors
+    ///
     /// - A database error if the connection or query fails.
     pub async fn has_password(&self, account_id: Uuid) -> Result<bool> {
         let mut conn = self.postgres.get_connection().await?;
@@ -90,6 +92,7 @@ impl AccountIdentityService {
     /// the `password_changed_at` stamp commit together.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no account has the given id.
     /// - `Unauthorized` if the account has no password, or the current password is
     ///   absent or incorrect.
@@ -134,6 +137,7 @@ impl AccountIdentityService {
     /// [`change_password`], which verifies the current one.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no account has the given id.
     /// - `Conflict` if the account already has a password.
     /// - `BadRequest` if the new password fails the strength check.
@@ -212,6 +216,7 @@ impl AccountIdentityService {
     /// never lose its only sign-in method.
     ///
     /// # Errors
+    ///
     /// - `Conflict` if it is the account's only remaining sign-in method.
     /// - `NotFound` if the account has no identity for that provider.
     /// - A database error if the connection or query fails.

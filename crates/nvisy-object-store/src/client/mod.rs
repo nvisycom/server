@@ -65,6 +65,7 @@ impl ObjectStoreClient {
     /// a fabricated key, it does not depend on a probe object existing.
     ///
     /// # Errors
+    ///
     /// A storage error if the store is unreachable or the credentials are
     /// rejected (`PermissionDenied`/`Unauthenticated`).
     #[tracing::instrument(name = "object.verify", skip(self))]
@@ -84,6 +85,7 @@ impl ObjectStoreClient {
     /// [`list_stream`]: Self::list_stream
     ///
     /// # Errors
+    ///
     /// A storage error if the listing request fails.
     #[tracing::instrument(name = "object.list", skip(self), fields(prefix = %prefix))]
     pub async fn list(&self, prefix: &str) -> Result<Vec<ObjectMeta>, Error> {
@@ -113,6 +115,7 @@ impl ObjectStoreClient {
     /// Retrieve the raw bytes, content-type, and metadata stored at `key`.
     ///
     /// # Errors
+    ///
     /// - A `Runtime` error if `key` is not a valid object-store path.
     /// - A storage error (including `NotFound`) if the object cannot be fetched
     ///   or its body cannot be read.
@@ -140,6 +143,7 @@ impl ObjectStoreClient {
     /// into NATS); pair with a chunk-consuming sink.
     ///
     /// # Errors
+    ///
     /// - A `Runtime` error if `key` is not a valid object-store path.
     /// - A storage error (including `NotFound`) if the object cannot be opened.
     ///   Errors reading individual chunks are yielded by the returned stream.
@@ -156,6 +160,7 @@ impl ObjectStoreClient {
     /// Upload `data` to `key`, optionally setting the content-type.
     ///
     /// # Errors
+    ///
     /// Propagates any error from [`put_opts`](Self::put_opts).
     pub async fn put(
         &self,
@@ -170,6 +175,7 @@ impl ObjectStoreClient {
     /// Upload `data` to `key` with the specified [`PutMode`].
     ///
     /// # Errors
+    ///
     /// - A `Runtime` error if `key` is not a valid object-store path.
     /// - A storage error if the upload fails (including a precondition failure
     ///   under a conditional [`PutMode`]).
@@ -202,6 +208,7 @@ impl ObjectStoreClient {
     /// Get object metadata without downloading the body.
     ///
     /// # Errors
+    ///
     /// - A `Runtime` error if `key` is not a valid object-store path.
     /// - A storage error (including `NotFound`) if the metadata cannot be fetched.
     #[tracing::instrument(name = "object.head", skip(self), fields(key = %key))]
@@ -213,6 +220,7 @@ impl ObjectStoreClient {
     /// Delete the object at `key`.
     ///
     /// # Errors
+    ///
     /// - A `Runtime` error if `key` is not a valid object-store path.
     /// - A storage error if the delete request fails.
     #[tracing::instrument(name = "object.delete", skip(self), fields(key = %key))]
@@ -224,6 +232,7 @@ impl ObjectStoreClient {
     /// Copy an object from `src` to `dst` within the same store.
     ///
     /// # Errors
+    ///
     /// - A `Runtime` error if either `src` or `dst` is not a valid object-store
     ///   path.
     /// - A storage error (including `NotFound` for a missing source) if the copy
@@ -238,6 +247,7 @@ impl ObjectStoreClient {
     /// Whether an object exists at `key`.
     ///
     /// # Errors
+    ///
     /// - A `Runtime` error if `key` is not a valid object-store path.
     /// - A storage error other than `NotFound` (which resolves to `Ok(false)`)
     ///   if the existence check fails.
@@ -254,6 +264,7 @@ impl ObjectStoreClient {
     /// body.
     ///
     /// # Errors
+    ///
     /// - A `Runtime` error if `key` is not a valid object-store path.
     /// - A storage error (including `NotFound`) if the range cannot be read.
     #[tracing::instrument(name = "object.get_range", skip(self), fields(key = %key))]
@@ -269,6 +280,7 @@ impl ObjectStoreClient {
     /// the multipart upload is aborted so no orphaned parts are left behind.
     ///
     /// # Errors
+    ///
     /// - A `Runtime` error if `key` is not a valid object-store path.
     /// - The stream's own error if it yields one (the upload is aborted first).
     /// - A storage error if starting, uploading a part, or completing the

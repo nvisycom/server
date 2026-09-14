@@ -78,6 +78,7 @@ impl BlobStore {
     /// aborts it so no partial upload lingers.
     ///
     /// # Errors
+    ///
     /// - `Body` if reading from `reader` fails.
     /// - `Operation` if the store rejects the upload (a single-part put, or any
     ///   part of a multipart upload).
@@ -252,6 +253,7 @@ impl BlobStore {
     /// Fetches an object as a stream, or `None` if it does not exist.
     ///
     /// # Errors
+    ///
     /// `Operation` if the fetch fails for any reason other than a missing object
     /// (a missing object is reported as `Ok(None)`).
     pub async fn get<K: ObjectKey>(&self, key: &K) -> Result<Option<GetObject>> {
@@ -287,6 +289,7 @@ impl BlobStore {
     /// Deletes an object. Idempotent: deleting a missing object succeeds.
     ///
     /// # Errors
+    ///
     /// `Operation` if the store rejects the delete request.
     pub async fn delete<K: ObjectKey>(&self, key: &K) -> Result<()> {
         let object_key = Self::object_key(key);
@@ -309,6 +312,7 @@ impl BlobStore {
     /// object operation needs, so it doubles as a readiness check.
     ///
     /// # Errors
+    ///
     /// `Operation` if the endpoint is unreachable, the credentials are rejected,
     /// or the bucket is missing or inaccessible.
     pub async fn ping(&self) -> Result<()> {
@@ -324,6 +328,7 @@ impl BlobStore {
     /// Whether an object exists, via a HEAD request.
     ///
     /// # Errors
+    ///
     /// `Operation` if the HEAD request fails for any reason other than the object
     /// being absent (a missing object is reported as `Ok(false)`).
     pub async fn exists<K: ObjectKey>(&self, key: &K) -> Result<bool> {

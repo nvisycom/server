@@ -120,6 +120,7 @@ impl LlmConfig {
     /// [`Error`]: crate::Error
     ///
     /// # Errors
+    ///
     /// - A `Build` error if the provider client cannot be constructed from the
     ///   config.
     /// - A `Verify` error if the provider rejects the credentials or is
@@ -152,6 +153,7 @@ impl LlmConfig {
     /// [`default_model`]: Self::default_model
     ///
     /// # Errors
+    ///
     /// A `Build` error if the client cannot be constructed from the config (e.g.
     /// an invalid base URL).
     pub fn connect(&self, model: Option<&str>) -> Result<InferenceClient> {

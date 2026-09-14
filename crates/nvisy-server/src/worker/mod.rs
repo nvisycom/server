@@ -32,6 +32,7 @@ use crate::Result;
 /// built afterwards are then cheap handles that assume their stream already exists.
 ///
 /// # Errors
+///
 /// A NATS error if reconciling any of the streams (create or update) fails.
 pub async fn ensure_streams(nats: &NatsClient) -> Result<()> {
     nats.ensure_stream::<webhook::WebhookStream>().await?;

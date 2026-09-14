@@ -52,6 +52,7 @@ impl<S: EventStream> EventSubscriber<S> {
     /// to an existing consumer rather than silently ignored.
     ///
     /// # Errors
+    ///
     /// - `StreamError` if the stream `S::NAME` cannot be looked up (e.g. it was
     ///   never reconciled via [`NatsClient::ensure_stream`], or the connection is
     ///   down).

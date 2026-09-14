@@ -156,6 +156,7 @@ impl ServiceState {
     /// one).
     ///
     /// # Errors
+    ///
     /// Returns an error if any startup step fails: connecting the infra clients
     /// and applying migrations, reconciling the `JetStream` streams, loading the
     /// encryption key, building the redaction engine, loading the session keys,

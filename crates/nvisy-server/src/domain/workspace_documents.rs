@@ -51,6 +51,7 @@ impl WorkspaceDocumentService {
     /// the engine's codec registry.
     ///
     /// # Errors
+    ///
     /// - `BadRequest` if a format or modality filter token matches no known
     ///   extension or modality.
     /// - A database error if a connection or the query fails.
@@ -76,6 +77,7 @@ impl WorkspaceDocumentService {
     /// creator, or a `NotFound`.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the document does not exist in the workspace.
     /// - A database error if a connection or the query fails.
     pub async fn find(
@@ -91,6 +93,7 @@ impl WorkspaceDocumentService {
     /// creator. The update and its event commit together.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the document does not exist in the workspace.
     /// - A database error if a connection or the update transaction fails.
     pub async fn update(
@@ -128,6 +131,7 @@ impl WorkspaceDocumentService {
     /// blob once its last reference is gone and its retention window has passed.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the document does not exist in the workspace.
     /// - A database error if a connection or the delete transaction fails.
     pub async fn delete(&self, origin: event::EventOrigin<'_>, document_id: Uuid) -> Result<()> {
@@ -160,6 +164,7 @@ impl WorkspaceDocumentService {
     /// held by an in-progress detection is reported as skipped rather than failing.
     ///
     /// # Errors
+    ///
     /// - A database error if a connection or the delete transaction fails.
     pub async fn bulk_delete(
         &self,

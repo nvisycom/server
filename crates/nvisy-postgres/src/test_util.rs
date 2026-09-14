@@ -239,6 +239,7 @@ pub mod backdate {
         ($fn:ident = $table:ident . $col:ident) => {
             #[doc = concat!("Sets `", stringify!($table), ".", stringify!($col), "`.")]
             /// # Errors
+            ///
             /// A database error if the update query fails.
             pub async fn $fn(conn: &mut PgConn, id: Uuid, $col: Timestamp) -> Result<()> {
                 use crate::schema::$table::dsl;
@@ -256,6 +257,7 @@ pub mod backdate {
                             stringify!($col_b), "` (nullable), together."
                         )]
             /// # Errors
+            ///
             /// A database error if the update query fails.
             pub async fn $fn(
                 conn: &mut PgConn,

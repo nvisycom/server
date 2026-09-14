@@ -62,6 +62,7 @@ impl CryptoService {
     /// The file must contain exactly 32 raw bytes (256-bit key).
     ///
     /// # Errors
+    ///
     /// - A config error if the key file is missing, is not a regular file, or does
     ///   not contain exactly 32 bytes.
     /// - A file-system error if reading the key file fails.
@@ -74,6 +75,7 @@ impl CryptoService {
     /// The file must contain exactly 32 raw bytes (256-bit key).
     ///
     /// # Errors
+    ///
     /// - A config error if the key file is missing, is not a regular file, or does
     ///   not contain exactly 32 bytes.
     /// - A file-system error if reading the key file fails.
@@ -84,6 +86,7 @@ impl CryptoService {
     /// Encrypts a serializable value under the given workspace's key.
     ///
     /// # Errors
+    ///
     /// - `Json` if `value` fails to serialize.
     /// - `EncryptionFailed` if the AEAD seal fails.
     pub fn encrypt_json<T: Serialize>(
@@ -97,6 +100,7 @@ impl CryptoService {
     /// Decrypts a value previously encrypted under the given workspace's key.
     ///
     /// # Errors
+    ///
     /// - `CiphertextTooShort` if the input is shorter than a nonce plus tag.
     /// - `DecryptionFailed` if authentication fails (wrong workspace key, corrupt,
     ///   or tampered data).
@@ -118,6 +122,7 @@ impl CryptoService {
     /// buffered whole.
     ///
     /// # Errors
+    ///
     /// - `EncryptionFailed` if the AEAD seal fails.
     pub fn encrypt(&self, workspace_id: Uuid, plaintext: &[u8]) -> CryptoResult<Vec<u8>> {
         encrypt(&self.workspace_key(workspace_id), plaintext)
@@ -126,6 +131,7 @@ impl CryptoService {
     /// Decrypts a buffer previously encrypted under the given workspace's key.
     ///
     /// # Errors
+    ///
     /// - `CiphertextTooShort` if the input is shorter than a nonce plus tag.
     /// - `DecryptionFailed` if authentication fails (wrong workspace key, corrupt,
     ///   or tampered data).

@@ -56,6 +56,7 @@ impl DateWindow {
     /// `[from, to]` spans `to - from + 1` dates.
     ///
     /// # Errors
+    ///
     /// - A 400 if `from` is after `to`.
     /// - A 400 if the window spans more than `MAX_WINDOW_DAYS` inclusive dates.
     /// - A 400 if a defaulted or computed bound falls outside the representable
@@ -98,6 +99,7 @@ impl DateWindow {
     /// bound the whole result (an export).
     ///
     /// # Errors
+    ///
     /// - A 400 if both bounds are present and `from` is after `to`.
     /// - A 400 if a given bound falls outside the representable timestamp range.
     pub fn resolve_optional_bounds(
@@ -127,6 +129,7 @@ impl ResolvedWindow {
     /// (inclusive lower bound).
     ///
     /// # Errors
+    ///
     /// A 400 if `from` cannot be represented as a zoned UTC timestamp.
     pub fn from_timestamp(&self) -> Result<jiff::Timestamp> {
         day_start_utc(self.from)
@@ -137,6 +140,7 @@ impl ResolvedWindow {
     /// the whole `to` day without spilling into the next.
     ///
     /// # Errors
+    ///
     /// A 400 if the day after `to` falls outside the representable date range or
     /// cannot be represented as a zoned UTC timestamp.
     pub fn to_timestamp(&self) -> Result<jiff::Timestamp> {

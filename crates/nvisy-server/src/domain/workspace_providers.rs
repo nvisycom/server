@@ -55,6 +55,7 @@ impl WorkspaceProviderService {
     /// provider and its creation event commit together.
     ///
     /// # Errors
+    ///
     /// - `BadRequest` if the config names a custom endpoint the endpoint policy
     ///   disallows.
     /// - A crypto error if encrypting the config fails.
@@ -115,6 +116,7 @@ impl WorkspaceProviderService {
     /// provider.
     ///
     /// # Errors
+    ///
     /// A database error if the query fails.
     pub async fn list(
         &self,
@@ -131,6 +133,7 @@ impl WorkspaceProviderService {
     /// Finds a provider by id with its creator, or a `NotFound`.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the provider does not exist in the workspace.
     /// - A database error if the query fails.
     pub async fn find(
@@ -150,6 +153,7 @@ impl WorkspaceProviderService {
     /// before store. The update and its event commit together.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the provider does not exist in the workspace.
     /// - `BadRequest` if a replacement config names a disallowed custom endpoint, or
     ///   changes the provider away from the stored one.
@@ -224,6 +228,7 @@ impl WorkspaceProviderService {
     /// Soft-deletes a provider, recording the event atomically.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the provider does not exist in the workspace.
     /// - A database error if the query fails.
     pub async fn delete(

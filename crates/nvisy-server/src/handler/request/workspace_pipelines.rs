@@ -58,6 +58,7 @@ impl PipelineDefinition {
     /// config to return silently.
     ///
     /// # Errors
+    ///
     /// A deserialization error if `config` does not decode to a
     /// [`PipelineDefinition`].
     pub fn from_parts(

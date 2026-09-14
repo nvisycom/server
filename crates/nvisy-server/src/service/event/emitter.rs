@@ -28,6 +28,7 @@ use crate::service::event::{EventOrigin, WorkspaceEvent};
 /// [`EventOutboxRepository::insert_event_outbox`].
 ///
 /// # Errors
+///
 /// - `InternalServerError` if `event` fails to serialize to JSON.
 pub fn event_outbox_row(
     origin: EventOrigin<'_>,

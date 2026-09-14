@@ -43,6 +43,7 @@ where
     /// Fetch the next message from the stream with timeout.
     ///
     /// # Errors
+    ///
     /// - `Operation` propagated from [`next`](Self::next) (opening the consumer
     ///   stream or receiving a message failed). Exhausting `timeout` is not an
     ///   error; it returns `Ok(None)`.
@@ -60,12 +61,14 @@ where
     /// Fetch the next message from the persistent message stream.
     ///
     /// # Errors
+    ///
     /// - `Operation` if the consumer message stream cannot be opened on first
     ///   use, or if receiving a message from the server fails. Payloads that
     ///   cannot be deserialized are terminated and skipped, not surfaced as
     ///   errors; the stream ending returns `Ok(None)`.
     ///
     /// # Panics
+    ///
     /// Panics if the message stream, just set to `Some` on first use, is `None` —
     /// an unreachable invariant violation.
     pub async fn next(&mut self) -> Result<Option<TypedMessage<T>>> {
@@ -145,6 +148,7 @@ impl<T> TypedMessage<T> {
     /// Get the message metadata.
     ///
     /// # Errors
+    ///
     /// - `Operation` if the message's reply subject cannot be parsed into
     ///   `JetStream` metadata (e.g. it is not a `JetStream` message).
     pub fn info(&self) -> Result<jetstream::message::Info<'_>> {
@@ -156,6 +160,7 @@ impl<T> TypedMessage<T> {
     /// Acknowledge the message.
     ///
     /// # Errors
+    ///
     /// - `Operation` if sending the ack to the server fails (e.g. the connection
     ///   is down).
     pub async fn ack(&mut self) -> Result<()> {
@@ -168,6 +173,7 @@ impl<T> TypedMessage<T> {
     /// Negative acknowledge the message (trigger redelivery).
     ///
     /// # Errors
+    ///
     /// - `Operation` if sending the nack to the server fails (e.g. the connection
     ///   is down).
     pub async fn nack(&mut self) -> Result<()> {
@@ -195,6 +201,7 @@ impl<T> TypedMessage<T> {
     /// Get message sequence number.
     ///
     /// # Errors
+    ///
     /// - `Operation` if the message metadata cannot be read (see
     ///   [`info`](Self::info)).
     pub fn sequence(&self) -> Result<u64> {
@@ -206,6 +213,7 @@ impl<T> TypedMessage<T> {
     /// Check if this message is a redelivery.
     ///
     /// # Errors
+    ///
     /// - `Operation` if the message metadata cannot be read (see
     ///   [`info`](Self::info)).
     pub fn is_redelivery(&self) -> Result<bool> {
@@ -217,6 +225,7 @@ impl<T> TypedMessage<T> {
     /// Get the number of delivery attempts.
     ///
     /// # Errors
+    ///
     /// - `Operation` if the message metadata cannot be read (see
     ///   [`info`](Self::info)).
     pub fn delivery_count(&self) -> Result<usize> {
@@ -228,6 +237,7 @@ impl<T> TypedMessage<T> {
     /// Acknowledge with explicit acknowledgment kind.
     ///
     /// # Errors
+    ///
     /// - `Operation` if sending the acknowledgment to the server fails (e.g. the
     ///   connection is down).
     pub async fn ack_with(&mut self, ack_kind: jetstream::AckKind) -> Result<()> {
@@ -240,6 +250,7 @@ impl<T> TypedMessage<T> {
     /// Double acknowledge (useful for at-least-once processing).
     ///
     /// # Errors
+    ///
     /// - `Operation` if the ack is sent but the server's confirmation is not
     ///   received (e.g. the connection is down).
     pub async fn double_ack(&mut self) -> Result<()> {

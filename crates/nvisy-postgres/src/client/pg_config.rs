@@ -199,6 +199,7 @@ impl PgConfig {
     /// Validates the configuration.
     ///
     /// # Errors
+    ///
     /// A `Config` error if the database URL is empty, or if the max connection
     /// count, connection timeout, or idle timeout falls outside its allowed
     /// range.
@@ -248,6 +249,7 @@ impl PgConfig {
     /// Validates the configuration for consistency and safety.
     ///
     /// # Errors
+    ///
     /// - A `Config` error if a timeout or pool-size value is out of range (see
     ///   [`validate`](Self::validate)).
     /// - Any error from constructing the underlying pool.

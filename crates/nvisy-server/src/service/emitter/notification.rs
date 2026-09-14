@@ -59,6 +59,7 @@ impl NotificationEmitter {
     /// client.
     ///
     /// # Errors
+    ///
     /// - A messaging error if the NATS broadcast subscription cannot be opened.
     pub async fn subscribe_unread(
         &self,
@@ -120,6 +121,7 @@ impl NotificationEmitter {
     /// notification never fails the operation that triggered it.
     ///
     /// # Errors
+    ///
     /// - A database error if acquiring the connection, the membership lookup, or
     ///   the notification insert fails. The follow-up unread-count broadcast is
     ///   best-effort and never fails the call.
@@ -176,6 +178,7 @@ impl NotificationEmitter {
     /// preference-filtered recipients, one batch-inserts their rows.
     ///
     /// # Errors
+    ///
     /// - A database error if acquiring the connection, resolving recipients, or
     ///   the batch insert fails. The per-recipient unread-count broadcasts are
     ///   best-effort and never fail the call.

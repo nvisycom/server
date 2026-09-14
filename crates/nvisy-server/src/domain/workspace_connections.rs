@@ -65,6 +65,7 @@ impl WorkspaceConnectionService {
     /// its schedule, and the creation event commit together.
     ///
     /// # Errors
+    ///
     /// - `BadRequest` if the config uses a custom endpoint the policy forbids, or
     ///   if a `sync` block is given for a provider that does not support scheduled
     ///   sync or carries an invalid cron expression.
@@ -149,6 +150,7 @@ impl WorkspaceConnectionService {
     /// successful sync time, optionally filtered by provider.
     ///
     /// # Errors
+    ///
     /// - A database error if a connection or query fails.
     pub async fn list(
         &self,
@@ -191,6 +193,7 @@ impl WorkspaceConnectionService {
     /// sync time, or a `NotFound`.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no connection with that id exists in the workspace.
     /// - A database error if a connection or query fails.
     pub async fn find(
@@ -214,6 +217,7 @@ impl WorkspaceConnectionService {
     /// concurrent token refresh.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no connection with that id exists in the workspace.
     /// - `BadRequest` if a replacement config uses a custom endpoint the policy
     ///   forbids, changes the connection's provider, or if a `sync` block is
@@ -322,6 +326,7 @@ impl WorkspaceConnectionService {
     /// Soft-deletes a connection, recording the event atomically.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no connection with that id exists in the workspace.
     /// - A database error if a connection or query fails.
     pub async fn delete(

@@ -109,6 +109,7 @@ impl<T: DeserializeOwned> Json<T> {
     /// Decodes the stored value into `T`, erroring on a mismatch.
     ///
     /// # Errors
+    ///
     /// A deserialization error if the stored value does not decode into `T`.
     pub fn strict(&self) -> serde_json::Result<T> {
         serde_json::from_value(self.value.clone())

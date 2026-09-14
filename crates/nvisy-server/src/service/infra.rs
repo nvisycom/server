@@ -36,6 +36,7 @@ impl Infra {
     /// missing bucket surfaces here rather than at the first upload.
     ///
     /// # Errors
+    ///
     /// - An external error if the Postgres client cannot be built or its pending
     ///   migrations fail to apply, if connecting to NATS fails, or if connecting
     ///   to the blob store or its startup ping fails (unreachable endpoint, bad

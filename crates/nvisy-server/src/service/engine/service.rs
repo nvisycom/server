@@ -36,6 +36,7 @@ impl EngineService {
     /// enrichment.
     ///
     /// # Errors
+    ///
     /// - A configuration error if a `config_path` is set but the provider config
     ///   file cannot be read or parsed.
     pub async fn from_config(config: EngineConfig) -> Result<Self> {
@@ -75,6 +76,7 @@ impl EngineService {
     /// [`analyze`]: Engine::analyze
     ///
     /// # Errors
+    ///
     /// - A `Processing` engine error if the blocking task panics or is cancelled.
     /// - Any engine error [`analyze`](Engine::analyze) itself produces.
     pub async fn analyze_blocking(
@@ -102,6 +104,7 @@ impl EngineService {
     /// Extensions are lowercased and de-duplicated, preserving first-seen order.
     ///
     /// # Errors
+    ///
     /// - [`UnknownFormatToken::Extension`] if a token is not a known file
     ///   extension in the codec registry. Empty tokens are skipped, not rejected.
     pub fn resolve_extensions<I, S>(&self, tokens: I) -> Result<Vec<String>, UnknownFormatToken>
@@ -138,6 +141,7 @@ impl EngineService {
     /// and de-duplicated, preserving first-seen order.
     ///
     /// # Errors
+    ///
     /// - [`UnknownFormatToken::Modality`] if a token matches no format's modality.
     ///   Empty tokens are skipped, not rejected.
     pub fn resolve_modalities<I, S>(&self, tokens: I) -> Result<Vec<String>, UnknownFormatToken>

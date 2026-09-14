@@ -42,6 +42,7 @@ impl AccountService {
     /// Finds an account by id, or a `NotFound`.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no account has the given id.
     /// - A database error if the connection or query fails.
     pub async fn find(&self, account_id: Uuid) -> Result<Account> {
@@ -59,6 +60,7 @@ impl AccountService {
     /// non-existing accounts.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no account has the given id, or the requester shares no
     ///   workspace with it.
     /// - A database error if the connection or query fails.
@@ -88,6 +90,7 @@ impl AccountService {
     /// row so re-submitting its current values is not a conflict.
     ///
     /// # Errors
+    ///
     /// - `Conflict` if the new email is already registered to another account, or
     ///   the new handle is already taken by another account.
     /// - A database error if the connection or query fails.
@@ -116,6 +119,7 @@ impl AccountService {
     /// Soft-deletes an account, or a `NotFound` if it does not exist.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if no account has the given id.
     /// - A database error if the connection or query fails.
     pub async fn delete(&self, account_id: Uuid) -> Result<()> {

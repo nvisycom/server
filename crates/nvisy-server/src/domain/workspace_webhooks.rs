@@ -58,6 +58,7 @@ impl WorkspaceWebhookService {
     /// its creation event commit together.
     ///
     /// # Errors
+    ///
     /// - `BadRequest` if the URL is malformed, uses a non-`http(s)` scheme, targets
     ///   an internal address, or a supplied header is invalid.
     /// - A crypto error if minting or encrypting the signing secret fails.
@@ -99,6 +100,7 @@ impl WorkspaceWebhookService {
     /// Lists a workspace's webhooks, each with its creator.
     ///
     /// # Errors
+    ///
     /// A database error if the query fails.
     pub async fn list(
         &self,
@@ -114,6 +116,7 @@ impl WorkspaceWebhookService {
     /// Finds a webhook by id with its creator, or a `NotFound`.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the webhook does not exist in the workspace.
     /// - A database error if the query fails.
     pub async fn find(
@@ -130,6 +133,7 @@ impl WorkspaceWebhookService {
     /// The update and its event commit together.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the webhook does not exist in the workspace.
     /// - `BadRequest` if a supplied URL is malformed, uses a non-`http(s)` scheme,
     ///   targets an internal address, or a supplied header is invalid.
@@ -177,6 +181,7 @@ impl WorkspaceWebhookService {
     /// Soft-deletes a webhook, recording the event atomically.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the webhook does not exist in the workspace.
     /// - A database error if the query fails.
     pub async fn delete(&self, origin: event::EventOrigin<'_>, webhook_id: Uuid) -> Result<()> {
@@ -213,6 +218,7 @@ impl WorkspaceWebhookService {
     /// worker's auto-disable threshold nor masks a genuinely failing endpoint.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the webhook does not exist in the workspace.
     /// - `BadRequest` if the webhook's stored URL fails to parse.
     /// - `InternalServerError` if the decrypted signing secret is not valid UTF-8.

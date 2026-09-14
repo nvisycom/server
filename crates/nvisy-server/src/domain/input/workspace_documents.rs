@@ -32,6 +32,7 @@ impl ListDocumentsInput {
     /// intersection). A facet that is absent imposes no constraint.
     ///
     /// # Errors
+    ///
     /// - [`UnknownFormatToken`] if a `formats` or `modality` token matches no
     ///   known file extension or modality in the engine's codec registry.
     pub fn to_filter(self, engine: &EngineService) -> Result<DocumentFilter, UnknownFormatToken> {

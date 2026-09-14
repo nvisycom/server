@@ -46,6 +46,7 @@ impl WorkspaceService {
     /// rolled back.
     ///
     /// # Errors
+    ///
     /// - A database error if a connection or the create transaction fails.
     pub async fn create(
         &self,
@@ -86,6 +87,7 @@ impl WorkspaceService {
     /// the account's membership and the creator's public identity.
     ///
     /// # Errors
+    ///
     /// - A database error if a connection or the query fails.
     pub async fn list(
         &self,
@@ -102,6 +104,7 @@ impl WorkspaceService {
     /// returns the updated workspace.
     ///
     /// # Errors
+    ///
     /// - A database error if a connection or the update transaction fails.
     pub async fn update(
         &self,
@@ -132,6 +135,7 @@ impl WorkspaceService {
     /// Soft-deletes a workspace, recording the event atomically.
     ///
     /// # Errors
+    ///
     /// - A database error if a connection or the delete transaction fails.
     pub async fn delete(&self, origin: event::EventOrigin<'_>) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;

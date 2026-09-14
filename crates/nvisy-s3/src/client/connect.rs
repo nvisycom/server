@@ -22,6 +22,7 @@ impl BlobStore {
     /// S3-compatible server; unset targets AWS S3.
     ///
     /// # Errors
+    ///
     /// - `Config` if the S3 configuration is invalid (e.g. a malformed endpoint
     ///   or region).
     /// - `Operation` if the initial reachability check against the bucket fails

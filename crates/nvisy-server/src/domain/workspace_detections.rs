@@ -92,6 +92,7 @@ impl WorkspaceDetectionService {
     /// creating a new one.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the pipeline or the input document does not exist in the
     ///   workspace.
     /// - `Conflict` if the pipeline is not enabled.
@@ -208,6 +209,7 @@ impl WorkspaceDetectionService {
     /// an existing detection.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the input document or any named policy does not exist in the
     ///   workspace.
     /// - A database error if a connection or the create transaction fails.
@@ -313,6 +315,7 @@ impl WorkspaceDetectionService {
     /// Lists a specific pipeline's detections with cursor pagination.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the pipeline does not exist in the workspace.
     /// - A database error if a connection or the query fails.
     pub async fn list_for_pipeline(
@@ -333,6 +336,7 @@ impl WorkspaceDetectionService {
     /// ad-hoc detections that name no pipeline.
     ///
     /// # Errors
+    ///
     /// - A database error if a connection or the query fails.
     pub async fn list_for_workspace(
         &self,
@@ -351,6 +355,7 @@ impl WorkspaceDetectionService {
     /// from. The owning pipeline is named by the detection's own `pipeline_id`.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the detection does not exist in the workspace.
     /// - A database error if a connection or a query fails.
     pub async fn get(
@@ -374,6 +379,7 @@ impl WorkspaceDetectionService {
     /// handler action (stream, redact) that then does its own work.
     ///
     /// # Errors
+    ///
     /// - `NotFound` if the detection does not exist in the workspace.
     /// - A database error if a connection or the query fails.
     pub async fn find(
@@ -398,6 +404,7 @@ impl WorkspaceDetectionService {
     /// always be re-redacted.
     ///
     /// # Errors
+    ///
     /// - `InternalServerError` if a pinned policy version can no longer be loaded,
     ///   or if a stored policy definition is malformed.
     /// - A database error if a connection or a query fails.
