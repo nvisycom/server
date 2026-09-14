@@ -188,8 +188,8 @@ impl NatsClient {
     ///
     /// # Errors
     ///
-    /// - `Operation` if the bucket does not exist and cannot be created (e.g. the
-    ///   `JetStream` request fails or the server rejects the bucket config).
+    /// - `Operation` if the bucket cannot be retrieved or created (a `JetStream`
+    ///   request fails, or the server rejects the bucket config).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
     pub async fn kv_store<B: KvBucket>(&self) -> Result<KvStore<B>> {
         KvStore::new(&self.inner.jetstream).await
@@ -199,8 +199,8 @@ impl NatsClient {
     ///
     /// # Errors
     ///
-    /// - `Operation` if the bucket does not exist and cannot be created (e.g. the
-    ///   `JetStream` request fails or the server rejects the bucket config).
+    /// - `Operation` if the bucket cannot be retrieved or created (a `JetStream`
+    ///   request fails, or the server rejects the bucket config).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
     pub async fn kv_store_with_ttl<B: KvBucket>(&self, ttl: Duration) -> Result<KvStore<B>> {
         KvStore::with_ttl(&self.inner.jetstream, ttl).await

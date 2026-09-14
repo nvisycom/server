@@ -61,6 +61,8 @@ impl AvatarService {
     ///
     /// - `BadRequest` if the upload exceeds the size cap, does not decode as an
     ///   image, or exceeds the source-dimension cap.
+    /// - `InternalServerError` if avatar processing fails (the blocking
+    ///   decode/resize task, or WebP re-encoding).
     /// - A storage error if writing or deleting the avatar object fails.
     /// - A database error if acquiring the connection, reading the previous
     ///   account, or updating `avatar_url` fails.
@@ -161,6 +163,8 @@ impl AvatarService {
     ///
     /// - `BadRequest` if the upload exceeds the size cap, does not decode as an
     ///   image, or exceeds the source-dimension cap.
+    /// - `InternalServerError` if avatar processing fails (the blocking
+    ///   decode/resize task, or WebP re-encoding).
     /// - A storage error if writing or deleting the avatar object fails.
     /// - A database error if acquiring the connection, reading the previous
     ///   workspace, or updating `avatar_url` fails.

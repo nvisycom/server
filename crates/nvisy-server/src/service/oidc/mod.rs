@@ -535,7 +535,8 @@ impl OidcService {
     ///
     /// # Errors
     ///
-    /// - `BadRequest` if `redirect_uri` is set but is not an allow-listed origin.
+    /// - `BadRequest` if `redirect_uri` is set but is not an allow-listed redirect
+    ///   target (a web origin or a desktop custom scheme).
     /// - An OIDC/provider error if building the authorization request fails (see
     ///   [`begin`](Self::begin)).
     /// - A messaging error if opening the KV store or stashing the flow state

@@ -63,9 +63,12 @@ where
     /// # Errors
     ///
     /// - `Operation` if the consumer message stream cannot be opened on first
-    ///   use, or if receiving a message from the server fails. Payloads that
-    ///   cannot be deserialized are terminated and skipped, not surfaced as
-    ///   errors; the stream ending returns `Ok(None)`.
+    ///   use, or if receiving a message from the server fails. A payload that
+    ///   cannot be deserialized is skipped rather than surfaced as an error: it is
+    ///   terminated (so the server stops redelivering it), but if that
+    ///   termination acknowledgment itself fails the failure is only logged and
+    ///   the server may redeliver the message. The stream ending returns
+    ///   `Ok(None)`.
     ///
     /// # Panics
     ///

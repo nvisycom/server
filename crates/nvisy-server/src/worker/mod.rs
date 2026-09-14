@@ -33,7 +33,8 @@ use crate::Result;
 ///
 /// # Errors
 ///
-/// A NATS error if reconciling any of the streams (create or update) fails.
+/// A NATS error if reconciling any of the streams (looking one up, creating it,
+/// or updating it to match) fails.
 pub async fn ensure_streams(nats: &NatsClient) -> Result<()> {
     nats.ensure_stream::<webhook::WebhookStream>().await?;
     nats.ensure_stream::<detection::DetectionStream>().await?;

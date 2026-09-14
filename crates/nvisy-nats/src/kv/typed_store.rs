@@ -298,8 +298,9 @@ impl<B: KvBucket> KvStore<B> {
     /// # Errors
     ///
     /// - `Operation` if opening the key stream fails (e.g. the connection is
-    ///   down). Individual keys that fail to read or fail to parse into `B::Key`
-    ///   are logged and skipped, not surfaced as errors.
+    ///   down). A key that fails to read from the stream is logged and skipped; a
+    ///   key that reads but does not parse into `B::Key` is skipped silently.
+    ///   Neither is surfaced as an error.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
     pub async fn keys(&self) -> Result<Vec<B::Key>> {
         let mut keys = Vec::new();

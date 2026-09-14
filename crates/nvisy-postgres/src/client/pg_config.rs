@@ -250,8 +250,8 @@ impl PgConfig {
     ///
     /// # Errors
     ///
-    /// - A `Config` error if a timeout or pool-size value is out of range (see
-    ///   [`validate`](Self::validate)).
+    /// - A `Config` error if [`validate`](Self::validate) rejects the config: an
+    ///   empty URL, or a timeout or pool-size value out of range.
     /// - Any error from constructing the underlying pool.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub fn build(self) -> Result<PgClient> {
