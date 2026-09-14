@@ -67,9 +67,14 @@ async fn create_pipeline(
     let mut conn = pg_client.get_connection().await?;
     let creator = resolve_account_ref(&mut conn, account_id).await?;
 
-    let response =
-        WorkspacePipeline::from_model(pipeline, workspace.id, workspace.handle, creator, policy_ids)
-            .map_err(serialize_error)?;
+    let response = WorkspacePipeline::from_model(
+        pipeline,
+        workspace.id,
+        workspace.handle,
+        creator,
+        policy_ids,
+    )
+    .map_err(serialize_error)?;
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -214,9 +219,14 @@ async fn update_pipeline(
     let mut conn = pg_client.get_connection().await?;
     let creator = resolve_account_ref(&mut conn, pipeline.account_id).await?;
 
-    let response =
-        WorkspacePipeline::from_model(pipeline, workspace.id, workspace.handle, creator, policy_ids)
-            .map_err(serialize_error)?;
+    let response = WorkspacePipeline::from_model(
+        pipeline,
+        workspace.id,
+        workspace.handle,
+        creator,
+        policy_ids,
+    )
+    .map_err(serialize_error)?;
 
     Ok((StatusCode::OK, Json(response)))
 }
