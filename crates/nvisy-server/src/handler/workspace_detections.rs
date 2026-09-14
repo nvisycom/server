@@ -698,8 +698,17 @@ async fn redact_detection(
     };
 
     // Phase 3: re-acquire a connection only for the final commit, so the pool was
-    // free during the inference and staging above.
-    let mut conn = pg_client.get_connection().await?;
+    // free during the inference and staging above. A failure here leaves both
+    // staged objects with no blob row for the reaper to find, so discard them
+    // before returning — as every later failure path does.
+    let mut conn = match pg_client.get_connection().await {
+        Ok(conn) => conn,
+        Err(err) => {
+            writer.discard_staged_object(&staged_output.0).await.ok();
+            writer.discard_staged_object(&staged_review).await.ok();
+            return Err(err.into());
+        }
+    };
     let redaction = conn
         .transaction(async |conn| {
             // The redacted output is a first-class document (kind=redacted); its

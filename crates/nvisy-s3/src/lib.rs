@@ -16,7 +16,7 @@ mod client;
 mod error;
 mod key;
 
-#[cfg(any(test, feature = "test_util"))]
+#[cfg(feature = "test_util")]
 pub mod test_util;
 
 pub use client::{BlobStore, GetObject, S3Config};
@@ -24,5 +24,5 @@ pub use error::{Error, Result};
 pub use key::{
     AccountAvatarKey, AuditKey, Bucket, DocumentKey, IntermediateKey, ObjectKey, WorkspaceAvatarKey,
 };
-#[cfg(any(test, feature = "test_util"))]
+#[cfg(feature = "test_util")]
 pub use test_util::TestBlobStore;

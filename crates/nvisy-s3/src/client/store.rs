@@ -334,7 +334,7 @@ impl BlobStore {
     ///
     /// `Operation` if the bucket cannot be created (already exists, or the store
     /// rejects the request).
-    #[cfg(any(test, feature = "test_util"))]
+    #[cfg(feature = "test_util")]
     pub async fn create_bucket(&self) -> Result<()> {
         self.client
             .create_bucket()
