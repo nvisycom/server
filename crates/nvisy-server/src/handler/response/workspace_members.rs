@@ -5,6 +5,7 @@ use nvisy_postgres::model::{Account, WorkspaceMember as WorkspaceMemberModel};
 use nvisy_postgres::types::{Handle, WorkspaceRole};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::Page;
 
@@ -13,6 +14,9 @@ use super::Page;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceMember {
+    /// Account id of the member — the durable reference used to address the
+    /// account (e.g. as a review `assignee`), stable across handle changes.
+    pub id: Uuid,
     /// Handle of the member's account.
     pub username: Handle,
     /// Email address of the member.
@@ -33,6 +37,7 @@ impl WorkspaceMember {
     /// Creates a Member response from database models.
     pub fn from_model(member: WorkspaceMemberModel, account: Account) -> Self {
         Self {
+            id: account.id,
             username: account.username,
             email_address: account.email_address,
             display_name: account.display_name,
