@@ -168,11 +168,11 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/threads/{threadId}/comments/",
+            "/workspaces/{workspaceId}/threads/{threadId}/comments",
             post_with(create_comment, create_comment_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/comments/{commentId}/",
+            "/workspaces/{workspaceId}/comments/{commentId}",
             patch_with(update_comment, update_comment_docs)
                 .delete_with(delete_comment, delete_comment_docs),
         )

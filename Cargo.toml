@@ -165,7 +165,9 @@ tracing-subscriber = { version = "0.3", features = [] }
 # Testing utilities
 tempfile = { version = "3.27", features = [] }
 mockall = { version = "0.15", features = [] }
-testcontainers-modules = { version = "0.15", features = ["postgres"] }
+# Each crate enables the module it needs (postgres/nats/minio) via its own
+# `features = [...]`; Cargo unions them.
+testcontainers-modules = { version = "0.15", features = [] }
 
 # (De)serialization
 csv = { version = "1.4", features = [] }

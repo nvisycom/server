@@ -30,6 +30,10 @@ ignored = ["aws-smithy-types"]
 # Exposes the config type's `clap::Args` derive for the CLI binary.
 cli = ["dep:clap"]
 
+# Test support: an ephemeral MinIO container + a connected store with its bucket
+# created, for this crate's tests and downstream crates that need a real S3.
+test_util = ["dep:testcontainers-modules", "tokio/sync"]
+
 [dependencies]
 # Internal crates
 nvisy-core = { workspace = true }
@@ -46,6 +50,10 @@ aws-credential-types = { workspace = true, features = ["hardcoded-credentials"] 
 
 # CLI configuration (optional; enabled by the server binary)
 clap = { workspace = true, features = ["derive", "env"], optional = true }
+
+# Test-only: an ephemeral S3-compatible container via testcontainers' generic
+# image, with HTTP readiness probing (gated on the `test_util` feature).
+testcontainers-modules = { workspace = true, features = ["http_wait"], optional = true }
 
 # Observability
 tracing = { workspace = true, features = [] }

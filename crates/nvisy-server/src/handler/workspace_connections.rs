@@ -516,22 +516,22 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/connections/",
+            "/workspaces/{workspaceId}/connections",
             post_with(create_connection, create_connection_docs)
                 .get_with(list_connections, list_connections_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/connections/{connectionId}/",
+            "/workspaces/{workspaceId}/connections/{connectionId}",
             get_with(read_connection, read_connection_docs)
                 .patch_with(update_connection, update_connection_docs)
                 .delete_with(delete_connection, delete_connection_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/connections/{connectionId}/verify/",
+            "/workspaces/{workspaceId}/connections/{connectionId}/verify",
             post_with(verify_connection, verify_connection_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/connections/{connectionId}/picker-token/",
+            "/workspaces/{workspaceId}/connections/{connectionId}/picker-token",
             post_with(mint_picker_token, mint_picker_token_docs),
         )
         .with_path_items(|item| item.tag("Connections"))

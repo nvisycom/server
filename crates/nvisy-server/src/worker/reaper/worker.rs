@@ -1,30 +1,4 @@
-//! Blob reaper: reclaims stored objects once nothing references them.
-//!
-//! Every stored object — original documents, redacted outputs, audit blobs, and
-//! intermediates — lives in a shared, ref-counted `workspace_blobs` row. A blob
-//! becomes reclaimable only when its last referrer is gone (`ref_count = 0`),
-//! which protects a blob shared by two identical uploads from being purged out
-//! from under a still-live document. Retention is a time policy layered on top:
-//! a blob is reclaimed once it is both unreferenced and past its window. Each
-//! tick runs three stages:
-//!
-//! - **Referrer cleanup**: machine byproducts — audit rows and detection
-//!   intermediates — hold a reference for their whole life, so their blobs never
-//!   reach `ref_count = 0` on their own. This stage expires those referrers by
-//!   their blob's retention window (deleting the audit row, nulling the
-//!   intermediate pointer) and drops the reference, so an expired byproduct blob
-//!   becomes reclaimable by the Expire sweep.
-//! - **Expire**: unreferenced blobs whose retention window has elapsed
-//!   (`ref_count = 0 AND expires_at < now()`, from the per-blob retention rule).
-//!   Each is claimed ([`purged_at`], committed before any object delete, so it
-//!   leaves the dedup set atomically) and then its object is reclaimed.
-//! - **Reconcile**: blobs claimed for purge whose object delete was never
-//!   confirmed (`purged_at IS NOT NULL AND reclaimed_at IS NULL`) — a delete that
-//!   failed or a crash between claim and delete. The object delete is retried
-//!   (idempotent) until `reclaimed_at` is stamped, so a transient object-store
-//!   outage self-heals and a claimed blob's bytes are never reused meanwhile.
-//!
-//! [`purged_at`]: nvisy_postgres::model::Blob::purged_at
+//! The reaper worker: the tick loop and its three sweep stages.
 
 use std::time::Duration;
 
@@ -34,8 +8,9 @@ use nvisy_postgres::query::{
 use tokio_util::sync::CancellationToken;
 
 use crate::response::Result;
-use crate::service::{CryptoService, Infra, PurgeOutcome, RunBlobStore};
+use crate::service::Infra;
 use crate::worker::Worker;
+use crate::worker::reaper::reclaimer::{BlobReclaimer, PurgeOutcome};
 
 /// Tracing target for the blob reaper.
 const TRACING_TARGET: &str = "nvisy_server::worker::reaper";
@@ -50,7 +25,7 @@ const SWEEP_BATCH: i64 = 500;
 /// Periodically reclaims expired blobs and reconciles orphaned objects.
 pub struct BlobReaper {
     infra: Infra,
-    blob: RunBlobStore,
+    blob: BlobReclaimer,
 }
 
 impl Worker for BlobReaper {
@@ -80,8 +55,8 @@ impl Worker for BlobReaper {
 impl BlobReaper {
     /// Creates a new [`BlobReaper`].
     #[must_use]
-    pub fn new(infra: Infra, crypto: CryptoService) -> Self {
-        let blob = RunBlobStore::new(infra.clone(), crypto);
+    pub fn new(infra: Infra) -> Self {
+        let blob = BlobReclaimer::new(infra.clone());
         Self { infra, blob }
     }
 

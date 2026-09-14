@@ -350,18 +350,18 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/providers/",
+            "/workspaces/{workspaceId}/providers",
             post_with(create_provider, create_provider_docs)
                 .get_with(list_providers, list_providers_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/providers/{providerId}/",
+            "/workspaces/{workspaceId}/providers/{providerId}",
             get_with(read_provider, read_provider_docs)
                 .patch_with(update_provider, update_provider_docs)
                 .delete_with(delete_provider, delete_provider_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/providers/{providerId}/verify/",
+            "/workspaces/{workspaceId}/providers/{providerId}/verify",
             post_with(verify_provider, verify_provider_docs),
         )
         .with_path_items(|item| item.tag("Providers"))

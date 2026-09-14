@@ -1,17 +1,18 @@
 //! Health monitoring service.
 //!
-//! Aggregates the [`HealthCheck`] results of all registered components
-//! ([`HealthCache`]), caching them with a TTL to balance responsiveness against
-//! the cost of repeated probes.
+//! [`HealthService`] aggregates the [`HealthCheck`] results of all registered
+//! components, caching them with a TTL to balance responsiveness against the cost
+//! of repeated probes. It hands back a [`HealthReading`] (a [`HealthReport`] plus
+//! a timestamp); mapping that onto the HTTP response is the handler's concern.
 //!
 //! [`HealthCheck`]: nvisy_core::health::HealthCheck
+//! [`HealthReport`]: nvisy_core::health::HealthReport
 
 use std::time::Duration;
 
-mod cache;
-mod snapshot;
+mod service;
 
-pub use cache::HealthCache;
+pub use service::{HealthReading, HealthService};
 
 /// Tracing target for health monitoring operations.
 const TRACING_TARGET: &str = "nvisy_server::service::health";

@@ -325,6 +325,26 @@ impl BlobStore {
         Ok(())
     }
 
+    /// Creates the configured bucket, for test setup against an empty store.
+    ///
+    /// Deployments provision their bucket out of band, so this is test-only:
+    /// gated on the `test_util` feature and never part of the normal API.
+    ///
+    /// # Errors
+    ///
+    /// `Operation` if the bucket cannot be created (already exists, or the store
+    /// rejects the request).
+    #[cfg(feature = "test_util")]
+    pub async fn create_bucket(&self) -> Result<()> {
+        self.client
+            .create_bucket()
+            .bucket(&self.bucket)
+            .send()
+            .await
+            .map_err(|err| Error::operation("create_bucket", err.into_service_error()))?;
+        Ok(())
+    }
+
     /// Whether an object exists, via a HEAD request.
     ///
     /// # Errors

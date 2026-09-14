@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use super::{AuthClaims, Permission, SessionToken};
 use crate::response::{Error, ErrorKind, Result};
-use crate::service::SessionKeys;
+use crate::service::AuthKeys;
 
 /// Tracing target for authentication operations.
 const TRACING_TARGET: &str = "nvisy_server::extract::auth";
@@ -344,7 +344,7 @@ where
     T: Clone + for<'de> Deserialize<'de> + Send + Sync + 'static,
     S: Sync + Send + 'static,
     PgClient: FromRef<S>,
-    SessionKeys: FromRef<S>,
+    AuthKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;
 
@@ -370,7 +370,7 @@ where
     T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static,
     S: Sync + Send + 'static,
     PgClient: FromRef<S>,
-    SessionKeys: FromRef<S>,
+    AuthKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;
 

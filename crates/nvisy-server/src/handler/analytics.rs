@@ -100,11 +100,11 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/analytics/",
+            "/workspaces/{workspaceId}/analytics",
             get_with(get_analytics, get_analytics_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/analytics/detections/timeseries/",
+            "/workspaces/{workspaceId}/analytics/detections/timeseries",
             get_with(get_detection_timeseries, get_detection_timeseries_docs),
         )
         .with_path_items(|item| item.tag("Analytics"))

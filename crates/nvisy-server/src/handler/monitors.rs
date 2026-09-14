@@ -1,8 +1,14 @@
-//! System health monitoring and status check handlers.
+//! Health-probe handlers, split along the two questions an orchestrator asks:
 //!
-//! This module provides endpoints for monitoring the health and status of the
-//! API server and its dependencies. It includes both public health checks and
-//! authenticated detailed status information with simple caching.
+//! - **Liveness** (`/health/live`): is the process up? A static `200`, with no
+//!   dependency probing. A failing dependency must not fail this — restarting the
+//!   process would not bring Postgres back, so liveness stays green while a
+//!   dependency is down and only readiness reports the outage.
+//! - **Readiness** (`/health/ready`, aliased at `/health`): can the server serve
+//!   traffic? Probes every dependency (Postgres, NATS, blob store, webhook
+//!   delivery) through [`HealthService`], so a load balancer can drain this
+//!   instance while the pod itself stays up. Cached with a short TTL, so frequent
+//!   probes stay cheap.
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
@@ -11,97 +17,76 @@ use axum::http::StatusCode;
 use nvisy_core::health::HealthStatus;
 
 use super::response::Health;
-use crate::extract::{Json, OptionalAuth, Version};
-use crate::response::Result;
-use crate::service::{HealthCache, ServiceState};
+use crate::extract::Json;
+use crate::service::{HealthService, ServiceState};
 
 /// Tracing target for monitor operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::monitors";
 
-/// Returns system health status.
+/// Liveness: confirms the process is running and able to answer.
 ///
-/// This endpoint provides health information about the API server and its
-/// dependencies. The response includes the current status, timestamp, and
-/// per-component check results.
-///
-/// # Behavior
-///
-/// - **Unauthenticated requests**: Always return cached health status for performance
-/// - **Authenticated requests**: Perform real-time health check unless `use_cache` is true
-///
-/// # Response Codes
-///
-/// - `200 OK` - System is healthy (or degraded)
-/// - `503 Service Unavailable` - System is unhealthy
-#[tracing::instrument(
-    skip_all,
-    fields(
-        authenticated = auth_state.is_some(),
-        account_id = auth_state.as_ref().map(|a| a.account_id.to_string()),
-    )
-)]
-async fn health_status(
-    State(health_service): State<HealthCache>,
-    OptionalAuth(auth_state): OptionalAuth,
-    version: Version,
-) -> Result<(StatusCode, Json<Health>)> {
-    let is_authenticated = auth_state.is_some();
-    let account_id = auth_state.as_ref().map(|auth| auth.account_id);
+/// Always `200 OK` — it probes no dependencies, so a dependency outage never
+/// trips it. Use it for an orchestrator's liveness probe, where a failure means
+/// "restart me"; a dependency being down is readiness's job, not a reason to
+/// restart.
+async fn liveness() -> StatusCode {
+    StatusCode::OK
+}
 
-    tracing::debug!(
-        target: TRACING_TARGET,
-        ?account_id,
-        is_authenticated,
-        version = %version,
-        "Health status check requested"
-    );
+fn liveness_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Liveness probe")
+        .description("Returns 200 if the process is running. Probes no dependencies.")
+        .response::<200, ()>()
+}
 
-    // Unauthenticated callers (load balancers, uptime probes) get the cached
-    // status for a fast response; authenticated callers get a real-time check.
-    let health = if is_authenticated {
-        tracing::trace!(
-            target: TRACING_TARGET,
-            "Performing real-time health check"
-        );
-        health_service.check().await
-    } else {
-        tracing::trace!(
-            target: TRACING_TARGET,
-            "Using cached health status"
-        );
-        health_service.get_cached_health().await
-    };
+/// Readiness: reports whether the server can serve traffic, dependencies included.
+///
+/// The response carries the overall status, a per-component breakdown, and when
+/// the underlying probe ran. Results are served from a short-lived cache and
+/// refreshed once stale, so this is safe to poll frequently.
+///
+/// - `200 OK` when healthy or degraded (still serving).
+/// - `503 Service Unavailable` when unhealthy (drain this instance).
+#[tracing::instrument(skip_all)]
+async fn readiness(State(health): State<HealthService>) -> (StatusCode, Json<Health>) {
+    let reading = health.report().await;
 
-    let status_code = match health.status {
+    let status_code = match reading.report.status {
         HealthStatus::Healthy | HealthStatus::Degraded => StatusCode::OK,
         HealthStatus::Unhealthy => StatusCode::SERVICE_UNAVAILABLE,
     };
 
     tracing::debug!(
         target: TRACING_TARGET,
-        status = ?health.status,
-        used_cache = !is_authenticated,
-        components = health.checks.len(),
-        "Health status response"
+        status = ?reading.report.status,
+        components = reading.report.components.len(),
+        "Readiness probe response",
     );
 
-    Ok((status_code, Json(health)))
+    (status_code, Json(reading.into()))
 }
 
-fn health_status_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Health status")
-        .description("Returns system health status. Unauthenticated requests use cache; authenticated requests perform real-time checks.")
+fn readiness_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Readiness probe")
+        .description(
+            "Reports the server's health and that of its dependencies, served from \
+             a short-lived cache. 200 when healthy or degraded, 503 when unhealthy. \
+             Safe to poll frequently.",
+        )
         .response::<200, Json<Health>>()
         .response::<503, Json<Health>>()
 }
 
-/// Returns a [`Router`] with all health monitoring routes.
+/// Returns a [`Router`] with the health-probe routes.
 ///
 /// [`Router`]: axum::routing::Router
 pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::get_with;
 
     ApiRouter::new()
-        .api_route("/health/", get_with(health_status, health_status_docs))
+        .api_route("/health/live", get_with(liveness, liveness_docs))
+        .api_route("/health/ready", get_with(readiness, readiness_docs))
+        // `/health` is the conventional default probe; alias it to readiness.
+        .api_route("/health", get_with(readiness, readiness_docs))
         .with_path_items(|item| item.tag("Health"))
 }

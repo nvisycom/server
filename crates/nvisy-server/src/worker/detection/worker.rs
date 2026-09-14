@@ -38,7 +38,7 @@ use super::support::{
 use crate::extract::SecurityContext;
 use crate::handler::request::PipelineDefinition;
 use crate::response::{ErrorKind, Result};
-use crate::service::{EngineService, Infra, RunBlobStore, event};
+use crate::service::{ArtifactWriter, EngineService, Infra, event};
 use crate::worker::Worker;
 
 /// Tracing target for detection worker operations.
@@ -59,7 +59,7 @@ const DETECTION_LEASE: Duration = Duration::from_mins(30);
 pub struct DetectionWorker {
     infra: Infra,
     engine: EngineService,
-    blob: RunBlobStore,
+    blob: ArtifactWriter,
     /// Bounds how many detection jobs run at once, sized to the deployment's
     /// available parallelism. Detection analysis is CPU-bound under the default
     /// lineup, so unbounded concurrency would only oversubscribe cores and grow
@@ -101,7 +101,7 @@ impl DetectionWorker {
     /// back to a small default when the runtime cannot report it), so in-flight
     /// detections stay near core count.
     #[must_use]
-    pub fn new(infra: Infra, engine: EngineService, blob: RunBlobStore) -> Self {
+    pub fn new(infra: Infra, engine: EngineService, blob: ArtifactWriter) -> Self {
         let concurrency = std::thread::available_parallelism()
             .map_or(DEFAULT_DETECTION_CONCURRENCY, NonZero::get);
         Self {

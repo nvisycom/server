@@ -38,6 +38,17 @@ cli = [
     "nvisy-file-service/cli",
 ]
 
+# Test support: the `TestApp` harness (containerized infra + a real ServiceState
+# + a TestServer + authed actors), for this crate's handler tests and downstream
+# crates that test their own routes.
+test_util = [
+    "nvisy-postgres/test_util",
+    "nvisy-nats/test_util",
+    "nvisy-s3/test_util",
+    "nvisy-webhook/reqwest",
+    "dep:axum-test",
+]
+
 [dependencies]
 # Elide crates. The workspace dep disables default features, so re-enable every
 # modality (all-modalities: tabular/image/audio/document) plus JSON/CSV audit
@@ -139,6 +150,9 @@ chrono = { workspace = true, features = [] }
 # Domain datatypes & data structures
 url = { workspace = true, features = [] }
 
+# Test-only harness dep (gated on the `test_util` feature).
+axum-test = { workspace = true, features = [], optional = true }
+
 [dev-dependencies]
 # Internal crates
 nvisy-nats = { workspace = true, features = [] }
@@ -150,6 +164,7 @@ anyhow = { workspace = true, features = ["backtrace"] }
 tempfile = { workspace = true, features = [] }
 dotenvy = { workspace = true, features = [] }
 tokio = { workspace = true, features = ["macros", "rt"] }
+uuid = { workspace = true, features = ["v7"] }
 
 [lints]
 workspace = true

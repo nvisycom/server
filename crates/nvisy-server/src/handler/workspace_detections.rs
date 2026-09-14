@@ -48,7 +48,9 @@ use crate::handler::response::{
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, SseResponse};
 use crate::service::event::EventEmitter;
-use crate::service::{DetectionQueue, EngineService, RunBlobStore, ServiceState, event};
+use crate::service::{
+    ArtifactReader, ArtifactWriter, DetectionQueue, EngineService, ServiceState, event,
+};
 use crate::worker::detection::DetectionStatusEvent;
 
 /// Tracing target for detection operations.
@@ -542,7 +544,8 @@ struct RedactInputs {
 async fn redact_detection(
     State(pg_client): State<PgClient>,
     State(detections): State<domain::WorkspaceDetectionService>,
-    State(blob): State<RunBlobStore>,
+    State(writer): State<ArtifactWriter>,
+    State(reader): State<ArtifactReader>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::RunRedactions>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
@@ -628,7 +631,7 @@ async fn redact_detection(
     // mutated on disk: reviewer edits and the redaction outcome land on this
     // clone, which is persisted as the redaction's own review audit, leaving the
     // detection analysis immutable and re-redactable.
-    let mut reviewed = blob
+    let mut reviewed = reader
         .load_audit(&engine, workspace.id, &inputs.audit_blob)
         .await?;
 
@@ -643,7 +646,7 @@ async fn redact_detection(
         edits.apply(&mut reviewed.report)?;
     }
 
-    let document = blob
+    let document = writer
         .build_document(&inputs.document, &inputs.source_blob, inputs.detection.id)
         .await?;
 
@@ -668,7 +671,7 @@ async fn redact_detection(
         .retention_override
         .as_ref()
         .map(nvisy_postgres::types::Json::or_default);
-    let staged_output = blob
+    let staged_output = writer
         .stage_redacted_document(
             &inputs.document,
             retention_override.as_ref(),
@@ -678,7 +681,7 @@ async fn redact_detection(
         .await?;
     // Staging the review audit after the output means a failure here would strand
     // the already-written output object (no blob to reclaim it); discard it first.
-    let staged_review = match blob
+    let staged_review = match writer
         .stage_review_audit(
             inputs.detection.workspace_id,
             retention_override.as_ref(),
@@ -689,14 +692,23 @@ async fn redact_detection(
     {
         Ok(staged) => staged,
         Err(err) => {
-            blob.discard_staged_object(&staged_output.0).await.ok();
+            writer.discard_staged_object(&staged_output.0).await.ok();
             return Err(err);
         }
     };
 
     // Phase 3: re-acquire a connection only for the final commit, so the pool was
-    // free during the inference and staging above.
-    let mut conn = pg_client.get_connection().await?;
+    // free during the inference and staging above. A failure here leaves both
+    // staged objects with no blob row for the reaper to find, so discard them
+    // before returning — as every later failure path does.
+    let mut conn = match pg_client.get_connection().await {
+        Ok(conn) => conn,
+        Err(err) => {
+            writer.discard_staged_object(&staged_output.0).await.ok();
+            writer.discard_staged_object(&staged_review).await.ok();
+            return Err(err.into());
+        }
+    };
     let redaction = conn
         .transaction(async |conn| {
             // The redacted output is a first-class document (kind=redacted); its
@@ -782,8 +794,8 @@ async fn redact_detection(
         Err(err) => {
             // The rows rolled back, so their staged objects are orphans: reclaim
             // both (best effort — a failure only leaves them for a later sweep).
-            blob.discard_staged_object(&staged_output.0).await.ok();
-            blob.discard_staged_object(&staged_review).await.ok();
+            writer.discard_staged_object(&staged_output.0).await.ok();
+            writer.discard_staged_object(&staged_review).await.ok();
             return Err(err);
         }
     };
@@ -792,10 +804,10 @@ async fn redact_detection(
     // the object staged for it orphaned (no row references it). Reclaim each
     // redundant staged object; best effort, a failure only defers it to a sweep.
     if output_path.as_deref() != Some(staged_output.0.storage_path.as_str()) {
-        blob.discard_staged_object(&staged_output.0).await.ok();
+        writer.discard_staged_object(&staged_output.0).await.ok();
     }
     if review_path.as_deref() != Some(staged_review.storage_path.as_str()) {
-        blob.discard_staged_object(&staged_review).await.ok();
+        writer.discard_staged_object(&staged_review).await.ok();
     }
 
     tracing::info!(
@@ -844,28 +856,28 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/pipelines/detections/",
+            "/workspaces/{workspaceId}/pipelines/detections",
             get_with(list_workspace_detections, list_workspace_detections_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/pipelines/{pipelineId}/detections/",
+            "/workspaces/{workspaceId}/pipelines/{pipelineId}/detections",
             post_with(create_detection, create_detection_docs)
                 .get_with(list_pipeline_detections, list_pipeline_detections_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/detections/",
+            "/workspaces/{workspaceId}/detections",
             post_with(create_adhoc_detection, create_adhoc_detection_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/detections/{detectionId}/",
+            "/workspaces/{workspaceId}/detections/{detectionId}",
             get_with(get_detection, get_detection_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/detections/{detectionId}/events/",
+            "/workspaces/{workspaceId}/detections/{detectionId}/events",
             get_with(stream_detection_events, stream_detection_events_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/detections/{detectionId}/redactions/",
+            "/workspaces/{workspaceId}/detections/{detectionId}/redactions",
             post_with(redact_detection, redact_detection_docs),
         )
         .with_path_items(|item| item.tag("WorkspaceDetections"))

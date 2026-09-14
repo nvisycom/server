@@ -17,8 +17,8 @@
 use axum::extract::FromRef;
 
 use crate::service::{
-    AccountProvisioner, AssistantQueue, AuthIssuer, AvatarService, DetectionQueue,
-    ExternalObjectStore, Infra, NotificationEmitter, OidcService, RunBlobStore, ServiceState,
+    AccountProvisioner, ArtifactReader, ArtifactWriter, AssistantQueue, AuthIssuer, AvatarService,
+    DetectionQueue, ExternalObjectStore, Infra, NotificationEmitter, OidcService, ServiceState,
     WebhookEmitter,
 };
 
@@ -157,14 +157,10 @@ impl_di_new! {
     // The detection queue (broadcast status and wake the drainer after a create).
     crate::domain::WorkspaceDetectionService =>
         |state| state.infra.postgres.clone(), DetectionQueue::from_ref(state);
-}
-
-// `RunBlobStore` composes from `Infra` and the crypto service (it encrypts and
-// decrypts blob content), so it needs a hand-written `FromRef`.
-impl FromRef<ServiceState> for RunBlobStore {
-    fn from_ref(state: &ServiceState) -> Self {
-        RunBlobStore::new(state.infra.clone(), state.crypto.clone())
-    }
+    // The blob writer/reader both encrypt/decrypt blob content, so each composes
+    // from `Infra` plus the crypto service.
+    ArtifactWriter => |state| state.infra.clone(), state.crypto.clone();
+    ArtifactReader => |state| state.infra.clone(), state.crypto.clone();
 }
 
 // `DetectionQueue` composes from two singletons — `Infra` and the shared

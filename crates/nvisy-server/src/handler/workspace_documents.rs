@@ -776,7 +776,7 @@ pub fn routes(max_file_body_bytes: usize) -> ApiRouter<ServiceState> {
     ApiRouter::new()
         // Workspace-scoped routes (require workspace context)
         .api_route(
-            "/workspaces/{workspaceId}/documents/",
+            "/workspaces/{workspaceId}/documents",
             post_with(upload_document, upload_document_docs)
                 // Raise this route's default body limit to the upload ceiling; the
                 // global `RequestBodyLimitLayer` still caps every route at the same
@@ -785,17 +785,17 @@ pub fn routes(max_file_body_bytes: usize) -> ApiRouter<ServiceState> {
                 .get_with(list_documents, list_documents_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/documents/delete/",
+            "/workspaces/{workspaceId}/documents/delete",
             post_with(bulk_delete_documents, bulk_delete_documents_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/documents/{documentId}/",
+            "/workspaces/{workspaceId}/documents/{documentId}",
             get_with(read_document, read_document_docs)
                 .patch_with(update_document, update_document_docs)
                 .delete_with(delete_document, delete_document_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/documents/{documentId}/content/",
+            "/workspaces/{workspaceId}/documents/{documentId}/content",
             get_with(download_document, download_document_docs),
         )
         .with_path_items(|item| item.tag("WorkspaceDocuments"))

@@ -275,7 +275,7 @@ async fn complete_callback(
 pub fn private_routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/connections/oauth/{provider}/start/",
+            "/workspaces/{workspaceId}/connections/oauth/{provider}/start",
             post_with(start_oauth, start_oauth_docs),
         )
         .with_path_items(|item| item.tag("Connections"))
@@ -290,5 +290,5 @@ pub fn public_routes() -> ApiRouter<ServiceState> {
     // from the OpenAPI spec entirely. It is a provider-driven browser redirect,
     // never a request an SDK/webapp client issues, so it has no place in the
     // generated client and no reason to appear in the API contract.
-    ApiRouter::new().route("/connections/oauth/callback/", get(oauth_callback))
+    ApiRouter::new().route("/connections/oauth/callback", get(oauth_callback))
 }

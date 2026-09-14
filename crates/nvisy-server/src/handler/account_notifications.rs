@@ -290,26 +290,26 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/notifications/",
+            "/notifications",
             get_with(list_notifications, list_notifications_docs),
         )
         .api_route(
-            "/notifications/unread/",
+            "/notifications/unread",
             get_with(get_unread_status, get_unread_status_docs),
         )
         .api_route(
-            "/notifications/unread/events/",
+            "/notifications/unread/events",
             get_with(stream_unread_status, stream_unread_status_docs),
         )
         .api_route(
-            "/notifications/read/",
+            "/notifications/read",
             post_with(
                 mark_all_notifications_read,
                 mark_all_notifications_read_docs,
             ),
         )
         .api_route(
-            "/notifications/{notificationId}/read/",
+            "/notifications/{notificationId}/read",
             post_with(mark_notification_read, mark_notification_read_docs),
         )
         .with_path_items(|item| item.tag("Notifications"))

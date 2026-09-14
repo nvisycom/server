@@ -22,7 +22,7 @@ use serde::Deserialize;
 use super::AuthClaims;
 use crate::extract::auth::SESSION_COOKIE_NAME;
 use crate::response::{Error, ErrorKind, Result};
-use crate::service::SessionKeys;
+use crate::service::AuthKeys;
 
 /// Which transport carried the session token on a request.
 ///
@@ -91,7 +91,7 @@ where
     /// # Errors
     ///
     /// Returns an error if the token is invalid, expired, or malformed.
-    fn from_token(token: &str, transport: AuthTransport, keys: &SessionKeys) -> Result<Self> {
+    fn from_token(token: &str, transport: AuthTransport, keys: &AuthKeys) -> Result<Self> {
         let auth_claims = AuthClaims::from_token(token, keys.decoding_key())?;
         Ok(Self {
             auth_claims,
@@ -104,7 +104,7 @@ impl<T, S> FromRequestParts<S> for SessionToken<T>
 where
     T: Clone + for<'de> Deserialize<'de> + Send + Sync + 'static,
     S: Sync + Send,
-    SessionKeys: FromRef<S>,
+    AuthKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;
 
@@ -114,7 +114,7 @@ where
             return Ok(session_token.clone());
         }
 
-        let auth_keys = SessionKeys::from_ref(state);
+        let auth_keys = AuthKeys::from_ref(state);
 
         // The session token can arrive two ways. Prefer the session cookie (the
         // browser SPA), then fall back to the `Authorization: Bearer` header

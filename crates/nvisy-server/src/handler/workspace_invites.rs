@@ -362,20 +362,20 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/invites/",
+            "/workspaces/{workspaceId}/invites",
             post_with(send_invite, send_invite_docs).get_with(list_invites, list_invites_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/invites/code/",
+            "/workspaces/{workspaceId}/invites/code",
             post_with(generate_invite_code, generate_invite_code_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/invites/{inviteId}/",
+            "/workspaces/{workspaceId}/invites/{inviteId}",
             delete_with(cancel_invite, cancel_invite_docs)
                 .post_with(reply_to_invite, reply_to_invite_docs),
         )
         .api_route(
-            "/invites/code/{inviteCode}/",
+            "/invites/code/{inviteCode}",
             get_with(preview_invite_code, preview_invite_code_docs)
                 .post_with(reply_to_invite_code, reply_to_invite_code_docs),
         )

@@ -286,12 +286,12 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/policies/",
+            "/workspaces/{workspaceId}/policies",
             post_with(create_policy, create_policy_docs)
                 .get_with(list_policies, list_policies_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/policies/{policyId}/",
+            "/workspaces/{workspaceId}/policies/{policyId}",
             get_with(read_policy, read_policy_docs)
                 .patch_with(update_policy, update_policy_docs)
                 .delete_with(delete_policy, delete_policy_docs),

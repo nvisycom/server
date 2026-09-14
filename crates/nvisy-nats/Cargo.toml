@@ -30,6 +30,10 @@ default = []
 # from flags/env directly, keeping the dependency optional for library users.
 cli = ["dep:clap", "dep:humantime"]
 
+# Test support: an ephemeral NATS (JetStream) container + connected client, for
+# this crate's tests and for downstream crates that compose a real server.
+test_util = ["dep:testcontainers-modules", "tokio/sync"]
+
 [dependencies]
 # Internal crates
 nvisy-core = { workspace = true }
@@ -50,6 +54,9 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 clap = { workspace = true, features = ["derive", "env"], optional = true }
 humantime = { workspace = true, features = [], optional = true }
+
+# Test-only: ephemeral NATS container (gated on the `test_util` feature).
+testcontainers-modules = { workspace = true, features = ["nats"], optional = true }
 
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }

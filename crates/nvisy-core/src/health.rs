@@ -1,16 +1,17 @@
 //! Shared health-reporting vocabulary and the [`HealthCheck`] trait.
 //!
 //! Each service client implements [`HealthCheck`] to report the health of the
-//! component it manages as a [`ComponentHealth`]. Aggregation into an overall
-//! report (and any transport concerns) is left to the consumer.
+//! component it manages as a [`ComponentHealth`]. A consumer aggregates those
+//! into a [`HealthReport`]; mapping that report onto a transport (an HTTP status,
+//! a response body) is left to the consumer.
 
 use std::borrow::Cow;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// Operational status of a service component.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum HealthStatus {
@@ -56,7 +57,7 @@ impl HealthStatus {
 }
 
 /// Health of a single service component.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ComponentHealth {
@@ -81,6 +82,41 @@ impl ComponentHealth {
             name: name.into(),
             status: HealthStatus::Unhealthy,
         }
+    }
+}
+
+/// An aggregated health report: the per-component results plus the overall
+/// [`HealthStatus`] they roll up to.
+///
+/// A consumer probes its [`HealthCheck`]s, collects the [`ComponentHealth`]s, and
+/// builds a report with [`from_components`](Self::from_components); the overall
+/// status is derived once, at construction, so every reader sees the same verdict.
+/// Mapping the report onto a transport (an HTTP status code, a timestamped
+/// response body) is the consumer's concern.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HealthReport {
+    /// Overall status rolled up from the components.
+    pub status: HealthStatus,
+    /// Per-component results.
+    pub components: Vec<ComponentHealth>,
+}
+
+impl HealthReport {
+    /// Builds a report from per-component results, deriving the overall status
+    /// with [`HealthStatus::from_components`].
+    #[must_use]
+    pub fn from_components(components: Vec<ComponentHealth>) -> Self {
+        Self {
+            status: HealthStatus::from_components(&components),
+            components,
+        }
+    }
+
+    /// Whether the overall status is [`Healthy`](HealthStatus::Healthy).
+    #[must_use]
+    pub const fn is_healthy(&self) -> bool {
+        self.status.is_healthy()
     }
 }
 

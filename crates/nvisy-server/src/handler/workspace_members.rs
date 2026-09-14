@@ -255,15 +255,15 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/members/",
+            "/workspaces/{workspaceId}/members",
             get_with(list_members, list_members_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/members/leave/",
+            "/workspaces/{workspaceId}/members/leave",
             post_with(leave_workspace, leave_workspace_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/members/{accountId}/",
+            "/workspaces/{workspaceId}/members/{accountId}",
             get_with(get_member, get_member_docs)
                 .patch_with(update_member, update_member_docs)
                 .delete_with(delete_member, delete_member_docs),

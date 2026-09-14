@@ -209,17 +209,17 @@ pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/account/",
+            "/account",
             get_with(get_own_account, get_own_account_docs)
                 .patch_with(update_own_account, update_own_account_docs)
                 .delete_with(delete_own_account, delete_own_account_docs),
         )
         .api_route(
-            "/accounts/{accountId}/",
+            "/accounts/{accountId}",
             get_with(get_account, get_account_docs),
         )
         .api_route(
-            "/accounts/{accountId}/avatar/",
+            "/accounts/{accountId}/avatar",
             put_with(upload_account_avatar, upload_account_avatar_docs)
                 .layer(DefaultBodyLimit::max(MAX_AVATAR_UPLOAD_BYTES))
                 .delete_with(delete_account_avatar, delete_account_avatar_docs),

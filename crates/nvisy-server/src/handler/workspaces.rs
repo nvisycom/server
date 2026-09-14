@@ -379,24 +379,24 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/",
+            "/workspaces",
             post_with(create_workspace, create_workspace_docs)
                 .get_with(list_workspaces, list_workspaces_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/",
+            "/workspaces/{workspaceId}",
             get_with(read_workspace, read_workspace_docs)
                 .patch_with(update_workspace, update_workspace_docs)
                 .delete_with(delete_workspace, delete_workspace_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/avatar/",
+            "/workspaces/{workspaceId}/avatar",
             put_with(upload_workspace_avatar, upload_workspace_avatar_docs)
                 .layer(DefaultBodyLimit::max(MAX_AVATAR_UPLOAD_BYTES))
                 .delete_with(delete_workspace_avatar, delete_workspace_avatar_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/notifications/",
+            "/workspaces/{workspaceId}/notifications",
             get_with(get_notification_settings, get_notification_settings_docs).patch_with(
                 update_notification_settings,
                 update_notification_settings_docs,

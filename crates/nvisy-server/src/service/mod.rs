@@ -1,9 +1,8 @@
 //! Application state and dependency injection.
 
-mod account_provisioner;
-mod auth_flow;
-mod auth_issuer;
+mod auth;
 mod avatar;
+mod blob;
 mod crypto;
 mod di;
 mod emitter;
@@ -12,11 +11,7 @@ pub mod event;
 mod health;
 mod infra;
 mod integration;
-mod oidc;
-mod password;
 mod queue;
-mod run_blob_store;
-mod session_keys;
 mod user_agent;
 
 use std::sync::Arc;
@@ -33,29 +28,25 @@ use crate::Result;
 use crate::args::ServiceArgs;
 use crate::middleware::UploadConfig;
 use crate::response::CookieConfig;
-pub use crate::service::account_provisioner::AccountProvisioner;
-pub use crate::service::auth_flow::SignInService;
-pub use crate::service::auth_issuer::AuthIssuer;
+pub use crate::service::auth::{
+    AccountProvisioner, AuthIssuer, AuthKeys, AuthKeysConfig, CallbackOutcome, ConsumedFlow,
+    OidcAuthorization, OidcConfig, OidcConfigured, OidcError, OidcIdentity, OidcPurpose,
+    OidcService, PasswordService, RedirectKind, SignInService,
+};
 pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
+pub use crate::service::blob::{ArtifactReader, ArtifactWriter};
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
 pub use crate::service::emitter::{NotificationEmitter, UnreadCountEvent, WebhookEmitter};
 pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
-pub use crate::service::health::{HealthCache, HealthConfig};
+pub use crate::service::health::{HealthConfig, HealthReading, HealthService};
 pub use crate::service::infra::Infra;
 pub use crate::service::integration::{
     ConnectionConfig, ConnectionSyncService, FileConnectorsConfig, FileServiceRedirect,
     IntegrationConfig, ProviderConfig, StandardCronSchedule, TransferKind, TransferRequest,
     persist_refreshed_tokens,
 };
-pub use crate::service::oidc::{
-    CallbackOutcome, ConsumedFlow, OidcAuthorization, OidcConfig, OidcConfigured, OidcError,
-    OidcIdentity, OidcPurpose, OidcService, RedirectKind,
-};
-pub use crate::service::password::PasswordService;
 pub use crate::service::queue::{AssistantQueue, DetectionQueue};
-pub use crate::service::run_blob_store::{PurgeOutcome, RunBlobStore};
-pub use crate::service::session_keys::{SessionKeys, SessionKeysConfig};
 pub use crate::service::user_agent::UserAgentParser;
 use crate::worker::assistant::{AssistantOutboxDrainer, AssistantWorker};
 use crate::worker::detection::{DetectionOutboxDrainer, DetectionWorker};
@@ -77,7 +68,7 @@ const TRACING_TARGET: &str = "nvisy_server::service";
 /// (a field clone), except the three marked `#[from_ref(skip)]` (the two wake
 /// coordinators, which also share a type, and the OIDC config, which is only ever
 /// composed into [`OidcService`]). The services that are pure compositions of
-/// these — [`AvatarService`], [`RunBlobStore`], [`DetectionQueue`], the domain
+/// these — [`AvatarService`], [`ArtifactWriter`], [`DetectionQueue`], the domain
 /// services, [`OidcService`], and so on — are not fields; they are built on demand
 /// in their `FromRef` impls (see the `di` module), a cheap move over `Arc`-backed
 /// handles.
@@ -122,11 +113,11 @@ pub struct ServiceState {
     // so long-lived handlers and background workers wind down promptly) and the
     // cached health snapshot.
     pub shutdown: CancellationToken,
-    pub health_cache: HealthCache,
+    pub health: HealthService,
 
     // Security services:
     pub password: PasswordService,
-    pub session_keys: SessionKeys,
+    pub session_keys: AuthKeys,
     // Password login/signup/logout orchestration. Holds only cheap `Arc`-backed
     // handles, so it is stored (its `FromRef` is a field clone).
     pub sign_in: SignInService,
@@ -162,6 +153,29 @@ impl ServiceState {
     /// encryption key, building the redaction engine, loading the session keys,
     /// configuring OIDC, or building the cloud file service.
     pub async fn from_config(args: ServiceArgs, webhook_service: WebhookService) -> Result<Self> {
+        // Resolve the file-backed key material up front, then assemble. A caller
+        // that already holds the keys in memory (e.g. a test harness) calls
+        // `assemble` directly and skips the filesystem entirely.
+        let crypto = args.crypto.load().await?;
+        let session_keys = args.session_keys.load().await?;
+        Self::assemble(args, webhook_service, crypto, session_keys).await
+    }
+
+    /// Assembles the state from the config aggregate plus already-built security
+    /// services, so a caller can inject in-memory keys rather than loading them
+    /// from files. [`from_config`](Self::from_config) is the file-loading entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any startup step fails: connecting the infra clients
+    /// and applying migrations, reconciling the `JetStream` streams, building the
+    /// redaction engine, configuring OIDC, or building the cloud file service.
+    pub async fn assemble(
+        args: ServiceArgs,
+        webhook_service: WebhookService,
+        crypto: CryptoService,
+        session_keys: AuthKeys,
+    ) -> Result<Self> {
         let infra = Infra::from_config(args.postgres, args.nats, args.s3).await?;
 
         // Reconcile every JetStream stream once, up front, so the publishers and
@@ -169,9 +183,7 @@ impl ServiceState {
         // stream already exists.
         ensure_streams(&infra.nats).await?;
 
-        let crypto = CryptoService::from_config(&args.crypto).await?;
         let engine = EngineService::from_config(args.engine).await?;
-        let session_keys = SessionKeys::from_config(&args.session_keys).await?;
         let oidc = OidcConfigured::from_config(&args.oidc)?;
 
         // Session cookies without `Secure` are only safe over plain HTTP on a
@@ -230,7 +242,7 @@ impl ServiceState {
             detection: Coordinator::new(),
             assistant: Coordinator::new(),
             shutdown: CancellationToken::new(),
-            health_cache: HealthCache::new(&args.health, health_checkers),
+            health: HealthService::new(&args.health, health_checkers),
             password,
             session_keys,
             sign_in,
@@ -267,7 +279,7 @@ impl ServiceState {
             self.crypto.clone(),
             self.connection_sync.clone(),
         ));
-        workers.spawn(BlobReaper::new(self.infra.clone(), self.crypto.clone()));
+        workers.spawn(BlobReaper::new(self.infra.clone()));
         workers.spawn(EventOutboxDrainer::new(self.infra.clone()));
         workers.spawn(DetectionOutboxDrainer::new(
             self.infra.clone(),
@@ -276,7 +288,7 @@ impl ServiceState {
         workers.spawn(DetectionWorker::new(
             self.infra.clone(),
             self.engine.clone(),
-            RunBlobStore::from_ref(self),
+            ArtifactWriter::from_ref(self),
         ));
         workers.spawn(AssistantOutboxDrainer::new(
             self.infra.clone(),

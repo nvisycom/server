@@ -20,8 +20,8 @@ use nvisy_postgres::PgConfig;
 use crate::middleware::UploadConfig;
 use crate::response::CookieConfig;
 use crate::service::{
-    CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig, IntegrationConfig, OidcConfig,
-    S3Config, SessionKeysConfig,
+    AuthKeysConfig, CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig,
+    IntegrationConfig, OidcConfig, S3Config,
 };
 
 /// Tracing target for configuration echoes emitted by the config aggregates.
@@ -56,7 +56,7 @@ pub struct ServiceArgs {
 
     /// JWT session key paths.
     #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "Authentication"))]
-    pub session_keys: SessionKeysConfig,
+    pub session_keys: AuthKeysConfig,
 
     /// Master encryption key path.
     #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "Encryption"))]

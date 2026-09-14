@@ -67,7 +67,7 @@ impl CryptoService {
     ///   not contain exactly 32 bytes.
     /// - A file-system error if reading the key file fails.
     pub async fn from_config(config: &CryptoConfig) -> Result<Self> {
-        Self::load(&config.key_path).await
+        config.load().await
     }
 
     /// Loads the master key from a file path.
@@ -80,7 +80,28 @@ impl CryptoService {
     ///   not contain exactly 32 bytes.
     /// - A file-system error if reading the key file fails.
     pub async fn from_key_file(key_path: impl AsRef<Path>) -> Result<Self> {
-        Self::load(key_path.as_ref()).await
+        CryptoConfig {
+            key_path: key_path.as_ref().to_path_buf(),
+        }
+        .load()
+        .await
+    }
+
+    /// Builds the service directly from raw 32-byte master-key material — the
+    /// real constructor, with no filesystem dependency. [`CryptoConfig::load`]
+    /// reads its file and calls this.
+    ///
+    /// # Errors
+    ///
+    /// A config error if `bytes` is not exactly 32 bytes.
+    pub fn from_key_bytes(bytes: &[u8]) -> Result<Self> {
+        let key = EncryptionKey::from_bytes(bytes).map_err(|e| {
+            tracing::error!(target: TRACING_TARGET, error = %e, "Invalid encryption key: expected exactly 32 bytes");
+            Error::config("Invalid encryption key: expected exactly 32 bytes").with_source(e)
+        })?;
+        Ok(Self {
+            master_key: Arc::new(key),
+        })
     }
 
     /// Encrypts a serializable value under the given workspace's key.
@@ -171,9 +192,19 @@ impl CryptoService {
     fn workspace_key(&self, workspace_id: Uuid) -> EncryptionKey {
         self.master_key.derive_workspace_key(workspace_id)
     }
+}
 
-    /// Reads and parses the 32-byte master key from disk.
-    async fn load(path: &Path) -> Result<Self> {
+impl CryptoConfig {
+    /// Reads the master-key file and builds the [`CryptoService`]. The one place
+    /// the key touches the filesystem; [`CryptoService::from_key_bytes`] parses.
+    ///
+    /// # Errors
+    ///
+    /// - A config error if the key file is missing, is not a regular file, or does
+    ///   not contain exactly 32 bytes.
+    /// - A file-system error if reading the key file fails.
+    pub async fn load(&self) -> Result<CryptoService> {
+        let path = &self.key_path;
         if !path.exists() {
             return Err(Error::config("Encryption key file does not exist"));
         }
@@ -181,37 +212,15 @@ impl CryptoService {
             return Err(Error::config("Encryption key path is not a file"));
         }
 
-        tracing::debug!(
-            target: TRACING_TARGET,
-            path = %path.display(),
-            "Loading master encryption key",
-        );
-
+        tracing::debug!(target: TRACING_TARGET, path = %path.display(), "Loading master encryption key");
         let bytes = tokio::fs::read(path).await.map_err(|e| {
-            tracing::error!(
-                target: TRACING_TARGET,
-                path = %path.display(),
-                error = %e,
-                "Failed to read encryption key file",
-            );
+            tracing::error!(target: TRACING_TARGET, path = %path.display(), error = %e, "Failed to read encryption key file");
             Error::file_system("Failed to read encryption key file").with_source(e)
         })?;
 
-        let key = EncryptionKey::from_bytes(&bytes).map_err(|e| {
-            tracing::error!(
-                target: TRACING_TARGET,
-                path = %path.display(),
-                error = %e,
-                "Invalid encryption key: expected exactly 32 bytes",
-            );
-            Error::config("Invalid encryption key: expected exactly 32 bytes").with_source(e)
-        })?;
-
+        let service = CryptoService::from_key_bytes(&bytes)?;
         tracing::info!(target: TRACING_TARGET, "Master encryption key loaded");
-
-        Ok(Self {
-            master_key: Arc::new(key),
-        })
+        Ok(service)
     }
 }
 
