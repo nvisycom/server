@@ -49,6 +49,11 @@ impl WorkspacePolicyService {
     /// reuse). A template or inline body is a permanent authored policy the caller
     /// names. The policy, its first version, and the creation event commit
     /// together.
+    ///
+    /// # Errors
+    ///
+    /// - `InternalServerError` if the policy definition cannot be serialized.
+    /// - A database error if the query fails.
     pub async fn create(
         &self,
         origin: event::EventOrigin<'_>,
@@ -170,6 +175,10 @@ impl WorkspacePolicyService {
 
     /// Lists a workspace's policies, newest first. `kind` narrows to a single
     /// policy kind; `None` returns every kind.
+    ///
+    /// # Errors
+    ///
+    /// A database error if the query fails.
     pub async fn list(
         &self,
         workspace_id: Uuid,
@@ -183,6 +192,12 @@ impl WorkspacePolicyService {
     }
 
     /// Finds a policy by id with its creator and current version, or a `NotFound`.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the policy does not exist in the workspace or has no current
+    ///   version.
+    /// - A database error if the query fails.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -201,6 +216,15 @@ impl WorkspacePolicyService {
     /// logical row in place. The write and its event commit together. A one-shot
     /// policy is immutable — content-addressed and reused by identity — so any edit
     /// to one is rejected; to change it, create a new policy.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the policy does not exist in the workspace or has no current
+    ///   version.
+    /// - `BadRequest` if the policy is a one-shot (immutable).
+    /// - `InternalServerError` if the stored definition is malformed or the new
+    ///   definition cannot be serialized.
+    /// - A database error if the query fails.
     pub async fn update(
         &self,
         origin: event::EventOrigin<'_>,
@@ -268,6 +292,11 @@ impl WorkspacePolicyService {
     }
 
     /// Soft-deletes a policy from its workspace, recording the event atomically.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the policy does not exist in the workspace.
+    /// - A database error if the query fails.
     pub async fn delete(&self, origin: event::EventOrigin<'_>, policy_id: Uuid) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         // Confirm the policy exists in the workspace before deleting.

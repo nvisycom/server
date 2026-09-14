@@ -29,8 +29,12 @@ impl ListDocumentsInput {
     ///
     /// `formats` and `modality` are separate facets combined with AND: when both
     /// are given, only documents whose extension is in both sets match (their
-    /// intersection). A facet that is absent imposes no constraint. Returns
-    /// [`UnknownFormatToken`] if a token matches no known extension or modality.
+    /// intersection). A facet that is absent imposes no constraint.
+    ///
+    /// # Errors
+    ///
+    /// - [`UnknownFormatToken`] if a `formats` or `modality` token matches no
+    ///   known file extension or modality in the engine's codec registry.
     pub fn to_filter(self, engine: &EngineService) -> Result<DocumentFilter, UnknownFormatToken> {
         let formats = self
             .formats

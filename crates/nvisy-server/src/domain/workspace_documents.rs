@@ -49,6 +49,12 @@ impl WorkspaceDocumentService {
     /// Lists a workspace's documents with cursor pagination, each with its backing
     /// blob and creator, resolving the query's format and modality facets against
     /// the engine's codec registry.
+    ///
+    /// # Errors
+    ///
+    /// - `BadRequest` if a format or modality filter token matches no known
+    ///   extension or modality.
+    /// - A database error if a connection or the query fails.
     pub async fn list(
         &self,
         workspace_id: Uuid,
@@ -69,6 +75,11 @@ impl WorkspaceDocumentService {
 
     /// Finds a document by id within a workspace, with its backing blob and
     /// creator, or a `NotFound`.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the document does not exist in the workspace.
+    /// - A database error if a connection or the query fails.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -80,6 +91,11 @@ impl WorkspaceDocumentService {
 
     /// Updates a document's metadata, returning it with its backing blob and
     /// creator. The update and its event commit together.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the document does not exist in the workspace.
+    /// - A database error if a connection or the update transaction fails.
     pub async fn update(
         &self,
         origin: event::EventOrigin<'_>,
@@ -113,6 +129,11 @@ impl WorkspaceDocumentService {
     /// Soft-deletes a document, dropping its blob reference, and records the event
     /// atomically. The backing object is not removed here: the reaper reclaims a
     /// blob once its last reference is gone and its retention window has passed.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the document does not exist in the workspace.
+    /// - A database error if a connection or the delete transaction fails.
     pub async fn delete(&self, origin: event::EventOrigin<'_>, document_id: Uuid) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         let document = find_document(&mut conn, origin.workspace_id, document_id).await?;
@@ -141,6 +162,10 @@ impl WorkspaceDocumentService {
     ///
     /// Idempotent: an id that is unknown, already deleted, in another workspace, or
     /// held by an in-progress detection is reported as skipped rather than failing.
+    ///
+    /// # Errors
+    ///
+    /// - A database error if a connection or the delete transaction fails.
     pub async fn bulk_delete(
         &self,
         origin: event::EventOrigin<'_>,

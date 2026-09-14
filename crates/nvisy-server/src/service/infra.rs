@@ -34,6 +34,13 @@ impl Infra {
     /// Each connection fails fast at startup: Postgres applies pending migrations,
     /// and the blob store is pinged so a bad endpoint, wrong credentials, or a
     /// missing bucket surfaces here rather than at the first upload.
+    ///
+    /// # Errors
+    ///
+    /// - An external error if the Postgres client cannot be built or its pending
+    ///   migrations fail to apply, if connecting to NATS fails, or if connecting
+    ///   to the blob store or its startup ping fails (unreachable endpoint, bad
+    ///   credentials, or missing bucket).
     pub async fn from_config(
         postgres_config: PgConfig,
         nats_config: NatsConfig,

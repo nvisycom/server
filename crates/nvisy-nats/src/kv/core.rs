@@ -33,6 +33,12 @@ pub struct InvalidKvKey;
 ///
 /// Returns the value on success so a caller's [`FromStr`] is a one-liner:
 /// `validate_kv_key(s).map(Self)`.
+///
+/// # Errors
+///
+/// - `InvalidKvKey` if `value` is empty, contains a character outside the
+///   allowed alphanumeric and `-/_=.` set, or has an empty dot-separated token
+///   (a leading, trailing, or consecutive dot).
 pub fn validate_kv_key(value: &str) -> Result<String, InvalidKvKey> {
     if value.is_empty() {
         return Err(InvalidKvKey);

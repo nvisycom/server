@@ -103,6 +103,11 @@ pub type PoliciesPage = Page<WorkspacePolicySummary>;
 impl WorkspacePolicy {
     /// Creates a response from a policy and its current version, deserializing the
     /// version's plaintext definition.
+    ///
+    /// # Errors
+    ///
+    /// A 500 if the stored version definition does not deserialize into a
+    /// [`Policy`].
     pub fn from_model(
         policy: WorkspacePolicyModel,
         version: WorkspacePolicyVersion,

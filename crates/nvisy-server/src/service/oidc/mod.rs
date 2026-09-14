@@ -532,6 +532,15 @@ impl OidcService {
     /// Rejects a redirect target that is not an allow-listed frontend origin
     /// *before* starting the flow: the callback carries the minted session token
     /// (or a reauth proof), so it must never be sent to a caller-chosen host.
+    ///
+    /// # Errors
+    ///
+    /// - `BadRequest` if `redirect_uri` is set but is not an allow-listed redirect
+    ///   target (a web origin or a desktop custom scheme).
+    /// - An OIDC/provider error if building the authorization request fails (see
+    ///   [`begin`](Self::begin)).
+    /// - A messaging error if opening the KV store or stashing the flow state
+    ///   fails.
     pub async fn begin_flow(
         &self,
         provider: IdentityProvider,
@@ -568,6 +577,12 @@ impl OidcService {
     /// Split from [`run_flow`](Self::run_flow) so the caller recovers the flow's
     /// `redirect_uri` before any fallible step, and can honor it even when that
     /// step fails. Returns the caller's redirect target alongside the state.
+    ///
+    /// # Errors
+    ///
+    /// - `BadRequest` if the `state` value is malformed, or if it matches no
+    ///   stored flow (unknown, expired, or already consumed).
+    /// - A messaging error if opening the KV store or the atomic take fails.
     pub async fn consume_flow(&self, query: &OidcCallbackQuery) -> Result<ConsumedFlow> {
         // Validate the state before touching the store so a malformed value maps to
         // a clean BadRequest rather than a KV error.
@@ -593,6 +608,18 @@ impl OidcService {
     /// already been consumed by [`consume_flow`](Self::consume_flow), so its
     /// `redirect_uri` is the caller's and is applied by the callback whether this
     /// succeeds or fails.
+    ///
+    /// # Errors
+    ///
+    /// - `Unauthorized` if the provider returned an error/denial, if the
+    ///   verified identity does not match a `Reauth` account's linked identity.
+    /// - `BadRequest` if the callback carries no authorization code.
+    /// - An OIDC/provider error if the code exchange or ID-token verification
+    ///   fails (see [`complete`](Self::complete)).
+    /// - `Forbidden` if the resolved or targeted account is suspended or deleted.
+    /// - `NotFound` if a `Link`/`Reauth` account no longer exists.
+    /// - A database error if acquiring the connection, provisioning/linking the
+    ///   identity, the identity lookup, or session minting fails.
     pub async fn run_flow(
         &self,
         security: SecurityContext,
@@ -697,6 +724,10 @@ impl OidcService {
 
     /// Refuses a sign-in for a suspended or deleted account, before any session
     /// token is minted — mirroring what password login gates on.
+    ///
+    /// # Errors
+    ///
+    /// - `Forbidden` if the account is suspended or deleted.
     pub fn gate_account_status(account: &Account) -> Result<()> {
         if account.is_suspended() {
             return Err(ErrorKind::Forbidden.with_message("Account is suspended"));
@@ -726,6 +757,12 @@ impl OidcService {
     /// Required by every credential-adding action so a merely-stolen session (with
     /// no way to complete a fresh provider re-auth) cannot mint a durable
     /// credential.
+    ///
+    /// # Errors
+    ///
+    /// - `Unauthorized` if the proof is malformed, missing/expired/already used,
+    ///   or belongs to a different account.
+    /// - A messaging error if opening the KV store or the atomic take fails.
     pub async fn consume_reauth_proof(&self, account_id: Uuid, proof: &str) -> Result<()> {
         let key = ReauthProofKey::from_str(proof)
             .map_err(|_| ErrorKind::Unauthorized.with_message("Invalid re-authentication proof"))?;

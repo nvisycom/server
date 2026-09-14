@@ -93,6 +93,12 @@ impl Handle {
     /// caller never has to hand-format one or worry about the bound. Available in
     /// this crate's own tests and, via the `test_util` feature, to downstream
     /// integration tests; never in normal builds.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the composed `h-<suffix>` handle always satisfies the
+    /// length and format invariants, so the internal parse cannot fail. A panic
+    /// would signal a change to the invariants that broke this construction.
     #[cfg(any(feature = "test_util", test))]
     #[must_use]
     pub fn test() -> Self {

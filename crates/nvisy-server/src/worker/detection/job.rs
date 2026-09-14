@@ -68,6 +68,10 @@ pub fn detection_subject(detection_id: Uuid) -> String {
 
 /// Publishes a detection job onto the `DetectionStream` work-queue for the worker
 /// to pick up.
+///
+/// # Errors
+///
+/// A NATS error if publishing the job to the work-queue fails.
 pub async fn enqueue(infra: &Infra, job: DetectionJob) -> Result<()> {
     let publisher = infra.nats.event_publisher::<DetectionStream>();
     publisher.publish(&job).await?;
@@ -97,6 +101,10 @@ pub async fn broadcast_status(infra: &Infra, detection_id: Uuid, status: Detecti
 /// Subscribes to a detection's status broadcasts, yielding each
 /// [`DetectionStatusEvent`]. Used by the SSE endpoint to forward status changes to
 /// a watching client.
+///
+/// # Errors
+///
+/// A NATS error if the broadcast subscription cannot be established.
 pub async fn subscribe_status(
     infra: &Infra,
     detection_id: Uuid,

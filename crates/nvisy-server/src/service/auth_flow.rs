@@ -67,6 +67,13 @@ impl SignInService {
     /// there is no account or no password identity — to keep the response time
     /// constant and prevent account enumeration. Do not short-circuit before the
     /// verify.
+    ///
+    /// # Errors
+    ///
+    /// - `Unauthorized` if no account matches the identifier or the password does
+    ///   not verify (the two are deliberately indistinguishable to the caller).
+    /// - `Forbidden` if the account is suspended or deleted.
+    /// - A database error if an account, identity, or session-minting query fails.
     pub async fn login(&self, request: Login, security: SecurityContext) -> Result<String> {
         let mut conn = self.postgres.get_connection().await?;
         let account = conn.find_account_by_identifier(&request.identifier).await?;
@@ -124,6 +131,16 @@ impl SignInService {
     /// The account and its password identity are created together in one
     /// transaction: an account must never exist without a way to authenticate, and
     /// the password hash lives on the identity, not the account.
+    ///
+    /// # Errors
+    ///
+    /// - A password-strength error if the password fails the policy check (see
+    ///   [`PasswordService::validate_and_hash`]).
+    /// - `Conflict` if the email or username is already in use.
+    /// - A database error if an existence check, the account/identity insert
+    ///   transaction, or session minting fails.
+    ///
+    /// [`PasswordService::validate_and_hash`]: crate::service::PasswordService::validate_and_hash
     pub async fn signup(&self, request: Signup, security: SecurityContext) -> Result<String> {
         // Strength-check and hash before touching the database; bind the check to
         // the account's own fields so a password derived from the username/email is
@@ -201,6 +218,12 @@ impl SignInService {
     ///
     /// Also opportunistically cleans up this connection's account's expired
     /// sessions — best-effort, so a cleanup failure is only logged.
+    ///
+    /// # Errors
+    ///
+    /// - A database error if acquiring the connection, the token lookup, or the
+    ///   token delete fails. The best-effort expired-session cleanup never fails
+    ///   the call (its error is only logged).
     pub async fn logout(&self, token_id: uuid::Uuid) -> Result<bool> {
         let mut conn = self.postgres.get_connection().await?;
 

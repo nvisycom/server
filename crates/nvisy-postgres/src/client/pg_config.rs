@@ -197,6 +197,12 @@ impl PgConfig {
     }
 
     /// Validates the configuration.
+    ///
+    /// # Errors
+    ///
+    /// A `Config` error if the database URL is empty, or if the max connection
+    /// count, connection timeout, or idle timeout falls outside its allowed
+    /// range.
     pub fn validate(&self) -> Result<()> {
         // Validate database URL
         if self.postgres_url.is_empty() {
@@ -241,6 +247,12 @@ impl PgConfig {
     /// Builds a new database instance with the given configuration.
     ///
     /// Validates the configuration for consistency and safety.
+    ///
+    /// # Errors
+    ///
+    /// - A `Config` error if [`validate`](Self::validate) rejects the config: an
+    ///   empty URL, or a timeout or pool-size value out of range.
+    /// - Any error from constructing the underlying pool.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub fn build(self) -> Result<PgClient> {
         tracing::debug!(target: TRACING_TARGET_CONNECTION, "Validating database configuration");

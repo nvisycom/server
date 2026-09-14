@@ -47,6 +47,11 @@ impl WorkspacePipeline {
     /// The `policy_ids` come from the join table and are merged with the stored
     /// engine config to rebuild the full definition. Fails if the stored config
     /// JSON does not decode to the current schema.
+    ///
+    /// # Errors
+    ///
+    /// A deserialization error if the stored pipeline config does not decode to
+    /// the current definition schema.
     pub fn from_model(
         pipeline: model::WorkspacePipeline,
         workspace_id: Uuid,

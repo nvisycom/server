@@ -238,6 +238,9 @@ pub mod backdate {
     macro_rules! backdate {
         ($fn:ident = $table:ident . $col:ident) => {
             #[doc = concat!("Sets `", stringify!($table), ".", stringify!($col), "`.")]
+            /// # Errors
+            ///
+            /// A database error if the update query fails.
             pub async fn $fn(conn: &mut PgConn, id: Uuid, $col: Timestamp) -> Result<()> {
                 use crate::schema::$table::dsl;
                 diesel::update(dsl::$table.filter(dsl::id.eq(id)))
@@ -253,6 +256,9 @@ pub mod backdate {
                             "Sets `", stringify!($table), ".", stringify!($col_a), "` and `",
                             stringify!($col_b), "` (nullable), together."
                         )]
+            /// # Errors
+            ///
+            /// A database error if the update query fails.
             pub async fn $fn(
                 conn: &mut PgConn,
                 id: Uuid,

@@ -44,6 +44,11 @@ impl WebhookHeaders {
     /// A name must be a non-empty HTTP token (RFC 7230 `field-name`); a value
     /// must contain only visible ASCII plus spaces/tabs (no control characters,
     /// so a value cannot inject a second header line).
+    ///
+    /// # Errors
+    ///
+    /// An [`InvalidHeader`] if a name is not a valid HTTP header name, or a value
+    /// contains control characters.
     pub fn try_new(
         headers: impl IntoIterator<Item = (String, String)>,
     ) -> Result<Self, InvalidHeader> {

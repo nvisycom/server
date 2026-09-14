@@ -56,6 +56,11 @@ impl PipelineDefinition {
     /// Decoding failure is surfaced rather than swallowed: a stored config that
     /// does not match the schema is a server-side data error, not an empty
     /// config to return silently.
+    ///
+    /// # Errors
+    ///
+    /// A deserialization error if `config` does not decode to a
+    /// [`PipelineDefinition`].
     pub fn from_parts(
         config: serde_json::Value,
         policy_ids: Vec<Uuid>,

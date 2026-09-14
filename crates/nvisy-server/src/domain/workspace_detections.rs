@@ -90,6 +90,14 @@ impl WorkspaceDetectionService {
     ///
     /// An idempotency key that matches an existing detection replays it instead of
     /// creating a new one.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the pipeline or the input document does not exist in the
+    ///   workspace.
+    /// - `Conflict` if the pipeline is not enabled.
+    /// - `BadRequest` if the pipeline has no policies or its definition is invalid.
+    /// - A database error if a connection or a query fails.
     pub async fn create(
         &self,
         origin: event::EventOrigin<'_>,
@@ -200,6 +208,12 @@ impl WorkspaceDetectionService {
     /// enqueues the detection the same way as [`create`]. An idempotency key replays
     /// an existing detection.
     ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the input document or any named policy does not exist in the
+    ///   workspace.
+    /// - A database error if a connection or the create transaction fails.
+    ///
     /// [`create`]: Self::create
     pub async fn create_adhoc(
         &self,
@@ -299,6 +313,11 @@ impl WorkspaceDetectionService {
     }
 
     /// Lists a specific pipeline's detections with cursor pagination.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the pipeline does not exist in the workspace.
+    /// - A database error if a connection or the query fails.
     pub async fn list_for_pipeline(
         &self,
         workspace_id: Uuid,
@@ -315,6 +334,10 @@ impl WorkspaceDetectionService {
 
     /// Lists all of a workspace's detections with cursor pagination, including
     /// ad-hoc detections that name no pipeline.
+    ///
+    /// # Errors
+    ///
+    /// - A database error if a connection or the query fails.
     pub async fn list_for_workspace(
         &self,
         workspace_id: Uuid,
@@ -330,6 +353,11 @@ impl WorkspaceDetectionService {
     /// Finds a detection by id within a workspace, with the triggering account and
     /// its input document name — the context a single-detection response renders
     /// from. The owning pipeline is named by the detection's own `pipeline_id`.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the detection does not exist in the workspace.
+    /// - A database error if a connection or a query fails.
     pub async fn get(
         &self,
         workspace_id: Uuid,
@@ -349,6 +377,11 @@ impl WorkspaceDetectionService {
 
     /// Finds a detection and its owning pipeline (if any) within a workspace, for a
     /// handler action (stream, redact) that then does its own work.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the detection does not exist in the workspace.
+    /// - A database error if a connection or the query fails.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -369,6 +402,12 @@ impl WorkspaceDetectionService {
     /// against a definition inconsistent with the analysis. A pinned version
     /// resolves even after its policy is soft-deleted, so a historical detection can
     /// always be re-redacted.
+    ///
+    /// # Errors
+    ///
+    /// - `InternalServerError` if a pinned policy version can no longer be loaded,
+    ///   or if a stored policy definition is malformed.
+    /// - A database error if a connection or a query fails.
     pub async fn resolve_pinned_policies(
         &self,
         workspace_id: Uuid,

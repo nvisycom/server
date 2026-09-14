@@ -45,6 +45,12 @@ impl WorkspacePipelineService {
     /// commit together. Returns the pipeline with the ids it now references.
     ///
     /// An unknown referenced policy rejects the whole request before any write.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if a referenced policy does not exist in the workspace.
+    /// - `InternalServerError` if the pipeline definition cannot be serialized.
+    /// - A database error if the query fails.
     pub async fn create(
         &self,
         origin: event::EventOrigin<'_>,
@@ -86,6 +92,10 @@ impl WorkspacePipelineService {
 
     /// Lists a workspace's pipelines, newest first, optionally filtered by status
     /// and a name search.
+    ///
+    /// # Errors
+    ///
+    /// A database error if the query fails.
     pub async fn list(
         &self,
         workspace_id: Uuid,
@@ -101,6 +111,11 @@ impl WorkspacePipelineService {
 
     /// Finds a pipeline by id with its creator and referenced policy ids, or a
     /// `NotFound`.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the pipeline does not exist in the workspace.
+    /// - A database error if the query fails.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -118,6 +133,13 @@ impl WorkspacePipelineService {
     /// references too; omitting it leaves them untouched. The write and its event
     /// commit together. An unknown referenced policy rejects the request before any
     /// write.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the pipeline does not exist in the workspace, or a supplied
+    ///   definition references a policy that does not.
+    /// - `InternalServerError` if the pipeline definition cannot be serialized.
+    /// - A database error if the query fails.
     pub async fn update(
         &self,
         origin: event::EventOrigin<'_>,
@@ -179,6 +201,11 @@ impl WorkspacePipelineService {
     }
 
     /// Soft-deletes a pipeline from its workspace, recording the event atomically.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the pipeline does not exist in the workspace.
+    /// - A database error if the query fails.
     pub async fn delete(&self, origin: event::EventOrigin<'_>, pipeline_id: Uuid) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         // Confirm the pipeline exists in the workspace before deleting.

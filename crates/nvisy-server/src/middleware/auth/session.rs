@@ -33,6 +33,13 @@ pub async fn require_authentication(_: AuthState, request: Request, next: Next) 
 /// reaching this body means the session is already valid — this middleware only
 /// extends it. It must be layered *inside* CSRF protection, so a request that will
 /// be rejected for a missing CSRF token never reaches the session-extending write.
+///
+/// # Errors
+///
+/// Never returns `Err`: the sliding write is best-effort, so a failure to acquire
+/// a connection or to slide is logged and swallowed, and the downstream response
+/// is always returned. The `Result` return type only mirrors the middleware
+/// signature.
 pub async fn slide_session(
     auth_state: AuthState,
     State(pg_database): State<PgClient>,

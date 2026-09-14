@@ -53,6 +53,13 @@ impl WorkspaceProviderService {
     /// can never disagree with it; the full config is encrypted at rest. A
     /// disallowed custom endpoint is rejected before the config is stored. The
     /// provider and its creation event commit together.
+    ///
+    /// # Errors
+    ///
+    /// - `BadRequest` if the config names a custom endpoint the endpoint policy
+    ///   disallows.
+    /// - A crypto error if encrypting the config fails.
+    /// - A database error if the query fails.
     pub async fn create(
         &self,
         origin: event::EventOrigin<'_>,
@@ -107,6 +114,10 @@ impl WorkspaceProviderService {
 
     /// Lists a workspace's providers, each with its creator, optionally filtered by
     /// provider.
+    ///
+    /// # Errors
+    ///
+    /// A database error if the query fails.
     pub async fn list(
         &self,
         workspace_id: Uuid,
@@ -120,6 +131,11 @@ impl WorkspaceProviderService {
     }
 
     /// Finds a provider by id with its creator, or a `NotFound`.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the provider does not exist in the workspace.
+    /// - A database error if the query fails.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -135,6 +151,15 @@ impl WorkspaceProviderService {
     /// the `provider/provider_type` columns — so a differing provider is rejected
     /// rather than silently migrated. A disallowed custom endpoint is rejected
     /// before store. The update and its event commit together.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the provider does not exist in the workspace.
+    /// - `BadRequest` if a replacement config names a disallowed custom endpoint, or
+    ///   changes the provider away from the stored one.
+    /// - A crypto error if decrypting the stored config or encrypting the
+    ///   replacement fails.
+    /// - A database error if the query fails.
     pub async fn update(
         &self,
         origin: event::EventOrigin<'_>,
@@ -201,6 +226,11 @@ impl WorkspaceProviderService {
     }
 
     /// Soft-deletes a provider, recording the event atomically.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the provider does not exist in the workspace.
+    /// - A database error if the query fails.
     pub async fn delete(
         &self,
         origin: event::EventOrigin<'_>,

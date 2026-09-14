@@ -28,6 +28,11 @@ use crate::response::{ErrorKind, Result};
 ///
 /// Runs after authentication, so the transport that authenticated is known (the
 /// [`SessionToken`] the auth layer verified and cached on the request).
+///
+/// # Errors
+///
+/// A 403 if the check applies (cookie-authenticated, state-changing request) and
+/// the CSRF header and cookie tokens are missing or do not match.
 pub async fn csrf_protect(request: Request, next: Next) -> Result<Response> {
     // Safe methods never mutate state, so they are exempt regardless of transport.
     let is_state_changing = matches!(

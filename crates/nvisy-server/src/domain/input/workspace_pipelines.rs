@@ -30,6 +30,10 @@ impl PipelineDefinitionInput {
     /// The references live in a join table, so they are stripped from the JSON to
     /// keep a single source of truth. Serialization failure is surfaced rather
     /// than swallowed so a bad config never gets silently persisted as empty.
+    ///
+    /// # Errors
+    ///
+    /// - A serialization error if the definition cannot be encoded to JSON.
     pub fn into_parts(mut self) -> serde_json::Result<(serde_json::Value, Vec<Uuid>)> {
         let policy_ids = std::mem::take(&mut self.policy_ids);
         let config = serde_json::to_value(&self)?;
@@ -42,6 +46,11 @@ impl PipelineDefinitionInput {
     /// Decoding failure is surfaced rather than swallowed: a stored config that
     /// does not match the schema is a server-side data error, not an empty
     /// config to return silently.
+    ///
+    /// # Errors
+    ///
+    /// - A deserialization error if the stored config JSON does not match the
+    ///   definition schema.
     pub fn from_parts(
         config: serde_json::Value,
         policy_ids: Vec<Uuid>,
@@ -80,6 +89,10 @@ impl CreatePipelineInput {
     /// The stored model carries only the engine config JSON; the policy
     /// references are returned separately for the caller to persist into the
     /// join table.
+    ///
+    /// # Errors
+    ///
+    /// - A serialization error if the definition cannot be encoded to JSON.
     pub fn into_parts(
         self,
         workspace_id: Uuid,
@@ -128,6 +141,11 @@ impl UpdatePipelineInput {
     /// join table untouched (partial update); a present one replaces both, so
     /// the references are returned only in that case. A supplied retention
     /// override is merged into the metadata column (preserving other fields).
+    ///
+    /// # Errors
+    ///
+    /// - A serialization error if a supplied definition cannot be encoded to
+    ///   JSON.
     pub fn into_parts(
         self,
         current_metadata: PipelineMetadata,

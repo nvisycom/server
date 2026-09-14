@@ -77,6 +77,12 @@ impl BlobStore {
     /// being buffered whole in memory. A failure after the multipart upload begins
     /// aborts it so no partial upload lingers.
     ///
+    /// # Errors
+    ///
+    /// - `Body` if reading from `reader` fails.
+    /// - `Operation` if the store rejects the upload (a single-part put, or any
+    ///   part of a multipart upload).
+    ///
     /// [`K::BUCKET`]: ObjectKey::BUCKET
     pub async fn put<K, R>(&self, key: &K, reader: R) -> Result<u64>
     where
@@ -245,6 +251,11 @@ impl BlobStore {
     }
 
     /// Fetches an object as a stream, or `None` if it does not exist.
+    ///
+    /// # Errors
+    ///
+    /// `Operation` if the fetch fails for any reason other than a missing object
+    /// (a missing object is reported as `Ok(None)`).
     pub async fn get<K: ObjectKey>(&self, key: &K) -> Result<Option<GetObject>> {
         let object_key = Self::object_key(key);
         tracing::debug!(target: TRACING_TARGET, key = %object_key, "Fetching object");
@@ -276,6 +287,10 @@ impl BlobStore {
     }
 
     /// Deletes an object. Idempotent: deleting a missing object succeeds.
+    ///
+    /// # Errors
+    ///
+    /// `Operation` if the store rejects the delete request.
     pub async fn delete<K: ObjectKey>(&self, key: &K) -> Result<()> {
         let object_key = Self::object_key(key);
         tracing::debug!(target: TRACING_TARGET, key = %object_key, "Deleting object");
@@ -295,6 +310,11 @@ impl BlobStore {
     /// Succeeds when the endpoint is reachable and the bucket exists and is
     /// accessible with the current credentials — the same preconditions every
     /// object operation needs, so it doubles as a readiness check.
+    ///
+    /// # Errors
+    ///
+    /// `Operation` if the endpoint is unreachable, the credentials are rejected,
+    /// or the bucket is missing or inaccessible.
     pub async fn ping(&self) -> Result<()> {
         self.client
             .head_bucket()
@@ -306,6 +326,11 @@ impl BlobStore {
     }
 
     /// Whether an object exists, via a HEAD request.
+    ///
+    /// # Errors
+    ///
+    /// `Operation` if the HEAD request fails for any reason other than the object
+    /// being absent (a missing object is reported as `Ok(false)`).
     pub async fn exists<K: ObjectKey>(&self, key: &K) -> Result<bool> {
         let object_key = Self::object_key(key);
         match self

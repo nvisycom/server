@@ -154,6 +154,13 @@ impl ServiceState {
     /// webhook client is injected rather than derived from config, so a caller
     /// can supply any implementation (the first-party CLI uses the reqwest-based
     /// one).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any startup step fails: connecting the infra clients
+    /// and applying migrations, reconciling the `JetStream` streams, loading the
+    /// encryption key, building the redaction engine, loading the session keys,
+    /// configuring OIDC, or building the cloud file service.
     pub async fn from_config(args: ServiceArgs, webhook_service: WebhookService) -> Result<Self> {
         let infra = Infra::from_config(args.postgres, args.nats, args.s3).await?;
 

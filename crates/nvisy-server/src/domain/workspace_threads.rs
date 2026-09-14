@@ -59,6 +59,11 @@ impl WorkspaceThreadService {
     /// opened event, and — if the assistant was addressed — queues its reply job,
     /// all in one transaction. Wakes the drainer after commit when a job was
     /// queued.
+    ///
+    /// # Errors
+    ///
+    /// - `InternalServerError` if the queued assistant job cannot be encoded.
+    /// - A database error if the query fails.
     pub async fn open(
         &self,
         origin: event::EventOrigin<'_>,
@@ -115,6 +120,11 @@ impl WorkspaceThreadService {
 
     /// Deletes a thread and all of its comments (soft delete), recording the
     /// event atomically.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the thread does not exist in the workspace.
+    /// - A database error if the query fails.
     pub async fn delete(&self, origin: event::EventOrigin<'_>, thread_id: Uuid) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         let thread = find_thread(&mut conn, origin.workspace_id, thread_id).await?;
@@ -139,6 +149,11 @@ impl WorkspaceThreadService {
 
     /// Closes a thread. An already-closed thread is returned unchanged, writing
     /// nothing and emitting no duplicate event.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the thread does not exist in the workspace.
+    /// - A database error if the query fails.
     pub async fn close(
         &self,
         origin: event::EventOrigin<'_>,
@@ -172,6 +187,11 @@ impl WorkspaceThreadService {
 
     /// Reopens a closed thread. An already-open thread is returned unchanged,
     /// emitting no duplicate event.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the thread does not exist in the workspace.
+    /// - A database error if the query fails.
     pub async fn reopen(
         &self,
         origin: event::EventOrigin<'_>,
@@ -206,6 +226,11 @@ impl WorkspaceThreadService {
     /// Renames a thread. `display_name` is `Option<Option<String>>`: `None` leaves
     /// the title unchanged (returned as-is), `Some(None)` clears it, `Some(Some)`
     /// sets it. Only an explicit value writes and emits a timeline event.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the thread does not exist in the workspace.
+    /// - A database error if the query fails.
     pub async fn rename(
         &self,
         origin: event::EventOrigin<'_>,
@@ -242,6 +267,12 @@ impl WorkspaceThreadService {
 
     /// Verifies a document's review as a whole, moving it to `resolved`, and
     /// raises the review-verified event.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the document, or its review thread, does not exist in the
+    ///   workspace.
+    /// - A database error if the query fails.
     pub async fn verify_review(
         &self,
         origin: event::EventOrigin<'_>,
@@ -281,6 +312,12 @@ impl WorkspaceThreadService {
     /// current one; a set assignee must be a workspace member (else a `NotFound`).
     /// Raises the matching review event, notifying the assignee unless they
     /// assigned themselves.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the document or its review thread does not exist in the
+    ///   workspace, or a set assignee is not a workspace member.
+    /// - A database error if the query fails.
     pub async fn assign_review(
         &self,
         origin: event::EventOrigin<'_>,
@@ -339,6 +376,13 @@ impl WorkspaceThreadService {
     /// addressed — queues the reply job, all in one transaction. Rejects a comment
     /// on a closed thread with a Conflict. Wakes the drainer after commit when a
     /// job was queued.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the thread does not exist in the workspace.
+    /// - `Conflict` if the thread is closed.
+    /// - `InternalServerError` if the queued assistant job cannot be encoded.
+    /// - A database error if the query fails.
     pub async fn create_comment(
         &self,
         origin: event::EventOrigin<'_>,
@@ -410,6 +454,12 @@ impl WorkspaceThreadService {
     }
 
     /// Edits a comment's body. Restricted to the comment's author.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the comment does not exist in the workspace.
+    /// - `Forbidden` if the caller is not the comment's author.
+    /// - A database error if the query fails.
     pub async fn update_comment(
         &self,
         workspace_id: Uuid,
@@ -435,6 +485,12 @@ impl WorkspaceThreadService {
     }
 
     /// Soft-deletes a comment. Restricted to the comment's author.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the comment does not exist in the workspace.
+    /// - `Forbidden` if the caller is not the comment's author.
+    /// - A database error if the query fails.
     pub async fn delete_comment(
         &self,
         workspace_id: Uuid,

@@ -119,6 +119,11 @@ impl ConnectionSyncService {
     /// transaction on the caller's connection, so the run and its start event
     /// commit together — the start event can never be lost for a run that was
     /// created. Returns the persisted run.
+    ///
+    /// # Errors
+    ///
+    /// - A database error if inserting the run row or emitting the start event
+    ///   fails, or the surrounding transaction cannot commit.
     pub async fn create_run(
         &self,
         conn: &mut PgConn,
@@ -148,6 +153,11 @@ impl ConnectionSyncService {
     /// it. Returns whether a token was found and cancelled. This is best-effort:
     /// a run executing on another instance is not reached here and relies on the
     /// DB status flip instead.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the process-local cancel-registry mutex is poisoned (a prior
+    /// holder panicked while holding the lock).
     #[must_use]
     pub fn cancel_local(&self, run_id: Uuid) -> bool {
         let guard = self.running.lock().expect("sync cancel registry poisoned");
@@ -165,6 +175,11 @@ impl ConnectionSyncService {
     /// manual endpoint and the scheduled worker.
     ///
     /// [`cancel_local`]: Self::cancel_local
+    ///
+    /// # Panics
+    ///
+    /// Panics if the process-local cancel-registry mutex is poisoned (a prior
+    /// holder panicked while holding the lock).
     pub async fn run_transfer(&self, request: TransferRequest) {
         let run_id = request.run_id;
         let token = CancellationToken::new();

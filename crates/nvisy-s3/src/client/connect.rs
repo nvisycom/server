@@ -20,6 +20,15 @@ impl BlobStore {
     /// credentials are used; otherwise the SDK's default credential chain applies
     /// (environment, profile, container/instance role). `endpoint` targets an
     /// S3-compatible server; unset targets AWS S3.
+    ///
+    /// This method does not contact the service — it only builds the client. Call
+    /// [`ping`](Self::ping) to verify endpoint reachability, credentials, and
+    /// bucket access.
+    ///
+    /// # Errors
+    ///
+    /// `Config` if the credentials are incomplete (only one of the access key id
+    /// and secret access key is set).
     #[tracing::instrument(name = "s3.connect", skip_all, fields(bucket = %config.bucket))]
     pub async fn connect(config: &S3Config) -> Result<Self> {
         tracing::debug!(

@@ -57,6 +57,10 @@ impl AccountIdentityService {
     }
 
     /// Lists the account's sign-in methods (its password and any linked providers).
+    ///
+    /// # Errors
+    ///
+    /// - A database error if the connection or query fails.
     pub async fn list(&self, account_id: Uuid) -> Result<Vec<AccountIdentity>> {
         let mut conn = self.postgres.get_connection().await?;
         Ok(conn.list_account_identities(account_id).await?)
@@ -67,6 +71,10 @@ impl AccountIdentityService {
     /// The handler reads this to decide the authorization it must obtain — a change
     /// requires the current password, a first-set requires a step-up proof — and
     /// to consume that single-use proof only when one is actually needed.
+    ///
+    /// # Errors
+    ///
+    /// - A database error if the connection or query fails.
     pub async fn has_password(&self, account_id: Uuid) -> Result<bool> {
         let mut conn = self.postgres.get_connection().await?;
         Ok(conn
@@ -82,6 +90,14 @@ impl AccountIdentityService {
     /// session or CSRF cannot silently reset it. The new password is strength-
     /// checked against the account's own identifiers, then the secret upsert and
     /// the `password_changed_at` stamp commit together.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if no account has the given id.
+    /// - `Unauthorized` if the account has no password, or the current password is
+    ///   absent or incorrect.
+    /// - `BadRequest` if the new password fails the strength check.
+    /// - A database error if the connection or transaction fails.
     pub async fn change_password(
         &self,
         account_id: Uuid,
@@ -119,6 +135,13 @@ impl AccountIdentityService {
     ///
     /// Refuses (409) if the account already has a password — that path is
     /// [`change_password`], which verifies the current one.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if no account has the given id.
+    /// - `Conflict` if the account already has a password.
+    /// - `BadRequest` if the new password fails the strength check.
+    /// - A database error if the connection or transaction fails.
     ///
     /// [`change_password`]: Self::change_password
     pub async fn set_first_password(
@@ -191,6 +214,12 @@ impl AccountIdentityService {
     /// Removes an identity, mapping the last-identity and not-found outcomes to
     /// their errors. Shared by the password and provider deletes: an account may
     /// never lose its only sign-in method.
+    ///
+    /// # Errors
+    ///
+    /// - `Conflict` if it is the account's only remaining sign-in method.
+    /// - `NotFound` if the account has no identity for that provider.
+    /// - A database error if the connection or query fails.
     pub async fn remove_identity(
         &self,
         account_id: Uuid,

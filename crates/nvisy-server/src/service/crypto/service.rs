@@ -60,6 +60,12 @@ impl CryptoService {
     /// Loads the master key from the path specified in `config`.
     ///
     /// The file must contain exactly 32 raw bytes (256-bit key).
+    ///
+    /// # Errors
+    ///
+    /// - A config error if the key file is missing, is not a regular file, or does
+    ///   not contain exactly 32 bytes.
+    /// - A file-system error if reading the key file fails.
     pub async fn from_config(config: &CryptoConfig) -> Result<Self> {
         Self::load(&config.key_path).await
     }
@@ -67,11 +73,22 @@ impl CryptoService {
     /// Loads the master key from a file path.
     ///
     /// The file must contain exactly 32 raw bytes (256-bit key).
+    ///
+    /// # Errors
+    ///
+    /// - A config error if the key file is missing, is not a regular file, or does
+    ///   not contain exactly 32 bytes.
+    /// - A file-system error if reading the key file fails.
     pub async fn from_key_file(key_path: impl AsRef<Path>) -> Result<Self> {
         Self::load(key_path.as_ref()).await
     }
 
     /// Encrypts a serializable value under the given workspace's key.
+    ///
+    /// # Errors
+    ///
+    /// - `Json` if `value` fails to serialize.
+    /// - `EncryptionFailed` if the AEAD seal fails.
     pub fn encrypt_json<T: Serialize>(
         &self,
         workspace_id: Uuid,
@@ -81,6 +98,13 @@ impl CryptoService {
     }
 
     /// Decrypts a value previously encrypted under the given workspace's key.
+    ///
+    /// # Errors
+    ///
+    /// - `CiphertextTooShort` if the input is shorter than a nonce plus tag.
+    /// - `DecryptionFailed` if authentication fails (wrong workspace key, corrupt,
+    ///   or tampered data).
+    /// - `Json` if the decrypted bytes fail to deserialize into `T`.
     pub fn decrypt_json<T: DeserializeOwned>(
         &self,
         workspace_id: Uuid,
@@ -96,11 +120,21 @@ impl CryptoService {
     /// can be opened by either [`decrypt`](Self::decrypt) or `decrypt_reader`.
     /// Use `encrypt_reader` when the data is file-sized and shouldn't be
     /// buffered whole.
+    ///
+    /// # Errors
+    ///
+    /// - `EncryptionFailed` if the AEAD seal fails.
     pub fn encrypt(&self, workspace_id: Uuid, plaintext: &[u8]) -> CryptoResult<Vec<u8>> {
         encrypt(&self.workspace_key(workspace_id), plaintext)
     }
 
     /// Decrypts a buffer previously encrypted under the given workspace's key.
+    ///
+    /// # Errors
+    ///
+    /// - `CiphertextTooShort` if the input is shorter than a nonce plus tag.
+    /// - `DecryptionFailed` if authentication fails (wrong workspace key, corrupt,
+    ///   or tampered data).
     pub fn decrypt(&self, workspace_id: Uuid, ciphertext: &[u8]) -> CryptoResult<Vec<u8>> {
         decrypt(&self.workspace_key(workspace_id), ciphertext)
     }

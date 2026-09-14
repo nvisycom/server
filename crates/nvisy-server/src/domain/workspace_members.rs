@@ -37,6 +37,10 @@ impl WorkspaceMemberService {
     }
 
     /// Lists a workspace's members with their accounts, newest first.
+    ///
+    /// # Errors
+    ///
+    /// A database error if a connection or query fails.
     pub async fn list(
         &self,
         workspace_id: Uuid,
@@ -51,6 +55,11 @@ impl WorkspaceMemberService {
     }
 
     /// Finds a member by account id with their account, or a `NotFound`.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the account is not a member of the workspace.
+    /// - A database error if a connection or query fails.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -66,6 +75,13 @@ impl WorkspaceMemberService {
     ///
     /// The actor cannot remove themselves (they leave instead), and an owner
     /// cannot be removed (an owner can only leave).
+    ///
+    /// # Errors
+    ///
+    /// - `BadRequest` if the actor targets their own membership, or if the target
+    ///   member is an owner.
+    /// - `NotFound` if the target account is not a member of the workspace.
+    /// - A database error if a connection or query fails.
     pub async fn remove(
         &self,
         origin: event::EventOrigin<'_>,
@@ -116,6 +132,14 @@ impl WorkspaceMemberService {
     ///
     /// The actor cannot change their own role, and an owner cannot be demoted (an
     /// owner can only leave).
+    ///
+    /// # Errors
+    ///
+    /// - `BadRequest` if the actor targets their own membership, or if the update
+    ///   would demote an owner to a non-owner role.
+    /// - `NotFound` if the target account is not a member of the workspace, or if
+    ///   the updated member cannot be read back.
+    /// - A database error if a connection or query fails.
     pub async fn update(
         &self,
         origin: event::EventOrigin<'_>,
@@ -172,6 +196,11 @@ impl WorkspaceMemberService {
     ///
     /// The membership carries the account's notification preferences, so the
     /// handler reads its settings from the returned row.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the account is not a member of the workspace.
+    /// - A database error if a connection or query fails.
     pub async fn notification_settings(
         &self,
         workspace_id: Uuid,
@@ -186,6 +215,11 @@ impl WorkspaceMemberService {
     /// Updates the acting account's notification preferences on its membership,
     /// returning the updated member. Fails with `NotFound` when the account is not a
     /// member of the workspace.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the account is not a member of the workspace.
+    /// - A database error if a connection or query fails.
     pub async fn update_notification_settings(
         &self,
         workspace_id: Uuid,
@@ -213,6 +247,12 @@ impl WorkspaceMemberService {
     /// records `MemberDeleted` with the leaving account as both actor and subject.
     /// The sole owner cannot leave and orphan the workspace: they must transfer
     /// ownership first.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the acting account is not a member of the workspace.
+    /// - `Conflict` if the account is the workspace's only owner.
+    /// - A database error if a connection or query fails.
     pub async fn leave(&self, origin: event::EventOrigin<'_>) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         let workspace_id = origin.workspace_id;

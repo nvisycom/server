@@ -118,6 +118,13 @@ impl LlmConfig {
     /// verification failure.
     ///
     /// [`Error`]: crate::Error
+    ///
+    /// # Errors
+    ///
+    /// - A `Build` error if the provider client cannot be constructed from the
+    ///   config.
+    /// - A `Verify` error if the provider rejects the credentials or is
+    ///   unreachable.
     pub async fn validate(&self) -> Result<()> {
         match self {
             Self::OpenAi(p) => {
@@ -144,6 +151,11 @@ impl LlmConfig {
     /// provider's own default applies.
     ///
     /// [`default_model`]: Self::default_model
+    ///
+    /// # Errors
+    ///
+    /// A `Build` error if the client cannot be constructed from the config (e.g.
+    /// an invalid base URL).
     pub fn connect(&self, model: Option<&str>) -> Result<InferenceClient> {
         let model = model.or_else(|| self.default_model()).unwrap_or_default();
         let client = match self {

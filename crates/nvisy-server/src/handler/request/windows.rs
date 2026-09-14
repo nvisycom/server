@@ -54,6 +54,13 @@ impl DateWindow {
     /// and a window of more than `MAX_WINDOW_DAYS` inclusive dates (400). Both
     /// bounds are inclusive, so the counts are date counts, not the difference:
     /// `[from, to]` spans `to - from + 1` dates.
+    ///
+    /// # Errors
+    ///
+    /// - A 400 if `from` is after `to`.
+    /// - A 400 if the window spans more than `MAX_WINDOW_DAYS` inclusive dates.
+    /// - A 400 if a defaulted or computed bound falls outside the representable
+    ///   date range.
     pub fn resolve(&self) -> Result<ResolvedWindow> {
         let to = self.to.unwrap_or_else(today_utc);
         let from = match self.from {
@@ -90,6 +97,11 @@ impl DateWindow {
     /// Use this where the range only narrows an already-bounded result (a
     /// cursor-paginated feed); use [`resolve`](Self::resolve) where the range must
     /// bound the whole result (an export).
+    ///
+    /// # Errors
+    ///
+    /// - A 400 if both bounds are present and `from` is after `to`.
+    /// - A 400 if a given bound falls outside the representable timestamp range.
     pub fn resolve_optional_bounds(
         &self,
     ) -> Result<(Option<jiff::Timestamp>, Option<jiff::Timestamp>)> {
@@ -115,6 +127,10 @@ impl DateWindow {
 impl ResolvedWindow {
     /// The window's start as a UTC timestamp at the day's first instant
     /// (inclusive lower bound).
+    ///
+    /// # Errors
+    ///
+    /// A 400 if `from` cannot be represented as a zoned UTC timestamp.
     pub fn from_timestamp(&self) -> Result<jiff::Timestamp> {
         day_start_utc(self.from)
     }
@@ -122,6 +138,11 @@ impl ResolvedWindow {
     /// The window's end as an *exclusive* upper bound: the first instant of the
     /// day after `to`. A filter of `column < to_timestamp()` therefore includes
     /// the whole `to` day without spilling into the next.
+    ///
+    /// # Errors
+    ///
+    /// A 400 if the day after `to` falls outside the representable date range or
+    /// cannot be represented as a zoned UTC timestamp.
     pub fn to_timestamp(&self) -> Result<jiff::Timestamp> {
         let next = self
             .to

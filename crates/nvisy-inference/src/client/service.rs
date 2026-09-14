@@ -37,6 +37,10 @@ impl InferenceClient {
 
     /// Send a single prompt with no conversation history and return the model's
     /// text response.
+    ///
+    /// # Errors
+    ///
+    /// A `Prompt` error if the completion request fails at runtime.
     #[tracing::instrument(name = "inference.prompt", skip_all)]
     pub async fn prompt(&self, prompt: &str) -> Result<String> {
         Prompt::prompt(&*self.0, prompt.to_owned())
@@ -47,6 +51,10 @@ impl InferenceClient {
     /// Run one chat turn against `history`, returning the model's text response.
     ///
     /// `history` is the prior conversation as [`ChatTurn`]s.
+    ///
+    /// # Errors
+    ///
+    /// A `Prompt` error if the completion request fails at runtime.
     #[tracing::instrument(name = "inference.chat", skip_all, fields(history_len = history.len()))]
     pub async fn chat(&self, prompt: &str, history: Vec<ChatTurn>) -> Result<String> {
         let mut history = to_messages(history);
