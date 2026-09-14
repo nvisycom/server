@@ -40,7 +40,7 @@ pub struct WorkspaceConnection {
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
     /// URL-safe workspace handle. Display-only.
-    pub workspace_slug: Handle,
+    pub workspace_handle: Handle,
     /// Account that created this connection.
     pub created_by: AccountRef,
     /// Human-readable connection display name.
@@ -120,7 +120,7 @@ impl WorkspaceConnection {
     pub fn from_model(
         connection: WorkspaceConnectionModel,
         workspace_id: Uuid,
-        workspace_slug: Handle,
+        workspace_handle: Handle,
         created_by: AccountRef,
         schedule: Option<WorkspaceConnectionSchedule>,
         last_synced_at: Option<Timestamp>,
@@ -133,7 +133,7 @@ impl WorkspaceConnection {
         Self {
             id: ConnectionId::from_uuid(connection.id),
             workspace_id,
-            workspace_slug,
+            workspace_handle,
             created_by,
             display_name: connection.display_name,
             provider: connection.provider,

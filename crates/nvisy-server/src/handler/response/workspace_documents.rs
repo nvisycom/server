@@ -19,7 +19,7 @@ pub struct WorkspaceDocument {
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
     /// URL-safe workspace handle. Display-only.
-    pub workspace_slug: Handle,
+    pub workspace_handle: Handle,
     /// Display name.
     pub display_name: String,
     /// Original filename when uploaded.
@@ -48,13 +48,13 @@ impl WorkspaceDocument {
         document: DocumentModel,
         blob: &Blob,
         workspace_id: Uuid,
-        workspace_slug: Handle,
+        workspace_handle: Handle,
         uploaded_by: AccountRef,
     ) -> Self {
         Self {
             id: document.id,
             workspace_id,
-            workspace_slug,
+            workspace_handle,
             display_name: document.display_name,
             original_filename: document.original_filename,
             extension: document.file_extension.clone(),

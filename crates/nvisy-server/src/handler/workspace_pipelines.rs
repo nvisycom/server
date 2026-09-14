@@ -67,9 +67,14 @@ async fn create_pipeline(
     let mut conn = pg_client.get_connection().await?;
     let creator = resolve_account_ref(&mut conn, account_id).await?;
 
-    let response =
-        WorkspacePipeline::from_model(pipeline, workspace.id, workspace.slug, creator, policy_ids)
-            .map_err(serialize_error)?;
+    let response = WorkspacePipeline::from_model(
+        pipeline,
+        workspace.id,
+        workspace.handle,
+        creator,
+        policy_ids,
+    )
+    .map_err(serialize_error)?;
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -117,7 +122,7 @@ async fn list_pipelines(
         WorkspacePipelineSummary::from_model(
             wc.item,
             workspace.id,
-            workspace.slug.clone(),
+            workspace.handle.clone(),
             wc.account.into(),
         )
     });
@@ -158,7 +163,7 @@ async fn get_pipeline(
     let response = WorkspacePipeline::from_model(
         found.item,
         workspace.id,
-        workspace.slug,
+        workspace.handle,
         found.account.into(),
         policy_ids,
     )
@@ -214,9 +219,14 @@ async fn update_pipeline(
     let mut conn = pg_client.get_connection().await?;
     let creator = resolve_account_ref(&mut conn, pipeline.account_id).await?;
 
-    let response =
-        WorkspacePipeline::from_model(pipeline, workspace.id, workspace.slug, creator, policy_ids)
-            .map_err(serialize_error)?;
+    let response = WorkspacePipeline::from_model(
+        pipeline,
+        workspace.id,
+        workspace.handle,
+        creator,
+        policy_ids,
+    )
+    .map_err(serialize_error)?;
 
     Ok((StatusCode::OK, Json(response)))
 }

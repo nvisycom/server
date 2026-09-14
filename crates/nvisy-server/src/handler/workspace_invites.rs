@@ -123,7 +123,7 @@ async fn list_invites(
     Ok((
         StatusCode::OK,
         Json(WorkspaceInvitesPage::from_cursor_page(page, |invite| {
-            WorkspaceInvite::from_model(invite, workspace.id, workspace.slug.clone())
+            WorkspaceInvite::from_model(invite, workspace.id, workspace.handle.clone())
         })),
     ))
 }
@@ -264,7 +264,7 @@ async fn generate_invite_code(
         Json(WorkspaceInviteCode::from_invite(
             &invite,
             workspace.id,
-            workspace.slug,
+            workspace.handle,
         )),
     ))
 }

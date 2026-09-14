@@ -67,7 +67,7 @@ async fn list_detection_redactions(
         items.push(WorkspaceRedactionResult::from_model(
             redaction,
             workspace.id,
-            workspace.slug.clone(),
+            workspace.handle.clone(),
             requested_by,
         ));
     }

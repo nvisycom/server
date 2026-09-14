@@ -130,7 +130,7 @@ impl WorkspacePipelineService {
             .into_parts(existing.metadata.or_default())
             .map_err(serialize_error)?;
 
-        // Resolve any supplied references up front so an unknown slug rejects
+        // Resolve any supplied references up front so an unknown handle rejects
         // before the write.
         let resolved = match &references {
             Some(references) => {

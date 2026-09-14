@@ -21,7 +21,7 @@ pub struct WorkspaceProvider {
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
     /// URL-safe workspace handle. Display-only.
-    pub workspace_slug: Handle,
+    pub workspace_handle: Handle,
     /// Account that created this provider.
     pub created_by: AccountRef,
     /// Human-readable provider display name.
@@ -46,13 +46,13 @@ impl WorkspaceProvider {
     pub fn from_model(
         provider: WorkspaceProviderModel,
         workspace_id: Uuid,
-        workspace_slug: Handle,
+        workspace_handle: Handle,
         created_by: AccountRef,
     ) -> Self {
         Self {
             id: ProviderId::from_uuid(provider.id),
             workspace_id,
-            workspace_slug,
+            workspace_handle,
             created_by,
             display_name: provider.display_name,
             provider: provider.provider,

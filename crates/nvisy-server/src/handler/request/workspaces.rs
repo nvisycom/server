@@ -28,8 +28,8 @@ pub struct CreateWorkspace {
     /// Display name of the workspace (2-32 characters).
     #[garde(length(min = 2, max = 32, chars), custom(validate_non_blank))]
     pub display_name: String,
-    /// Optional URL slug. Derived from the display name when omitted.
-    pub slug: Option<Handle>,
+    /// Optional handle. Derived from the display name when omitted.
+    pub handle: Option<Handle>,
     /// Optional description of the workspace (max 500 characters).
     #[garde(length(max = 500, chars))]
     pub description: Option<String>,
@@ -41,8 +41,8 @@ pub struct CreateWorkspace {
 impl CreateWorkspace {
     /// Converts this request into a [`NewWorkspace`] model for database insertion.
     ///
-    /// The slug is the caller-provided one, or derived from the display name.
-    /// The returned slug is only the *preferred* value; the repository resolves
+    /// The handle is the caller-provided one, or derived from the display name.
+    /// The returned handle is only the *preferred* value; the repository resolves
     /// collisions with a numeric suffix on insert.
     ///
     /// # Arguments
@@ -51,21 +51,21 @@ impl CreateWorkspace {
     ///
     /// # Errors
     ///
-    /// Returns `BadRequest` if no slug was given and the display name has no
-    /// slug-able characters.
+    /// Returns `BadRequest` if no handle was given and the display name has no
+    /// handle-able characters.
     pub fn into_model(self, account_id: Uuid) -> Result<NewWorkspace> {
-        let slug = match self.slug {
-            Some(slug) => slug,
+        let handle = match self.handle {
+            Some(handle) => handle,
             None => Handle::derive(&self.display_name).ok_or_else(|| {
                 ErrorKind::BadRequest
-                    .with_message("Could not derive a slug from the display name; provide one")
+                    .with_message("Could not derive a handle from the display name; provide one")
                     .with_resource("workspace")
             })?,
         };
 
         Ok(NewWorkspace {
             display_name: self.display_name,
-            slug,
+            handle,
             description: self.description,
             avatar_url: None,
             metadata: None,
@@ -77,7 +77,7 @@ impl CreateWorkspace {
 
 /// Request payload to update an existing workspace.
 ///
-/// All fields are optional; only provided fields will be updated. The slug is
+/// All fields are optional; only provided fields will be updated. The handle is
 /// immutable and set at creation, so it cannot be changed here.
 #[must_use]
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema, Validate)]

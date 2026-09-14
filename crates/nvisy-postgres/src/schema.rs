@@ -619,7 +619,7 @@ diesel::table! {
     workspaces (id) {
         id -> Uuid,
         display_name -> Text,
-        slug -> Text,
+        handle -> Text,
         description -> Nullable<Text>,
         avatar_url -> Nullable<Text>,
         metadata -> Jsonb,

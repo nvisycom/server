@@ -78,7 +78,7 @@ async fn list_documents(
             wc.item.document,
             &wc.item.blob,
             workspace.id,
-            workspace.slug.clone(),
+            workspace.handle.clone(),
             wc.account.into(),
         )
     });
@@ -425,7 +425,7 @@ async fn upload_document(
             entry.document,
             &entry.blob,
             workspace.id,
-            workspace.slug.clone(),
+            workspace.handle.clone(),
             uploaded_by.clone(),
         ));
     }
@@ -478,7 +478,7 @@ async fn read_document(
             found.item.document,
             &found.item.blob,
             workspace.id,
-            workspace.slug,
+            workspace.handle,
             found.account.into(),
         )),
     ))
@@ -529,7 +529,7 @@ async fn update_document(
             found.item.document,
             &found.item.blob,
             workspace.id,
-            workspace.slug,
+            workspace.handle,
             found.account.into(),
         )),
     ))

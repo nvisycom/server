@@ -113,9 +113,9 @@ impl RedirectResult<'_> {
 
 /// Returns the browser to the frontend after a cloud-file OAuth flow.
 ///
-/// A `{workspaceSlug}` placeholder in the configured base is substituted with
-/// `workspace_slug` when known (i.e. on success), so a base like
-/// `https://app/w/{workspaceSlug}/integrations` lands on the workspace's page.
+/// A `{workspaceHandle}` placeholder in the configured base is substituted with
+/// `workspace_handle` when known (i.e. on success), so a base like
+/// `https://app/w/{workspaceHandle}/integrations` lands on the workspace's page.
 /// The outcome is appended as a `connection=success|error` query. When no
 /// frontend URL is configured, renders a minimal in-page result instead of a
 /// redirect — a browser blocks a top-level navigation to a `data:` URL, so a
@@ -123,12 +123,12 @@ impl RedirectResult<'_> {
 pub(crate) fn connection_result_redirect(
     base: Option<&str>,
     status: &str,
-    workspace_slug: Option<&str>,
+    workspace_handle: Option<&str>,
 ) -> Response {
     match base {
         Some(base) => {
-            let base = match workspace_slug {
-                Some(slug) => base.replace("{workspaceSlug}", slug),
+            let base = match workspace_handle {
+                Some(handle) => base.replace("{workspaceHandle}", handle),
                 None => base.to_owned(),
             };
             let separator = if base.contains('?') { '&' } else { '?' };

@@ -33,7 +33,7 @@ pub trait RequiredPermission {
 
 /// Proof that the caller holds permission `P` in the addressed workspace.
 ///
-/// Extracting `Authorized<P>` resolves the `{workspaceSlug}` path segment to a
+/// Extracting `Authorized<P>` resolves the `{workspaceId}` path segment to a
 /// live [`Workspace`] and authorizes the caller for `P::PERMISSION`, rejecting
 /// with `403 Forbidden` otherwise (and `404` for an unknown workspace, `401` for
 /// a bad token) — exactly the checks a handler used to run by hand. The handler
@@ -42,7 +42,7 @@ pub trait RequiredPermission {
 pub struct Authorized<P: RequiredPermission> {
     /// The authenticated caller's account id.
     pub account_id: Uuid,
-    /// The workspace the `{workspaceSlug}` segment resolved to.
+    /// The workspace the `{workspaceId}` segment resolved to.
     pub workspace: Workspace,
     /// The caller's membership in the workspace, whose role satisfied `P`.
     pub member: WorkspaceMember,
@@ -61,7 +61,7 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         // AuthState verifies the token (cached in extensions) and WorkspaceContext
-        // resolves the slug. The membership/role check needs a connection only for
+        // resolves the workspace by id. The membership/role check needs a connection only for
         // its own duration, so acquire one here and drop it before returning —
         // never hand a pooled connection to the handler body, which would pin it
         // for the request's whole lifetime and exhaust the pool under load.
@@ -96,7 +96,7 @@ where
 impl<P: RequiredPermission> OperationInput for Authorized<P> {
     fn operation_input(ctx: &mut GenContext, operation: &mut Operation) {
         // Same OpenAPI surface as extracting AuthState + WorkspaceContext by hand:
-        // the bearer security scheme and the {workspaceSlug} path parameter.
+        // the bearer security scheme and the {workspaceId} path parameter.
         <AuthState>::operation_input(ctx, operation);
         WorkspaceContext::operation_input(ctx, operation);
     }

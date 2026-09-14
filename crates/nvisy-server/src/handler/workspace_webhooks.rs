@@ -69,7 +69,7 @@ async fn create_webhook(
         Json(WorkspaceWebhookCreated::from_model(
             created.webhook,
             workspace.id,
-            workspace.slug,
+            workspace.handle,
             creator,
             created.secret,
         )),
@@ -117,7 +117,7 @@ async fn list_webhooks(
             WorkspaceWebhook::from_model(
                 wc.item,
                 workspace.id,
-                workspace.slug.clone(),
+                workspace.handle.clone(),
                 wc.account.into(),
             )
         })),
@@ -160,7 +160,7 @@ async fn read_webhook(
         Json(WorkspaceWebhook::from_model(
             found.item,
             workspace.id,
-            workspace.slug,
+            workspace.handle,
             found.account.into(),
         )),
     ))
@@ -214,7 +214,7 @@ async fn update_webhook(
         Json(WorkspaceWebhook::from_model(
             found.item,
             workspace.id,
-            workspace.slug,
+            workspace.handle,
             found.account.into(),
         )),
     ))

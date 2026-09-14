@@ -3,7 +3,7 @@
 //! Resolves the `{workspaceId}` path segment to the addressed [`Workspace`], so
 //! handlers receive a validated workspace without repeating the lookup. The `id`
 //! is the workspace's public URL identity and the internal key used for
-//! authorization and scoped queries; the slug is a display-only name.
+//! authorization and scoped queries; the handle is a display-only name.
 
 use aide::OperationInput;
 use aide::generate::GenContext;

@@ -12,7 +12,7 @@ use super::{AccountRef, Page};
 /// Response type for a workspace activity.
 ///
 /// The typed payload is nested under `payload`, so an activity is
-/// `{ id, workspaceSlug, performedBy, payload: { activityType, <params...> }, createdAt }`.
+/// `{ id, workspaceHandle, performedBy, payload: { activityType, <params...> }, createdAt }`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceActivity {
@@ -21,7 +21,7 @@ pub struct WorkspaceActivity {
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
     /// URL-safe workspace handle. Display-only.
-    pub workspace_slug: Handle,
+    pub workspace_handle: Handle,
     /// Account that performed the activity.
     pub performed_by: AccountRef,
     /// The activity type and its typed params, absent when the stored params do
@@ -39,13 +39,13 @@ impl WorkspaceActivity {
     pub fn from_model(
         activity: WorkspaceActivityModel,
         workspace_id: Uuid,
-        workspace_slug: Handle,
+        workspace_handle: Handle,
         performed_by: AccountRef,
     ) -> Self {
         Self {
             id: activity.id,
             workspace_id,
-            workspace_slug,
+            workspace_handle,
             performed_by,
             payload: activity.params.optional(),
             created_at: activity.created_at.into(),

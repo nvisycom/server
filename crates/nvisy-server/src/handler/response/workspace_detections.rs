@@ -15,7 +15,7 @@ use super::{AccountRef, Page};
 /// Response type for a detection.
 ///
 /// A detection is addressed by its own opaque id; the owning pipeline and
-/// workspace slugs are carried for context. Redacted outputs are not here — a
+/// workspace handles are carried for context. Redacted outputs are not here — a
 /// detection produces many redactions, each fetched from its `redactions`
 /// endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -30,7 +30,7 @@ pub struct WorkspaceDetection {
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
     /// URL-safe workspace handle. Display-only.
-    pub workspace_slug: Handle,
+    pub workspace_handle: Handle,
     /// Source document this detection analyzes.
     pub input_document_id: Uuid,
     /// Display name of the source document, for showing the detection without a
@@ -63,12 +63,12 @@ pub type WorkspaceDetectionsPage = Page<WorkspaceDetection>;
 
 impl WorkspaceDetection {
     /// Creates a detection response from the database model, the owning workspace
-    /// id and slug, the triggering account, and the resolved input file display
+    /// id and handle, the triggering account, and the resolved input file display
     /// name. The owning pipeline id is read from the model.
     pub fn from_model(
         detection: DetectionModel,
         workspace_id: Uuid,
-        workspace_slug: Handle,
+        workspace_handle: Handle,
         triggered_by: AccountRef,
         files: DetectionDocuments,
     ) -> Self {
@@ -82,7 +82,7 @@ impl WorkspaceDetection {
             id: DetectionId::from_uuid(detection.id),
             pipeline_id,
             workspace_id,
-            workspace_slug,
+            workspace_handle,
             input_document_id: detection.input_document_id,
             input_document_name: files.input,
             triggered_by,
