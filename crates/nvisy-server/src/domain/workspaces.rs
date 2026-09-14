@@ -44,6 +44,9 @@ impl WorkspaceService {
     /// The workspace, its owner membership, and the creation event commit in one
     /// transaction, so the event is never lost nor recorded for a workspace that
     /// rolled back.
+    ///
+    /// # Errors
+    /// - A database error if a connection or the create transaction fails.
     pub async fn create(
         &self,
         origin: event::EventOrigin<'_>,
@@ -81,6 +84,9 @@ impl WorkspaceService {
 
     /// Lists the workspaces the account is a member of, newest first, each with
     /// the account's membership and the creator's public identity.
+    ///
+    /// # Errors
+    /// - A database error if a connection or the query fails.
     pub async fn list(
         &self,
         account_id: Uuid,
@@ -94,6 +100,9 @@ impl WorkspaceService {
 
     /// Updates a workspace's configuration, recording the event atomically, and
     /// returns the updated workspace.
+    ///
+    /// # Errors
+    /// - A database error if a connection or the update transaction fails.
     pub async fn update(
         &self,
         origin: event::EventOrigin<'_>,
@@ -121,6 +130,9 @@ impl WorkspaceService {
     }
 
     /// Soft-deletes a workspace, recording the event atomically.
+    ///
+    /// # Errors
+    /// - A database error if a connection or the delete transaction fails.
     pub async fn delete(&self, origin: event::EventOrigin<'_>) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         let workspace_id = origin.workspace_id;

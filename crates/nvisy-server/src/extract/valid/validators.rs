@@ -13,6 +13,9 @@
 /// A `length(min = 1)` rule counts characters, so a whitespace-only value passes
 /// it; this rule rejects such a value up front with a clean `400` rather than
 /// letting it reach the database's `trim()` constraint (a late failure).
+///
+/// # Errors
+/// A [`garde::Error`] if the value is empty once trimmed.
 pub fn validate_non_blank(value: &str, _: &()) -> garde::Result {
     if value.trim().is_empty() {
         return Err(garde::Error::new("must not be blank"));
@@ -25,6 +28,9 @@ pub fn validate_non_blank(value: &str, _: &()) -> garde::Result {
 /// Takes an `Option` because garde passes a custom validator the field value
 /// as-is (it does not unwrap `Option` the way the built-in rules do). An absent
 /// value is nothing to check; a present value must not be blank once trimmed.
+///
+/// # Errors
+/// A [`garde::Error`] if a present value is empty once trimmed.
 pub fn validate_non_blank_opt(value: &Option<String>, ctx: &()) -> garde::Result {
     match value {
         Some(value) => validate_non_blank(value, ctx),
@@ -39,6 +45,10 @@ pub fn validate_non_blank_opt(value: &Option<String>, ctx: &()) -> garde::Result
 /// as-is — it does not unwrap `Option` the way the built-in rules do — and this
 /// validator is applied to optional name fields; an absent name is nothing to
 /// check.
+///
+/// # Errors
+/// A [`garde::Error`] if a present name contains a character other than a letter,
+/// digit, whitespace, hyphen, or apostrophe.
 pub fn validate_display_name_format(name: &Option<String>, _: &()) -> garde::Result {
     let Some(name) = name else {
         return Ok(());

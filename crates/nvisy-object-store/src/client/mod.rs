@@ -63,6 +63,10 @@ impl ObjectStoreClient {
     /// failures (`PermissionDenied`/`Unauthenticated`) as errors, so callers
     /// can distinguish a bad connection from bad credentials. Unlike a HEAD on
     /// a fabricated key, it does not depend on a probe object existing.
+    ///
+    /// # Errors
+    /// A storage error if the store is unreachable or the credentials are
+    /// rejected (`PermissionDenied`/`Unauthenticated`).
     #[tracing::instrument(name = "object.verify", skip(self))]
     pub async fn verify_reachable(&self) -> Result<(), Error> {
         self.0
@@ -78,6 +82,9 @@ impl ObjectStoreClient {
     /// use [`list_stream`] instead.
     ///
     /// [`list_stream`]: Self::list_stream
+    ///
+    /// # Errors
+    /// A storage error if the listing request fails.
     #[tracing::instrument(name = "object.list", skip(self), fields(prefix = %prefix))]
     pub async fn list(&self, prefix: &str) -> Result<Vec<ObjectMeta>, Error> {
         let prefix = if prefix.is_empty() {
@@ -104,6 +111,11 @@ impl ObjectStoreClient {
     }
 
     /// Retrieve the raw bytes, content-type, and metadata stored at `key`.
+    ///
+    /// # Errors
+    /// - A `Runtime` error if `key` is not a valid object-store path.
+    /// - A storage error (including `NotFound`) if the object cannot be fetched
+    ///   or its body cannot be read.
     #[tracing::instrument(name = "object.get", skip(self), fields(key = %key))]
     pub async fn get(&self, key: &str) -> Result<GetOutput, Error> {
         let path = parse_key(key)?;
@@ -126,6 +138,11 @@ impl ObjectStoreClient {
     ///
     /// The read half of an object-to-elsewhere pipe (e.g. streaming an object
     /// into NATS); pair with a chunk-consuming sink.
+    ///
+    /// # Errors
+    /// - A `Runtime` error if `key` is not a valid object-store path.
+    /// - A storage error (including `NotFound`) if the object cannot be opened.
+    ///   Errors reading individual chunks are yielded by the returned stream.
     #[tracing::instrument(name = "object.get_stream", skip(self), fields(key = %key))]
     pub async fn get_stream(
         &self,
@@ -137,6 +154,9 @@ impl ObjectStoreClient {
     }
 
     /// Upload `data` to `key`, optionally setting the content-type.
+    ///
+    /// # Errors
+    /// Propagates any error from [`put_opts`](Self::put_opts).
     pub async fn put(
         &self,
         key: &str,
@@ -148,6 +168,11 @@ impl ObjectStoreClient {
     }
 
     /// Upload `data` to `key` with the specified [`PutMode`].
+    ///
+    /// # Errors
+    /// - A `Runtime` error if `key` is not a valid object-store path.
+    /// - A storage error if the upload fails (including a precondition failure
+    ///   under a conditional [`PutMode`]).
     #[tracing::instrument(name = "object.put_opts", skip(self, data), fields(key = %key, size = data.len()))]
     pub async fn put_opts(
         &self,
@@ -175,6 +200,10 @@ impl ObjectStoreClient {
     }
 
     /// Get object metadata without downloading the body.
+    ///
+    /// # Errors
+    /// - A `Runtime` error if `key` is not a valid object-store path.
+    /// - A storage error (including `NotFound`) if the metadata cannot be fetched.
     #[tracing::instrument(name = "object.head", skip(self), fields(key = %key))]
     pub async fn head(&self, key: &str) -> Result<ObjectMeta, Error> {
         let path = parse_key(key)?;
@@ -182,6 +211,10 @@ impl ObjectStoreClient {
     }
 
     /// Delete the object at `key`.
+    ///
+    /// # Errors
+    /// - A `Runtime` error if `key` is not a valid object-store path.
+    /// - A storage error if the delete request fails.
     #[tracing::instrument(name = "object.delete", skip(self), fields(key = %key))]
     pub async fn delete(&self, key: &str) -> Result<(), Error> {
         let path = parse_key(key)?;
@@ -189,6 +222,12 @@ impl ObjectStoreClient {
     }
 
     /// Copy an object from `src` to `dst` within the same store.
+    ///
+    /// # Errors
+    /// - A `Runtime` error if either `src` or `dst` is not a valid object-store
+    ///   path.
+    /// - A storage error (including `NotFound` for a missing source) if the copy
+    ///   fails.
     #[tracing::instrument(name = "object.copy", skip(self), fields(src = %src, dst = %dst))]
     pub async fn copy(&self, src: &str, dst: &str) -> Result<(), Error> {
         let from = parse_key(src)?;
@@ -197,6 +236,11 @@ impl ObjectStoreClient {
     }
 
     /// Whether an object exists at `key`.
+    ///
+    /// # Errors
+    /// - A `Runtime` error if `key` is not a valid object-store path.
+    /// - A storage error other than `NotFound` (which resolves to `Ok(false)`)
+    ///   if the existence check fails.
     #[tracing::instrument(name = "object.exists", skip(self), fields(key = %key))]
     pub async fn exists(&self, key: &str) -> Result<bool, Error> {
         match self.head(key).await {
@@ -208,6 +252,10 @@ impl ObjectStoreClient {
 
     /// Read a byte range of the object at `key` without downloading the whole
     /// body.
+    ///
+    /// # Errors
+    /// - A `Runtime` error if `key` is not a valid object-store path.
+    /// - A storage error (including `NotFound`) if the range cannot be read.
     #[tracing::instrument(name = "object.get_range", skip(self), fields(key = %key))]
     pub async fn get_range(&self, key: &str, range: Range<u64>) -> Result<Bytes, Error> {
         let path = parse_key(key)?;
@@ -219,6 +267,12 @@ impl ObjectStoreClient {
     /// Chunks are uploaded as they arrive, so the whole object never needs to
     /// be buffered in memory. If the stream yields an error, or any part fails,
     /// the multipart upload is aborted so no orphaned parts are left behind.
+    ///
+    /// # Errors
+    /// - A `Runtime` error if `key` is not a valid object-store path.
+    /// - The stream's own error if it yields one (the upload is aborted first).
+    /// - A storage error if starting, uploading a part, or completing the
+    ///   multipart upload fails.
     #[tracing::instrument(name = "object.put_multipart", skip(self, stream), fields(key = %key))]
     pub async fn put_multipart<S>(
         &self,

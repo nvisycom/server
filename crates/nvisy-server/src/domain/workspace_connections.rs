@@ -63,6 +63,13 @@ impl WorkspaceConnectionService {
     /// A disallowed custom endpoint is rejected before store; a `sync` block is
     /// accepted only for a provider that supports scheduled sync. The connection,
     /// its schedule, and the creation event commit together.
+    ///
+    /// # Errors
+    /// - `BadRequest` if the config uses a custom endpoint the policy forbids, or
+    ///   if a `sync` block is given for a provider that does not support scheduled
+    ///   sync or carries an invalid cron expression.
+    /// - An encryption error if the config cannot be encrypted.
+    /// - A database error if a connection or query fails.
     pub async fn create(
         &self,
         origin: event::EventOrigin<'_>,
@@ -140,6 +147,9 @@ impl WorkspaceConnectionService {
 
     /// Lists a workspace's connections, each with its creator, schedule, and last
     /// successful sync time, optionally filtered by provider.
+    ///
+    /// # Errors
+    /// - A database error if a connection or query fails.
     pub async fn list(
         &self,
         workspace_id: Uuid,
@@ -179,6 +189,10 @@ impl WorkspaceConnectionService {
 
     /// Finds a connection by id with its creator, schedule, and last successful
     /// sync time, or a `NotFound`.
+    ///
+    /// # Errors
+    /// - `NotFound` if no connection with that id exists in the workspace.
+    /// - A database error if a connection or query fails.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -198,6 +212,16 @@ impl WorkspaceConnectionService {
     /// client and a refresh may have rotated them. The update, its schedule, and
     /// the event commit together, under a row lock that serializes against a
     /// concurrent token refresh.
+    ///
+    /// # Errors
+    /// - `NotFound` if no connection with that id exists in the workspace.
+    /// - `BadRequest` if a replacement config uses a custom endpoint the policy
+    ///   forbids, changes the connection's provider, or if a `sync` block is
+    ///   given for a provider that does not support scheduled sync or carries an
+    ///   invalid cron expression.
+    /// - An encryption error if the stored config cannot be decrypted or the
+    ///   replacement config cannot be encrypted.
+    /// - A database error if a connection or query fails.
     pub async fn update(
         &self,
         origin: event::EventOrigin<'_>,
@@ -296,6 +320,10 @@ impl WorkspaceConnectionService {
     }
 
     /// Soft-deletes a connection, recording the event atomically.
+    ///
+    /// # Errors
+    /// - `NotFound` if no connection with that id exists in the workspace.
+    /// - A database error if a connection or query fails.
     pub async fn delete(
         &self,
         origin: event::EventOrigin<'_>,

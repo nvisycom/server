@@ -35,6 +35,12 @@ impl<S: EventStream> EventPublisher<S> {
     }
 
     /// Publish an event to the stream's configured subject.
+    ///
+    /// # Errors
+    /// - `Serialization` if `event` cannot be serialized to JSON.
+    /// - `DeliveryFailed` if the publish is not accepted by the server (e.g. no
+    ///   stream captures the subject, or the connection is down).
+    /// - `Operation` if the publish is accepted but the `JetStream` ack fails.
     pub async fn publish(&self, event: &S::Message) -> Result<()> {
         self.publish_subject(S::SUBJECT, event).await
     }
@@ -42,6 +48,12 @@ impl<S: EventStream> EventPublisher<S> {
     /// Publish an event with a sub-subject appended to the stream subject.
     ///
     /// Events are published to `{stream_subject}.{sub_subject}`.
+    ///
+    /// # Errors
+    /// - `Serialization` if `event` cannot be serialized to JSON.
+    /// - `DeliveryFailed` if the publish is not accepted by the server (e.g. no
+    ///   stream captures the subject, or the connection is down).
+    /// - `Operation` if the publish is accepted but the `JetStream` ack fails.
     pub async fn publish_to(&self, sub_subject: &str, event: &S::Message) -> Result<()> {
         let subject = format!("{}.{}", S::SUBJECT, sub_subject);
         self.publish_subject(&subject, event).await

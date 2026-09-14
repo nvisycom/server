@@ -29,6 +29,9 @@ impl PasswordService {
     /// Validates a password's strength against the configured policy.
     ///
     /// `user_inputs` are values (email, name) the password must not resemble.
+    ///
+    /// # Errors
+    /// - `BadRequest` if the password fails the strength policy.
     pub fn validate(&self, password: &str, user_inputs: &[&str]) -> Result<()> {
         self.strength.validate_password(password, user_inputs)
     }
@@ -37,17 +40,29 @@ impl PasswordService {
     ///
     /// The single entry point for accepting a new password: it can't be hashed
     /// without first passing the strength check.
+    ///
+    /// # Errors
+    /// - `BadRequest` if the password fails the strength policy.
+    /// - `InternalServerError` if Argon2id hashing fails.
     pub fn validate_and_hash(&self, password: &str, user_inputs: &[&str]) -> Result<String> {
         self.strength.validate_password(password, user_inputs)?;
         self.hasher.hash_password(password)
     }
 
     /// Hashes a password with Argon2id, without a strength check.
+    ///
+    /// # Errors
+    /// - `InternalServerError` if Argon2id hashing fails.
     pub fn hash(&self, password: &str) -> Result<String> {
         self.hasher.hash_password(password)
     }
 
     /// Verifies a password against a stored Argon2id hash.
+    ///
+    /// # Errors
+    /// - `Unauthorized` if the password does not match the stored hash.
+    /// - `InternalServerError` if the stored hash is malformed or verification
+    ///   otherwise fails.
     pub fn verify(&self, password: &str, stored_hash: &str) -> Result<()> {
         self.hasher.verify_password(password, stored_hash)
     }

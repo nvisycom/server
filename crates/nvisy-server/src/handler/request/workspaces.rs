@@ -95,6 +95,12 @@ pub struct UpdateWorkspace {
 }
 
 impl UpdateWorkspace {
+    /// Converts this request into the database update model, encoding replacement
+    /// settings to JSON where present.
+    ///
+    /// # Errors
+    /// Never returns `Err`; the `Result` return type is kept for signature
+    /// consistency with the other request-to-model conversions.
     pub fn into_model(self) -> Result<UpdateWorkspaceModel> {
         Ok(UpdateWorkspaceModel {
             display_name: self.display_name,

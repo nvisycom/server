@@ -43,6 +43,11 @@ impl AccountApiTokenService {
     ///
     /// The JWT is returned only here, at creation; it is never stored or shown
     /// again.
+    ///
+    /// # Errors
+    /// - `NotFound` if no account has the given id.
+    /// - An auth error if signing the token's JWT fails.
+    /// - A database error if the connection or transaction fails.
     pub async fn create(
         &self,
         account_id: Uuid,
@@ -73,6 +78,9 @@ impl AccountApiTokenService {
     }
 
     /// Lists the account's API tokens with cursor pagination.
+    ///
+    /// # Errors
+    /// - A database error if the connection or query fails.
     pub async fn list(
         &self,
         account_id: Uuid,
@@ -85,6 +93,10 @@ impl AccountApiTokenService {
     }
 
     /// Reads one of the account's API tokens by id, or a `NotFound`.
+    ///
+    /// # Errors
+    /// - `NotFound` if the token does not exist or belongs to another account.
+    /// - A database error if the connection or query fails.
     pub async fn read(&self, account_id: Uuid, token_id: Uuid) -> Result<AccountApiToken> {
         let mut conn = self.postgres.get_connection().await?;
         find_account_token(&mut conn, account_id, token_id).await
@@ -94,6 +106,11 @@ impl AccountApiTokenService {
     ///
     /// Refuses (403) to rename a session token — only API tokens carry a
     /// user-facing name.
+    ///
+    /// # Errors
+    /// - `NotFound` if the token does not exist or belongs to another account.
+    /// - `Forbidden` if the token is a session token rather than an API token.
+    /// - A database error if the connection or query fails.
     pub async fn update(
         &self,
         account_id: Uuid,
@@ -121,6 +138,11 @@ impl AccountApiTokenService {
     }
 
     /// Revokes (soft-deletes) an API token, or a 400 if it was already revoked.
+    ///
+    /// # Errors
+    /// - `NotFound` if the token does not exist or belongs to another account.
+    /// - `BadRequest` if the token was already revoked.
+    /// - A database error if the connection or query fails.
     pub async fn revoke(&self, account_id: Uuid, token_id: Uuid) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         let token = find_account_token(&mut conn, account_id, token_id).await?;

@@ -23,6 +23,9 @@ impl AssistantQueue {
     }
 
     /// Enqueues an assistant reply onto the work-queue for the worker to pick up.
+    ///
+    /// # Errors
+    /// - A messaging error if publishing the job to NATS fails.
     pub async fn enqueue(&self, job: AssistantJob) -> Result<()> {
         let publisher = self.infra.nats.event_publisher::<AssistantStream>();
         publisher.publish(&job).await?;

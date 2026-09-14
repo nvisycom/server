@@ -72,6 +72,11 @@ impl<B: KvBucket> KvStore<B> {
     }
 
     /// Put a value into the store.
+    ///
+    /// # Errors
+    /// - `Serialization` if `value` cannot be serialized to JSON.
+    /// - `Operation` if the KV put fails (e.g. the connection is down or the
+    ///   server rejects the write).
     #[tracing::instrument(skip(self, value), target = TRACING_TARGET_KV)]
     pub async fn put(&self, key: &B::Key, value: &B::Value) -> Result<KvEntry> {
         let key_str = key.to_string();
@@ -104,6 +109,14 @@ impl<B: KvBucket> KvStore<B> {
     /// was already present. This is the put-if-absent primitive for distributed
     /// locks / leader election: combined with a bucket TTL, exactly one caller
     /// wins the create and the entry auto-expires if the winner dies.
+    ///
+    /// A create against an already-present key is not an error: it returns
+    /// `Ok(false)`.
+    ///
+    /// # Errors
+    /// - `Serialization` if `value` cannot be serialized to JSON.
+    /// - `Operation` if the create fails for any reason other than the key
+    ///   already existing (e.g. network, ack, or publish failure).
     #[tracing::instrument(skip(self, value), target = TRACING_TARGET_KV)]
     pub async fn create(&self, key: &B::Key, value: &B::Value) -> Result<bool> {
         use async_nats::jetstream::kv::CreateErrorKind;
@@ -122,6 +135,12 @@ impl<B: KvBucket> KvStore<B> {
     }
 
     /// Get a value from the store.
+    ///
+    /// # Errors
+    /// - `Serialization` if a stored entry's bytes cannot be deserialized into
+    ///   `B::Value`.
+    /// - `Operation` if the KV read fails (e.g. the connection is down). A
+    ///   missing key is not an error; it returns `Ok(None)`.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
     pub async fn get(&self, key: &B::Key) -> Result<Option<KvValue<B::Value>>> {
         let key_str = key.to_string();
@@ -157,6 +176,9 @@ impl<B: KvBucket> KvStore<B> {
     }
 
     /// Get a value, returning just the data.
+    ///
+    /// # Errors
+    /// Propagates any error from [`get`](Self::get).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
     pub async fn get_value(&self, key: &B::Key) -> Result<Option<B::Value>> {
         Ok(self.get(key).await?.map(|kv| kv.value))
@@ -172,6 +194,13 @@ impl<B: KvBucket> KvStore<B> {
     /// `None` rather than re-consuming the entry. Use this for one-time tokens
     /// (OAuth/OIDC state, step-up proofs) where a plain get-then-delete would leave
     /// a replay window.
+    ///
+    /// # Errors
+    /// - `Serialization` or `Operation` propagated from the initial
+    ///   [`get`](Self::get).
+    /// - `Operation` if the conditional purge fails for any reason other than a
+    ///   revision mismatch (e.g. network, ack, or publish failure). Losing the
+    ///   race is not an error; it returns `Ok(None)`.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
     pub async fn take(&self, key: &B::Key) -> Result<Option<B::Value>> {
         use async_nats::jetstream::kv::PurgeErrorKind;
@@ -205,6 +234,10 @@ impl<B: KvBucket> KvStore<B> {
     }
 
     /// Delete a key from the store.
+    ///
+    /// # Errors
+    /// - `Operation` if the purge fails (e.g. the connection is down or the
+    ///   server rejects the request). Purging an absent key is not an error.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
     pub async fn delete(&self, key: &B::Key) -> Result<()> {
         let key_str = key.to_string();
@@ -222,6 +255,10 @@ impl<B: KvBucket> KvStore<B> {
     }
 
     /// Check if a key exists in the store.
+    ///
+    /// # Errors
+    /// - `Operation` if the KV read fails (e.g. the connection is down). A
+    ///   missing key is not an error; it returns `Ok(false)`.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
     pub async fn exists(&self, key: &B::Key) -> Result<bool> {
         let key_str = key.to_string();
@@ -233,6 +270,11 @@ impl<B: KvBucket> KvStore<B> {
     }
 
     /// Touches a key to reset its TTL by re-putting the same value.
+    ///
+    /// # Errors
+    /// - `Operation` if the key does not exist (nothing to re-put), or if the
+    ///   underlying [`get`](Self::get) or [`put`](Self::put) fails.
+    /// - `Serialization` propagated from [`get`](Self::get)/[`put`](Self::put).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
     pub async fn touch(&self, key: &B::Key) -> Result<KvEntry> {
         let kv_value = self
@@ -244,6 +286,11 @@ impl<B: KvBucket> KvStore<B> {
     }
 
     /// Get all keys in the bucket with the expected prefix.
+    ///
+    /// # Errors
+    /// - `Operation` if opening the key stream fails (e.g. the connection is
+    ///   down). Individual keys that fail to read or fail to parse into `B::Key`
+    ///   are logged and skipped, not surfaced as errors.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
     pub async fn keys(&self) -> Result<Vec<B::Key>> {
         let mut keys = Vec::new();
@@ -280,6 +327,11 @@ impl<B: KvBucket> KvStore<B> {
     }
 
     /// Purge all keys in the bucket.
+    ///
+    /// # Errors
+    /// - `Operation` if listing the keys via [`keys`](Self::keys) fails, or if
+    ///   any per-key [`delete`](Self::delete) fails (deletion stops at the first
+    ///   failure).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
     pub async fn purge_all(&self) -> Result<()> {
         let keys = self.keys().await?;
@@ -297,6 +349,11 @@ impl<B: KvBucket> KvStore<B> {
     }
 
     /// Update a value only if the revision matches (optimistic concurrency).
+    ///
+    /// # Errors
+    /// - `Serialization` if `value` cannot be serialized to JSON.
+    /// - `Operation` if the conditional update fails, including when `revision`
+    ///   no longer matches the stored revision (the concurrency check lost).
     #[tracing::instrument(skip(self, value), target = TRACING_TARGET_KV)]
     pub async fn update(&self, key: &B::Key, value: &B::Value, revision: u64) -> Result<KvEntry> {
         let key_str = key.to_string();
@@ -325,6 +382,11 @@ impl<B: KvBucket> KvStore<B> {
     }
 
     /// Get or compute a value using the cache-aside pattern.
+    ///
+    /// # Errors
+    /// - `Serialization` or `Operation` propagated from the [`get_value`](Self::get_value)
+    ///   read or, on a miss, the [`put`](Self::put) that stores the computed value.
+    /// - Any error returned by `compute_fn` when the key is absent.
     #[tracing::instrument(skip(self, compute_fn), target = TRACING_TARGET_KV)]
     pub async fn get_or_compute<F, Fut>(&self, key: &B::Key, compute_fn: F) -> Result<B::Value>
     where

@@ -80,6 +80,11 @@ impl FileService {
     /// An [`OAuthClient`] for `provider`, resolving its configured app, or an
     /// error if the host has not configured one. This is the handle for the
     /// authorize URL and the code/token exchanges.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `BadRequest` error if the host has not configured an OAuth app
+    /// for `provider`.
     pub fn oauth_client(&self, provider: FileServiceProvider) -> Result<OAuthClient> {
         let app = self.apps.for_provider(provider).ok_or_else(|| {
             Error::new(
@@ -191,6 +196,11 @@ impl FileService {
 
     /// Connects to the file service described by `config`, refreshing its OAuth
     /// token first if needed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if refreshing the stored token fails (see
+    /// [`ensure_fresh`](Self::ensure_fresh)).
     pub async fn connect(&self, config: &FileServiceConfig) -> Result<ConnectedFileService> {
         let fresh = self.ensure_fresh(config).await?;
         let client = config.connect(self.http.clone(), fresh.access_token);

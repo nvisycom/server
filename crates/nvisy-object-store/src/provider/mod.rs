@@ -154,6 +154,10 @@ pub trait Client: Deref<Target = ObjectStoreClient> + Send + Sync + 'static {
 /// The config's variant selects the provider, so there is no runtime provider
 /// string to validate; a custom endpoint is validated under `policy`, and the
 /// client is scoped under the config's root path.
+///
+/// # Errors
+/// An error if the credentials are invalid, a custom endpoint is rejected by
+/// `policy`, or the provider client cannot be constructed.
 pub async fn connect(
     config: &StorageConfig,
     policy: EndpointPolicy,

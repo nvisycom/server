@@ -55,6 +55,11 @@ impl fmt::Debug for ReqwestClient {
 
 impl ReqwestClient {
     /// Creates a new reqwest client with the given configuration.
+    ///
+    /// # Panics
+    /// If the underlying HTTP client cannot be built — for example, when the
+    /// platform TLS backend fails to initialize. The configured timeout,
+    /// user agent, and redirect policy are always valid and never the cause.
     pub fn new(config: &ReqwestConfig) -> Self {
         let timeout = config.effective_timeout();
         let user_agent = config.effective_user_agent();

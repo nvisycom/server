@@ -93,6 +93,11 @@ impl RunBlobStore {
     /// whose object delete then fails stays claimed for the reconcile sweep to
     /// retry, so a transient store outage self-heals without ever resurrecting the
     /// bytes.
+    ///
+    /// # Errors
+    /// - A database error if the claim query fails. Once the blob is claimed, the
+    ///   object reclaim is folded into the returned [`PurgeOutcome`] (a failed
+    ///   delete yields `Pending`, not an error).
     pub async fn purge_blob(
         &self,
         conn: &mut PgConn,
@@ -189,6 +194,12 @@ impl RunBlobStore {
     /// silently no-op if it differed between passes. Both detect and redact build
     /// from the same document through here, so the name is identical by
     /// construction.
+    ///
+    /// # Errors
+    /// - `InternalServerError` if the blob's storage path is not a valid document
+    ///   key, if the object is missing from storage, if reading its bytes fails,
+    ///   or if decrypting them with the workspace key fails.
+    /// - A storage error if the object store rejects the read.
     pub async fn build_document(
         &self,
         document: &WorkspaceDocument,
@@ -242,6 +253,10 @@ impl RunBlobStore {
     /// [`discard_staged_object`].
     ///
     /// [`discard_staged_object`]: Self::discard_staged_object
+    ///
+    /// # Errors
+    /// - `InternalServerError` if serializing or encrypting the audit fails.
+    /// - A storage error if the object write fails.
     pub async fn stage_analyzed_document(
         &self,
         workspace_id: Uuid,
@@ -267,6 +282,10 @@ impl RunBlobStore {
     /// entity. It shares the audit-logs retention scope with the detection audit;
     /// the audit *row* (not a distinct blob kind) distinguishes it — a review
     /// audit sets `redaction_id` and `derived_from`.
+    ///
+    /// # Errors
+    /// - `InternalServerError` if serializing or encrypting the audit fails.
+    /// - A storage error if the object write fails.
     pub async fn stage_review_audit(
         &self,
         workspace_id: Uuid,
@@ -334,6 +353,11 @@ impl RunBlobStore {
     /// The intermediates carry document content, so they are encrypted at rest and
     /// governed by their own retention scope, resolved here (workspace baseline,
     /// pipeline override if set).
+    ///
+    /// # Errors
+    /// - `InternalServerError` if serializing `artifacts` or encrypting them with
+    ///   the workspace key fails.
+    /// - A storage error if writing the object fails.
     pub async fn stage_intermediates<T: Serialize>(
         &self,
         workspace_id: Uuid,
@@ -383,6 +407,11 @@ impl RunBlobStore {
     /// the normal document endpoints.
     ///
     /// [`discard_staged_object`]: Self::discard_staged_object
+    ///
+    /// # Errors
+    /// - `InternalServerError` if encrypting the redacted bytes with the
+    ///   workspace key fails.
+    /// - A storage error if writing the object fails.
     pub async fn stage_redacted_document(
         &self,
         source_document: &WorkspaceDocument,
@@ -431,6 +460,11 @@ impl RunBlobStore {
     /// review audit, intermediate, or redacted document alike. Best effort: a
     /// failure here only leaves the object for a later manual sweep, so callers log
     /// rather than propagate.
+    ///
+    /// # Errors
+    /// - `InternalServerError` if the staged blob names an unknown or non-purgeable
+    ///   bucket, or its storage key does not parse.
+    /// - A storage error if the object delete fails.
     pub async fn discard_staged_object(&self, staged: &NewBlob) -> Result<()> {
         self.delete_object(&staged.storage_bucket, &staged.storage_path)
             .await
@@ -444,6 +478,11 @@ impl RunBlobStore {
     /// (404) map to distinct responses.
     ///
     /// [`load_audit`]: Self::load_audit
+    ///
+    /// # Errors
+    /// - `Conflict` if the detection has no base audit yet.
+    /// - `NotFound` if the audit's blob has been reclaimed.
+    /// - A database error if either lookup fails.
     pub async fn resolve_audit_blob(
         &self,
         conn: &mut PgConn,
@@ -469,6 +508,12 @@ impl RunBlobStore {
     /// [`Audit`] serializes but does not `Deserialize`, since its report tags each
     /// entity group by modality name and only the engine's registry can map those
     /// back to concrete types.
+    ///
+    /// # Errors
+    /// - `InternalServerError` if the blob's storage path is not a valid audit
+    ///   key, if the object is missing from storage, if reading its bytes fails,
+    ///   if decrypting them fails, or if the engine cannot decode the audit.
+    /// - A storage error if the object store rejects the read.
     pub async fn load_audit(
         &self,
         engine: &Engine,
@@ -517,6 +562,11 @@ impl RunBlobStore {
     /// to a 404, distinct from a reference to a reclaimed blob.
     ///
     /// [`load_intermediates`]: Self::load_intermediates
+    ///
+    /// # Errors
+    /// - `NotFound` if the detection has no intermediates reference, or its blob
+    ///   has been reclaimed.
+    /// - A database error if the blob lookup fails.
     pub async fn resolve_intermediates_blob(
         &self,
         conn: &mut PgConn,
@@ -541,6 +591,13 @@ impl RunBlobStore {
     /// serializes but does not `Deserialize`, since each group is tagged by
     /// modality name and only the engine's registry can map those back to concrete
     /// artifact types.
+    ///
+    /// # Errors
+    /// - `InternalServerError` if the blob's storage path is not a valid
+    ///   intermediates key, if the object is missing from storage, if reading its
+    ///   bytes fails, if decrypting them fails, or if the engine cannot decode the
+    ///   artifacts.
+    /// - A storage error if the object store rejects the read.
     pub async fn load_intermediates(
         &self,
         engine: &Engine,
@@ -589,6 +646,11 @@ impl RunBlobStore {
     /// has since been reclaimed (404).
     ///
     /// [`load_audit`]: Self::load_audit
+    ///
+    /// # Errors
+    /// - `Conflict` if the redaction has no review audit.
+    /// - `NotFound` if the review audit's blob has been reclaimed.
+    /// - A database error if either lookup fails.
     pub async fn resolve_review_blob(&self, conn: &mut PgConn, redaction_id: Uuid) -> Result<Blob> {
         let audit = conn
             .find_redaction_audit(redaction_id)

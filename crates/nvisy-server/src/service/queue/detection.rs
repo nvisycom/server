@@ -30,6 +30,9 @@ impl DetectionQueue {
 
     /// Enqueues a detection's analysis onto the work-queue for the worker to pick
     /// up.
+    ///
+    /// # Errors
+    /// - A messaging error if publishing the job to NATS fails.
     pub async fn enqueue(&self, job: DetectionJob) -> Result<()> {
         enqueue(&self.infra, job).await
     }
@@ -54,6 +57,9 @@ impl DetectionQueue {
     /// [`DetectionStatusEvent`].
     ///
     /// Used by the SSE endpoint to forward status changes to a watching client.
+    ///
+    /// # Errors
+    /// - A messaging error if the NATS broadcast subscription cannot be opened.
     pub async fn subscribe_status(
         &self,
         detection_id: Uuid,

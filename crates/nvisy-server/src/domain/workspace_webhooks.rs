@@ -56,6 +56,12 @@ impl WorkspaceWebhookService {
     /// The secret is generated here so it is returned once and stored only
     /// encrypted; the server decrypts it to sign each delivery. The webhook and
     /// its creation event commit together.
+    ///
+    /// # Errors
+    /// - `BadRequest` if the URL is malformed, uses a non-`http(s)` scheme, targets
+    ///   an internal address, or a supplied header is invalid.
+    /// - A crypto error if minting or encrypting the signing secret fails.
+    /// - A database error if the query fails.
     pub async fn create(
         &self,
         origin: event::EventOrigin<'_>,
@@ -91,6 +97,9 @@ impl WorkspaceWebhookService {
     }
 
     /// Lists a workspace's webhooks, each with its creator.
+    ///
+    /// # Errors
+    /// A database error if the query fails.
     pub async fn list(
         &self,
         workspace_id: Uuid,
@@ -103,6 +112,10 @@ impl WorkspaceWebhookService {
     }
 
     /// Finds a webhook by id with its creator, or a `NotFound`.
+    ///
+    /// # Errors
+    /// - `NotFound` if the webhook does not exist in the workspace.
+    /// - A database error if the query fails.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -115,6 +128,12 @@ impl WorkspaceWebhookService {
     /// Updates a webhook, returning it with its creator.
     ///
     /// The update and its event commit together.
+    ///
+    /// # Errors
+    /// - `NotFound` if the webhook does not exist in the workspace.
+    /// - `BadRequest` if a supplied URL is malformed, uses a non-`http(s)` scheme,
+    ///   targets an internal address, or a supplied header is invalid.
+    /// - A database error if the query fails.
     pub async fn update(
         &self,
         origin: event::EventOrigin<'_>,
@@ -156,6 +175,10 @@ impl WorkspaceWebhookService {
     }
 
     /// Soft-deletes a webhook, recording the event atomically.
+    ///
+    /// # Errors
+    /// - `NotFound` if the webhook does not exist in the workspace.
+    /// - A database error if the query fails.
     pub async fn delete(&self, origin: event::EventOrigin<'_>, webhook_id: Uuid) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         let existing = find_webhook(&mut conn, origin.workspace_id, webhook_id)
@@ -188,6 +211,14 @@ impl WorkspaceWebhookService {
     /// caller's payload — but never touches stored delivery health: its outcome is
     /// returned to the caller directly, so a manual test neither counts toward the
     /// worker's auto-disable threshold nor masks a genuinely failing endpoint.
+    ///
+    /// # Errors
+    /// - `NotFound` if the webhook does not exist in the workspace.
+    /// - `BadRequest` if the webhook's stored URL fails to parse.
+    /// - `InternalServerError` if the decrypted signing secret is not valid UTF-8.
+    /// - A crypto error if decrypting the signing secret fails.
+    /// - A delivery error if the outbound request cannot be sent.
+    /// - A database error if the query fails.
     pub async fn test(
         &self,
         workspace_id: Uuid,

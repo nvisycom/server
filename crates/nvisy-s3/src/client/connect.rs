@@ -20,6 +20,12 @@ impl BlobStore {
     /// credentials are used; otherwise the SDK's default credential chain applies
     /// (environment, profile, container/instance role). `endpoint` targets an
     /// S3-compatible server; unset targets AWS S3.
+    ///
+    /// # Errors
+    /// - `Config` if the S3 configuration is invalid (e.g. a malformed endpoint
+    ///   or region).
+    /// - `Operation` if the initial reachability check against the bucket fails
+    ///   (unreachable endpoint, bad credentials, or a missing bucket).
     #[tracing::instrument(name = "s3.connect", skip_all, fields(bucket = %config.bucket))]
     pub async fn connect(config: &S3Config) -> Result<Self> {
         tracing::debug!(

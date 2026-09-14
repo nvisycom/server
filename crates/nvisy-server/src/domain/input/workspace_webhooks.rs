@@ -32,6 +32,9 @@ impl CreateWebhookInput {
     ///
     /// Rejects malformed headers with a `400`. `Suspended` is a system-only state,
     /// so a caller-supplied `Suspended` is coerced to `Disabled`.
+    ///
+    /// # Errors
+    /// - `BadRequest` if a supplied header name or value is malformed.
     pub fn into_model(
         self,
         workspace_id: Uuid,
@@ -79,6 +82,9 @@ impl UpdateWebhookInput {
     ///
     /// While `current_status` is `Suspended` (system-set), the status field is
     /// ignored. A caller-supplied `Suspended` is coerced to `Disabled`.
+    ///
+    /// # Errors
+    /// - `BadRequest` if a supplied header name or value is malformed.
     pub fn into_model(self, current_status: WebhookStatus) -> Result<UpdateWorkspaceWebhookModel> {
         let events = self.events.map(|e| e.into_iter().map(Some).collect());
         let headers = validate_headers(self.headers)?;

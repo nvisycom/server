@@ -47,6 +47,12 @@ impl WebhookEmitter {
     /// * `resource_id` - The ID of the affected resource
     /// * `triggered_by` - The account ID that triggered the event (if any)
     /// * `data` - Additional event-specific data
+    ///
+    /// # Errors
+    /// - A database error if acquiring the connection or querying the subscribed
+    ///   webhooks fails.
+    /// - A messaging error if publishing a delivery job to NATS fails; the first
+    ///   such error is surfaced after every job has been attempted.
     #[tracing::instrument(
         skip(self, data),
         fields(

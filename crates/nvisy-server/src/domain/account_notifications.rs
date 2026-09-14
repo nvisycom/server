@@ -40,6 +40,9 @@ impl AccountNotificationService {
 
     /// Lists the account's notifications, most recent first (a pure read; does not
     /// change read status).
+    ///
+    /// # Errors
+    /// - A database error if the connection or query fails.
     pub async fn list(
         &self,
         account_id: Uuid,
@@ -52,6 +55,9 @@ impl AccountNotificationService {
     }
 
     /// Returns the account's unread notification count.
+    ///
+    /// # Errors
+    /// - A database error if the connection or query fails.
     pub async fn unread_count(&self, account_id: Uuid) -> Result<i64> {
         let mut conn = self.postgres.get_connection().await?;
         Ok(conn.count_unread_account_notifications(account_id).await?)
@@ -59,6 +65,9 @@ impl AccountNotificationService {
 
     /// Marks every unread notification read, broadcasting the now-zero count when
     /// any were marked. Returns how many it marked.
+    ///
+    /// # Errors
+    /// - A database error if the connection or query fails.
     pub async fn mark_all_read(&self, account_id: Uuid) -> Result<i64> {
         let mut conn = self.postgres.get_connection().await?;
         let marked_read = i64::try_from(
@@ -79,6 +88,10 @@ impl AccountNotificationService {
     /// Marks a single notification read, scoped to the owning account, broadcasting
     /// the decremented count. A notification owned by another account (or a missing
     /// id) is reported as not-found.
+    ///
+    /// # Errors
+    /// - `NotFound` if the notification does not exist or belongs to another account.
+    /// - A database error if the connection or query fails.
     pub async fn mark_read(&self, account_id: Uuid, notification_id: Uuid) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         let marked = conn

@@ -91,6 +91,9 @@ impl CreateAccountApiToken {
     ///
     /// * `account_id` - The account this token belongs to.
     /// * `security` - The caller's request context (client IP and user agent).
+    ///
+    /// # Errors
+    /// A 400 if the display name is empty or whitespace-only once trimmed.
     pub fn into_model(
         self,
         account_id: Uuid,

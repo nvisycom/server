@@ -57,6 +57,9 @@ impl NotificationEmitter {
     ///
     /// Used by the unread SSE endpoint to push a live badge count to a watching
     /// client.
+    ///
+    /// # Errors
+    /// - A messaging error if the NATS broadcast subscription cannot be opened.
     pub async fn subscribe_unread(
         &self,
         account_id: Uuid,
@@ -115,6 +118,11 @@ impl NotificationEmitter {
     ///
     /// Best-effort by contract: callers log-and-continue on error so a failed
     /// notification never fails the operation that triggered it.
+    ///
+    /// # Errors
+    /// - A database error if acquiring the connection, the membership lookup, or
+    ///   the notification insert fails. The follow-up unread-count broadcast is
+    ///   best-effort and never fails the call.
     pub async fn notify_account(
         &self,
         workspace_id: Uuid,
@@ -166,6 +174,11 @@ impl NotificationEmitter {
     ///
     /// Two queries total regardless of recipient count: one resolves the
     /// preference-filtered recipients, one batch-inserts their rows.
+    ///
+    /// # Errors
+    /// - A database error if acquiring the connection, resolving recipients, or
+    ///   the batch insert fails. The per-recipient unread-count broadcasts are
+    ///   best-effort and never fail the call.
     pub async fn notify_workspace_roles(
         &self,
         workspace_id: Uuid,

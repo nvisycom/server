@@ -41,6 +41,11 @@ where
     T: DeserializeOwned + Send + 'static,
 {
     /// Fetch the next message from the stream with timeout.
+    ///
+    /// # Errors
+    /// - `Operation` propagated from [`next`](Self::next) (opening the consumer
+    ///   stream or receiving a message failed). Exhausting `timeout` is not an
+    ///   error; it returns `Ok(None)`.
     pub async fn next_with_timeout(
         &mut self,
         timeout: Duration,
@@ -53,6 +58,16 @@ where
     }
 
     /// Fetch the next message from the persistent message stream.
+    ///
+    /// # Errors
+    /// - `Operation` if the consumer message stream cannot be opened on first
+    ///   use, or if receiving a message from the server fails. Payloads that
+    ///   cannot be deserialized are terminated and skipped, not surfaced as
+    ///   errors; the stream ending returns `Ok(None)`.
+    ///
+    /// # Panics
+    /// Panics if the message stream, just set to `Some` on first use, is `None` —
+    /// an unreachable invariant violation.
     pub async fn next(&mut self) -> Result<Option<TypedMessage<T>>> {
         // Open the message stream once and reuse it across calls; recreating it
         // each call would drop any already-fetched-but-unpolled messages.
@@ -128,6 +143,10 @@ impl<T> TypedMessage<T> {
     }
 
     /// Get the message metadata.
+    ///
+    /// # Errors
+    /// - `Operation` if the message's reply subject cannot be parsed into
+    ///   `JetStream` metadata (e.g. it is not a `JetStream` message).
     pub fn info(&self) -> Result<jetstream::message::Info<'_>> {
         self.message
             .info()
@@ -135,6 +154,10 @@ impl<T> TypedMessage<T> {
     }
 
     /// Acknowledge the message.
+    ///
+    /// # Errors
+    /// - `Operation` if sending the ack to the server fails (e.g. the connection
+    ///   is down).
     pub async fn ack(&mut self) -> Result<()> {
         self.message
             .ack()
@@ -143,6 +166,10 @@ impl<T> TypedMessage<T> {
     }
 
     /// Negative acknowledge the message (trigger redelivery).
+    ///
+    /// # Errors
+    /// - `Operation` if sending the nack to the server fails (e.g. the connection
+    ///   is down).
     pub async fn nack(&mut self) -> Result<()> {
         self.message
             .ack_with(jetstream::AckKind::Nak(None))
@@ -166,6 +193,10 @@ impl<T> TypedMessage<T> {
     }
 
     /// Get message sequence number.
+    ///
+    /// # Errors
+    /// - `Operation` if the message metadata cannot be read (see
+    ///   [`info`](Self::info)).
     pub fn sequence(&self) -> Result<u64> {
         self.info()
             .map(|info| info.stream_sequence)
@@ -173,6 +204,10 @@ impl<T> TypedMessage<T> {
     }
 
     /// Check if this message is a redelivery.
+    ///
+    /// # Errors
+    /// - `Operation` if the message metadata cannot be read (see
+    ///   [`info`](Self::info)).
     pub fn is_redelivery(&self) -> Result<bool> {
         self.info()
             .map(|info| info.delivered > 1)
@@ -180,6 +215,10 @@ impl<T> TypedMessage<T> {
     }
 
     /// Get the number of delivery attempts.
+    ///
+    /// # Errors
+    /// - `Operation` if the message metadata cannot be read (see
+    ///   [`info`](Self::info)).
     pub fn delivery_count(&self) -> Result<usize> {
         self.info()
             .map(|info| usize::try_from(info.delivered).unwrap_or(0))
@@ -187,6 +226,10 @@ impl<T> TypedMessage<T> {
     }
 
     /// Acknowledge with explicit acknowledgment kind.
+    ///
+    /// # Errors
+    /// - `Operation` if sending the acknowledgment to the server fails (e.g. the
+    ///   connection is down).
     pub async fn ack_with(&mut self, ack_kind: jetstream::AckKind) -> Result<()> {
         self.message
             .ack_with(ack_kind)
@@ -195,6 +238,10 @@ impl<T> TypedMessage<T> {
     }
 
     /// Double acknowledge (useful for at-least-once processing).
+    ///
+    /// # Errors
+    /// - `Operation` if the ack is sent but the server's confirmation is not
+    ///   received (e.g. the connection is down).
     pub async fn double_ack(&mut self) -> Result<()> {
         self.message
             .double_ack()

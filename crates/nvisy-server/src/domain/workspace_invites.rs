@@ -56,6 +56,11 @@ impl WorkspaceInviteService {
     /// A deployment that can deliver email out-of-band (e.g. the hosted edition)
     /// can call this, then send its own message on `Created` and handle
     /// `UnknownEmail` however it chooses.
+    ///
+    /// # Errors
+    /// - `Conflict` if the email already belongs to a member, or already has a
+    ///   pending invitation.
+    /// - A database error if a connection or query fails.
     pub async fn create(
         &self,
         origin: event::EventOrigin<'_>,
@@ -117,6 +122,9 @@ impl WorkspaceInviteService {
     }
 
     /// Lists a workspace's invitations, newest first.
+    ///
+    /// # Errors
+    /// A database error if a connection or query fails.
     pub async fn list(
         &self,
         workspace_id: Uuid,
@@ -131,6 +139,10 @@ impl WorkspaceInviteService {
     }
 
     /// Cancels a pending invitation in a workspace, recording the event atomically.
+    ///
+    /// # Errors
+    /// - `NotFound` if no invitation matches the id in the workspace.
+    /// - A database error if a connection or query fails.
     pub async fn cancel(&self, origin: event::EventOrigin<'_>, invite_id: Uuid) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         let workspace_id = origin.workspace_id;
@@ -158,6 +170,15 @@ impl WorkspaceInviteService {
 
     /// Accepts an invitation by id, minting a membership. The invite must be usable
     /// and (if email-bound) addressed to the acting account.
+    ///
+    /// # Errors
+    /// - `NotFound` if no invitation matches the id in the workspace, or if the
+    ///   acting account cannot be read.
+    /// - `BadRequest` if the invitation has expired or been consumed.
+    /// - `Forbidden` if the invitation is email-bound to a different account.
+    /// - `Conflict` if the account is already a member, or if a concurrent accept
+    ///   consumed the invitation first.
+    /// - A database error if a connection or query fails.
     pub async fn accept(
         &self,
         origin: event::EventOrigin<'_>,
@@ -172,6 +193,13 @@ impl WorkspaceInviteService {
 
     /// Declines an invitation by id, recording the event atomically. The invite
     /// must be usable and (if email-bound) addressed to the acting account.
+    ///
+    /// # Errors
+    /// - `NotFound` if no invitation matches the id in the workspace, or if the
+    ///   acting account cannot be read.
+    /// - `BadRequest` if the invitation has expired or been consumed.
+    /// - `Forbidden` if the invitation is email-bound to a different account.
+    /// - A database error if a connection or query fails.
     pub async fn decline(&self, origin: event::EventOrigin<'_>, invite_id: Uuid) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         let invite = find_invite(&mut conn, origin.workspace_id, invite_id).await?;
@@ -181,6 +209,9 @@ impl WorkspaceInviteService {
     }
 
     /// Mints a shareable, single-use invite code for a workspace.
+    ///
+    /// # Errors
+    /// A database error if a connection or query fails.
     pub async fn generate_code(
         &self,
         workspace_id: Uuid,
@@ -197,6 +228,12 @@ impl WorkspaceInviteService {
 
     /// Previews an invite code: the workspace it grants access to. The code must be
     /// usable. Requires no authentication.
+    ///
+    /// # Errors
+    /// - `NotFound` if no invite matches the code, or if the invite's workspace no
+    ///   longer exists.
+    /// - `BadRequest` if the code has expired or been consumed.
+    /// - A database error if a connection or query fails.
     pub async fn preview_code(&self, invite_code: &str) -> Result<InvitePreview> {
         let mut conn = self.postgres.get_connection().await?;
         let invite = find_code(&mut conn, invite_code).await?;
@@ -212,6 +249,15 @@ impl WorkspaceInviteService {
 
     /// Accepts an invite code, minting a membership. The code must be usable and
     /// (if email-bound) addressed to the acting account.
+    ///
+    /// # Errors
+    /// - `NotFound` if no invite matches the code, or if the acting account cannot
+    ///   be read.
+    /// - `BadRequest` if the code has expired or been consumed.
+    /// - `Forbidden` if the code is email-bound to a different account.
+    /// - `Conflict` if the account is already a member, or if a concurrent accept
+    ///   consumed the invite first.
+    /// - A database error if a connection or query fails.
     pub async fn accept_code(
         &self,
         account_id: Uuid,
@@ -235,6 +281,13 @@ impl WorkspaceInviteService {
 
     /// Declines an invite code, recording the event atomically. The code must be
     /// usable and (if email-bound) addressed to the acting account.
+    ///
+    /// # Errors
+    /// - `NotFound` if no invite matches the code, or if the acting account cannot
+    ///   be read.
+    /// - `BadRequest` if the code has expired or been consumed.
+    /// - `Forbidden` if the code is email-bound to a different account.
+    /// - A database error if a connection or query fails.
     pub async fn decline_code(
         &self,
         account_id: Uuid,

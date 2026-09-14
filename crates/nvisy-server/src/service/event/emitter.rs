@@ -26,6 +26,9 @@ use crate::service::event::{EventOrigin, WorkspaceEvent};
 /// inside a `PgError`-typed transaction (to preserve a rollback sentinel) can
 /// build the row up front with this and then insert it via
 /// [`EventOutboxRepository::insert_event_outbox`].
+///
+/// # Errors
+/// - `InternalServerError` if `event` fails to serialize to JSON.
 pub fn event_outbox_row(
     origin: EventOrigin<'_>,
     event: &WorkspaceEvent,

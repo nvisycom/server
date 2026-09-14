@@ -50,6 +50,14 @@ impl<S: EventStream> EventSubscriber<S> {
     ///
     /// `create_consumer` upserts, so a changed `ACK_WAIT`/`MAX_DELIVER` is applied
     /// to an existing consumer rather than silently ignored.
+    ///
+    /// # Errors
+    /// - `StreamError` if the stream `S::NAME` cannot be looked up (e.g. it was
+    ///   never reconciled via [`NatsClient::ensure_stream`], or the connection is
+    ///   down).
+    /// - `ConsumerError` if the durable consumer cannot be created or updated.
+    ///
+    /// [`NatsClient::ensure_stream`]: crate::NatsClient::ensure_stream
     #[tracing::instrument(skip(self), target = TRACING_TARGET_STREAM)]
     pub async fn subscribe(&self) -> Result<TypedMessageStream<S::Message>> {
         let mut config = consumer::pull::Config {

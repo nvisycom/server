@@ -71,6 +71,11 @@ impl SessionKeys {
     /// # Returns
     ///
     /// Returns a result containing the initialized keys or an error.
+    ///
+    /// # Errors
+    /// - A config error if either key file is missing or is not a regular file.
+    /// - A file-system error if reading a key file fails.
+    /// - An auth error if a key file's PEM cannot be parsed as an Ed25519 key.
     pub async fn from_config(config: &SessionKeysConfig) -> Result<Self> {
         // Validate configuration before attempting to load keys
         Self::validate_config(config)?;
@@ -113,6 +118,10 @@ impl SessionKeys {
     /// # Returns
     ///
     /// Returns a result containing the initialized keys or an error.
+    ///
+    /// # Errors
+    /// Propagates any error from [`from_config`](Self::from_config): a missing or
+    /// non-file key path, a file-system read failure, or an unparseable key PEM.
     pub async fn new(
         decoding_pem_key: impl AsRef<Path>,
         encoding_pem_key: impl AsRef<Path>,
@@ -149,6 +158,15 @@ impl SessionKeys {
     /// # Returns
     ///
     /// Returns `Ok(())` if keys are valid, or an error if validation fails.
+    ///
+    /// # Errors
+    /// - An auth error if signing the test token with the encoding key fails, or
+    ///   if decoding/verifying it with the decoding key fails (the two keys are
+    ///   not a matching Ed25519 pair).
+    ///
+    /// # Panics
+    /// Panics if the system clock is set before the Unix epoch, so that computing
+    /// the test token's expiry from the current time fails.
     pub fn validate_keys(&self) -> Result<()> {
         use std::time::{SystemTime, UNIX_EPOCH};
 

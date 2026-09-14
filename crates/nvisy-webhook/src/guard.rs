@@ -20,6 +20,9 @@ use crate::{Error, ErrorKind, Result};
 pub trait UrlGuardExt {
     /// Returns an `InvalidEndpoint` error unless the URL uses the `http` or
     /// `https` scheme.
+    ///
+    /// # Errors
+    /// An `InvalidEndpoint` error if the scheme is neither `http` nor `https`.
     fn check_scheme(&self) -> Result<()>;
 
     /// Returns an `InvalidEndpoint` error if the URL's host is an IP literal
@@ -27,6 +30,10 @@ pub trait UrlGuardExt {
     ///
     /// This is a synchronous, no-DNS check for write-time validation; hostnames
     /// pass here and are checked against their resolved addresses at delivery.
+    ///
+    /// # Errors
+    /// An `InvalidEndpoint` error if the host is an IP literal that is not
+    /// globally routable.
     fn check_literal_host(&self) -> Result<()>;
 
     /// Returns an `InvalidEndpoint` error if any resolved address is not a
@@ -34,6 +41,10 @@ pub trait UrlGuardExt {
     ///
     /// `addrs` are the addresses the host resolved to. Rejecting when the list
     /// is empty prevents delivering to a host that resolved to nothing.
+    ///
+    /// # Errors
+    /// An `InvalidEndpoint` error if any resolved address is not globally
+    /// routable, or if `addrs` is empty (the host resolved to nothing).
     fn check_resolved_addrs(&self, addrs: impl IntoIterator<Item = IpAddr>) -> Result<()>;
 }
 

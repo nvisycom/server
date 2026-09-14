@@ -128,6 +128,9 @@ impl<T> Page<T> {
     ///
     /// Returns the first error encountered while mapping (e.g. a decryption
     /// failure), otherwise the fully mapped page.
+    ///
+    /// # Errors
+    /// Propagates the first error returned by `f`, stopping the mapping.
     pub fn try_from_cursor_page<M, F, E>(page: CursorPage<M>, f: F) -> Result<Self, E>
     where
         F: FnMut(M) -> Result<T, E>,

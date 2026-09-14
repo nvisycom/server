@@ -28,14 +28,9 @@ homepage = "https://github.com/nvisycom/server"
 documentation = "https://docs.rs/nvisy-server"
 
 # Shared lints for every crate (opt in with `[lints] workspace = true`).
-# `clippy::pedantic` is denied; the exceptions below are lints whose value does
-# not fit this codebase.
+# The whole of `clippy::pedantic` is denied.
 [workspace.lints.clippy]
 pedantic = { level = "deny", priority = -1 }
-# `# Errors`/`# Panics` doc sections are being written in a dedicated pass; until
-# then, allow rather than satisfy them with meaningless generic text.
-missing_errors_doc = "allow"
-missing_panics_doc = "allow"
 
 # Release-optimised build that keeps full debuginfo, for profiling with a
 # sampling profiler (e.g. `samply record --profile profiling`). Optimisations

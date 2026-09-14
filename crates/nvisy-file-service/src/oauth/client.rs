@@ -56,6 +56,11 @@ impl OAuthClient {
 
     /// Starts the authorization-code flow: returns the URL to send the user to
     /// plus the CSRF state and PKCE verifier the callback must present.
+    ///
+    /// # Errors
+    ///
+    /// Returns a connection error if a configured OAuth endpoint (auth, token, or
+    /// redirect URI) is not a valid URL.
     pub fn begin_authorization(&self) -> Result<Authorization> {
         let client = self.build()?;
         let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
@@ -79,6 +84,12 @@ impl OAuthClient {
     }
 
     /// Exchanges an authorization `code` (with its PKCE `verifier`) for tokens.
+    ///
+    /// # Errors
+    ///
+    /// Returns a connection error if a configured OAuth endpoint is not a valid
+    /// URL, or an `Unauthenticated` error if the code exchange request fails or is
+    /// rejected by the provider.
     pub async fn exchange_code(&self, code: String, pkce_verifier: String) -> Result<OAuthTokens> {
         let response = self
             .build()?
@@ -95,6 +106,10 @@ impl OAuthClient {
     }
 
     /// Refreshes the access token using a stored refresh token.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any error from [`refresh_with_scopes`](Self::refresh_with_scopes).
     pub async fn refresh_tokens(&self, refresh_token: &str) -> Result<OAuthTokens> {
         self.refresh_with_scopes(refresh_token, &[]).await
     }
@@ -106,6 +121,12 @@ impl OAuthClient {
     /// re-consent — e.g. a SharePoint-audience token for the `OneDrive` file picker,
     /// distinct from the Graph token the connector uses. An empty `scopes` refreshes
     /// with the originally granted scopes (see [`refresh_tokens`](Self::refresh_tokens)).
+    ///
+    /// # Errors
+    ///
+    /// Returns a connection error if a configured OAuth endpoint is not a valid
+    /// URL, or an `Unauthenticated` error if the refresh request fails or is
+    /// rejected by the provider.
     pub async fn refresh_with_scopes(
         &self,
         refresh_token: &str,

@@ -64,6 +64,12 @@ struct NatsClientInner {
 
 impl NatsClient {
     /// Create a new NATS client and connect
+    ///
+    /// # Errors
+    /// - `Timeout` if the connection is not established within
+    ///   `nats_connect_timeout` (defaulting to 30 seconds).
+    /// - `Connection` if the TCP/handshake to the NATS server fails within the
+    ///   deadline (bad URL, auth rejected, server unreachable).
     #[tracing::instrument(skip(config))]
     pub async fn connect(config: NatsConfig) -> Result<Self> {
         tracing::info!("Connecting to NATS servers: {}", config.nats_url);
@@ -141,6 +147,11 @@ impl NatsClient {
     }
 
     /// Test connectivity with a ping
+    ///
+    /// # Errors
+    /// - `Timeout` if the server does not respond to the flush within 10 seconds.
+    /// - `Connection` if flushing the connection fails (e.g. the socket is
+    ///   disconnected).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CONNECTION)]
     pub async fn ping(&self) -> Result<Duration> {
         let start = Instant::now();
@@ -172,12 +183,20 @@ impl NatsClient {
 impl NatsClient {
     /// Get or create the KV store for a bucket. The bucket fixes the key and
     /// value types, so it is the only type argument.
+    ///
+    /// # Errors
+    /// - `Operation` if the bucket does not exist and cannot be created (e.g. the
+    ///   `JetStream` request fails or the server rejects the bucket config).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
     pub async fn kv_store<B: KvBucket>(&self) -> Result<KvStore<B>> {
         KvStore::new(&self.inner.jetstream).await
     }
 
     /// Get or create the KV store for a bucket with a custom TTL.
+    ///
+    /// # Errors
+    /// - `Operation` if the bucket does not exist and cannot be created (e.g. the
+    ///   `JetStream` request fails or the server rejects the bucket config).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
     pub async fn kv_store_with_ttl<B: KvBucket>(&self, ttl: Duration) -> Result<KvStore<B>> {
         KvStore::with_ttl(&self.inner.jetstream, ttl).await
@@ -192,6 +211,11 @@ impl NatsClient {
     /// This is a per-deployment concern: call it once at startup for each stream,
     /// so that publishers and subscribers built later are cheap handles that do no
     /// reconciliation of their own.
+    ///
+    /// # Errors
+    /// - `Operation` if the stream cannot be looked up, updated to match `S`'s
+    ///   config, or created (the `JetStream` request fails or the server rejects
+    ///   the stream config).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
     pub async fn ensure_stream<S: EventStream>(&self) -> Result<()> {
         ensure_stream::<S>(&self.inner.jetstream).await
@@ -230,6 +254,11 @@ impl NatsClient {
     ///
     /// Best-effort: delivered to whichever subscribers are connected now, with no
     /// persistence or acknowledgement.
+    ///
+    /// # Errors
+    /// - `Serialization` if `message` cannot be serialized to JSON.
+    /// - `Connection` if the message cannot be handed to the NATS connection
+    ///   (e.g. the client is disconnected).
     #[tracing::instrument(skip(self, message), target = TRACING_TARGET_CLIENT)]
     pub async fn publish_broadcast<T>(&self, subject: String, message: &T) -> Result<()>
     where
@@ -248,6 +277,10 @@ impl NatsClient {
     ///
     /// The stream ends when the subscription is dropped. Messages that fail to
     /// deserialize are skipped rather than ending the stream.
+    ///
+    /// # Errors
+    /// - `Connection` if the subscription cannot be established (e.g. the client
+    ///   is disconnected or the subject is invalid).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
     pub async fn subscribe_broadcast<T>(&self, subject: String) -> Result<BroadcastStream<T>>
     where

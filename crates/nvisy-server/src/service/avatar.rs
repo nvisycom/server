@@ -56,6 +56,13 @@ impl AvatarService {
     /// object is written and the URL updated before the previous version is
     /// deleted, so a reader never sees a missing avatar; a crash between the
     /// update and the delete can leave the previous object orphaned (see #192).
+    ///
+    /// # Errors
+    /// - `BadRequest` if the upload exceeds the size cap, does not decode as an
+    ///   image, or exceeds the source-dimension cap.
+    /// - A storage error if writing or deleting the avatar object fails.
+    /// - A database error if acquiring the connection, reading the previous
+    ///   account, or updating `avatar_url` fails.
     pub async fn set_account_avatar(&self, account_id: Uuid, upload: Bytes) -> Result<Account> {
         let webp = process_avatar(upload).await?;
         let version = content_version(&webp);
@@ -95,6 +102,10 @@ impl AvatarService {
     }
 
     /// Streams the account avatar for a specific version, or `None` if absent.
+    ///
+    /// # Errors
+    /// - A storage error if the object store rejects the read.
+    /// - `InternalServerError` if reading the object's bytes into memory fails.
     pub async fn account_avatar(&self, account_id: Uuid, version: &str) -> Result<Option<Vec<u8>>> {
         read_object(
             self.infra
@@ -106,6 +117,11 @@ impl AvatarService {
     }
 
     /// Removes an account's current avatar object and clears its `avatar_url`.
+    ///
+    /// # Errors
+    /// - A storage error if deleting the avatar object fails.
+    /// - A database error if acquiring the connection, reading the account, or
+    ///   clearing `avatar_url` fails.
     pub async fn delete_account_avatar(&self, account_id: Uuid) -> Result<()> {
         let mut conn = self.infra.postgres.get_connection().await?;
         let account = conn.find_account_by_id(account_id).await?;
@@ -137,6 +153,13 @@ impl AvatarService {
     /// object is written and the URL updated before the previous version is
     /// deleted, so a reader never sees a missing avatar; a crash between the
     /// update and the delete can leave the previous object orphaned (see #192).
+    ///
+    /// # Errors
+    /// - `BadRequest` if the upload exceeds the size cap, does not decode as an
+    ///   image, or exceeds the source-dimension cap.
+    /// - A storage error if writing or deleting the avatar object fails.
+    /// - A database error if acquiring the connection, reading the previous
+    ///   workspace, or updating `avatar_url` fails.
     pub async fn set_workspace_avatar(&self, workspace_id: Uuid, upload: Bytes) -> Result<()> {
         let webp = process_avatar(upload).await?;
         let version = content_version(&webp);
@@ -175,6 +198,10 @@ impl AvatarService {
     }
 
     /// Streams the workspace avatar for a specific version, or `None` if absent.
+    ///
+    /// # Errors
+    /// - A storage error if the object store rejects the read.
+    /// - `InternalServerError` if reading the object's bytes into memory fails.
     pub async fn workspace_avatar(
         &self,
         workspace_id: Uuid,
@@ -190,6 +217,11 @@ impl AvatarService {
     }
 
     /// Removes a workspace's current avatar object and clears its `avatar_url`.
+    ///
+    /// # Errors
+    /// - A storage error if deleting the avatar object fails.
+    /// - A database error if acquiring the connection, reading the workspace, or
+    ///   clearing `avatar_url` fails.
     pub async fn delete_workspace_avatar(&self, workspace_id: Uuid) -> Result<()> {
         let mut conn = self.infra.postgres.get_connection().await?;
         let workspace = conn.find_workspace_by_id(workspace_id).await?;

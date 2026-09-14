@@ -34,6 +34,10 @@ impl EngineService {
     /// Loads the NER/LLM lineups and the OCR/STT enricher backends from the
     /// configured file when present; otherwise starts with empty lineups and no
     /// enrichment.
+    ///
+    /// # Errors
+    /// - A configuration error if a `config_path` is set but the provider config
+    ///   file cannot be read or parsed.
     pub async fn from_config(config: EngineConfig) -> Result<Self> {
         let provider_config = match config.config_path {
             Some(path) => config::load(&path).await?,
@@ -69,6 +73,10 @@ impl EngineService {
     /// `Arc`-backed, so the clone is cheap and shares one configured lineup).
     ///
     /// [`analyze`]: Engine::analyze
+    ///
+    /// # Errors
+    /// - A `Processing` engine error if the blocking task panics or is cancelled.
+    /// - Any engine error [`analyze`](Engine::analyze) itself produces.
     pub async fn analyze_blocking(
         &self,
         document: Document,
@@ -92,6 +100,10 @@ impl EngineService {
     /// rejects rather than silently matching nothing.
     ///
     /// Extensions are lowercased and de-duplicated, preserving first-seen order.
+    ///
+    /// # Errors
+    /// - [`UnknownFormatToken::Extension`] if a token is not a known file
+    ///   extension in the codec registry. Empty tokens are skipped, not rejected.
     pub fn resolve_extensions<I, S>(&self, tokens: I) -> Result<Vec<String>, UnknownFormatToken>
     where
         I: IntoIterator<Item = S>,
@@ -124,6 +136,10 @@ impl EngineService {
     ///
     /// An unknown modality is returned as an error. Extensions are lowercased
     /// and de-duplicated, preserving first-seen order.
+    ///
+    /// # Errors
+    /// - [`UnknownFormatToken::Modality`] if a token matches no format's modality.
+    ///   Empty tokens are skipped, not rejected.
     pub fn resolve_modalities<I, S>(&self, tokens: I) -> Result<Vec<String>, UnknownFormatToken>
     where
         I: IntoIterator<Item = S>,
