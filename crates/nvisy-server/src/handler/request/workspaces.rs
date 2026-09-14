@@ -59,7 +59,6 @@ impl CreateWorkspace {
             None => Handle::derive(&self.display_name).ok_or_else(|| {
                 ErrorKind::BadRequest
                     .with_message("Could not derive a handle from the display name; provide one")
-                    .with_resource("workspace")
             })?,
         };
 

@@ -73,7 +73,6 @@ impl PasswordHasher {
                 ErrorKind::InternalServerError
                     .with_message("Password processing failed")
                     .with_context("Hash generation error")
-                    .with_resource("authentication")
             })?;
 
         Ok(password_hash.to_string())
@@ -117,7 +116,6 @@ impl PasswordHasher {
             ErrorKind::InternalServerError
                 .with_message("Authentication system temporarily unavailable")
                 .with_context("Hash format error")
-                .with_resource("authentication")
         })?;
 
         match self
@@ -141,8 +139,7 @@ impl PasswordHasher {
 
                 Err(ErrorKind::Unauthorized
                     .with_message("Authentication failed")
-                    .with_context("Invalid credentials")
-                    .with_resource("authentication"))
+                    .with_context("Invalid credentials"))
             }
             Err(e) => {
                 tracing::error!(
@@ -153,8 +150,7 @@ impl PasswordHasher {
 
                 Err(ErrorKind::InternalServerError
                     .with_message("Authentication temporarily unavailable")
-                    .with_context("Verification error")
-                    .with_resource("authentication"))
+                    .with_context("Verification error"))
             }
         }
     }

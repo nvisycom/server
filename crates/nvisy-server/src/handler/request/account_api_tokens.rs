@@ -96,7 +96,6 @@ impl CreateAccountApiToken {
         let sanitized_name = self.display_name.trim().to_string();
         if sanitized_name.is_empty() {
             return Err(crate::response::ErrorKind::BadRequest
-                .with_resource("api_token")
                 .with_message("Token name cannot be empty or whitespace only"));
         }
 

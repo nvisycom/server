@@ -133,16 +133,13 @@ where
                 .map_err(|rejection| match rejection.reason() {
                     TypedHeaderRejectionReason::Missing => ErrorKind::MissingAuthToken
                         .with_message("Authentication required")
-                        .with_context("Provide a session cookie or a Bearer token")
-                        .with_resource("authentication"),
+                        .with_context("Provide a session cookie or a Bearer token"),
                     TypedHeaderRejectionReason::Error(_) => ErrorKind::MalformedAuthToken
                         .with_message("Invalid token format")
-                        .with_context("Authorization header must contain a valid Bearer token")
-                        .with_resource("authentication"),
+                        .with_context("Authorization header must contain a valid Bearer token"),
                     _ => ErrorKind::InternalServerError
                         .with_message("Authentication processing failed")
-                        .with_context("Unexpected error during header extraction")
-                        .with_resource("authentication"),
+                        .with_context("Unexpected error during header extraction"),
                 })?;
             Self::from_token(bearer.token(), AuthTransport::Bearer, &auth_keys)?
         };
@@ -155,7 +152,7 @@ where
 
 impl From<JwtError> for Error<'static> {
     fn from(error: JwtError) -> Self {
-        let error = match error.kind() {
+        match error.kind() {
             JwtErrorKind::ExpiredSignature => ErrorKind::Unauthorized
                 .with_message("Your session has expired")
                 .with_context("Please sign in again to continue"),
@@ -192,8 +189,6 @@ impl From<JwtError> for Error<'static> {
             _ => ErrorKind::InternalServerError
                 .with_message("Authentication processing failed")
                 .with_context("An unexpected error occurred during token validation"),
-        };
-
-        error.with_resource("authentication")
+        }
     }
 }

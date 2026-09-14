@@ -118,9 +118,7 @@ pub(crate) async fn start_link(
     // attach a new sign-in method. The proof is consumed here, before the OIDC
     // round-trip begins.
     let proof = query.reauth_proof.as_deref().ok_or_else(|| {
-        ErrorKind::Unauthorized
-            .with_message("Re-authentication required to link a provider")
-            .with_resource("account")
+        ErrorKind::Unauthorized.with_message("Re-authentication required to link a provider")
     })?;
     oidc.consume_reauth_proof(auth_state.account_id, proof)
         .await?;
@@ -214,9 +212,9 @@ async fn mint_desktop_token(
     // anything else) so this endpoint cannot be used to mint a token toward an
     // http page that would then hold a bearer credential.
     if oidc.classify_redirect(&request.redirect_uri) != Some(RedirectKind::DesktopScheme) {
-        return Err(ErrorKind::BadRequest
-            .with_message("redirectUri is not an allowed desktop scheme")
-            .with_resource("account"));
+        return Err(
+            ErrorKind::BadRequest.with_message("redirectUri is not an allowed desktop scheme")
+        );
     }
 
     let mut conn = pg_client.get_connection().await?;
@@ -231,8 +229,7 @@ async fn mint_desktop_token(
         .ok_or_else(|| ErrorKind::Unauthorized.with_message("Session not found"))?;
     if session.session_type != ApiTokenType::Web {
         return Err(ErrorKind::Forbidden
-            .with_message("Desktop tokens can only be minted from a browser session")
-            .with_resource("session"));
+            .with_message("Desktop tokens can only be minted from a browser session"));
     }
 
     let account = provisioner

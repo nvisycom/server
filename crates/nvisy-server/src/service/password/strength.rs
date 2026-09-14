@@ -159,7 +159,7 @@ impl PasswordStrength {
             // strength-estimator suggestions appended so the client sees how to
             // fix it. The warning stays in context (debug detail, not advice).
             let mut message = String::from("Password does not meet minimum strength requirements");
-            let mut error = ErrorKind::BadRequest.with_resource("password");
+            let mut error = ErrorKind::BadRequest.into_error();
 
             if let Some(feedback) = result.feedback {
                 if let Some(warning) = feedback.warning {

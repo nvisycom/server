@@ -105,9 +105,7 @@ impl<T> AuthState<T> {
                 workspace_id = %workspace_id,
                 "access denied: not a workspace member"
             );
-            return Err(ErrorKind::Forbidden
-                .with_message("Not a workspace member")
-                .with_resource("workspace"));
+            return Err(ErrorKind::Forbidden.with_message("Not a workspace member"));
         };
 
         if permission.is_permitted_by_role(member.member_role) {
@@ -129,9 +127,7 @@ impl<T> AuthState<T> {
                 role = ?member.member_role,
                 "access denied: insufficient role"
             );
-            Err(ErrorKind::Forbidden
-                .with_message("Insufficient role for this action")
-                .with_resource("workspace"))
+            Err(ErrorKind::Forbidden.with_message("Insufficient role for this action"))
         }
     }
 }
@@ -196,7 +192,6 @@ where
             );
             ErrorKind::InternalServerError
                 .with_message("Authentication verification encountered an error")
-                .with_resource("authentication")
         })?;
 
         // Step 1: Verify account exists and is in good standing
@@ -265,7 +260,6 @@ where
                 ErrorKind::InternalServerError
                     .with_message("Account verification encountered an error")
                     .with_context("Unable to validate account credentials")
-                    .with_resource("authentication")
             })?
             .ok_or_else(|| {
                 tracing::warn!(
@@ -278,7 +272,6 @@ where
                 ErrorKind::Unauthorized
                     .with_message("Account not found")
                     .with_context("Your account may have been deactivated")
-                    .with_resource("authentication")
             })?;
 
         tracing::debug!(
@@ -327,7 +320,6 @@ where
                 ErrorKind::InternalServerError
                     .with_message("Authentication verification encountered an error")
                     .with_context("Unable to validate the session token")
-                    .with_resource("authentication")
             })?;
 
         if !is_active {
@@ -340,8 +332,7 @@ where
 
             return Err(ErrorKind::Unauthorized
                 .with_message("Your session has been revoked")
-                .with_context("Please sign in again to continue")
-                .with_resource("authentication"));
+                .with_context("Please sign in again to continue"));
         }
 
         Ok(())

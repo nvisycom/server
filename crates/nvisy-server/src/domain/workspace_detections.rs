@@ -96,9 +96,7 @@ impl WorkspaceDetectionService {
         // Only an enabled pipeline runs: a draft (still being configured) or a
         // disabled (paused) pipeline is rejected.
         if !pipeline.status.is_enabled() {
-            return Err(ErrorKind::Conflict
-                .with_message("Pipeline is not enabled")
-                .with_resource("pipeline"));
+            return Err(ErrorKind::Conflict.with_message("Pipeline is not enabled"));
         }
 
         // Validate synchronously so a bad request fails fast (4xx) rather than as a
@@ -110,8 +108,7 @@ impl WorkspaceDetectionService {
 
         if conn.list_pipeline_policy_ids(pipeline.id).await?.is_empty() {
             return Err(ErrorKind::BadRequest
-                .with_message("Pipeline has no policies; attach at least one before running")
-                .with_resource("pipeline"));
+                .with_message("Pipeline has no policies; attach at least one before running"));
         }
 
         // Decode the pipeline definition now so an undecodable definition fails the
@@ -122,7 +119,6 @@ impl WorkspaceDetectionService {
                 |err| {
                     ErrorKind::BadRequest
                         .with_message("Pipeline definition is invalid")
-                        .with_resource("pipeline")
                         .with_context(err.to_string())
                 },
             )?;

@@ -71,9 +71,9 @@ impl WorkspaceInviteService {
             .await?
             .is_some()
         {
-            return Err(ErrorKind::Conflict
-                .with_message("User is already a member of this workspace")
-                .with_resource("workspace_member"));
+            return Err(
+                ErrorKind::Conflict.with_message("User is already a member of this workspace")
+            );
         }
 
         let Some(account) = conn.find_account_by_email(&invitee_email).await? else {
@@ -86,8 +86,7 @@ impl WorkspaceInviteService {
             .is_some()
         {
             return Err(ErrorKind::Conflict
-                .with_message("A pending invitation already exists for this email")
-                .with_resource("workspace_invite"));
+                .with_message("A pending invitation already exists for this email"));
         }
 
         let new_invite = input.to_model(workspace_id, actor_id);
@@ -200,13 +199,10 @@ impl WorkspaceInviteService {
         let invite = find_code(&mut conn, invite_code).await?;
         if !invite.can_be_used() {
             return Err(ErrorKind::BadRequest
-                .with_message("This invite code has expired or is no longer valid")
-                .with_resource("invite_code"));
+                .with_message("This invite code has expired or is no longer valid"));
         }
         let Some(workspace) = conn.find_workspace_by_id(invite.workspace_id).await? else {
-            return Err(ErrorKind::NotFound
-                .with_resource("workspace")
-                .with_message("Workspace not found"));
+            return Err(ErrorKind::NotFound.with_message("Workspace not found"));
         };
         Ok(InvitePreview { workspace, invite })
     }
@@ -223,8 +219,7 @@ impl WorkspaceInviteService {
         let invite = find_code(&mut conn, invite_code).await?;
         if !invite.can_be_used() {
             return Err(ErrorKind::BadRequest
-                .with_message("This invite code has expired or is no longer valid")
-                .with_resource("invite_code"));
+                .with_message("This invite code has expired or is no longer valid"));
         }
         verify_invitee_matches(&mut conn, &invite, account_id).await?;
         let origin = event::EventOrigin {
@@ -247,8 +242,7 @@ impl WorkspaceInviteService {
         let invite = find_code(&mut conn, invite_code).await?;
         if !invite.can_be_used() {
             return Err(ErrorKind::BadRequest
-                .with_message("This invite code has expired or is no longer valid")
-                .with_resource("invite_code"));
+                .with_message("This invite code has expired or is no longer valid"));
         }
         verify_invitee_matches(&mut conn, &invite, account_id).await?;
         let origin = event::EventOrigin {
@@ -265,9 +259,7 @@ fn guard_usable(invite: &WorkspaceInvite) -> Result<()> {
     if invite.can_be_used() {
         Ok(())
     } else {
-        Err(ErrorKind::BadRequest
-            .with_message("This invitation has expired or is no longer valid")
-            .with_resource("workspace_invite"))
+        Err(ErrorKind::BadRequest.with_message("This invitation has expired or is no longer valid"))
     }
 }
 
@@ -313,9 +305,7 @@ async fn accept_invite_as_member(
         .await?
         .is_some()
     {
-        return Err(ErrorKind::Conflict
-            .with_message("You are already a member of this workspace")
-            .with_resource("workspace_member"));
+        return Err(ErrorKind::Conflict.with_message("You are already a member of this workspace"));
     }
 
     let invite_id = invite.id;
@@ -332,9 +322,7 @@ async fn accept_invite_as_member(
                 .await?
                 .is_none()
             {
-                return Err(ErrorKind::Conflict
-                    .with_message("This invitation is no longer valid")
-                    .with_resource("workspace_invite"));
+                return Err(ErrorKind::Conflict.with_message("This invitation is no longer valid"));
             }
 
             let new_member = NewWorkspaceMember::new(workspace_id, account_id, invited_role);
@@ -391,8 +379,7 @@ async fn verify_invitee_matches(
         Ok(())
     } else {
         Err(ErrorKind::Forbidden
-            .with_message("This invitation was sent to a different email address")
-            .with_resource("workspace_invite"))
+            .with_message("This invitation was sent to a different email address"))
     }
 }
 
@@ -404,22 +391,14 @@ async fn find_invite(
 ) -> Result<WorkspaceInvite> {
     conn.find_invite_in_workspace(workspace_id, invite_id)
         .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("Invitation not found")
-                .with_resource("workspace_invite")
-        })
+        .ok_or_else(|| ErrorKind::NotFound.with_message("Invitation not found"))
 }
 
 /// Finds an invite by its shareable code token, or a NotFound.
 async fn find_code(conn: &mut PgConn, invite_code: &str) -> Result<WorkspaceInvite> {
     conn.find_workspace_invite_by_token(invite_code)
         .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_resource("invite_code")
-                .with_message("Invalid invite code")
-        })
+        .ok_or_else(|| ErrorKind::NotFound.with_message("Invalid invite code"))
 }
 
 #[cfg(test)]

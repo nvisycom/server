@@ -101,9 +101,7 @@ impl AccountApiTokenService {
         let token = find_account_token(&mut conn, account_id, token_id).await?;
 
         if token.session_type != ApiTokenType::Api {
-            return Err(ErrorKind::Forbidden
-                .with_resource("api_token")
-                .with_message("Only API tokens can be renamed"));
+            return Err(ErrorKind::Forbidden.with_message("Only API tokens can be renamed"));
         }
 
         let updated = conn
@@ -126,9 +124,7 @@ impl AccountApiTokenService {
 
         let deleted = conn.delete_account_api_token(token.id).await?;
         if !deleted {
-            return Err(ErrorKind::BadRequest
-                .with_resource("api_token")
-                .with_message("API token is already revoked"));
+            return Err(ErrorKind::BadRequest.with_message("API token is already revoked"));
         }
 
         tracing::info!(target: TRACING_TARGET, "API token revoked");
@@ -148,10 +144,6 @@ async fn find_account_token(
         .find_account_api_token_by_id(token_id)
         .await?
         .filter(|token| token.account_id == account_id)
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_resource("api_token")
-                .with_message("API token not found")
-        })?;
+        .ok_or_else(|| ErrorKind::NotFound.with_message("API token not found"))?;
     Ok(token)
 }

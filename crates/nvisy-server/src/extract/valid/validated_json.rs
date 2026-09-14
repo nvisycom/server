@@ -87,9 +87,7 @@ impl From<Report> for Error<'static> {
             many => many.join(". "),
         };
 
-        ErrorKind::BadRequest
-            .with_message(user_message)
-            .with_resource("request")
+        ErrorKind::BadRequest.with_message(user_message)
     }
 }
 

@@ -201,11 +201,10 @@ impl WorkspaceWebhookService {
                 .item
         };
 
-        let url: Url = webhook.url.parse().map_err(|_| {
-            ErrorKind::BadRequest
-                .with_message("Invalid webhook URL")
-                .with_resource("webhook")
-        })?;
+        let url: Url = webhook
+            .url
+            .parse()
+            .map_err(|_| ErrorKind::BadRequest.with_message("Invalid webhook URL"))?;
 
         let secret = String::from_utf8(
             self.crypto

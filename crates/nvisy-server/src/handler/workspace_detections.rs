@@ -570,9 +570,9 @@ async fn redact_detection(
 
         // A detection can only be redacted once its analysis is complete.
         if !detection.status.is_complete() {
-            return Err(ErrorKind::Conflict
-                .with_message("WorkspaceDetection is not ready to redact")
-                .with_resource("detection"));
+            return Err(
+                ErrorKind::Conflict.with_message("WorkspaceDetection is not ready to redact")
+            );
         }
 
         // The source document is reachable only if it was not explicitly deleted;
@@ -583,7 +583,6 @@ async fn redact_detection(
             .ok_or_else(|| {
                 ErrorKind::Conflict
                     .with_message("The detection's source document is no longer available")
-                    .with_resource("detection")
             })?;
         let source_blob = conn
             .find_blob_by_id(document.blob_id)
@@ -591,22 +590,17 @@ async fn redact_detection(
             .ok_or_else(|| {
                 ErrorKind::Conflict
                     .with_message("The detection's source document is no longer available")
-                    .with_resource("detection")
             })?;
 
         // The base audit (its `derived_from` for the review audit) and its blob.
         let base_audit = conn.find_base_audit(detection.id).await?.ok_or_else(|| {
-            ErrorKind::Conflict
-                .with_message("WorkspaceDetection has no analysis yet")
-                .with_resource("detection")
+            ErrorKind::Conflict.with_message("WorkspaceDetection has no analysis yet")
         })?;
         let audit_blob = conn
             .find_blob_by_id(base_audit.blob_id)
             .await?
             .ok_or_else(|| {
-                ErrorKind::NotFound
-                    .with_message("The analysis for this detection has been deleted")
-                    .with_resource("detection")
+                ErrorKind::NotFound.with_message("The analysis for this detection has been deleted")
             })?;
         RedactInputs {
             detection,

@@ -325,7 +325,6 @@ impl AssistantWorker {
             .ok_or_else(|| {
                 ErrorKind::Conflict
                     .with_message("This workspace has no language model provider configured")
-                    .with_resource("provider")
             })?;
 
         let config: ProviderConfig = self

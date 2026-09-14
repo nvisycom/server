@@ -56,11 +56,7 @@ impl WorkspaceMemberService {
         let mut conn = self.postgres.get_connection().await?;
         conn.find_workspace_member_with_account(workspace_id, member_account_id)
             .await?
-            .ok_or_else(|| {
-                ErrorKind::NotFound
-                    .with_resource("workspace_member")
-                    .with_message("Workspace member not found")
-            })
+            .ok_or_else(|| ErrorKind::NotFound.with_message("Workspace member not found"))
     }
 
     /// Removes a member from a workspace, recording the event atomically.
@@ -85,7 +81,7 @@ impl WorkspaceMemberService {
             .find_workspace_member(workspace_id, member_account_id)
             .await?
         else {
-            return Err(ErrorKind::NotFound.with_resource("workspace_member"));
+            return Err(ErrorKind::NotFound.into_error());
         };
 
         if member_to_remove.member_role.is_owner() {
@@ -137,7 +133,7 @@ impl WorkspaceMemberService {
             .find_workspace_member(workspace_id, member_account_id)
             .await?
         else {
-            return Err(ErrorKind::NotFound.with_resource("workspace_member"));
+            return Err(ErrorKind::NotFound.into_error());
         };
 
         // An owner cannot be demoted (only they can leave): reject a role change
@@ -166,7 +162,7 @@ impl WorkspaceMemberService {
 
         conn.find_workspace_member_with_account(workspace_id, member_account_id)
             .await?
-            .ok_or_else(|| ErrorKind::NotFound.with_resource("workspace_member"))
+            .ok_or_else(|| ErrorKind::NotFound.into_error())
     }
 
     /// Returns the acting account's membership in the workspace, or a NotFound.
@@ -181,11 +177,7 @@ impl WorkspaceMemberService {
         let mut conn = self.postgres.get_connection().await?;
         conn.find_workspace_member(workspace_id, account_id)
             .await?
-            .ok_or_else(|| {
-                ErrorKind::NotFound
-                    .with_message("Workspace membership not found")
-                    .with_resource("workspace_member")
-            })
+            .ok_or_else(|| ErrorKind::NotFound.with_message("Workspace membership not found"))
     }
 
     /// Updates the acting account's notification preferences on its membership,
@@ -203,9 +195,7 @@ impl WorkspaceMemberService {
             .await?
             .is_none()
         {
-            return Err(ErrorKind::NotFound
-                .with_message("Workspace membership not found")
-                .with_resource("workspace_member"));
+            return Err(ErrorKind::NotFound.with_message("Workspace membership not found"));
         }
 
         Ok(conn
@@ -230,9 +220,7 @@ impl WorkspaceMemberService {
             .await?
             .is_none()
         {
-            return Err(ErrorKind::NotFound
-                .with_resource("workspace_member")
-                .with_message("You are not a member of this workspace"));
+            return Err(ErrorKind::NotFound.with_message("You are not a member of this workspace"));
         }
 
         conn.transaction(async |conn| {
@@ -241,8 +229,7 @@ impl WorkspaceMemberService {
             let owner_ids = conn.lock_owner_ids(workspace_id).await?;
             if owner_ids.contains(&account_id) && owner_ids.len() <= 1 {
                 return Err(ErrorKind::Conflict
-                    .with_message("You are the only owner; transfer ownership before leaving")
-                    .with_resource("workspace_member"));
+                    .with_message("You are the only owner; transfer ownership before leaving"));
             }
 
             conn.remove_workspace_member(workspace_id, account_id)

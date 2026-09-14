@@ -63,11 +63,7 @@ where
         let workspace = conn
             .find_workspace_by_id(workspace_id)
             .await?
-            .ok_or_else(|| {
-                ErrorKind::NotFound
-                    .with_message("Workspace not found")
-                    .with_resource("workspace")
-            })?;
+            .ok_or_else(|| ErrorKind::NotFound.with_message("Workspace not found"))?;
 
         Ok(WorkspaceContext(workspace))
     }

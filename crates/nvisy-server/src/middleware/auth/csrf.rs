@@ -60,8 +60,7 @@ pub async fn csrf_protect(request: Request, next: Next) -> Result<Response> {
             );
             return Err(ErrorKind::Forbidden
                 .with_message("CSRF check failed")
-                .with_context("Missing or mismatched CSRF token")
-                .with_resource("authentication"));
+                .with_context("Missing or mismatched CSRF token"));
         }
     }
 

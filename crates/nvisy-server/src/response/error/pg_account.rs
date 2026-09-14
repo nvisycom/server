@@ -9,7 +9,7 @@ use super::{Error, ErrorKind};
 
 impl From<AccountConstraints> for Error<'static> {
     fn from(c: AccountConstraints) -> Self {
-        let error = match c {
+        match c {
             AccountConstraints::UsernameLength => ErrorKind::BadRequest
                 .with_message("Handle must be between 3 and 32 characters long"),
             AccountConstraints::UsernameFormat => ErrorKind::BadRequest
@@ -40,15 +40,13 @@ impl From<AccountConstraints> for Error<'static> {
             AccountConstraints::SuspendedNotAdmin => {
                 ErrorKind::BadRequest.with_message("Admin accounts cannot be suspended")
             }
-        };
-
-        error.with_resource("account")
+        }
     }
 }
 
 impl From<AccountIdentityConstraints> for Error<'static> {
     fn from(c: AccountIdentityConstraints) -> Self {
-        let error = match c {
+        match c {
             // The shape checks and uniqueness on identities guard invariants the
             // handlers already enforce, so a violation is a server-side bug, not a
             // client input error, except the subject collision below.
@@ -59,34 +57,28 @@ impl From<AccountIdentityConstraints> for Error<'static> {
             }
             AccountIdentityConstraints::ProviderSubjectUnique => ErrorKind::Conflict
                 .with_message("This identity is already linked to another account"),
-        };
-
-        error.with_resource("account_identity")
+        }
     }
 }
 
 impl From<AccountApiTokenConstraints> for Error<'static> {
     fn from(c: AccountApiTokenConstraints) -> Self {
-        let error = match c {
+        match c {
             AccountApiTokenConstraints::NameNotEmpty => {
                 ErrorKind::BadRequest.with_message("Token name cannot be empty")
             }
             AccountApiTokenConstraints::NameLength => {
                 ErrorKind::BadRequest.with_message("Token name is too long")
             }
-        };
-
-        error.with_resource("account_api_token")
+        }
     }
 }
 
 impl From<AccountNotificationConstraints> for Error<'static> {
     fn from(constraint: AccountNotificationConstraints) -> Self {
-        let error = match constraint {
+        match constraint {
             AccountNotificationConstraints::ParamsSize => ErrorKind::BadRequest
                 .with_message("Notification params must be between 2 and 4096 bytes"),
-        };
-
-        error.with_resource("notification")
+        }
     }
 }
