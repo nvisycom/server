@@ -1,9 +1,4 @@
-//! Secure password hashing and verification using Argon2id.
-//!
-//! This module provides a comprehensive password hashing solution using the Argon2id
-//! algorithm with recommended security parameters. The password hashing and verification
-//! methods are designed for use in HTTP handlers and return appropriate HTTP error
-//! responses for client consumption.
+//! Argon2id password hashing and verification.
 
 use argon2::password_hash::{Error as ArgonError, PasswordHasher as _, PasswordVerifier};
 use argon2::{Argon2, PasswordHash};
@@ -14,51 +9,27 @@ use crate::response::{ErrorKind, Result};
 /// Tracing target for password hashing operations.
 const TRACING_TARGET: &str = "nvisy_server::service::password";
 
-/// Secure password hashing and verification service using Argon2id.
-///
-/// This service provides cryptographically secure password hashing using the Argon2id
-/// algorithm with OWASP recommended parameters.
+/// Hashes and verifies passwords with Argon2id.
 #[derive(Debug, Clone)]
 pub struct PasswordHasher {
     argon2: Argon2<'static>,
 }
 
 impl PasswordHasher {
-    /// Creates a new instance of the [`PasswordHasher`] service.
+    /// A hasher with the default Argon2id parameters.
+    #[must_use]
     pub fn new() -> Self {
-        let argon2 = Argon2::default();
-        Self { argon2 }
+        Self {
+            argon2: Argon2::default(),
+        }
     }
 
-    /// Hashes a password using Argon2id with a cryptographically secure random salt.
-    ///
-    /// The returned hash string includes all necessary parameters and the salt,
-    /// making it suitable for long-term storage in a database.
-    ///
-    /// This method is designed for use in HTTP handlers and returns appropriate
-    /// HTTP error responses for client consumption.
-    ///
-    /// # Arguments
-    ///
-    /// * `password` - The plaintext password to hash
-    ///
-    /// # Returns
-    ///
-    /// A PHC string format hash that includes the algorithm, parameters, salt,
-    /// and hash value. This can be stored directly in a database.
+    /// Hashes `password` with a fresh random salt, returning a PHC string (algorithm,
+    /// parameters, salt, and hash) suitable for storage.
     ///
     /// # Errors
     ///
-    /// Returns `ErrorKind::InternalServerError` with user-friendly message if:
-    /// - Salt generation fails
-    /// - Password hashing operation fails
-    ///
-    /// # Security Notes
-    ///
-    /// - Each call generates a unique cryptographically secure salt
-    /// - The password is processed securely and not logged
-    /// - The function has consistent timing regardless of password content
-    /// - All sensitive data is cleared from memory as soon as possible
+    /// `InternalServerError` if hashing fails.
     pub fn hash_password(&self, password: &str) -> Result<String> {
         let password_hash = self
             .argon2
@@ -78,32 +49,13 @@ impl PasswordHasher {
         Ok(password_hash.to_string())
     }
 
-    /// Verifies a password against a stored hash.
-    ///
-    /// This function performs timing-safe verification to prevent side-channel attacks
-    /// and is designed for use in HTTP handlers, returning appropriate HTTP error
-    /// responses for client consumption.
-    ///
-    /// # Arguments
-    ///
-    /// * `password` - The plaintext password to verify
-    /// * `stored_hash` - The PHC string format hash retrieved from storage
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the password is correct and verification succeeds.
+    /// Verifies `password` against a stored PHC hash, in constant time.
     ///
     /// # Errors
     ///
-    /// Returns different HTTP errors based on failure type:
-    /// - `ErrorKind::Unauthorized` for incorrect passwords
-    /// - `ErrorKind::InternalServerError` for invalid hash format or system errors
-    ///
-    /// # Security Notes
-    ///
-    /// - Uses timing-safe comparison to prevent timing attacks
-    /// - Does not leak information about why verification failed
-    /// - Error messages are safe for client consumption
+    /// - `Unauthorized` if the password does not match.
+    /// - `InternalServerError` if the stored hash is malformed or verification
+    ///   otherwise fails.
     pub fn verify_password(&self, password: &str, stored_hash: &str) -> Result<()> {
         // Parse the stored hash
         let parsed_hash = PasswordHash::new(stored_hash).map_err(|e| {
@@ -155,37 +107,23 @@ impl PasswordHasher {
         }
     }
 
-    /// Performs a dummy password verification to maintain consistent timing.
-    ///
-    /// This method is used when an account doesn't exist to prevent timing attacks
-    /// that could reveal which accounts exist in the system. It generates a random
-    /// password, hashes it, and performs verification (which will always fail).
-    ///
-    /// # Arguments
-    ///
-    /// * `password` - The password to verify (will be checked against a random hash)
-    ///
-    /// # Security Notes
-    ///
-    /// - Takes approximately the same time as a real password verification
-    /// - Prevents account enumeration via timing analysis
-    /// - Always returns false but performs actual cryptographic work
+    /// Does the cryptographic work of a verification against a throwaway hash and
+    /// returns `false`, so a login for a non-existent account takes the same time
+    /// as a real one — defeating account enumeration by timing.
+    #[must_use]
     pub fn verify_dummy_password(&self, password: &str) -> bool {
         use rand::RngExt;
 
-        // Generate a random dummy password (16 characters)
-        let password_len = rand::random_range(16..32);
         let mut rng = rand::rng();
-        let dummy_password: String = (0..password_len)
+        let dummy: String = (0..rand::random_range(16..32))
             .map(|_| rng.sample(Alphanumeric) as char)
             .collect();
 
-        // Hash the dummy password and verify, this will always fail
-        // but takes the same time as a real verification
-        if let Ok(dummy_hash) = self.hash_password(&dummy_password) {
+        // Hash a random password and verify against it; the compare always fails
+        // but spends the same time as a real verification.
+        if let Ok(dummy_hash) = self.hash_password(&dummy) {
             let _ = self.verify_password(password, &dummy_hash);
         }
-
         false
     }
 }

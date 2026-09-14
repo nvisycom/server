@@ -24,7 +24,7 @@ use crate::extract::{Authorized, Json, Path, Query, markers};
 use crate::handler::request::{ExportFormat, ExportQuery, WorkspaceDetectionPathParams};
 use crate::handler::utility::DownloadDocs;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, attachment_headers};
-use crate::service::{EngineService, RunBlobStore, ServiceState};
+use crate::service::{ArtifactReader, EngineService, ServiceState};
 
 /// Tracing target for detection audit operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::detection_audits";
@@ -44,7 +44,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::detection_audits";
 async fn get_detection_analysis(
     State(pg_client): State<PgClient>,
     State(detections): State<domain::WorkspaceDetectionService>,
-    State(blob): State<RunBlobStore>,
+    State(blob): State<ArtifactReader>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadAudit>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
@@ -102,7 +102,7 @@ fn get_detection_analysis_docs(op: TransformOperation) -> TransformOperation {
 async fn get_detection_intermediates(
     State(pg_client): State<PgClient>,
     State(detections): State<domain::WorkspaceDetectionService>,
-    State(blob): State<RunBlobStore>,
+    State(blob): State<ArtifactReader>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadOriginalDocuments>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
@@ -166,7 +166,7 @@ fn get_detection_intermediates_docs(op: TransformOperation) -> TransformOperatio
 async fn download_detection_audit(
     State(pg_client): State<PgClient>,
     State(detections): State<domain::WorkspaceDetectionService>,
-    State(blob): State<RunBlobStore>,
+    State(blob): State<ArtifactReader>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadAudit>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,

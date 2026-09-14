@@ -48,7 +48,9 @@ use crate::handler::response::{
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, SseResponse};
 use crate::service::event::EventEmitter;
-use crate::service::{DetectionQueue, EngineService, RunBlobStore, ServiceState, event};
+use crate::service::{
+    ArtifactReader, ArtifactWriter, DetectionQueue, EngineService, ServiceState, event,
+};
 use crate::worker::detection::DetectionStatusEvent;
 
 /// Tracing target for detection operations.
@@ -542,7 +544,8 @@ struct RedactInputs {
 async fn redact_detection(
     State(pg_client): State<PgClient>,
     State(detections): State<domain::WorkspaceDetectionService>,
-    State(blob): State<RunBlobStore>,
+    State(writer): State<ArtifactWriter>,
+    State(reader): State<ArtifactReader>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::RunRedactions>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
@@ -628,7 +631,7 @@ async fn redact_detection(
     // mutated on disk: reviewer edits and the redaction outcome land on this
     // clone, which is persisted as the redaction's own review audit, leaving the
     // detection analysis immutable and re-redactable.
-    let mut reviewed = blob
+    let mut reviewed = reader
         .load_audit(&engine, workspace.id, &inputs.audit_blob)
         .await?;
 
@@ -643,7 +646,7 @@ async fn redact_detection(
         edits.apply(&mut reviewed.report)?;
     }
 
-    let document = blob
+    let document = writer
         .build_document(&inputs.document, &inputs.source_blob, inputs.detection.id)
         .await?;
 
@@ -668,7 +671,7 @@ async fn redact_detection(
         .retention_override
         .as_ref()
         .map(nvisy_postgres::types::Json::or_default);
-    let staged_output = blob
+    let staged_output = writer
         .stage_redacted_document(
             &inputs.document,
             retention_override.as_ref(),
@@ -678,7 +681,7 @@ async fn redact_detection(
         .await?;
     // Staging the review audit after the output means a failure here would strand
     // the already-written output object (no blob to reclaim it); discard it first.
-    let staged_review = match blob
+    let staged_review = match writer
         .stage_review_audit(
             inputs.detection.workspace_id,
             retention_override.as_ref(),
@@ -689,7 +692,7 @@ async fn redact_detection(
     {
         Ok(staged) => staged,
         Err(err) => {
-            blob.discard_staged_object(&staged_output.0).await.ok();
+            writer.discard_staged_object(&staged_output.0).await.ok();
             return Err(err);
         }
     };
@@ -782,8 +785,8 @@ async fn redact_detection(
         Err(err) => {
             // The rows rolled back, so their staged objects are orphans: reclaim
             // both (best effort — a failure only leaves them for a later sweep).
-            blob.discard_staged_object(&staged_output.0).await.ok();
-            blob.discard_staged_object(&staged_review).await.ok();
+            writer.discard_staged_object(&staged_output.0).await.ok();
+            writer.discard_staged_object(&staged_review).await.ok();
             return Err(err);
         }
     };
@@ -792,10 +795,10 @@ async fn redact_detection(
     // the object staged for it orphaned (no row references it). Reclaim each
     // redundant staged object; best effort, a failure only defers it to a sweep.
     if output_path.as_deref() != Some(staged_output.0.storage_path.as_str()) {
-        blob.discard_staged_object(&staged_output.0).await.ok();
+        writer.discard_staged_object(&staged_output.0).await.ok();
     }
     if review_path.as_deref() != Some(staged_review.storage_path.as_str()) {
-        blob.discard_staged_object(&staged_review).await.ok();
+        writer.discard_staged_object(&staged_review).await.ok();
     }
 
     tracing::info!(

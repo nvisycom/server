@@ -25,7 +25,7 @@ use crate::handler::request::{
 use crate::handler::response::{WorkspaceRedactionResult, WorkspaceRedactionsPage};
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{ErrorKind, ErrorResponse, Result};
-use crate::service::{EngineService, RunBlobStore};
+use crate::service::{ArtifactReader, EngineService};
 
 /// Tracing target for redaction operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::redactions";
@@ -103,7 +103,7 @@ fn list_detection_redactions_docs(op: TransformOperation) -> TransformOperation 
 )]
 async fn get_redaction_review(
     State(pg_client): State<PgClient>,
-    State(blob): State<RunBlobStore>,
+    State(blob): State<ArtifactReader>,
     State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadAudit>,
     Path(path_params): Path<WorkspaceRedactionPathParams>,

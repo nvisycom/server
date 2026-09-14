@@ -1,7 +1,7 @@
 //! Session-token issuance: the one place that turns an account into a signed JWT.
 //!
 //! [`AuthIssuer`] owns the outbound half of authentication — signing an
-//! [`AuthClaims`] into a JWT with the server's [`SessionKeys`], and the session
+//! [`AuthClaims`] into a JWT with the server's [`AuthKeys`], and the session
 //! flavors that create an `account_api_tokens` row and sign a credential for it
 //! (browser `web` sessions and native-app `app` tokens). Every sign-in path and
 //! the API-token endpoint funnel through it, so there is a single implementation
@@ -20,21 +20,21 @@ use nvisy_postgres::types::{ApiTokenType, session};
 
 use crate::extract::{AuthClaims, SecurityContext};
 use crate::response::Result;
-use crate::service::{SessionKeys, UserAgentParser};
+use crate::service::{AuthKeys, UserAgentParser};
 
 /// Tracing target for token issuance.
 const TRACING_TARGET: &str = "nvisy_server::service::auth_issuer";
 
 /// Signs authentication credentials and mints session tokens.
 ///
-/// Composed from the server's [`SessionKeys`] (JWT signing) and the
+/// Composed from the server's [`AuthKeys`] (JWT signing) and the
 /// [`UserAgentParser`] (session display names). Cheap to clone — both are
 /// `Arc`-backed handles — so it is resolved per request from [`ServiceState`].
 ///
 /// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct AuthIssuer {
-    session_keys: SessionKeys,
+    session_keys: AuthKeys,
     user_agent_parser: UserAgentParser,
 }
 
@@ -42,7 +42,7 @@ impl AuthIssuer {
     /// Composes the issuer from its collaborators.
     #[inline]
     #[must_use]
-    pub const fn new(session_keys: SessionKeys, user_agent_parser: UserAgentParser) -> Self {
+    pub const fn new(session_keys: AuthKeys, user_agent_parser: UserAgentParser) -> Self {
         Self {
             session_keys,
             user_agent_parser,

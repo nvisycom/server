@@ -27,7 +27,12 @@ mod error;
 pub mod kv;
 pub mod stream;
 
+#[cfg(any(test, feature = "test_util"))]
+pub mod test_util;
+
 // Re-export async_nats types needed by consumers
 pub use async_nats::jetstream;
 pub use client::{NatsClient, NatsConfig};
 pub use error::{Error, Result};
+#[cfg(any(test, feature = "test_util"))]
+pub use test_util::TestNats;

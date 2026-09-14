@@ -12,7 +12,7 @@ use serde::Deserialize;
 
 use super::AuthState;
 use crate::response::{Error, Result};
-use crate::service::SessionKeys;
+use crate::service::AuthKeys;
 
 /// Optional [`AuthState`] for an endpoint that runs with or without a token.
 ///
@@ -31,7 +31,7 @@ where
     T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static,
     S: Sync + Send + 'static,
     PgClient: FromRef<S>,
-    SessionKeys: FromRef<S>,
+    AuthKeys: FromRef<S>,
 {
     type Rejection = Error<'static>;
 

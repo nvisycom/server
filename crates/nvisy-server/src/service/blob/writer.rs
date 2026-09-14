@@ -1,32 +1,12 @@
-//! Pipeline-run blob I/O.
-//!
-//! [`RunBlobStore`] reads and writes a run's document, redacted output, audit,
-//! and enrichment intermediates in the platform's first-party S3-compatible blob
-//! store (the `Documents`, `Audits`, and `Intermediates` [`Bucket`]s), handling
-//! per-workspace encryption and the blob bookkeeping each one needs. It is
-//! distinct from [`ExternalObjectStore`], which bridges external tenant object
-//! stores.
-//!
-//! Bytes are content-addressed: each `stage_*` method writes the (encrypted)
-//! object and returns a [`NewBlob`] describing it, which the caller resolves
-//! through [`find_or_create_blob`] (directly or via [`create_audit`] /
-//! [`create_workspace_document`]) so identical content is stored once and shared.
-//!
-//! [`Bucket`]: nvisy_s3::Bucket
-//! [`ExternalObjectStore`]: crate::service::ExternalObjectStore
-//! [`find_or_create_blob`]: nvisy_postgres::query::WorkspaceBlobRepository::find_or_create_blob
-//! [`create_audit`]: nvisy_postgres::query::WorkspaceAuditRepository::create_audit
-//! [`create_workspace_document`]: nvisy_postgres::query::WorkspaceDocumentRepository::create_workspace_document
+//! Write side of the pipeline-run blob store: staging a run's outputs.
 
 use std::io::Cursor;
 use std::str::FromStr;
 
 use bytes::Bytes;
+use elide_pipeline::Audit;
 use elide_pipeline::file::Document;
-use elide_pipeline::{ArtifactSet, Audit, Engine};
-use nvisy_postgres::PgConn;
-use nvisy_postgres::model::{Blob, NewBlob, WorkspaceDetection, WorkspaceDocument};
-use nvisy_postgres::query::{ReclaimableBlob, WorkspaceAuditRepository, WorkspaceBlobRepository};
+use nvisy_postgres::model::{Blob, NewBlob, WorkspaceDocument};
 use nvisy_postgres::types::{RetentionOverride, RetentionScope, RetentionSettings};
 use nvisy_s3::{AuditKey, Bucket, DocumentKey, IntermediateKey};
 use serde::Serialize;
@@ -37,29 +17,10 @@ use uuid::Uuid;
 use crate::response::{Error, ErrorKind, Result};
 use crate::service::{CryptoService, Infra};
 
-/// Tracing target for blob-store operations.
-const TRACING_TARGET: &str = "nvisy_server::service::run_blob_store";
-
-/// Whether a reclaim step removed a blob's backing object.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[must_use = "a Pending reclaim is not progress and must not be counted as one"]
-pub enum PurgeOutcome {
-    /// The object was removed and `reclaimed_at` was stamped.
-    Purged,
-    /// The object was not reclaimed — the blob gained a reference before it could
-    /// be claimed, or the delete failed (store failure, bad key, or unknown
-    /// bucket). A claimed-but-not-reclaimed blob is retried by the reconcile sweep.
-    Pending,
-}
-
-/// Wraps a storage-key parse failure as an internal error.
-fn invalid_key(err: impl std::fmt::Display) -> Error<'static> {
-    ErrorKind::InternalServerError
-        .with_message("Invalid blob storage key")
-        .with_context(err.to_string())
-}
-
-/// Reads and writes a pipeline run's blobs in the first-party blob store.
+/// Stages a pipeline run's outputs into the first-party blob store: encrypts and
+/// writes documents, audits, and enrichment intermediates, returning the
+/// [`NewBlob`] the caller resolves into a row. Its read counterpart is
+/// [`ArtifactReader`].
 ///
 /// Cloneable and cheap to pass around: it holds the shared [`Infra`] clients
 /// (all `Arc`-backed) and takes the per-request database connection as a method
@@ -68,120 +29,21 @@ fn invalid_key(err: impl std::fmt::Display) -> Error<'static> {
 /// S3-compatible store, routing to the `Documents`, `Audits`, and
 /// `Intermediates` [`Bucket`] prefixes.
 ///
+/// [`ArtifactReader`]: crate::service::ArtifactReader
 /// [`ExternalObjectStore`]: crate::service::ExternalObjectStore
+/// [`NewBlob`]: nvisy_postgres::model::NewBlob
 /// [`Bucket`]: nvisy_s3::Bucket
 #[derive(Clone)]
 #[must_use = "service does nothing unless you use it"]
-pub struct RunBlobStore {
-    infra: Infra,
-    crypto: CryptoService,
+pub struct ArtifactWriter {
+    pub(super) infra: Infra,
+    pub(super) crypto: CryptoService,
 }
 
-impl RunBlobStore {
-    /// Creates a new [`RunBlobStore`] over the internal object store and crypto.
+impl ArtifactWriter {
+    /// Creates a new [`ArtifactWriter`] over the internal object store and crypto.
     pub fn new(infra: Infra, crypto: CryptoService) -> Self {
         Self { infra, crypto }
-    }
-
-    /// Claims a due blob and reclaims its object.
-    ///
-    /// The claim (`purged_at`) is committed *before* the object is deleted, so the
-    /// blob leaves the dedup set the instant it is claimed: `find_or_create_blob`
-    /// can never hand out a reference to bytes that are about to be — or already —
-    /// gone. If a reference was acquired since the sweep read the blob, the claim
-    /// matches no row and the blob is skipped ([`PurgeOutcome::Pending`]). A claim
-    /// whose object delete then fails stays claimed for the reconcile sweep to
-    /// retry, so a transient store outage self-heals without ever resurrecting the
-    /// bytes.
-    ///
-    /// # Errors
-    ///
-    /// - A database error if the claim query fails. Once the blob is claimed, the
-    ///   object reclaim is folded into the returned [`PurgeOutcome`] (a failed
-    ///   delete yields `Pending`, not an error).
-    pub async fn purge_blob(
-        &self,
-        conn: &mut PgConn,
-        blob: &ReclaimableBlob,
-    ) -> Result<PurgeOutcome> {
-        // Claim first, in its own committed step: once purged_at is set the blob no
-        // longer deduplicates, so deleting its object next cannot strand a live
-        // reference even if this process crashes before the delete.
-        if conn.claim_blob_for_purge(blob.id).await?.is_none() {
-            return Ok(PurgeOutcome::Pending);
-        }
-        Ok(self.reclaim_claimed_object(conn, blob).await)
-    }
-
-    /// Reclaims the object of a blob already claimed for purge (`purged_at` set),
-    /// stamping `reclaimed_at` on success. Backs the reconcile sweep's retries.
-    ///
-    /// A failed delete leaves `reclaimed_at` NULL so the blob is retried; the blob
-    /// is already out of the dedup set, so its bytes are never reused meanwhile.
-    pub async fn reclaim_claimed_object(
-        &self,
-        conn: &mut PgConn,
-        blob: &ReclaimableBlob,
-    ) -> PurgeOutcome {
-        if let Err(err) = self
-            .delete_object(&blob.storage_bucket, &blob.storage_path)
-            .await
-        {
-            tracing::error!(
-                target: TRACING_TARGET,
-                blob_id = %blob.id,
-                error = %err,
-                "Failed to delete claimed blob object; left for the reaper to retry",
-            );
-            return PurgeOutcome::Pending;
-        }
-
-        if let Err(err) = conn.mark_blob_reclaimed(blob.id).await {
-            tracing::error!(
-                target: TRACING_TARGET,
-                blob_id = %blob.id,
-                error = %err,
-                "Deleted blob object but failed to mark it reclaimed; will retry",
-            );
-            return PurgeOutcome::Pending;
-        }
-        PurgeOutcome::Purged
-    }
-
-    /// Removes an object from whichever store its blob names. An unparseable
-    /// storage key or an unknown store is an error, not a silent success: the
-    /// object was not reclaimed, so the blob stays pending.
-    async fn delete_object(&self, bucket: &str, storage_path: &str) -> Result<()> {
-        let store = Bucket::from_name(bucket).ok_or_else(|| {
-            ErrorKind::InternalServerError
-                .with_message("Blob references an unknown storage bucket")
-                .with_context(format!("bucket: {bucket}"))
-        })?;
-
-        // Each store's key type differs, so parse the key for the store this blob
-        // names before deleting.
-        match store {
-            Bucket::Documents => {
-                let key = DocumentKey::from_str(storage_path).map_err(invalid_key)?;
-                self.infra.blobs.delete(&key).await?;
-            }
-            Bucket::Audits => {
-                let key = AuditKey::from_str(storage_path).map_err(invalid_key)?;
-                self.infra.blobs.delete(&key).await?;
-            }
-            Bucket::Intermediates => {
-                let key = IntermediateKey::from_str(storage_path).map_err(invalid_key)?;
-                self.infra.blobs.delete(&key).await?;
-            }
-            Bucket::Avatars => {
-                return Err(ErrorKind::InternalServerError
-                    .with_message(
-                        "Avatar objects are not reclaimed through the blob store's blob purge",
-                    )
-                    .with_context(format!("bucket: {bucket}")));
-            }
-        }
-        Ok(())
     }
 
     /// Reads a document's bytes from its blob and builds an engine [`Document`],
@@ -477,218 +339,48 @@ impl RunBlobStore {
             .await
     }
 
-    /// Resolves the blob holding a detection's analysis (its base audit).
-    ///
-    /// The connection-bound step of loading an analysis; pair with [`load_audit`]
-    /// to release the connection before the object-store round-trip. A detection
-    /// with no base audit yet (409) and one whose audit blob has been reclaimed
-    /// (404) map to distinct responses.
-    ///
-    /// [`load_audit`]: Self::load_audit
-    ///
-    /// # Errors
-    ///
-    /// - `Conflict` if the detection has no base audit yet.
-    /// - `NotFound` if the audit's blob has been reclaimed.
-    /// - A database error if either lookup fails.
-    pub async fn resolve_audit_blob(
-        &self,
-        conn: &mut PgConn,
-        detection: &WorkspaceDetection,
-    ) -> Result<Blob> {
-        let audit = conn
-            .find_base_audit(detection.id)
-            .await?
-            .ok_or_else(|| ErrorKind::Conflict.with_message("Detection has no analysis yet"))?;
-        self.blob_or_gone(
-            conn,
-            audit.blob_id,
-            "The analysis for this detection has been deleted",
-        )
-        .await
-    }
-
-    /// Loads and decodes an analysis from its already-resolved audit blob. Holds
-    /// no database connection: only object-store I/O and decryption, so a caller
-    /// can run it after releasing its connection.
-    ///
-    /// The `engine` reconstructs the audit's report from its serialized form: an
-    /// [`Audit`] serializes but does not `Deserialize`, since its report tags each
-    /// entity group by modality name and only the engine's registry can map those
-    /// back to concrete types.
-    ///
-    /// # Errors
-    ///
-    /// - `InternalServerError` if the blob's storage path is not a valid audit
-    ///   key, if the object is missing from storage, if reading its bytes fails,
-    ///   if decrypting them fails, or if the engine cannot decode the audit.
-    /// - A storage error if the object store rejects the read.
-    pub async fn load_audit(
-        &self,
-        engine: &Engine,
-        workspace_id: Uuid,
-        audit_blob: &Blob,
-    ) -> Result<Audit> {
-        let key = AuditKey::from_str(&audit_blob.storage_path).map_err(|err| {
+    /// Removes an object from whichever store its blob names. An unparseable
+    /// storage key or an unknown store is an error, not a silent success: the
+    /// object was not reclaimed, so the blob stays pending.
+    async fn delete_object(&self, bucket: &str, storage_path: &str) -> Result<()> {
+        let store = Bucket::from_name(bucket).ok_or_else(|| {
             ErrorKind::InternalServerError
-                .with_message("Invalid audit storage key")
-                .with_context(err.to_string())
+                .with_message("Blob references an unknown storage bucket")
+                .with_context(format!("bucket: {bucket}"))
         })?;
 
-        let data = self.infra.blobs.get(&key).await?.ok_or_else(|| {
-            ErrorKind::InternalServerError.with_message("Audit is missing from storage")
-        })?;
-        let mut reader = data.into_reader();
-        let mut ciphertext = Vec::new();
-        reader.read_to_end(&mut ciphertext).await.map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Failed to read audit")
-                .with_context(err.to_string())
-        })?;
-
-        let plaintext = self
-            .crypto
-            .decrypt(workspace_id, &ciphertext)
-            .map_err(|err| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to decrypt audit")
-                    .with_context(err.to_string())
-            })?;
-        engine
-            .deserialize_audit(&mut serde_json::Deserializer::from_slice(&plaintext))
-            .map_err(|err| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to decode audit")
-                    .with_context(err.to_string())
-            })
+        // Each store's key type differs, so parse the key for the store this blob
+        // names before deleting.
+        match store {
+            Bucket::Documents => {
+                let key = DocumentKey::from_str(storage_path).map_err(invalid_key)?;
+                self.infra.blobs.delete(&key).await?;
+            }
+            Bucket::Audits => {
+                let key = AuditKey::from_str(storage_path).map_err(invalid_key)?;
+                self.infra.blobs.delete(&key).await?;
+            }
+            Bucket::Intermediates => {
+                let key = IntermediateKey::from_str(storage_path).map_err(invalid_key)?;
+                self.infra.blobs.delete(&key).await?;
+            }
+            Bucket::Avatars => {
+                return Err(ErrorKind::InternalServerError
+                    .with_message(
+                        "Avatar objects are not reclaimed through the blob store's blob purge",
+                    )
+                    .with_context(format!("bucket: {bucket}")));
+            }
+        }
+        Ok(())
     }
+}
 
-    /// Resolves the blob holding a detection's enrichment intermediates.
-    ///
-    /// The connection-bound step; pair with [`load_intermediates`] to release the
-    /// connection before the object-store round-trip. A detection whose modality
-    /// produced no enrichment (text, tabular) has none — a `None` reference maps
-    /// to a 404, distinct from a reference to a reclaimed blob.
-    ///
-    /// [`load_intermediates`]: Self::load_intermediates
-    ///
-    /// # Errors
-    ///
-    /// - `NotFound` if the detection has no intermediates reference, or its blob
-    ///   has been reclaimed.
-    /// - A database error if the blob lookup fails.
-    pub async fn resolve_intermediates_blob(
-        &self,
-        conn: &mut PgConn,
-        detection: &WorkspaceDetection,
-    ) -> Result<Blob> {
-        let blob_id = detection.intermediate_blob_id.ok_or_else(|| {
-            ErrorKind::NotFound.with_message("Detection has no enrichment intermediates")
-        })?;
-        self.blob_or_gone(
-            conn,
-            blob_id,
-            "The intermediates for this detection have been deleted",
-        )
-        .await
-    }
-
-    /// Loads and decodes a detection's enrichment intermediates from its
-    /// already-resolved blob. Holds no database connection: only object-store I/O
-    /// and decryption.
-    ///
-    /// The `engine` reconstructs the [`ArtifactSet`] from its serialized form: it
-    /// serializes but does not `Deserialize`, since each group is tagged by
-    /// modality name and only the engine's registry can map those back to concrete
-    /// artifact types.
-    ///
-    /// # Errors
-    ///
-    /// - `InternalServerError` if the blob's storage path is not a valid
-    ///   intermediates key, if the object is missing from storage, if reading its
-    ///   bytes fails, if decrypting them fails, or if the engine cannot decode the
-    ///   artifacts.
-    /// - A storage error if the object store rejects the read.
-    pub async fn load_intermediates(
-        &self,
-        engine: &Engine,
-        workspace_id: Uuid,
-        intermediates_blob: &Blob,
-    ) -> Result<ArtifactSet> {
-        let key = IntermediateKey::from_str(&intermediates_blob.storage_path).map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Invalid intermediates storage key")
-                .with_context(err.to_string())
-        })?;
-
-        let data = self.infra.blobs.get(&key).await?.ok_or_else(|| {
-            ErrorKind::InternalServerError.with_message("Intermediates are missing from storage")
-        })?;
-        let mut reader = data.into_reader();
-        let mut ciphertext = Vec::new();
-        reader.read_to_end(&mut ciphertext).await.map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Failed to read intermediates")
-                .with_context(err.to_string())
-        })?;
-
-        let plaintext = self
-            .crypto
-            .decrypt(workspace_id, &ciphertext)
-            .map_err(|err| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to decrypt intermediates")
-                    .with_context(err.to_string())
-            })?;
-        engine
-            .deserialize_artifacts(&mut serde_json::Deserializer::from_slice(&plaintext))
-            .map_err(|err| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to decode intermediates")
-                    .with_context(err.to_string())
-            })
-    }
-
-    /// Resolves the blob holding a redaction's review audit.
-    ///
-    /// The connection-bound step of loading a review audit; pair with
-    /// [`load_audit`] to release the connection before the object-store
-    /// round-trip. Errors if the redaction has no review audit (409) or its blob
-    /// has since been reclaimed (404).
-    ///
-    /// [`load_audit`]: Self::load_audit
-    ///
-    /// # Errors
-    ///
-    /// - `Conflict` if the redaction has no review audit.
-    /// - `NotFound` if the review audit's blob has been reclaimed.
-    /// - A database error if either lookup fails.
-    pub async fn resolve_review_blob(&self, conn: &mut PgConn, redaction_id: Uuid) -> Result<Blob> {
-        let audit = conn
-            .find_redaction_audit(redaction_id)
-            .await?
-            .ok_or_else(|| ErrorKind::Conflict.with_message("Redaction has no review audit"))?;
-        self.blob_or_gone(
-            conn,
-            audit.blob_id,
-            "The review audit for this redaction has been deleted",
-        )
-        .await
-    }
-
-    /// Fetches a blob by id, mapping a reclaimed (absent) blob to a 404 with
-    /// `gone_message`. Shared by the audit/intermediate/review resolvers, which
-    /// differ in that message.
-    async fn blob_or_gone(
-        &self,
-        conn: &mut PgConn,
-        blob_id: Uuid,
-        gone_message: &'static str,
-    ) -> Result<Blob> {
-        conn.find_blob_by_id(blob_id)
-            .await?
-            .ok_or_else(|| ErrorKind::NotFound.with_message(gone_message))
-    }
+/// Wraps a storage-key parse failure as an internal error.
+fn invalid_key(err: impl std::fmt::Display) -> Error<'static> {
+    ErrorKind::InternalServerError
+        .with_message("Invalid blob storage key")
+        .with_context(err.to_string())
 }
 
 /// Maps an analysis (de)serialization failure to an internal error.

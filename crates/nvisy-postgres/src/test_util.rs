@@ -14,11 +14,15 @@ use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::client::PgClientMigrationExt;
-use crate::model::{NewAccount, NewBlob, NewWorkspace, NewWorkspaceDocument, NewWorkspacePipeline};
-use crate::query::{
-    AccountRepository, WorkspaceDocumentRepository, WorkspacePipelineRepository,
-    WorkspaceRepository,
+use crate::model::{
+    NewAccount, NewBlob, NewWorkspace, NewWorkspaceDocument, NewWorkspaceMember,
+    NewWorkspacePipeline,
 };
+use crate::query::{
+    AccountRepository, WorkspaceDocumentRepository, WorkspaceMemberRepository,
+    WorkspacePipelineRepository, WorkspaceRepository,
+};
+use crate::types::WorkspaceRole;
 use crate::{PgClient, PgConfig};
 
 /// Caps how many Postgres containers may boot at once, across the whole test
@@ -146,6 +150,41 @@ impl TestDatabase {
             account_id,
             workspace_id: workspace.id,
         }
+    }
+
+    /// Seeds an account and a workspace it owns, **with the owner membership** the
+    /// raw workspace insert omits — so the account is authorized on the workspace.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any insert fails.
+    pub async fn seed_owned_workspace(&self) -> SeededWorkspace {
+        let seeded = self.seed_account_and_workspace().await;
+        self.seed_workspace_member(seeded.workspace_id, seeded.account_id, WorkspaceRole::Owner)
+            .await;
+        seeded
+    }
+
+    /// Adds `account_id` to `workspace_id` at `role`. The seeder for the
+    /// membership rows that a workspace's raw insert does not create.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the insert fails.
+    pub async fn seed_workspace_member(
+        &self,
+        workspace_id: Uuid,
+        account_id: Uuid,
+        role: WorkspaceRole,
+    ) {
+        let mut conn = self
+            .client
+            .get_connection()
+            .await
+            .expect("failed to get a connection");
+        conn.add_workspace_member(NewWorkspaceMember::new(workspace_id, account_id, role))
+            .await
+            .expect("failed to seed workspace member");
     }
 
     /// Seeds an account, a workspace, a pipeline, and an input document (with its

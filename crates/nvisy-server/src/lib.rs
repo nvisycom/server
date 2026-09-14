@@ -13,5 +13,8 @@ pub mod response;
 pub mod service;
 pub mod worker;
 
+#[cfg(feature = "test_util")]
+pub mod test_util;
+
 pub use crate::args::ServiceArgs;
 pub use crate::error::{BoxedError, Error, ErrorKind, Result};
