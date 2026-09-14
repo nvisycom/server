@@ -20,14 +20,12 @@ pub enum Bucket {
     #[strum(serialize = "DOCUMENT_AUDITS")]
     Audits,
     /// Transient pipeline intermediates (enrichment: OCR layout, transcripts).
-    #[strum(serialize = "PIPELINE_INTERMEDIATES")]
+    #[strum(serialize = "INTERMEDIATES")]
     Intermediates,
-    /// Account avatars.
-    #[strum(serialize = "ACCOUNT_AVATARS")]
-    AccountAvatars,
-    /// Workspace avatars (logos).
-    #[strum(serialize = "WORKSPACE_AVATARS")]
-    WorkspaceAvatars,
+    /// Account and workspace avatars. Both share this store; each key carries an
+    /// `account_`/`workspace_` prefix that namespaces the two within it.
+    #[strum(serialize = "AVATARS")]
+    Avatars,
 }
 
 impl Bucket {
@@ -46,8 +44,7 @@ impl Bucket {
             Self::Documents => "documents",
             Self::Audits => "audits",
             Self::Intermediates => "intermediates",
-            Self::AccountAvatars => "account-avatars",
-            Self::WorkspaceAvatars => "workspace-avatars",
+            Self::Avatars => "avatars",
         }
     }
 
@@ -71,8 +68,7 @@ mod tests {
             Bucket::Documents,
             Bucket::Audits,
             Bucket::Intermediates,
-            Bucket::AccountAvatars,
-            Bucket::WorkspaceAvatars,
+            Bucket::Avatars,
         ] {
             assert_eq!(Bucket::from_name(bucket.name()), Some(bucket));
         }
