@@ -303,7 +303,7 @@ mod tests {
         audit.storage_bucket = "DOCUMENT_AUDITS".to_owned();
         let mut intermediate = audit.clone();
         intermediate.storage_path = format!("{}-i", audit.storage_path);
-        intermediate.storage_bucket = "PIPELINE_INTERMEDIATES".to_owned();
+        intermediate.storage_bucket = "INTERMEDIATES".to_owned();
 
         let a = conn.find_or_create_blob(audit.clone()).await?;
         let i = conn.find_or_create_blob(intermediate).await?;

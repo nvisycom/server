@@ -162,7 +162,7 @@ impl RunBlobStore {
                 let key = IntermediateKey::from_str(storage_path).map_err(invalid_key)?;
                 self.infra.blobs.delete(&key).await?;
             }
-            Bucket::AccountAvatars | Bucket::WorkspaceAvatars => {
+            Bucket::Avatars => {
                 return Err(ErrorKind::InternalServerError
                     .with_message(
                         "Avatar objects are not reclaimed through the blob store's blob purge",

@@ -21,7 +21,7 @@ pub struct AccountAvatarKey {
 }
 
 impl ObjectKey for AccountAvatarKey {
-    const BUCKET: Bucket = Bucket::AccountAvatars;
+    const BUCKET: Bucket = Bucket::Avatars;
     const PREFIX: &'static str = "account_";
 }
 
@@ -64,7 +64,7 @@ pub struct WorkspaceAvatarKey {
 }
 
 impl ObjectKey for WorkspaceAvatarKey {
-    const BUCKET: Bucket = Bucket::WorkspaceAvatars;
+    const BUCKET: Bucket = Bucket::Avatars;
     const PREFIX: &'static str = "workspace_";
 }
 
