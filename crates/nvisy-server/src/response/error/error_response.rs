@@ -22,9 +22,6 @@ pub struct ErrorResponse<'a> {
     pub name: Cow<'a, str>,
     /// User-friendly error message safe for client display.
     pub message: Cow<'a, str>,
-    /// The resource that the error relates to, if any.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resource: Option<Cow<'a, str>>,
 
     /// Internal context for debugging; logged, never sent to the client.
     #[serde(skip)]
@@ -46,7 +43,6 @@ impl<'a> ErrorResponse<'a> {
         Self {
             name: Cow::Borrowed(name),
             message: Cow::Borrowed(message),
-            resource: None,
             context: None,
             status,
         }
@@ -66,7 +62,6 @@ impl IntoResponse for ErrorResponse<'_> {
             status = %self.status,
             name = %self.name,
             message = %self.message,
-            resource = ?self.resource,
             context = ?self.context,
             "HTTP error response"
         );
@@ -87,17 +82,15 @@ mod tests {
         assert_eq!(response.name, "not_found");
         assert_eq!(response.message, "Resource not found");
         assert_eq!(response.status, StatusCode::NOT_FOUND);
-        assert!(response.resource.is_none());
     }
 
     #[test]
     fn only_the_public_fields_serialize() {
         // `context` and `status` are `#[serde(skip)]`; the body carries just
-        // name, message, and (when present) resource.
+        // name and message.
         let response = ErrorResponse {
             name: "bad_request".into(),
             message: "Test message".into(),
-            resource: Some("test_resource".into()),
             context: Some("secret debugging detail".into()),
             status: StatusCode::BAD_REQUEST,
         };
@@ -105,7 +98,6 @@ mod tests {
         let json = serde_json::to_string(&response).unwrap();
         assert!(json.contains("name"));
         assert!(json.contains("message"));
-        assert!(json.contains("resource"));
 
         assert!(!json.contains("context"));
         assert!(!json.contains("secret debugging detail"));

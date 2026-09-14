@@ -35,23 +35,17 @@ impl<'a> From<nvisy_nats::Error> for HttpError<'a> {
                 .with_context("Service configuration is invalid"),
 
             // Not found errors -> Not Found
-            nvisy_nats::Error::KvKeyNotFound {
-                ref key,
-                ref bucket,
-            } => ErrorKind::NotFound
+            nvisy_nats::Error::KvKeyNotFound { ref bucket, .. } => ErrorKind::NotFound
                 .with_message("Resource not found")
-                .with_resource(key.clone())
                 .with_context(format!("Key not found in storage bucket '{}'", bucket)),
 
-            nvisy_nats::Error::KvBucketNotFound { ref bucket } => ErrorKind::NotFound
+            nvisy_nats::Error::KvBucketNotFound { .. } => ErrorKind::NotFound
                 .with_message("Storage bucket not found")
-                .with_resource(bucket.clone())
                 .with_context("The requested storage bucket does not exist"),
 
             // Revision conflicts -> Conflict
-            nvisy_nats::Error::KvRevisionMismatch { ref key, .. } => ErrorKind::Conflict
+            nvisy_nats::Error::KvRevisionMismatch { .. } => ErrorKind::Conflict
                 .with_message("Resource has been modified")
-                .with_resource(key.clone())
                 .with_context("The resource was modified by another request"),
 
             // JetStream and streaming errors -> Internal Server Error
@@ -63,19 +57,16 @@ impl<'a> From<nvisy_nats::Error> for HttpError<'a> {
                 .with_message("Message processing failed")
                 .with_context("Error processing JetStream message"),
 
-            nvisy_nats::Error::StreamError { ref stream, .. } => ErrorKind::InternalServerError
+            nvisy_nats::Error::StreamError { .. } => ErrorKind::InternalServerError
                 .with_message("Stream operation failed")
-                .with_resource(stream.clone())
                 .with_context("Error accessing or manipulating stream"),
 
-            nvisy_nats::Error::ConsumerError { ref consumer, .. } => ErrorKind::InternalServerError
+            nvisy_nats::Error::ConsumerError { .. } => ErrorKind::InternalServerError
                 .with_message("Consumer operation failed")
-                .with_resource(consumer.clone())
                 .with_context("Error with message consumer"),
 
-            nvisy_nats::Error::JobQueueError { ref queue, .. } => ErrorKind::InternalServerError
+            nvisy_nats::Error::JobQueueError { .. } => ErrorKind::InternalServerError
                 .with_message("Job processing failed")
-                .with_resource(queue.clone())
                 .with_context("Error processing job from queue"),
 
             // Legacy streaming errors -> Internal Server Error
@@ -136,7 +127,6 @@ mod tests {
         let http_err: HttpError = nats_err.into();
 
         assert_eq!(http_err.kind(), ErrorKind::NotFound);
-        assert_eq!(http_err.resource.as_deref(), Some("missing_key"));
         assert!(http_err.context.as_deref().unwrap().contains("test_bucket"));
     }
 
@@ -146,7 +136,6 @@ mod tests {
         let http_err: HttpError = nats_err.into();
 
         assert_eq!(http_err.kind(), ErrorKind::Conflict);
-        assert_eq!(http_err.resource.as_deref(), Some("test_key"));
         assert!(http_err.context.as_deref().unwrap().contains("modified"));
     }
 
@@ -156,7 +145,6 @@ mod tests {
         let http_err: HttpError = nats_err.into();
 
         assert_eq!(http_err.kind(), ErrorKind::InternalServerError);
-        assert_eq!(http_err.resource.as_deref(), Some("test_stream"));
         assert!(http_err.context.as_deref().unwrap().contains("stream"));
     }
 

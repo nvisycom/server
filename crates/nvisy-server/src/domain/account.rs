@@ -79,18 +79,14 @@ impl AccountService {
             && conn.email_exists_for_other(email, account_id).await?
         {
             tracing::warn!(target: TRACING_TARGET, "Account update failed: email already exists");
-            return Err(ErrorKind::Conflict
-                .with_message("Email is already registered")
-                .with_resource("account"));
+            return Err(ErrorKind::Conflict.with_message("Email is already registered"));
         }
 
         if let Some(username) = &updates.username
             && conn.username_exists_for_other(username, account_id).await?
         {
             tracing::warn!(target: TRACING_TARGET, "Account update failed: username already taken");
-            return Err(ErrorKind::Conflict
-                .with_message("Handle is already taken")
-                .with_resource("account"));
+            return Err(ErrorKind::Conflict.with_message("Handle is already taken"));
         }
 
         let account = conn.update_account(account_id, updates).await?;

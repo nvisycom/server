@@ -417,9 +417,7 @@ impl WorkspaceThreadService {
         let mut conn = self.postgres.get_connection().await?;
         let comment = find_comment(&mut conn, workspace_id, comment_id).await?;
         if comment.author_account_id != account_id {
-            return Err(ErrorKind::Forbidden
-                .with_message("Only the author can edit this comment")
-                .with_resource("workspace_thread_comment"));
+            return Err(ErrorKind::Forbidden.with_message("Only the author can edit this comment"));
         }
 
         let updated = conn
@@ -443,9 +441,9 @@ impl WorkspaceThreadService {
         let mut conn = self.postgres.get_connection().await?;
         let comment = find_comment(&mut conn, workspace_id, comment_id).await?;
         if comment.author_account_id != account_id {
-            return Err(ErrorKind::Forbidden
-                .with_message("Only the author can delete this comment")
-                .with_resource("workspace_thread_comment"));
+            return Err(
+                ErrorKind::Forbidden.with_message("Only the author can delete this comment")
+            );
         }
 
         conn.delete_comment(comment.id).await?;

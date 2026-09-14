@@ -88,27 +88,19 @@ impl SignInService {
         let account = match account {
             None => {
                 tracing::warn!(target: TRACING_TARGET, reason = "account_not_found", "Login failed");
-                return Err(ErrorKind::Unauthorized
-                    .with_resource("credentials")
-                    .with_message("Invalid credentials"));
+                return Err(ErrorKind::Unauthorized.with_message("Invalid credentials"));
             }
             Some(_) if !password_valid => {
                 tracing::warn!(target: TRACING_TARGET, reason = "invalid_password", "Login failed");
-                return Err(ErrorKind::Unauthorized
-                    .with_resource("credentials")
-                    .with_message("Invalid credentials"));
+                return Err(ErrorKind::Unauthorized.with_message("Invalid credentials"));
             }
             Some(acc) if acc.is_suspended() => {
                 tracing::warn!(target: TRACING_TARGET, reason = "account_suspended", "Login failed");
-                return Err(ErrorKind::Forbidden
-                    .with_resource("account")
-                    .with_message("Account is suspended"));
+                return Err(ErrorKind::Forbidden.with_message("Account is suspended"));
             }
             Some(acc) if acc.is_deleted() => {
                 tracing::warn!(target: TRACING_TARGET, reason = "account_deleted", "Login failed");
-                return Err(ErrorKind::Forbidden
-                    .with_resource("account")
-                    .with_message("Account has been deleted"));
+                return Err(ErrorKind::Forbidden.with_message("Account has been deleted"));
             }
             Some(acc) => acc,
         };

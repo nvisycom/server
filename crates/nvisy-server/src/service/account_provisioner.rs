@@ -71,9 +71,7 @@ impl AccountProvisioner {
         // becomes the account's required primary address; to link, it is the match
         // key.
         let email = identity.email.ok_or_else(|| {
-            ErrorKind::BadRequest
-                .with_message("Sign-in provider did not return an email address")
-                .with_resource("account")
+            ErrorKind::BadRequest.with_message("Sign-in provider did not return an email address")
         })?;
 
         // 2. An account already uses this email.
@@ -88,12 +86,10 @@ impl AccountProvisioner {
                     provider = ?provider,
                     "Refusing to link OIDC identity: provider did not verify the email",
                 );
-                return Err(ErrorKind::Conflict
-                    .with_message(
-                        "An account already uses this email; sign in with your existing method \
+                return Err(ErrorKind::Conflict.with_message(
+                    "An account already uses this email; sign in with your existing method \
                          or verify the email with the provider first",
-                    )
-                    .with_resource("account"));
+                ));
             }
 
             // The matched account may already have a *different* identity for this
@@ -111,11 +107,9 @@ impl AccountProvisioner {
                     provider = ?provider,
                     "Refusing to link OIDC identity: account already has one for this provider",
                 );
-                return Err(ErrorKind::Conflict
-                    .with_message(
-                        "An account already uses this email with a different provider account",
-                    )
-                    .with_resource("account"));
+                return Err(ErrorKind::Conflict.with_message(
+                    "An account already uses this email with a different provider account",
+                ));
             }
 
             link_oidc_identity(
@@ -144,12 +138,10 @@ impl AccountProvisioner {
                 provider = ?provider,
                 "Refusing to provision account: provider did not verify the email",
             );
-            return Err(ErrorKind::BadRequest
-                .with_message(
-                    "Sign-in provider did not verify your email address; verify it with the \
+            return Err(ErrorKind::BadRequest.with_message(
+                "Sign-in provider did not verify your email address; verify it with the \
                      provider and try again",
-                )
-                .with_resource("account"));
+            ));
         }
 
         let username = derive_unique_username(conn, &email).await?;
@@ -220,8 +212,7 @@ impl AccountProvisioner {
                 "Refusing to link an identity already linked to another account",
             );
             return Err(ErrorKind::Conflict
-                .with_message("This provider identity is already linked to another account")
-                .with_resource("account_identity"));
+                .with_message("This provider identity is already linked to another account"));
         }
 
         link_oidc_identity(
@@ -246,11 +237,9 @@ impl AccountProvisioner {
     ///
     /// Returns not-found if no account has the id, or a database error.
     pub async fn load_active(&self, conn: &mut PgConn, account_id: Uuid) -> Result<Account> {
-        conn.find_account_by_id(account_id).await?.ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("Account not found")
-                .with_resource("account")
-        })
+        conn.find_account_by_id(account_id)
+            .await?
+            .ok_or_else(|| ErrorKind::NotFound.with_message("Account not found"))
     }
 }
 
@@ -262,8 +251,7 @@ async fn link_oidc_identity(conn: &mut PgConn, identity: NewAccountIdentity) -> 
     match conn.link_oidc_identity(identity).await? {
         LinkIdentityOutcome::Linked | LinkIdentityOutcome::AlreadyLinked => Ok(()),
         LinkIdentityOutcome::ProviderConflict => Err(ErrorKind::Conflict
-            .with_message("An account already uses a different provider account")
-            .with_resource("account_identity")),
+            .with_message("An account already uses a different provider account")),
     }
 }
 
@@ -301,8 +289,7 @@ async fn derive_unique_username(conn: &mut PgConn, email: &str) -> Result<Handle
     }
 
     Err(ErrorKind::InternalServerError
-        .with_message("Could not allocate a username for the new account")
-        .with_resource("account"))
+        .with_message("Could not allocate a username for the new account"))
 }
 
 /// Truncates `value` to at most `max` bytes without splitting a UTF-8 character.

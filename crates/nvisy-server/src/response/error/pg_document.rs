@@ -6,7 +6,7 @@ use super::{Error, ErrorKind};
 
 impl From<WorkspaceDocumentConstraints> for Error<'static> {
     fn from(c: WorkspaceDocumentConstraints) -> Self {
-        let error = match c {
+        match c {
             WorkspaceDocumentConstraints::DisplayNameLength => ErrorKind::BadRequest
                 .with_message("Document name must be between 1 and 255 characters long"),
             WorkspaceDocumentConstraints::OriginalFilenameLength => ErrorKind::BadRequest
@@ -20,15 +20,13 @@ impl From<WorkspaceDocumentConstraints> for Error<'static> {
             WorkspaceDocumentConstraints::WorkspaceIdIdUnique => {
                 ErrorKind::Conflict.with_message("A document with this identifier already exists")
             }
-        };
-
-        error.with_resource("document")
+        }
     }
 }
 
 impl From<WorkspaceBlobConstraints> for Error<'static> {
     fn from(c: WorkspaceBlobConstraints) -> Self {
-        let error = match c {
+        match c {
             WorkspaceBlobConstraints::FileSizeMin => {
                 ErrorKind::BadRequest.with_message("File size must be greater than or equal to 0")
             }
@@ -40,8 +38,6 @@ impl From<WorkspaceBlobConstraints> for Error<'static> {
             | WorkspaceBlobConstraints::PurgedAfterCreated => {
                 ErrorKind::InternalServerError.with_message("Invalid blob state")
             }
-        };
-
-        error.with_resource("blob")
+        }
     }
 }

@@ -93,19 +93,13 @@ impl AccountIdentityService {
             .find_account_identity(account_id, IdentityProvider::Password)
             .await?
             .and_then(|identity| identity.secret)
-            .ok_or_else(|| {
-                ErrorKind::Unauthorized
-                    .with_message("Current password is incorrect")
-                    .with_resource("account")
-            })?;
+            .ok_or_else(|| ErrorKind::Unauthorized.with_message("Current password is incorrect"))?;
 
         let verified =
             current_password.is_some_and(|current| self.password.verify(current, &secret).is_ok());
         if !verified {
             tracing::warn!(target: TRACING_TARGET, "Password change failed: current password incorrect");
-            return Err(ErrorKind::Unauthorized
-                .with_message("Current password is incorrect")
-                .with_resource("account"));
+            return Err(ErrorKind::Unauthorized.with_message("Current password is incorrect"));
         }
 
         // Release this connection before `write_password` acquires its own, so the
@@ -138,8 +132,7 @@ impl AccountIdentityService {
             .and_then(|identity| identity.secret);
         if existing.is_some() {
             return Err(ErrorKind::Conflict
-                .with_message("Account already has a password; change it instead")
-                .with_resource("account"));
+                .with_message("Account already has a password; change it instead"));
         }
 
         // Release this connection before `write_password` acquires its own, so the
@@ -203,11 +196,10 @@ impl AccountIdentityService {
                 Ok(())
             }
             DeleteIdentityOutcome::LastIdentityKept => Err(ErrorKind::Conflict
-                .with_message("Cannot remove your only sign-in method; add another first")
-                .with_resource("account_identity")),
-            DeleteIdentityOutcome::NotFound => Err(ErrorKind::NotFound
-                .with_message("No such sign-in method on this account")
-                .with_resource("account_identity")),
+                .with_message("Cannot remove your only sign-in method; add another first")),
+            DeleteIdentityOutcome::NotFound => {
+                Err(ErrorKind::NotFound.with_message("No such sign-in method on this account"))
+            }
         }
     }
 }

@@ -63,7 +63,6 @@ async fn handler(method: Method, uri: Uri) -> Response {
     );
 
     ErrorKind::NotFound
-        .with_resource("route")
         .with_context(format!("No route matches {method} {}", uri.path()))
         .into_response()
 }

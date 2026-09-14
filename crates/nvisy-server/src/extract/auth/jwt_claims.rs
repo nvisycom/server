@@ -166,7 +166,6 @@ where
             ErrorKind::InternalServerError
                 .with_message("Authentication token generation failed")
                 .with_context("Unable to create session token")
-                .with_resource("authentication")
         })
     }
 }

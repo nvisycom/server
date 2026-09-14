@@ -438,16 +438,14 @@ impl RunBlobStore {
         conn: &mut PgConn,
         detection: &WorkspaceDetection,
     ) -> Result<Blob> {
-        let audit = conn.find_base_audit(detection.id).await?.ok_or_else(|| {
-            ErrorKind::Conflict
-                .with_message("Detection has no analysis yet")
-                .with_resource("detection")
-        })?;
+        let audit = conn
+            .find_base_audit(detection.id)
+            .await?
+            .ok_or_else(|| ErrorKind::Conflict.with_message("Detection has no analysis yet"))?;
         self.blob_or_gone(
             conn,
             audit.blob_id,
             "The analysis for this detection has been deleted",
-            "detection",
         )
         .await
     }
@@ -512,15 +510,12 @@ impl RunBlobStore {
         detection: &WorkspaceDetection,
     ) -> Result<Blob> {
         let blob_id = detection.intermediate_blob_id.ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("Detection has no enrichment intermediates")
-                .with_resource("detection")
+            ErrorKind::NotFound.with_message("Detection has no enrichment intermediates")
         })?;
         self.blob_or_gone(
             conn,
             blob_id,
             "The intermediates for this detection have been deleted",
-            "detection",
         )
         .await
     }
@@ -583,35 +578,27 @@ impl RunBlobStore {
         let audit = conn
             .find_redaction_audit(redaction_id)
             .await?
-            .ok_or_else(|| {
-                ErrorKind::Conflict
-                    .with_message("Redaction has no review audit")
-                    .with_resource("redaction")
-            })?;
+            .ok_or_else(|| ErrorKind::Conflict.with_message("Redaction has no review audit"))?;
         self.blob_or_gone(
             conn,
             audit.blob_id,
             "The review audit for this redaction has been deleted",
-            "redaction",
         )
         .await
     }
 
     /// Fetches a blob by id, mapping a reclaimed (absent) blob to a 404 with
-    /// `gone_message` naming `resource`. Shared by the audit/intermediate/review
-    /// resolvers, which differ in that message and the resource they name.
+    /// `gone_message`. Shared by the audit/intermediate/review resolvers, which
+    /// differ in that message.
     async fn blob_or_gone(
         &self,
         conn: &mut PgConn,
         blob_id: Uuid,
         gone_message: &'static str,
-        resource: &'static str,
     ) -> Result<Blob> {
-        conn.find_blob_by_id(blob_id).await?.ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message(gone_message)
-                .with_resource(resource)
-        })
+        conn.find_blob_by_id(blob_id)
+            .await?
+            .ok_or_else(|| ErrorKind::NotFound.with_message(gone_message))
     }
 }
 

@@ -443,9 +443,7 @@ impl DetectionWorker {
                 }
             };
             if resolved.is_empty() {
-                return Err(ErrorKind::BadRequest
-                    .with_message("Detection has no policies")
-                    .with_resource("detection"));
+                return Err(ErrorKind::BadRequest.with_message("Detection has no policies"));
             }
             // Split the resolved set into the version ids the run pins and the
             // definitions the engine consumes.

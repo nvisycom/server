@@ -24,8 +24,6 @@ use super::ErrorResponse;
 pub struct Error<'a> {
     /// The error category, which determines the HTTP status and default message.
     pub kind: ErrorKind,
-    /// The resource the error relates to, if any.
-    pub resource: Option<Cow<'a, str>>,
     /// Debugging context appended to the response, if any.
     pub context: Option<Cow<'a, str>>,
     /// A custom user-facing message overriding the kind's default, if any.
@@ -38,7 +36,6 @@ impl Error<'static> {
     pub fn new(kind: ErrorKind) -> Self {
         Self {
             kind,
-            resource: None,
             context: None,
             message: None,
         }
@@ -46,9 +43,7 @@ impl Error<'static> {
 
     /// Creates a [`NotFound`](ErrorKind::NotFound) error for the given resource.
     pub fn not_found(resource: &'static str) -> Self {
-        Self::new(ErrorKind::NotFound)
-            .with_message(format!("{resource} not found"))
-            .with_resource(resource)
+        Self::new(ErrorKind::NotFound).with_message(format!("{resource} not found"))
     }
 }
 
@@ -74,15 +69,6 @@ impl<'a> Error<'a> {
         }
     }
 
-    /// Sets the resource that caused the error.
-    #[inline]
-    pub fn with_resource(self, resource: impl Into<Cow<'a, str>>) -> Self {
-        Self {
-            resource: Some(resource.into()),
-            ..self
-        }
-    }
-
     /// Returns the error kind.
     ///
     /// A convenience over the public [`kind`](Self::kind) field for the common
@@ -98,7 +84,6 @@ impl<'a> Error<'a> {
             kind: self.kind,
             context: self.context.map(|c| Cow::Owned(c.into_owned())),
             message: self.message.map(|m| Cow::Owned(m.into_owned())),
-            resource: self.resource.map(|r| Cow::Owned(r.into_owned())),
         }
     }
 }
@@ -110,7 +95,6 @@ impl Default for Error<'static> {
             kind: ErrorKind::default(),
             context: None,
             message: None,
-            resource: None,
         }
     }
 }
@@ -124,8 +108,7 @@ impl fmt::Debug for Error<'_> {
             .field("kind", &self.kind)
             .field("name", &response.name)
             .field("status", &response.status)
-            .field("message", &response.message)
-            .field("resource", &response.resource);
+            .field("message", &response.message);
 
         if let Some(ref context) = self.context {
             debug_struct.field("context", context);
@@ -133,10 +116,6 @@ impl fmt::Debug for Error<'_> {
 
         if let Some(ref message) = self.message {
             debug_struct.field("custom_message", message);
-        }
-
-        if let Some(ref resource) = self.resource {
-            debug_struct.field("custom_resource", resource);
         }
 
         debug_struct.finish()
@@ -154,10 +133,6 @@ impl fmt::Display for Error<'_> {
             write!(f, " - {}", context)?;
         }
 
-        if let Some(ref resource) = self.resource {
-            write!(f, " [resource: {}]", resource)?;
-        }
-
         Ok(())
     }
 }
@@ -168,12 +143,11 @@ impl IntoResponse for Error<'_> {
     fn into_response(self) -> Response {
         // The kind supplies the defaults (name, status, and fallback message);
         // this error's own fields override the message and add the per-occurrence
-        // resource and context.
+        // context.
         let defaults = self.kind.response();
         ErrorResponse {
             name: defaults.name,
             message: self.message.unwrap_or(defaults.message),
-            resource: self.resource,
             context: self.context,
             status: defaults.status,
         }
@@ -256,14 +230,6 @@ impl ErrorKind {
     #[inline]
     pub fn with_message<'a>(self, message: impl Into<Cow<'a, str>>) -> Error<'a> {
         Error::new(self).with_message(message)
-    }
-
-    /// Creates an [`Error`] with the specified resource.
-    ///
-    /// This is a convenience method for creating resource-specific errors.
-    #[inline]
-    pub fn with_resource<'a>(self, resource: impl Into<Cow<'a, str>>) -> Error<'a> {
-        Error::new(self).with_resource(resource)
     }
 
     /// Returns the default [`ErrorResponse`] for this kind: its machine-readable
@@ -410,22 +376,13 @@ mod tests {
     }
 
     #[test]
-    fn error_with_resource() {
-        let error = ErrorKind::Forbidden.with_resource("document");
-        assert_eq!(error.resource.as_deref(), Some("document"));
-        let _ = error.into_response();
-    }
-
-    #[test]
     fn error_builder_chaining() {
         let error = ErrorKind::NotFound
             .with_message("Document not found")
-            .with_resource("document")
             .with_context("ID: 123");
 
         assert_eq!(error.kind, ErrorKind::NotFound);
         assert_eq!(error.message.as_deref(), Some("Document not found"));
-        assert_eq!(error.resource.as_deref(), Some("document"));
         assert_eq!(error.context.as_deref(), Some("ID: 123"));
     }
 
@@ -433,7 +390,6 @@ mod tests {
     fn std_fmt_display() {
         let error = ErrorKind::NotFound
             .with_message("Resource not found")
-            .with_resource("document")
             .with_context("ID: 123");
 
         let display = format!("{}", error);
@@ -441,20 +397,17 @@ mod tests {
         assert!(display.contains("404"));
         assert!(display.contains("Resource not found"));
         assert!(display.contains("ID: 123"));
-        assert!(display.contains("document"));
     }
 
     #[test]
     fn std_fmt_debug() {
         let error = ErrorKind::Forbidden
             .with_message("Access denied")
-            .with_resource("document")
             .with_context("User lacks permissions");
 
         let debug = format!("{:?}", error);
         assert!(debug.contains("Forbidden"));
         assert!(debug.contains("Access denied"));
-        assert!(debug.contains("document"));
     }
 
     #[test]
@@ -467,12 +420,10 @@ mod tests {
     fn error_into_static() {
         let error = ErrorKind::NotFound
             .with_message("Test message".to_string())
-            .with_resource("test_resource".to_string())
             .with_context("Test context".to_string());
 
         let static_error = error.into_owned();
         assert_eq!(static_error.message.as_deref(), Some("Test message"));
-        assert_eq!(static_error.resource.as_deref(), Some("test_resource"));
         assert_eq!(static_error.context.as_deref(), Some("Test context"));
     }
 

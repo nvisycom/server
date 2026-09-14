@@ -100,7 +100,6 @@ impl RedirectResult<'_> {
             );
             return ErrorKind::InternalServerError
                 .with_message("Sign-in could not be completed")
-                .with_resource("authentication")
                 .into_response();
         }
 

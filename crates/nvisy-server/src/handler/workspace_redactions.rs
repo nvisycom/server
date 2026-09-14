@@ -152,11 +152,7 @@ async fn find_redaction(
 ) -> Result<nvisy_postgres::model::WorkspaceRedaction> {
     conn.find_redaction_in_workspace(workspace_id, redaction_id)
         .await?
-        .ok_or_else(|| {
-            ErrorKind::NotFound
-                .with_message("Redaction not found")
-                .with_resource("redaction")
-        })
+        .ok_or_else(|| ErrorKind::NotFound.with_message("Redaction not found"))
 }
 
 /// Builds the redaction routes.

@@ -90,9 +90,7 @@ async fn set_password(
         // (from the OIDC reauth endpoint), consumed single-use here before the
         // service writes the credential.
         let proof = request.reauth_proof.as_deref().ok_or_else(|| {
-            ErrorKind::Unauthorized
-                .with_message("Re-authentication required to set a password")
-                .with_resource("account")
+            ErrorKind::Unauthorized.with_message("Re-authentication required to set a password")
         })?;
         oidc.consume_reauth_proof(account_id, proof).await?;
         identities
@@ -153,9 +151,9 @@ async fn unlink_provider(
     // The password is managed through its own endpoint; this route is for OIDC
     // providers only.
     if !path_params.provider.is_oidc() {
-        return Err(ErrorKind::BadRequest
-            .with_message("Use the password endpoint to remove a password")
-            .with_resource("account_identity"));
+        return Err(
+            ErrorKind::BadRequest.with_message("Use the password endpoint to remove a password")
+        );
     }
 
     identities

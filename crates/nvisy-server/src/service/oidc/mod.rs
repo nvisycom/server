@@ -541,9 +541,7 @@ impl OidcService {
         if let Some(redirect_uri) = &redirect_uri
             && !self.is_redirect_allowed(redirect_uri)
         {
-            return Err(ErrorKind::BadRequest
-                .with_message("redirectUri is not an allowed origin")
-                .with_resource("account"));
+            return Err(ErrorKind::BadRequest.with_message("redirectUri is not an allowed origin"));
         }
 
         let OidcAuthorization {
@@ -681,8 +679,7 @@ impl OidcService {
                     .is_some_and(|linked| linked.account_id == account_id);
                 if !matches {
                     return Err(ErrorKind::Unauthorized
-                        .with_message("Re-authentication did not match a linked identity")
-                        .with_resource("account"));
+                        .with_message("Re-authentication did not match a linked identity"));
                 }
                 let proof = self.mint_reauth_proof(account_id).await?;
                 Ok(CallbackOutcome::Reauthed { proof })
@@ -702,14 +699,10 @@ impl OidcService {
     /// token is minted — mirroring what password login gates on.
     pub fn gate_account_status(account: &Account) -> Result<()> {
         if account.is_suspended() {
-            return Err(ErrorKind::Forbidden
-                .with_message("Account is suspended")
-                .with_resource("account"));
+            return Err(ErrorKind::Forbidden.with_message("Account is suspended"));
         }
         if account.is_deleted() {
-            return Err(ErrorKind::Forbidden
-                .with_message("Account has been deleted")
-                .with_resource("account"));
+            return Err(ErrorKind::Forbidden.with_message("Account has been deleted"));
         }
         Ok(())
     }
