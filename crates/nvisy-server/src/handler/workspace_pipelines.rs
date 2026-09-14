@@ -291,13 +291,13 @@ pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         // Workspace-scoped routes for listing and creating
         .api_route(
-            "/workspaces/{workspaceId}/pipelines/",
+            "/workspaces/{workspaceId}/pipelines",
             post_with(create_pipeline, create_pipeline_docs)
                 .get_with(list_pipelines, list_pipelines_docs),
         )
         // Pipeline operations by id
         .api_route(
-            "/workspaces/{workspaceId}/pipelines/{pipelineId}/",
+            "/workspaces/{workspaceId}/pipelines/{pipelineId}",
             get_with(get_pipeline, get_pipeline_docs)
                 .patch_with(update_pipeline, update_pipeline_docs)
                 .delete_with(delete_pipeline, delete_pipeline_docs),

@@ -183,15 +183,15 @@ pub fn private_routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/capabilities/labels/",
+            "/capabilities/labels",
             get_with(list_labels, list_labels_docs),
         )
         .api_route(
-            "/capabilities/recognizers/",
+            "/capabilities/recognizers",
             get_with(list_recognizers, list_recognizers_docs),
         )
         .api_route(
-            "/capabilities/connectors/",
+            "/capabilities/connectors",
             get_with(list_connectors, list_connectors_docs),
         )
         .with_path_items(|item| item.tag("Capabilities"))
@@ -203,7 +203,7 @@ pub fn public_routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::get_with;
 
     ApiRouter::new()
-        .api_route("/capabilities/auth/", get_with(list_auth, list_auth_docs))
+        .api_route("/capabilities/auth", get_with(list_auth, list_auth_docs))
         .with_path_items(|item| item.tag("Capabilities"))
 }
 

@@ -185,11 +185,11 @@ fn unlink_provider_docs(op: TransformOperation) -> TransformOperation {
 pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
-            "/account/identities/",
+            "/account/identities",
             get_with(list_identities, list_identities_docs),
         )
         .api_route(
-            "/account/identities/password/",
+            "/account/identities/password",
             put_with(set_password, set_password_docs)
                 .delete_with(delete_password, delete_password_docs),
         )
@@ -198,7 +198,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
         // lives in `auth_oidc` beside the shared callback) and returns an
         // authorize URL; unlinking removes the identity.
         .api_route(
-            "/account/identities/{provider}/",
+            "/account/identities/{provider}",
             post_with(
                 super::auth_oidc::start_link,
                 super::auth_oidc::start_link_docs,

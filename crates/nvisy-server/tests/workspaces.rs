@@ -18,7 +18,7 @@ async fn delete_workspace_as_owner_succeeds() {
 
     let response = app
         .server()
-        .delete(&format!("/workspaces/{workspace}/"))
+        .delete(&format!("/workspaces/{workspace}"))
         .authorization_bearer(&owner.jwt)
         .await;
 
@@ -39,7 +39,7 @@ async fn delete_workspace_as_reviewer_is_forbidden() {
 
     let response = app
         .server()
-        .delete(&format!("/workspaces/{workspace}/"))
+        .delete(&format!("/workspaces/{workspace}"))
         .authorization_bearer(&member.jwt)
         .await;
 

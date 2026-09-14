@@ -162,7 +162,7 @@ async fn find_redaction(
 pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/detections/{detectionId}/redactions/",
+            "/workspaces/{workspaceId}/detections/{detectionId}/redactions",
             get_with(list_detection_redactions, list_detection_redactions_docs),
         )
         .api_route(

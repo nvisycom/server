@@ -323,7 +323,7 @@ fn serialize_error(error: impl std::fmt::Display) -> Error<'static> {
 pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/activities/",
+            "/workspaces/{workspaceId}/activities",
             get_with(list_activities, list_activities_docs),
         )
         .api_route(

@@ -367,14 +367,14 @@ pub fn public_routes() -> ApiRouter<ServiceState> {
         // The start endpoint is part of the API contract (a client initiates it),
         // so it is an `api_route` and appears in the OpenAPI spec.
         .api_route(
-            "/auth/{provider}/start/",
+            "/auth/{provider}/start",
             get_with(start_sign_in, start_sign_in_docs),
         )
         // The callback is a provider-driven browser redirect, never an SDK call,
         // so it is a plain route absent from the OpenAPI spec. It serves the
         // sign-in, link, and reauth flows (the stashed purpose selects the
         // action).
-        .route("/auth/{provider}/callback/", get(oidc_callback))
+        .route("/auth/{provider}/callback", get(oidc_callback))
         .with_path_items(|item| item.tag("Authentication"))
 }
 
@@ -388,14 +388,14 @@ pub fn public_routes() -> ApiRouter<ServiceState> {
 pub fn private_routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
-            "/auth/{provider}/reauth/",
+            "/auth/{provider}/reauth",
             get_with(start_reauth, start_reauth_docs),
         )
         // Desktop token minting: the browser session is exchanged for a native-app
         // Bearer token. A static path alongside the `{provider}` routes above; they
         // diverge after the second segment, so there is no route conflict.
         .api_route(
-            "/auth/desktop/token/",
+            "/auth/desktop/token",
             post_with(mint_desktop_token, mint_desktop_token_docs),
         )
         .with_path_items(|item| item.tag("Authentication"))

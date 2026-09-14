@@ -169,12 +169,12 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/api-tokens/",
+            "/api-tokens",
             post_with(create_api_token, create_api_token_docs)
                 .get_with(list_api_tokens, list_api_tokens_docs),
         )
         .api_route(
-            "/api-tokens/{tokenId}/",
+            "/api-tokens/{tokenId}",
             get_with(read_api_token, read_api_token_docs)
                 .patch_with(update_api_token, update_api_token_docs)
                 .delete_with(revoke_api_token, revoke_api_token_docs),

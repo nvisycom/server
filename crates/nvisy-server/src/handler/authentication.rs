@@ -109,8 +109,8 @@ pub fn public_routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::post_with;
 
     ApiRouter::new()
-        .api_route("/auth/login/", post_with(login, login_docs))
-        .api_route("/auth/signup/", post_with(signup, signup_docs))
+        .api_route("/auth/login", post_with(login, login_docs))
+        .api_route("/auth/signup", post_with(signup, signup_docs))
         .with_path_items(|item| item.tag("Authentication"))
 }
 
@@ -121,7 +121,7 @@ pub fn private_routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::post_with;
 
     ApiRouter::new()
-        .api_route("/auth/logout/", post_with(logout, logout_docs))
+        .api_route("/auth/logout", post_with(logout, logout_docs))
         .with_path_items(|item| item.tag("Authentication"))
 }
 

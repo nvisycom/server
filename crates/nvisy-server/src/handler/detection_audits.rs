@@ -260,15 +260,15 @@ fn archive_error(error: impl std::fmt::Display) -> Error<'static> {
 pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/detections/{detectionId}/analysis/",
+            "/workspaces/{workspaceId}/detections/{detectionId}/analysis",
             get_with(get_detection_analysis, get_detection_analysis_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/detections/{detectionId}/audit/",
+            "/workspaces/{workspaceId}/detections/{detectionId}/audit",
             get_with(download_detection_audit, download_detection_audit_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/detections/{detectionId}/intermediates/",
+            "/workspaces/{workspaceId}/detections/{detectionId}/intermediates",
             get_with(
                 get_detection_intermediates,
                 get_detection_intermediates_docs,

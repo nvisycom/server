@@ -19,7 +19,7 @@ async fn list_members_as_owner_returns_the_membership() {
 
     let response = app
         .server()
-        .get(&format!("/workspaces/{workspace}/members/"))
+        .get(&format!("/workspaces/{workspace}/members"))
         .authorization_bearer(&owner.jwt)
         .await;
 
@@ -42,7 +42,7 @@ async fn list_members_as_non_member_is_forbidden() {
 
     let response = app
         .server()
-        .get(&format!("/workspaces/{workspace}/members/"))
+        .get(&format!("/workspaces/{workspace}/members"))
         .authorization_bearer(&outsider.jwt)
         .await;
 
@@ -59,7 +59,7 @@ async fn list_members_for_unknown_workspace_is_not_found() {
 
     let response = app
         .server()
-        .get(&format!("/workspaces/{missing}/members/"))
+        .get(&format!("/workspaces/{missing}/members"))
         .authorization_bearer(&actor.jwt)
         .await;
 
@@ -75,7 +75,7 @@ async fn list_members_without_a_token_is_unauthorized() {
 
     let response = app
         .server()
-        .get(&format!("/workspaces/{workspace}/members/"))
+        .get(&format!("/workspaces/{workspace}/members"))
         .await;
 
     response.assert_status_unauthorized();

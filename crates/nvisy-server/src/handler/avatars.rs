@@ -79,11 +79,11 @@ fn get_avatar_docs(op: TransformOperation) -> TransformOperation {
 pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
         .api_route(
-            "/avatars/accounts/{id}/{version}/",
+            "/avatars/accounts/{id}/{version}",
             get_with(get_account_avatar, get_avatar_docs),
         )
         .api_route(
-            "/avatars/workspaces/{id}/{version}/",
+            "/avatars/workspaces/{id}/{version}",
             get_with(get_workspace_avatar, get_avatar_docs),
         )
         .with_path_items(|item| item.tag("Avatars"))

@@ -87,6 +87,6 @@ pub fn routes() -> ApiRouter<ServiceState> {
         .api_route("/health/live", get_with(liveness, liveness_docs))
         .api_route("/health/ready", get_with(readiness, readiness_docs))
         // `/health` is the conventional default probe; alias it to readiness.
-        .api_route("/health/", get_with(readiness, readiness_docs))
+        .api_route("/health", get_with(readiness, readiness_docs))
         .with_path_items(|item| item.tag("Health"))
 }

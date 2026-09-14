@@ -559,30 +559,30 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/documents/{documentId}/review/verify/",
+            "/workspaces/{workspaceId}/documents/{documentId}/review/verify",
             post_with(verify_review, verify_review_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/documents/{documentId}/review/assign/",
+            "/workspaces/{workspaceId}/documents/{documentId}/review/assign",
             put_with(assign_review, assign_review_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/threads/",
+            "/workspaces/{workspaceId}/threads",
             post_with(open_workspace_thread, open_workspace_thread_docs)
                 .get_with(list_threads, list_threads_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/threads/{threadId}/",
+            "/workspaces/{workspaceId}/threads/{threadId}",
             patch_with(rename_thread, rename_thread_docs)
                 .delete_with(delete_thread, delete_thread_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/threads/{threadId}/close/",
+            "/workspaces/{workspaceId}/threads/{threadId}/close",
             post_with(close_thread, close_thread_docs)
                 .delete_with(reopen_thread, reopen_thread_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/threads/{threadId}/timeline/",
+            "/workspaces/{workspaceId}/threads/{threadId}/timeline",
             get_with(list_thread_timeline, list_thread_timeline_docs),
         )
         .with_path_items(|item| item.tag("Threads"))

@@ -856,28 +856,28 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/pipelines/detections/",
+            "/workspaces/{workspaceId}/pipelines/detections",
             get_with(list_workspace_detections, list_workspace_detections_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/pipelines/{pipelineId}/detections/",
+            "/workspaces/{workspaceId}/pipelines/{pipelineId}/detections",
             post_with(create_detection, create_detection_docs)
                 .get_with(list_pipeline_detections, list_pipeline_detections_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/detections/",
+            "/workspaces/{workspaceId}/detections",
             post_with(create_adhoc_detection, create_adhoc_detection_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/detections/{detectionId}/",
+            "/workspaces/{workspaceId}/detections/{detectionId}",
             get_with(get_detection, get_detection_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/detections/{detectionId}/events/",
+            "/workspaces/{workspaceId}/detections/{detectionId}/events",
             get_with(stream_detection_events, stream_detection_events_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/detections/{detectionId}/redactions/",
+            "/workspaces/{workspaceId}/detections/{detectionId}/redactions",
             post_with(redact_detection, redact_detection_docs),
         )
         .with_path_items(|item| item.tag("WorkspaceDetections"))
