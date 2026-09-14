@@ -2,7 +2,7 @@
 //! any downstream binary that embeds this server.
 //!
 //! [`MiddlewareArgs`] groups the middleware configs a binary applies to the
-//! router (CORS, OpenAPI, recovery) into one `clap::Args` group, so a wrapping
+//! router (CORS, `OpenAPI`, recovery) into one `clap::Args` group, so a wrapping
 //! binary can `#[clap(flatten)]` it instead of re-declaring each config. The
 //! request-limit [`UploadConfig`](crate::middleware::UploadConfig) is part of
 //! [`ServiceArgs`](crate::ServiceArgs) instead, since the running state also
@@ -33,7 +33,7 @@ pub struct MiddlewareArgs {
     #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "CORS"))]
     pub cors: CorsConfig,
 
-    /// OpenAPI documentation configuration.
+    /// `OpenAPI` documentation configuration.
     #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "OpenAPI"))]
     pub openapi: OpenApiConfig,
 
@@ -107,7 +107,7 @@ impl MiddlewareArgs {
 
 /// Applies the standard HTTP-middleware stack to a router in one call.
 pub trait RouterMiddlewareExt<S> {
-    /// Serves OpenAPI docs, then layers metrics, security headers + CORS + body
+    /// Serves `OpenAPI` docs, then layers metrics, security headers + CORS + body
     /// limits, observability, and recovery — the full standard stack, in the
     /// order the server applies them.
     ///

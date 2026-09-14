@@ -132,7 +132,7 @@ impl WorkspaceInviteRepository for PgConnection {
         &mut self,
         token: &str,
     ) -> Result<Option<WorkspaceInvite>> {
-        use schema::workspace_invites::dsl::*;
+        use schema::workspace_invites::dsl::{invite_token, workspace_invites};
 
         let invite = workspace_invites
             .filter(invite_token.eq(token))
@@ -169,7 +169,7 @@ impl WorkspaceInviteRepository for PgConnection {
         invite_id: Uuid,
         changes: UpdateWorkspaceInvite,
     ) -> Result<WorkspaceInvite> {
-        use schema::workspace_invites::dsl::*;
+        use schema::workspace_invites::dsl::{id, workspace_invites};
 
         let invite = diesel::update(workspace_invites)
             .filter(id.eq(invite_id))

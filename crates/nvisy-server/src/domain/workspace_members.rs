@@ -29,6 +29,7 @@ pub struct WorkspaceMemberService {
 
 impl WorkspaceMemberService {
     /// Creates a [`WorkspaceMemberService`] over the given connection pool.
+    #[must_use]
     pub fn new(postgres: PgClient) -> Self {
         Self { postgres }
     }
@@ -47,7 +48,7 @@ impl WorkspaceMemberService {
             .await?)
     }
 
-    /// Finds a member by account id with their account, or a NotFound.
+    /// Finds a member by account id with their account, or a `NotFound`.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -165,7 +166,7 @@ impl WorkspaceMemberService {
             .ok_or_else(|| ErrorKind::NotFound.into_error())
     }
 
-    /// Returns the acting account's membership in the workspace, or a NotFound.
+    /// Returns the acting account's membership in the workspace, or a `NotFound`.
     ///
     /// The membership carries the account's notification preferences, so the
     /// handler reads its settings from the returned row.
@@ -181,7 +182,7 @@ impl WorkspaceMemberService {
     }
 
     /// Updates the acting account's notification preferences on its membership,
-    /// returning the updated member. Fails with NotFound when the account is not a
+    /// returning the updated member. Fails with `NotFound` when the account is not a
     /// member of the workspace.
     pub async fn update_notification_settings(
         &self,
@@ -295,8 +296,8 @@ mod tests {
             member_role: Some(WorkspaceRole::Editor),
             ..Default::default()
         };
-        let (updated, _account) = service.update(origin, member, updates).await?;
-        assert_eq!(updated.member_role, WorkspaceRole::Editor);
+        let (updated_member, _account) = service.update(origin, member, updates).await?;
+        assert_eq!(updated_member.member_role, WorkspaceRole::Editor);
         Ok(())
     }
 

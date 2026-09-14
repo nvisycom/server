@@ -557,7 +557,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         // exact `claimed_at` our claim stamped. A worker that re-claimed a stale
         // detection renews `claimed_at`, so a lost claim matches no row and
         // returns false.
-        let updated = diesel::update(
+        let rows_affected = diesel::update(
             workspace_detections::table
                 .filter(dsl::id.eq(detection_id))
                 .filter(dsl::status.eq(DetectionStatus::Executing))
@@ -568,7 +568,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         .await
         .map_err(Error::from)?;
 
-        Ok(updated == 1)
+        Ok(rows_affected == 1)
     }
 
     async fn fail_detection(
@@ -587,7 +587,7 @@ impl WorkspaceDetectionRepository for PgConnection {
 
         // Same claim guard as the complete finalize: only our still-live claim
         // (detection `Executing`, `claimed_at` unchanged) may fail the detection.
-        let updated = diesel::update(
+        let rows_affected = diesel::update(
             workspace_detections::table
                 .filter(dsl::id.eq(detection_id))
                 .filter(dsl::status.eq(DetectionStatus::Executing))
@@ -598,7 +598,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         .await
         .map_err(Error::from)?;
 
-        Ok(updated == 1)
+        Ok(rows_affected == 1)
     }
 
     async fn fail_pending_detection(
@@ -615,7 +615,7 @@ impl WorkspaceDetectionRepository for PgConnection {
 
         // Guard on `Pending`: once a worker claims the detection (moving it to
         // `Executing`), this matches no row and the worker owns the outcome.
-        let updated = diesel::update(
+        let rows_affected = diesel::update(
             workspace_detections::table
                 .filter(dsl::id.eq(detection_id))
                 .filter(dsl::status.eq(DetectionStatus::Pending)),
@@ -625,7 +625,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         .await
         .map_err(Error::from)?;
 
-        Ok(updated == 1)
+        Ok(rows_affected == 1)
     }
 
     async fn record_detection_usage(&mut self, usage: &[NewWorkspaceDetectionUsage]) -> Result<()> {

@@ -306,7 +306,7 @@ async fn test_webhook(
 
     Ok((
         StatusCode::OK,
-        Json(WorkspaceWebhookResult::from_response(response)),
+        Json(WorkspaceWebhookResult::from_response(&response)),
     ))
 }
 
@@ -321,7 +321,7 @@ fn test_webhook_docs(op: TransformOperation) -> TransformOperation {
 
 /// Returns routes for workspace webhook management.
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, post_with};
 
     ApiRouter::new()
         .api_route(

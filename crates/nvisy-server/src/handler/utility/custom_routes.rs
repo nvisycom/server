@@ -48,11 +48,13 @@ where
 {
     /// Creates a new empty `CustomRoutes` instance.
     #[inline]
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Adds custom private routes (authenticated), merging with any already set.
+    #[must_use]
     pub fn add_private_routes(mut self, routes: ApiRouter<S>) -> Self {
         self.private_routes = Some(match self.private_routes {
             Some(existing) => existing.merge(routes),
@@ -62,6 +64,7 @@ where
     }
 
     /// Adds custom public routes (unauthenticated), merging with any already set.
+    #[must_use]
     pub fn add_public_routes(mut self, routes: ApiRouter<S>) -> Self {
         self.public_routes = Some(match self.public_routes {
             Some(existing) => existing.merge(routes),
@@ -71,6 +74,7 @@ where
     }
 
     /// Returns true if no custom routes are configured.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.private_routes.is_none() && self.public_routes.is_none()
     }

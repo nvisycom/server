@@ -61,3 +61,6 @@ derive_more = { workspace = true, features = [
     "display",
     "from_str",
 ] }
+
+[lints]
+workspace = true

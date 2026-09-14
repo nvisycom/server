@@ -11,7 +11,7 @@
 //!
 //! - [`Permissive`](EndpointPolicy::Permissive) — self-hosted, where endpoints
 //!   are a trusted operator's choice: `https` anywhere, and `http` only for a
-//!   loopback host (a local emulator such as MinIO, Azurite, or Ollama).
+//!   loopback host (a local emulator such as `MinIO`, Azurite, or Ollama).
 //! - [`Strict`](EndpointPolicy::Strict) — cloud/multi-tenant, where endpoints
 //!   are attacker-influenced: `https` only, and the host must resolve entirely
 //!   to globally routable addresses (checked after DNS, since a public hostname
@@ -75,7 +75,9 @@ impl EndpointPolicy {
         match self {
             Self::Permissive => match url.scheme() {
                 "https" => Ok(EndpointDecision { allow_http: false }),
-                "http" if is_loopback_host(url.host()) => Ok(EndpointDecision { allow_http: true }),
+                "http" if is_loopback_host(url.host().as_ref()) => {
+                    Ok(EndpointDecision { allow_http: true })
+                }
                 "http" => Err(Error::invalid(format!(
                     "plaintext http endpoints are only allowed for loopback hosts: {endpoint}"
                 ))),
@@ -99,7 +101,7 @@ impl EndpointPolicy {
 
 /// Whether a parsed URL host is the local loopback interface: `localhost`, an
 /// IPv4 loopback (`127.0.0.0/8`), or `::1`.
-fn is_loopback_host(host: Option<Host<&str>>) -> bool {
+fn is_loopback_host(host: Option<&Host<&str>>) -> bool {
     match host {
         Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
         Some(Host::Ipv4(ip)) => ip.is_loopback(),

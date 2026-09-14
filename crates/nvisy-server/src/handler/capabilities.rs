@@ -66,12 +66,15 @@ fn list_recognizers_docs(op: TransformOperation) -> TransformOperation {
 /// only when that provider's OAuth app is configured on the server.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+// reason: one serialized availability flag per provider; a struct-per-bool would
+// not read better and would change the wire shape.
+#[allow(clippy::struct_excessive_bools)]
 pub struct FileProviders {
     /// Whether Google Drive can be connected.
     pub google_drive: bool,
     /// Whether Dropbox can be connected.
     pub dropbox: bool,
-    /// Whether OneDrive can be connected.
+    /// Whether `OneDrive` can be connected.
     pub one_drive: bool,
     /// Whether Box can be connected. (`box` is a Rust keyword, hence the field
     /// name; the wire name is `box`.)
@@ -174,7 +177,7 @@ fn list_auth_docs(op: TransformOperation) -> TransformOperation {
 /// Authenticated capability routes: the deployment reference data a signed-in
 /// client reads (labels, recognizers, connectors).
 pub fn private_routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::get_with;
 
     ApiRouter::new()
         .api_route(
@@ -195,7 +198,7 @@ pub fn private_routes() -> ApiRouter<ServiceState> {
 /// Public capability routes: the sign-in methods a login screen reads before
 /// anyone is authenticated, so this route carries no auth requirement.
 pub fn public_routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::get_with;
 
     ApiRouter::new()
         .api_route("/capabilities/auth/", get_with(list_auth, list_auth_docs))

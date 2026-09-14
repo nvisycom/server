@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// Defines the type of notification event sent to a user.
     ///
-    /// Corresponds to the `NOTIFICATION_EVENT` PostgreSQL enum and is used for
+    /// Corresponds to the `NOTIFICATION_EVENT` `PostgreSQL` enum and is used for
     /// member, connection-sync, detection, redaction, and system notifications.
     /// The values mirror the [`WebhookEvent`](super::WebhookEvent) naming for the
     /// events the two channels share.

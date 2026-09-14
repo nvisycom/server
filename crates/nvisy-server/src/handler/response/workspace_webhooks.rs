@@ -134,8 +134,11 @@ pub struct WorkspaceWebhookResult {
 }
 
 impl WorkspaceWebhookResult {
-    /// Creates a WebhookResult from the core webhook response.
-    pub fn from_response(response: nvisy_webhook::provider::WebhookResponse) -> Self {
+    /// Creates a `WebhookResult` from the core webhook response.
+    // reason: jiff reports the total as f64 milliseconds and there is no fallible
+    // f64->i64 conversion; the duration is small and positive, so truncation is fine.
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn from_response(response: &nvisy_webhook::provider::WebhookResponse) -> Self {
         let duration_ms = response
             .duration()
             .total(jiff::Unit::Millisecond)

@@ -5,7 +5,7 @@
 
 use super::http_error::{Error as HttpError, ErrorKind};
 
-impl<'a> From<nvisy_nats::Error> for HttpError<'a> {
+impl From<nvisy_nats::Error> for HttpError<'_> {
     fn from(nats_error: nvisy_nats::Error) -> Self {
         match nats_error {
             // Connection and network errors -> Service Unavailable (transient,
@@ -20,7 +20,7 @@ impl<'a> From<nvisy_nats::Error> for HttpError<'a> {
 
             nvisy_nats::Error::DeliveryFailed { ref subject, .. } => ErrorKind::InternalServerError
                 .with_message("Message delivery failed")
-                .with_context(format!("Failed to deliver message to {}", subject)),
+                .with_context(format!("Failed to deliver message to {subject}")),
 
             // Serialization is an internal encode/decode fault, not a client
             // input error: the caller cannot influence how we frame NATS payloads.
@@ -37,7 +37,7 @@ impl<'a> From<nvisy_nats::Error> for HttpError<'a> {
             // Not found errors -> Not Found
             nvisy_nats::Error::KvKeyNotFound { ref bucket, .. } => ErrorKind::NotFound
                 .with_message("Resource not found")
-                .with_context(format!("Key not found in storage bucket '{}'", bucket)),
+                .with_context(format!("Key not found in storage bucket '{bucket}'")),
 
             nvisy_nats::Error::KvBucketNotFound { .. } => ErrorKind::NotFound
                 .with_message("Storage bucket not found")
@@ -84,7 +84,7 @@ impl<'a> From<nvisy_nats::Error> for HttpError<'a> {
 
             // Generic operation error -> Internal Server Error
             nvisy_nats::Error::Operation { ref operation, .. } => ErrorKind::InternalServerError
-                .with_message(format!("Operation '{}' failed", operation))
+                .with_message(format!("Operation '{operation}' failed"))
                 .with_context("The requested operation could not be completed"),
         }
     }

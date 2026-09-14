@@ -164,7 +164,7 @@ fn revoke_api_token_docs(op: TransformOperation) -> TransformOperation {
 
 /// Returns routes for API token management.
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, post_with};
 
     ApiRouter::new()
         .api_route(

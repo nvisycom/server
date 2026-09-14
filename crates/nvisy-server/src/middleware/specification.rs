@@ -1,12 +1,12 @@
-//! OpenAPI specification middleware with Scalar UI integration.
+//! `OpenAPI` specification middleware with Scalar UI integration.
 //!
-//! This module provides OpenAPI documentation generation and serving capabilities
+//! This module provides `OpenAPI` documentation generation and serving capabilities
 //! using the [`aide`] crate with Scalar UI for interactive API exploration.
 //!
 //! # Overview
 //!
 //! The specification module offers:
-//! - Automatic OpenAPI spec generation from aide's [`ApiRouter`]
+//! - Automatic `OpenAPI` spec generation from aide's [`ApiRouter`]
 //! - Scalar UI for interactive API documentation
 //! - Configurable paths for JSON spec and UI endpoints
 //!
@@ -32,15 +32,15 @@ use axum::routing::{Router, get};
 use axum::{Extension, Json};
 use serde_json::Value;
 
-/// OpenAPI configuration for aide integration.
+/// `OpenAPI` configuration for aide integration.
 ///
-/// Configures the paths where the OpenAPI JSON specification and
+/// Configures the paths where the `OpenAPI` JSON specification and
 /// Scalar UI will be served.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 #[must_use = "config does nothing unless you use it"]
 pub struct OpenApiConfig {
-    /// Path which exposes the OpenAPI JSON specification.
+    /// Path which exposes the `OpenAPI` JSON specification.
     #[cfg_attr(
         feature = "cli",
         arg(long, env = "OPENAPI_JSON_PATH", default_value = "/api/openapi.json")
@@ -64,23 +64,23 @@ impl Default for OpenApiConfig {
     }
 }
 
-/// Extension trait for [`ApiRouter`] to add OpenAPI documentation with Scalar UI.
+/// Extension trait for [`ApiRouter`] to add `OpenAPI` documentation with Scalar UI.
 ///
-/// This trait provides convenient methods to generate and serve OpenAPI documentation
+/// This trait provides convenient methods to generate and serve `OpenAPI` documentation
 /// from your aide-annotated routes.
 ///
 /// [`ApiRouter`]: aide::axum::ApiRouter
 pub trait RouterOpenApiExt<S> {
-    /// Adds OpenAPI documentation routes.
+    /// Adds `OpenAPI` documentation routes.
     ///
     /// This method:
-    /// - Generates the OpenAPI specification from the router's API routes
-    /// - Adds a route to serve the OpenAPI JSON specification
+    /// - Generates the `OpenAPI` specification from the router's API routes
+    /// - Adds a route to serve the `OpenAPI` JSON specification
     /// - Adds a route to serve the Scalar API reference UI
     ///
     /// # Arguments
     ///
-    /// * `config` - Configuration for OpenAPI and Scalar UI paths
+    /// * `config` - Configuration for `OpenAPI` and Scalar UI paths
     ///
     /// # Example
     ///
@@ -237,10 +237,12 @@ fn collapse_in_object(map: &mut serde_json::Map<String, Value>) {
     }
 }
 
-/// Transforms the OpenAPI specification with info and tags.
+/// Transforms the `OpenAPI` specification with info and tags.
 ///
-/// This function configures the OpenAPI documentation with API info and
+/// This function configures the `OpenAPI` documentation with API info and
 /// organized tags for different API sections.
+// reason: long but cohesive; splitting adds no clarity.
+#[allow(clippy::too_many_lines)]
 fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
     api.title("Nvisy API")
         .summary("Document processing and annotation platform")

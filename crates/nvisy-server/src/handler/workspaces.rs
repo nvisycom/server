@@ -63,7 +63,7 @@ async fn create_workspace(
     let creator = resolve_account_ref(&mut conn, creator_id).await?;
     let response = Workspace::from_model_with_membership(
         created.workspace,
-        created.membership,
+        &created.membership,
         creator,
         upload.max_file_bytes(),
     );
@@ -98,7 +98,7 @@ async fn list_workspaces(
     let response = Page::from_cursor_page(page, |(workspace, member, creator)| {
         Workspace::from_model_with_membership(
             workspace,
-            member,
+            &member,
             creator.into(),
             hard_max_upload_bytes,
         )
@@ -142,7 +142,7 @@ async fn read_workspace(
     let creator = resolve_account_ref(&mut conn, workspace.created_by).await?;
 
     let hard = upload.max_file_bytes();
-    let response = Workspace::from_model_with_membership(workspace, member, creator, hard);
+    let response = Workspace::from_model_with_membership(workspace, &member, creator, hard);
     Ok((StatusCode::OK, Json(response)))
 }
 
@@ -195,7 +195,7 @@ async fn update_workspace(
     let creator = resolve_account_ref(&mut conn, updated.created_by).await?;
 
     let hard = upload.max_file_bytes();
-    let response = Workspace::from_model_with_membership(updated, member, creator, hard);
+    let response = Workspace::from_model_with_membership(updated, &member, creator, hard);
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -375,7 +375,7 @@ fn delete_workspace_avatar_docs(op: TransformOperation) -> TransformOperation {
 }
 
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, post_with, put_with};
 
     ApiRouter::new()
         .api_route(

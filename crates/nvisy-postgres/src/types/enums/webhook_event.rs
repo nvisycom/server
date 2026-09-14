@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// The types of events that can trigger webhook delivery.
     ///
-    /// Corresponds to the `WEBHOOK_EVENT` PostgreSQL enum and configures which
+    /// Corresponds to the `WEBHOOK_EVENT` `PostgreSQL` enum and configures which
     /// events a webhook receives.
     pub enum WebhookEvent = "crate::schema::sql_types::WebhookEvent" {
         /// A new document was created.
@@ -77,6 +77,7 @@ db_enum! {
 
 impl WebhookEvent {
     /// Returns the event category as a string.
+    #[must_use]
     pub fn category(&self) -> &'static str {
         match self {
             WebhookEvent::DocumentCreated
@@ -119,6 +120,7 @@ impl WebhookEvent {
     /// The event name is already a dotted, NATS-legal subject (e.g.
     /// `document.created`, `pipeline.redaction.created`), so this is the event's own
     /// string representation (from its `strum(serialize)`).
+    #[must_use]
     pub fn as_subject(&self) -> &'static str {
         self.into()
     }

@@ -48,7 +48,7 @@ pub const TRACING_TARGET_CONFIG: &str = "nvisy_cli::config";
 ///
 /// Combines all configuration groups for the nvisy server:
 /// - [`ServerConfig`]: Network binding and TLS
-/// - [`MiddlewareArgs`]: HTTP middleware (CORS, OpenAPI, recovery)
+/// - [`MiddlewareArgs`]: HTTP middleware (CORS, `OpenAPI`, recovery)
 /// - [`ServiceArgs`]: External services, resources, and request limits
 /// - [`ReqwestConfig`]: HTTP client configuration for webhook delivery
 #[derive(Debug, Clone, Parser)]
@@ -60,7 +60,7 @@ pub struct Cli {
     #[clap(flatten, next_help_heading = "Server")]
     pub server: ServerConfig,
 
-    /// HTTP middleware configuration (CORS, OpenAPI, recovery/timeouts).
+    /// HTTP middleware configuration (CORS, `OpenAPI`, recovery/timeouts).
     #[clap(flatten)]
     pub middleware: MiddlewareArgs,
 
@@ -151,7 +151,7 @@ impl Cli {
 
     /// Initializes application state from CLI configuration.
     pub async fn service_state(&self) -> anyhow::Result<ServiceState> {
-        let webhook = ReqwestClient::new(self.reqwest.clone()).into_service();
-        Ok(ServiceState::from_args(self.service.clone(), webhook).await?)
+        let webhook = ReqwestClient::new(&self.reqwest).into_service();
+        Ok(ServiceState::from_config(self.service.clone(), webhook).await?)
     }
 }

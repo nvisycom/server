@@ -96,7 +96,7 @@ fn get_detection_timeseries_docs(op: TransformOperation) -> TransformOperation {
 
 /// Builds the analytics routes.
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::get_with;
 
     ApiRouter::new()
         .api_route(

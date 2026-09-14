@@ -69,7 +69,7 @@ impl Workspace {
     /// Creates a new instance of [`Workspace`] with role information.
     pub fn from_model_with_membership(
         workspace: model::Workspace,
-        member: model::WorkspaceMember,
+        member: &model::WorkspaceMember,
         created_by: AccountRef,
         hard_max_upload_bytes: u64,
     ) -> Self {

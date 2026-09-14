@@ -119,6 +119,7 @@ impl Version {
     /// assert_eq!(Version::new("v0").into_inner(), Some(0));
     /// assert_eq!(Version::new("invalid").into_inner(), None);
     /// ```
+    #[must_use]
     pub fn into_inner(self) -> Option<u16> {
         match self {
             Self::Unrecognized => None,

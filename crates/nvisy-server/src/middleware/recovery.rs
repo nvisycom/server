@@ -66,11 +66,13 @@ pub trait RouterRecoveryExt<S> {
     ///
     /// This middleware stack handles request timeouts, panics in handlers,
     /// and Tower service errors, converting them to appropriate HTTP responses.
+    #[must_use]
     fn with_recovery(self, config: &RecoveryConfig) -> Self;
 
     /// Layers recovery middleware with default configuration.
     ///
     /// Uses a 30-second timeout suitable for most production environments.
+    #[must_use]
     fn with_default_recovery(self) -> Self;
 }
 
@@ -92,6 +94,8 @@ where
     }
 }
 
+// reason: signature is fixed by tower's `HandleErrorLayer::new` callback.
+#[allow(clippy::needless_pass_by_value)]
 fn handle_error(err: BoxError) -> ResponseFut {
     use axum_client_ip::Rejection as IpRejection;
     use tower::timeout::error::Elapsed;
@@ -131,6 +135,8 @@ fn handle_error(err: BoxError) -> ResponseFut {
     ready(error.into_response()).boxed()
 }
 
+// reason: signature is fixed by tower-http's `CatchPanicLayer::custom` callback.
+#[allow(clippy::needless_pass_by_value)]
 fn catch_panic(err: Panic) -> Response {
     // If the panic is an Error, return it directly.
     if let Some(error) = err.downcast_ref::<Error>() {

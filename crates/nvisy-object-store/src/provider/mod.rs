@@ -36,7 +36,7 @@ use crate::error::{Error, ErrorKind};
     rename_all_fields = "camelCase"
 )]
 pub enum StorageConfig {
-    /// S3-compatible provider (AWS S3, MinIO, and so on).
+    /// S3-compatible provider (AWS S3, `MinIO`, and so on).
     S3 {
         /// Optional root prefix within the bucket; keys resolve relative to it.
         #[serde(default, skip_serializing_if = "Option::is_none")]

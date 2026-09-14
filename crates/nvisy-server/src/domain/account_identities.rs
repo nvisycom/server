@@ -47,6 +47,7 @@ pub struct AccountIdentityService {
 
 impl AccountIdentityService {
     /// Creates an [`AccountIdentityService`] over its clients.
+    #[must_use]
     pub fn new(postgres: PgClient, password: PasswordService) -> Self {
         Self { postgres, password }
     }

@@ -1,7 +1,7 @@
 //! Enhanced form data extractor with improved error handling.
 //!
 //! This module provides [`Form`], an enhanced version of [`axum::Form`] with
-//! better error messages and OpenAPI documentation support.
+//! better error messages and `OpenAPI` documentation support.
 
 use aide::OperationInput;
 use aide::generate::GenContext;

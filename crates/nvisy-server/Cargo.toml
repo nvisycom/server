@@ -150,3 +150,6 @@ anyhow = { workspace = true, features = ["backtrace"] }
 tempfile = { workspace = true, features = [] }
 dotenvy = { workspace = true, features = [] }
 tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

@@ -33,7 +33,7 @@ use crate::response::{Error, ErrorKind};
 #[derive(Debug, Clone)]
 pub struct WorkspaceContext(pub Workspace);
 
-/// The `{workspaceId}` path segment. Named to match the OpenAPI parameter and the
+/// The `{workspaceId}` path segment. Named to match the `OpenAPI` parameter and the
 /// route definition.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]

@@ -83,9 +83,9 @@ impl Worker for AssistantOutboxDrainer {
         let mut ticker = tokio::time::interval(TICK_INTERVAL);
         loop {
             tokio::select! {
-                _ = cancel.cancelled() => break,
+                () = cancel.cancelled() => break,
                 _ = ticker.tick() => self.tick(&cancel).await,
-                _ = self.coordinator.notified() => self.tick(&cancel).await,
+                () = self.coordinator.notified() => self.tick(&cancel).await,
             }
         }
 
@@ -99,6 +99,7 @@ impl AssistantOutboxDrainer {
     ///
     /// Shares the [`Coordinator`] with the enqueue-side `AssistantQueue`
     /// so a job committed on this instance wakes this drainer at once.
+    #[must_use]
     pub fn new(infra: Infra, coordinator: Coordinator) -> Self {
         Self { infra, coordinator }
     }
@@ -124,7 +125,7 @@ impl AssistantOutboxDrainer {
                     } else if pass.claimed > 0 {
                         tracing::debug!(target: TRACING_TARGET, processed = pass.processed, "Assistant-job drain pass published jobs");
                     }
-                    if pass.claimed < DRAIN_BATCH as usize {
+                    if i64::try_from(pass.claimed).unwrap_or(i64::MAX) < DRAIN_BATCH {
                         break;
                     }
                 }

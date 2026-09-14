@@ -76,6 +76,7 @@ pub struct WorkspacePolicySummary {
 impl WorkspacePolicySummary {
     /// Creates a summary from a database model and its creator. Does not load the
     /// definition.
+    #[must_use]
     pub fn from_model(
         policy: WorkspacePolicyModel,
         workspace_id: Uuid,

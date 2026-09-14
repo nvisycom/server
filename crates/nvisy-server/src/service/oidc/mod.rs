@@ -1,6 +1,6 @@
 //! OIDC sign-in service.
 //!
-//! Runs the OpenID Connect authorization-code flows (sign-in, account link, and
+//! Runs the `OpenID` Connect authorization-code flows (sign-in, account link, and
 //! step-up re-authentication) for the deployment's configured providers (Google,
 //! Microsoft), and owns the browser-driven flow orchestration: stashing and
 //! consuming the single-use flow state, resolving the identity to an account, and
@@ -241,7 +241,7 @@ type ReauthProofBucket = ReauthProofKvBucket<ReauthProof>;
 /// into the browser response (a cookie, a deep-link, or a fragment redirect).
 pub enum CallbackOutcome {
     /// A web sign-in: the minted session JWT, delivered to the browser as an
-    /// HttpOnly session cookie set on the callback redirect.
+    /// `HttpOnly` session cookie set on the callback redirect.
     SignedIn { jwt: String },
     /// A native-app (desktop) sign-in: the minted `app` token, delivered to the
     /// app in the callback's deep-link query (`?token=…`), never a cookie.
@@ -688,7 +688,7 @@ impl OidcService {
     }
 
     /// Loads the account for a `Link`/`Reauth` flow (whose `account_id` comes from
-    /// the caller's own session), or a NotFound if it is gone.
+    /// the caller's own session), or a `NotFound` if it is gone.
     async fn load_account(conn: &mut PgConn, account_id: uuid::Uuid) -> Result<Account> {
         conn.find_account_by_id(account_id)
             .await?
@@ -769,8 +769,8 @@ mod tests {
         OidcCore {
             http: reqwest::Client::new(),
             providers: Vec::new(),
-            allowed_redirect_origins: origins.iter().map(|o| o.to_string()).collect(),
-            allowed_redirect_schemes: schemes.iter().map(|s| s.to_string()).collect(),
+            allowed_redirect_origins: origins.iter().map(ToString::to_string).collect(),
+            allowed_redirect_schemes: schemes.iter().map(ToString::to_string).collect(),
         }
     }
 

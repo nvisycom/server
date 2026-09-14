@@ -1,4 +1,4 @@
-//! Extension trait for PgClient providing migration functionality.
+//! Extension trait for `PgClient` providing migration functionality.
 //!
 //! This module provides a clean extension trait that adds migration capabilities
 //! to the `PgClient` struct, keeping migration-related functionality separate
@@ -13,7 +13,7 @@ use super::{
 };
 use crate::{PgClient, Result};
 
-/// Extension trait providing migration functionality for PgClient.
+/// Extension trait providing migration functionality for `PgClient`.
 ///
 /// This trait adds methods for managing database migrations, including
 /// applying pending migrations, rolling back changes, and checking

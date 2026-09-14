@@ -1,4 +1,4 @@
-//! Type-safe JetStream subscriber.
+//! Type-safe `JetStream` subscriber.
 //!
 //! A stream selects both its configuration and its payload type (see
 //! [`EventStream`]), so [`EventSubscriber`] is generic over `S` alone; the
@@ -88,18 +88,21 @@ impl<S: EventStream> EventSubscriber<S> {
 
     /// Returns the stream name.
     #[inline]
+    #[must_use]
     pub fn stream_name(&self) -> &'static str {
         S::NAME
     }
 
     /// Returns the subject.
     #[inline]
+    #[must_use]
     pub fn subject(&self) -> &'static str {
         S::SUBJECT
     }
 
     /// Returns the consumer name.
     #[inline]
+    #[must_use]
     pub fn consumer_name(&self) -> &'static str {
         S::CONSUMER_NAME
     }

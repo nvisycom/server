@@ -9,7 +9,7 @@ use nvisy_s3::Error as S3Error;
 
 use super::http_error::{Error as HttpError, ErrorKind};
 
-impl<'a> From<S3Error> for HttpError<'a> {
+impl From<S3Error> for HttpError<'_> {
     fn from(error: S3Error) -> Self {
         ErrorKind::InternalServerError
             .with_message("Object storage operation failed")

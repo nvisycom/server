@@ -1,4 +1,4 @@
-//! Type-safe wrappers over a JetStream pull consumer's messages.
+//! Type-safe wrappers over a `JetStream` pull consumer's messages.
 //!
 //! [`TypedMessageStream`] deserializes a consumer's messages into `T`;
 //! [`TypedMessage`] pairs a decoded value with its ack handle.
@@ -182,7 +182,7 @@ impl<T> TypedMessage<T> {
     /// Get the number of delivery attempts.
     pub fn delivery_count(&self) -> Result<usize> {
         self.info()
-            .map(|info| info.delivered as usize)
+            .map(|info| usize::try_from(info.delivered).unwrap_or(0))
             .map_err(|e| Error::operation("get_delivery_count", e.to_string()))
     }
 

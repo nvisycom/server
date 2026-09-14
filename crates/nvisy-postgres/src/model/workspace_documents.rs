@@ -1,4 +1,4 @@
-//! Workspace document model for PostgreSQL database operations.
+//! Workspace document model for `PostgreSQL` database operations.
 //!
 //! A document is the human-facing file: an uploaded/imported original, or a
 //! redacted output. Its bytes live in a [`Blob`](crate::model::Blob); the

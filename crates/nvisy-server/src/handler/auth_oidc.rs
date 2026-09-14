@@ -1,7 +1,7 @@
 //! OIDC flows (Google, Microsoft): sign-in, account linking, and step-up
 //! re-authentication.
 //!
-//! Every flow is an OpenID Connect authorization-code exchange — a two-step,
+//! Every flow is an `OpenID` Connect authorization-code exchange — a two-step,
 //! browser-driven round-trip that all share one callback:
 //!
 //! 1. A `start` endpoint begins the authorization, stashes the CSRF state, PKCE

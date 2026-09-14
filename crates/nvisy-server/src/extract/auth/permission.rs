@@ -124,6 +124,7 @@ impl Permission {
     /// This method leverages the role hierarchy to determine if the given role
     /// has sufficient permissions. A role is permitted if it has equal or higher
     /// permission level than the minimum required role for this permission.
+    #[must_use]
     pub const fn is_permitted_by_role(self, role: WorkspaceRole) -> bool {
         role.has_permission_level_of(self.minimum_required_role())
     }
@@ -181,6 +182,7 @@ impl Permission {
     }
 
     /// Returns all permissions available to the given role.
+    #[must_use]
     pub fn permissions_for_role(role: WorkspaceRole) -> Vec<Self> {
         Self::iter()
             .filter(|perm| perm.is_permitted_by_role(role))

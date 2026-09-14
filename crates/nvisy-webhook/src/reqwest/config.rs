@@ -15,7 +15,7 @@ pub const DEFAULT_MAX_RETRIES: u32 = 1;
 pub const DEFAULT_MIN_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Default maximum retry interval.
-pub const DEFAULT_MAX_RETRY_INTERVAL: Duration = Duration::from_millis(30_000);
+pub const DEFAULT_MAX_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Configuration for the reqwest HTTP client.
 ///
@@ -87,6 +87,7 @@ impl Default for ReqwestConfig {
 
 impl ReqwestConfig {
     /// Create a new configuration with the specified timeout.
+    #[must_use]
     pub fn new(timeout: Duration) -> Self {
         Self {
             http_timeout: Some(timeout),
@@ -95,6 +96,7 @@ impl ReqwestConfig {
     }
 
     /// Returns the effective timeout, using the default when unset.
+    #[must_use]
     pub fn effective_timeout(&self) -> Duration {
         self.http_timeout.unwrap_or(DEFAULT_TIMEOUT)
     }
@@ -153,30 +155,30 @@ mod tests {
         assert_eq!(config.effective_timeout(), DEFAULT_TIMEOUT);
         assert_eq!(config.max_retries, DEFAULT_MAX_RETRIES);
         assert_eq!(config.min_retry_interval, Duration::from_millis(500));
-        assert_eq!(config.max_retry_interval, Duration::from_millis(30_000));
+        assert_eq!(config.max_retry_interval, Duration::from_secs(30));
     }
 
     #[test]
     fn test_new_config() {
-        let config = ReqwestConfig::new(Duration::from_secs(60));
-        assert_eq!(config.http_timeout, Some(Duration::from_secs(60)));
-        assert_eq!(config.effective_timeout(), Duration::from_secs(60));
+        let config = ReqwestConfig::new(Duration::from_mins(1));
+        assert_eq!(config.http_timeout, Some(Duration::from_mins(1)));
+        assert_eq!(config.effective_timeout(), Duration::from_mins(1));
         assert_eq!(config.max_retries, DEFAULT_MAX_RETRIES);
     }
 
     #[test]
     fn test_builder_pattern() {
         let config = ReqwestConfig::default()
-            .with_timeout(Duration::from_secs(120))
+            .with_timeout(Duration::from_mins(2))
             .with_user_agent("custom-agent/1.0")
             .with_max_retries(5)
-            .with_retry_interval(Duration::from_secs(1), Duration::from_secs(60));
+            .with_retry_interval(Duration::from_secs(1), Duration::from_mins(1));
 
-        assert_eq!(config.http_timeout, Some(Duration::from_secs(120)));
+        assert_eq!(config.http_timeout, Some(Duration::from_mins(2)));
         assert_eq!(config.user_agent, Some("custom-agent/1.0".to_string()));
         assert_eq!(config.max_retries, 5);
         assert_eq!(config.min_retry_interval, Duration::from_secs(1));
-        assert_eq!(config.max_retry_interval, Duration::from_secs(60));
+        assert_eq!(config.max_retry_interval, Duration::from_mins(1));
     }
 
     #[test]

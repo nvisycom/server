@@ -49,6 +49,9 @@ impl MigrationStatus {
     }
 
     /// Returns the progress ratio (0.0 to 1.0) of applied migrations.
+    // reason: a ratio is inherently floating-point; the operands are small migration counts.
+    #[allow(clippy::cast_precision_loss)]
+    #[must_use]
     pub fn progress_ratio(&self) -> f64 {
         let total_migrations = self.total_migrations();
         if total_migrations == 0 {
@@ -59,35 +62,45 @@ impl MigrationStatus {
     }
 
     /// Returns the last applied migration version, if any.
+    #[must_use]
     pub fn last_applied_version(&self) -> Option<&str> {
-        self.applied_versions.last().map(|s| s.as_str())
+        self.applied_versions
+            .last()
+            .map(std::string::String::as_str)
     }
 
     /// Returns the next pending migration version, if any.
+    #[must_use]
     pub fn next_pending_version(&self) -> Option<&str> {
-        self.pending_versions.first().map(|s| s.as_str())
+        self.pending_versions
+            .first()
+            .map(std::string::String::as_str)
     }
 
     /// Returns the number of applied migrations.
     #[inline]
+    #[must_use]
     pub fn applied_migrations(&self) -> usize {
         self.applied_versions.len()
     }
 
     /// Returns the number of pending migrations.
     #[inline]
+    #[must_use]
     pub fn pending_migrations(&self) -> usize {
         self.pending_versions.len()
     }
 
     /// Returns the total number of migrations.
     #[inline]
+    #[must_use]
     pub fn total_migrations(&self) -> usize {
         self.applied_migrations() + self.pending_migrations()
     }
 
     /// Returns true if all migrations have been applied.
     #[inline]
+    #[must_use]
     pub fn is_up_to_date(&self) -> bool {
         self.pending_versions.is_empty()
     }
@@ -126,6 +139,7 @@ pub struct MigrationResult {
 
 impl MigrationResult {
     /// Creates a successful migration result.
+    #[must_use]
     pub fn success(duration: Duration, processed_versions: Vec<String>) -> Self {
         Self {
             duration,
@@ -135,6 +149,7 @@ impl MigrationResult {
     }
 
     /// Creates a failed migration result.
+    #[must_use]
     pub fn failure(duration: Duration, error_message: String) -> Self {
         Self {
             duration,
@@ -144,8 +159,9 @@ impl MigrationResult {
     }
 
     /// Returns the average time per migration processed.
+    #[must_use]
     pub fn average_time_per_migration(&self) -> Option<Duration> {
-        let processed = self.processed_versions.len() as u32;
+        let processed = u32::try_from(self.processed_versions.len()).unwrap_or(u32::MAX);
         if processed > 0 {
             Some(self.duration / processed)
         } else {
@@ -154,13 +170,17 @@ impl MigrationResult {
     }
 
     /// Returns whether this result indicates a successful operation with no migrations processed.
+    #[must_use]
     pub fn is_no_op(&self) -> bool {
         self.error_message.is_none() && self.processed_versions.is_empty()
     }
 
     /// Returns the last processed migration version, if any.
+    #[must_use]
     pub fn last_processed_version(&self) -> Option<&str> {
-        self.processed_versions.last().map(|s| s.as_str())
+        self.processed_versions
+            .last()
+            .map(std::string::String::as_str)
     }
 }
 
@@ -176,7 +196,7 @@ mod tests {
         let pending = vec!["003".to_string(), "004".to_string()];
         let status = MigrationStatus::new(applied.clone(), pending.clone());
 
-        assert_eq!(status.progress_ratio(), 0.5);
+        assert!((status.progress_ratio() - 0.5).abs() < f64::EPSILON);
         assert_eq!(status.last_applied_version(), Some("002"));
         assert_eq!(status.next_pending_version(), Some("003"));
     }
@@ -187,7 +207,7 @@ mod tests {
         let pending = vec![];
 
         let status = MigrationStatus::new(applied, pending);
-        assert_eq!(status.progress_ratio(), 1.0);
+        assert!((status.progress_ratio() - 1.0).abs() < f64::EPSILON);
         assert_eq!(status.next_pending_version(), None);
         assert!(status.is_up_to_date());
     }

@@ -29,6 +29,7 @@ pub struct OffsetPagination {
 
 impl OffsetPagination {
     /// Creates a new pagination instance.
+    #[must_use]
     pub fn new(limit: i64, offset: i64) -> Self {
         Self {
             limit: limit.clamp(1, MAX_LIMIT),
@@ -38,6 +39,7 @@ impl OffsetPagination {
     }
 
     /// Creates pagination from page number and page size.
+    #[must_use]
     pub fn from_page(page: i64, page_size: i64) -> Self {
         let page = page.max(1);
         let page_size = page_size.clamp(1, MAX_LIMIT);
@@ -49,17 +51,20 @@ impl OffsetPagination {
     }
 
     /// Enables including total count in the response.
+    #[must_use]
     pub fn with_count(mut self) -> Self {
         self.include_count = true;
         self
     }
 
     /// Gets the current page number (1-based).
+    #[must_use]
     pub fn page_number(&self) -> i64 {
         (self.offset / self.limit) + 1
     }
 
     /// Gets the page size.
+    #[must_use]
     pub fn page_size(&self) -> i64 {
         self.limit
     }
@@ -87,11 +92,13 @@ pub struct OffsetPage<T> {
 
 impl<T> OffsetPage<T> {
     /// Creates a new offset page.
+    #[must_use]
     pub fn new(items: Vec<T>, total: Option<i64>) -> Self {
         Self { items, total }
     }
 
     /// Creates an empty offset page.
+    #[must_use]
     pub fn empty() -> Self {
         Self {
             items: Vec::new(),
@@ -113,14 +120,17 @@ impl<T> OffsetPage<T> {
     /// Returns whether there are more pages after this one.
     ///
     /// Requires `total` to be present.
+    #[must_use]
     pub fn has_more(&self, pagination: &OffsetPagination) -> Option<bool> {
-        self.total
-            .map(|total| (pagination.offset + self.items.len() as i64) < total)
+        self.total.map(|total| {
+            (pagination.offset + i64::try_from(self.items.len()).unwrap_or(i64::MAX)) < total
+        })
     }
 
     /// Returns the total number of pages.
     ///
     /// Requires `total` to be present.
+    #[must_use]
     pub fn total_pages(&self, pagination: &OffsetPagination) -> Option<i64> {
         self.total
             .map(|total| (total + pagination.limit - 1) / pagination.limit)

@@ -123,7 +123,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         &mut self,
         webhook_id: Uuid,
     ) -> Result<Option<WorkspaceWebhook>> {
-        use schema::workspace_webhooks::dsl::*;
+        use schema::workspace_webhooks::dsl::{deleted_at, id, workspace_webhooks};
 
         let webhook = workspace_webhooks
             .filter(id.eq(webhook_id))
@@ -233,7 +233,7 @@ impl WorkspaceWebhookRepository for PgConnection {
         webhook_id: Uuid,
         changes: UpdateWorkspaceWebhook,
     ) -> Result<WorkspaceWebhook> {
-        use schema::workspace_webhooks::dsl::*;
+        use schema::workspace_webhooks::dsl::{deleted_at, id, workspace_webhooks};
 
         // Scope to a live row: a concurrently tombstoned webhook yields
         // `NotFound` instead of reviving the dead row.
@@ -251,7 +251,7 @@ impl WorkspaceWebhookRepository for PgConnection {
 
     async fn delete_workspace_webhook(&mut self, webhook_id: Uuid) -> Result<()> {
         use diesel::dsl::now;
-        use schema::workspace_webhooks::dsl::*;
+        use schema::workspace_webhooks::dsl::{deleted_at, id, workspace_webhooks};
 
         // Scope to a live row so re-deleting keeps the original tombstone.
         diesel::update(workspace_webhooks)
@@ -267,7 +267,9 @@ impl WorkspaceWebhookRepository for PgConnection {
 
     async fn record_webhook_success(&mut self, webhook_id: Uuid) -> Result<WorkspaceWebhook> {
         use diesel::dsl::now;
-        use schema::workspace_webhooks::dsl::*;
+        use schema::workspace_webhooks::dsl::{
+            consecutive_failures, id, last_success_at, workspace_webhooks,
+        };
 
         let webhook = diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
@@ -282,7 +284,9 @@ impl WorkspaceWebhookRepository for PgConnection {
 
     async fn record_webhook_failure(&mut self, webhook_id: Uuid) -> Result<WorkspaceWebhook> {
         use diesel::dsl::now;
-        use schema::workspace_webhooks::dsl::*;
+        use schema::workspace_webhooks::dsl::{
+            consecutive_failures, id, last_failure_at, workspace_webhooks,
+        };
 
         let webhook = diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
@@ -299,7 +303,7 @@ impl WorkspaceWebhookRepository for PgConnection {
     }
 
     async fn suspend_webhook(&mut self, webhook_id: Uuid) -> Result<WorkspaceWebhook> {
-        use schema::workspace_webhooks::dsl::*;
+        use schema::workspace_webhooks::dsl::{id, status, workspace_webhooks};
 
         let webhook = diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
@@ -317,7 +321,9 @@ impl WorkspaceWebhookRepository for PgConnection {
         ws_id: Uuid,
         event: WebhookEvent,
     ) -> Result<Vec<WorkspaceWebhook>> {
-        use schema::workspace_webhooks::dsl::*;
+        use schema::workspace_webhooks::dsl::{
+            deleted_at, events, status, workspace_id, workspace_webhooks,
+        };
 
         // Query webhooks whose events array contains the target event via the
         // PostgreSQL `@>` operator. The events column is

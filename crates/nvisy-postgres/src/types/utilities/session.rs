@@ -21,33 +21,54 @@ use std::time::Duration;
 
 /// Idle window for a "remember me" session: it survives this much inactivity
 /// before dying. Chosen for a long-lived, sticky login.
-pub const IDLE_REMEMBERED: Duration = Duration::from_secs(7 * 24 * 60 * 60); // 7 days
+pub const IDLE_REMEMBERED: Duration = Duration::from_hours(168); // 7 days
 
 /// Idle window for an ordinary (not "remembered") session: it dies after this
 /// much inactivity. Shorter, for the shared- or public-computer case.
-pub const IDLE_DEFAULT: Duration = Duration::from_secs(24 * 60 * 60); // 1 day
+pub const IDLE_DEFAULT: Duration = Duration::from_hours(24); // 1 day
 
 /// Absolute maximum session age from original issue. A session is rejected past
 /// this regardless of activity, forcing a fresh sign-in. Independent of
 /// "remember me".
-pub const MAX_AGE: Duration = Duration::from_secs(90 * 24 * 60 * 60); // 90 days
+pub const MAX_AGE: Duration = Duration::from_hours(2160); // 90 days
 
 /// Minimum staleness before an active session's idle bound is slid forward. The
 /// slide is throttled to this interval so a burst of requests does not write on
 /// every one: at most one slide write per interval of continuous use.
-pub const SLIDE_THROTTLE: Duration = Duration::from_secs(5 * 60); // 5 minutes
+pub const SLIDE_THROTTLE: Duration = Duration::from_mins(5); // 5 minutes
 
 /// Lifetime of a native-app (desktop) session token. Unlike a browser session it
 /// does not slide or hit the browser absolute cap — it is a long-lived `app` token
 /// the desktop stores and sends as a Bearer credential, expiring only at this
 /// fixed age from issue.
-pub const APP_TOKEN_LIFETIME: Duration = Duration::from_secs(365 * 24 * 60 * 60); // 1 year
+pub const APP_TOKEN_LIFETIME: Duration = Duration::from_hours(8760); // 1 year
 
 /// Maximum number of live `app` (desktop) session tokens kept per account. Each
 /// desktop login mints a new long-lived token automatically, so without a cap they
 /// would accumulate across re-logins; on mint, the oldest beyond this many are
 /// revoked. Sized to cover a handful of devices per user.
 pub const MAX_APP_TOKENS_PER_ACCOUNT: usize = 10;
+
+/// A lifetime constant as whole seconds in `i64`, the width the JWT `exp` and the
+/// `jiff`/`time` span builders take. Every session constant here is a small,
+/// fixed number of seconds (years at most), so the conversion is exact.
+const fn secs_i64(duration: Duration) -> i64 {
+    // Bounded compile-time constant (≤ 1 year ≪ i64::MAX seconds), so the cast is
+    // exact; there is no runtime value that could wrap.
+    #[allow(clippy::cast_possible_wrap)]
+    {
+        duration.as_secs() as i64
+    }
+}
+
+/// [`MAX_AGE`] in whole seconds.
+pub const MAX_AGE_SECS: i64 = secs_i64(MAX_AGE);
+
+/// [`SLIDE_THROTTLE`] in whole seconds.
+pub const SLIDE_THROTTLE_SECS: i64 = secs_i64(SLIDE_THROTTLE);
+
+/// [`APP_TOKEN_LIFETIME`] in whole seconds.
+pub const APP_TOKEN_LIFETIME_SECS: i64 = secs_i64(APP_TOKEN_LIFETIME);
 
 /// The sliding-session bounds a keep-alive slide operates under: the two idle
 /// windows (chosen per the row's `is_remembered`), the absolute cap the slide
@@ -104,7 +125,8 @@ pub fn idle_window(is_remembered: bool) -> Duration {
 #[must_use]
 pub fn initial_expires_at(is_remembered: bool) -> jiff::Timestamp {
     let idle = idle_window(is_remembered);
-    jiff::Timestamp::now() + jiff::Span::new().seconds(idle.as_secs() as i64)
+    jiff::Timestamp::now()
+        + jiff::Span::new().seconds(i64::try_from(idle.as_secs()).unwrap_or(i64::MAX))
 }
 
 #[cfg(test)]
@@ -139,7 +161,7 @@ mod tests {
         assert!(default > now);
         assert!(remembered > default);
 
-        let cap = now + jiff::Span::new().seconds(MAX_AGE.as_secs() as i64);
+        let cap = now + jiff::Span::new().seconds(MAX_AGE_SECS);
         assert!(remembered <= cap);
     }
 }

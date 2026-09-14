@@ -29,6 +29,7 @@ pub struct AccountRef {
 impl AccountRef {
     /// Builds a reference from a resolved id, handle, display name, and avatar
     /// path.
+    #[must_use]
     pub fn new(
         id: Uuid,
         username: Handle,

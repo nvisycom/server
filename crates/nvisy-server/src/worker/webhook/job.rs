@@ -4,7 +4,7 @@ use nvisy_postgres::types::WebhookEvent;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// The `WEBHOOKS` JetStream stream, carrying [`WebhookJob`] payloads.
+/// The `WEBHOOKS` `JetStream` stream, carrying [`WebhookJob`] payloads.
 pub type WebhookStream = nvisy_nats::stream::WebhookStream<WebhookJob>;
 
 /// A webhook delivery job enqueued on the NATS `WEBHOOKS` stream.

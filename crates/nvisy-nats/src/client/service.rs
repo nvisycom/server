@@ -87,10 +87,12 @@ impl NatsClient {
         if let Some(max_reconnects) = config.max_reconnects_option() {
             connect_opts = connect_opts.max_reconnects(max_reconnects);
         }
-        let reconnect_delay_ms = config.reconnect_delay().as_millis().min(u64::MAX as u128) as u64;
+        let reconnect_delay_ms =
+            u64::try_from(config.reconnect_delay().as_millis()).unwrap_or(u64::MAX);
         connect_opts = connect_opts.reconnect_delay_callback(move |attempts| {
+            let exponent = u32::try_from(attempts.min(32)).unwrap_or(32);
             Duration::from_millis(std::cmp::min(
-                reconnect_delay_ms * 2_u64.pow(attempts.min(32) as u32),
+                reconnect_delay_ms * 2_u64.pow(exponent),
                 30_000, // Max 30 seconds
             ))
         });
@@ -184,7 +186,7 @@ impl NatsClient {
 
 // Stream getters
 impl NatsClient {
-    /// Ensures the JetStream stream backing `S` exists and matches `S`'s config,
+    /// Ensures the `JetStream` stream backing `S` exists and matches `S`'s config,
     /// creating it if absent and reconciling subjects/retention if present.
     ///
     /// This is a per-deployment concern: call it once at startup for each stream,
@@ -197,18 +199,20 @@ impl NatsClient {
 
     /// Create an event publisher for the specified stream type.
     ///
-    /// A cheap handle over the JetStream context; the stream must already have
+    /// A cheap handle over the `JetStream` context; the stream must already have
     /// been reconciled at startup via [`ensure_stream`](Self::ensure_stream).
+    #[must_use]
     pub fn event_publisher<S: EventStream>(&self) -> EventPublisher<S> {
         EventPublisher::new(&self.inner.jetstream)
     }
 
     /// Create an event subscriber for the specified stream type.
     ///
-    /// A cheap handle over the JetStream context; the stream must already have
+    /// A cheap handle over the `JetStream` context; the stream must already have
     /// been reconciled at startup via [`ensure_stream`](Self::ensure_stream). The
     /// durable consumer is upserted when [`subscribe`](EventSubscriber::subscribe)
     /// is called.
+    #[must_use]
     pub fn event_subscriber<S: EventStream>(&self) -> EventSubscriber<S> {
         EventSubscriber::new(&self.inner.jetstream)
     }

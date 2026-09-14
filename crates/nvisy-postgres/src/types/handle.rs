@@ -65,6 +65,7 @@ impl Handle {
     /// The text is slugified, then truncated to [`HANDLE_MAX_LENGTH`] on a dash
     /// boundary where possible. Returns `None` if the result cannot satisfy the
     /// minimum length (e.g. the input has no slug-able characters).
+    #[must_use]
     pub fn derive(text: &str) -> Option<Self> {
         let slugged = slug::slugify(text);
         let trimmed = truncate_on_dash(&slugged, HANDLE_MAX_LENGTH);

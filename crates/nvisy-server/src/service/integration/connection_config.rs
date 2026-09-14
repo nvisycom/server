@@ -25,7 +25,7 @@ use crate::response::{ErrorKind, Result};
 pub enum ConnectionConfig {
     /// An object-storage connection (s3, azure, gcs).
     ObjectStore(StorageConfig),
-    /// A file-service connection (google_drive, dropbox, ...).
+    /// A file-service connection (`google_drive`, dropbox, ...).
     FileService(FileServiceConfig),
 }
 

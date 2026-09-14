@@ -1,4 +1,4 @@
-//! JetStream streams for real-time updates and distributed job processing.
+//! `JetStream` streams for real-time updates and distributed job processing.
 //!
 //! This module provides type-safe streaming capabilities: generic event
 //! publishing and subscribing over a stream configured via [`EventStream`].

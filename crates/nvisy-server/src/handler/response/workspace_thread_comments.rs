@@ -1,4 +1,4 @@
-//! WorkspaceComment response type: one message within a thread.
+//! `WorkspaceComment` response type: one message within a thread.
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceThreadComment as CommentModel;
@@ -29,6 +29,7 @@ pub struct WorkspaceComment {
 impl WorkspaceComment {
     /// Creates a comment response from the database model and the resolved author
     /// reference.
+    #[must_use]
     pub fn from_model(comment: CommentModel, author: AccountRef) -> Self {
         Self {
             id: comment.id,

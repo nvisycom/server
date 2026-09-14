@@ -85,6 +85,7 @@ impl WorkspaceThreadEntry {
     /// The entry's position in the merged timeline: `(created_at, source, id)`.
     /// Comments sort before events at the same instant; `id` breaks a tie within
     /// one stream. This is the total order the timeline is paginated by.
+    #[must_use]
     pub fn cursor(&self) -> TimelineCursor {
         match self {
             WorkspaceThreadEntry::Comment(c) => TimelineCursor {
@@ -101,6 +102,7 @@ impl WorkspaceThreadEntry {
     }
 
     /// The sort tuple for merging the two streams, derived from [`Self::cursor`].
+    #[must_use]
     pub fn sort_key(&self) -> (Timestamp, TimelineSource, uuid::Uuid) {
         let c = self.cursor();
         (c.created_at, c.source, c.id)
@@ -140,6 +142,7 @@ impl WorkspaceThread {
 impl WorkspaceThreadEvent {
     /// Creates a thread-event response from the database model and the resolved
     /// actor reference (absent if the actor's account was removed).
+    #[must_use]
     pub fn from_model(event: EventModel, actor: Option<AccountRef>) -> Self {
         Self {
             id: event.id,

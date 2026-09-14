@@ -117,6 +117,9 @@ pub struct WorkspaceDetectionStatusEntry {
 impl WorkspaceAnalytics {
     /// Assembles the response from a workspace analytics snapshot, zero-filling
     /// every enum value and deriving the scalar totals and error rate.
+    // reason: an error rate is inherently floating-point; the operands are small detection counts.
+    #[allow(clippy::cast_precision_loss)]
+    #[must_use]
     pub fn from_snapshot(snapshot: AnalyticsSnapshot) -> Self {
         let AnalyticsSnapshot {
             storage,
@@ -232,6 +235,9 @@ impl WorkspaceDetectionTimeSeries {
     /// no detections reports `detections: 0` and omits the rate/duration/token
     /// fields. The query only produces days that had a detection, so gap-filling
     /// happens here.
+    // reason: an error rate is inherently floating-point; the operands are small detection counts.
+    #[allow(clippy::cast_precision_loss)]
+    #[must_use]
     pub fn from_window(from: Date, to: Date, points: Vec<DetectionDayPoint>) -> Self {
         // Index the sparse rows by their UTC day for O(1) lookup while walking the
         // window.

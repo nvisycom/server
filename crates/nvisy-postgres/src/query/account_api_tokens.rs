@@ -177,7 +177,7 @@ impl AccountApiTokenRepository for PgConnection {
         //     browser sessions. The absolute cap is a browser-session policy;
         //     programmatic `api` tokens are long-lived and authoritative on
         //     their own `expired_at`, so they are exempt from it.
-        let max_age_secs = max_age.as_secs() as i64;
+        let max_age_secs = i64::try_from(max_age.as_secs()).unwrap_or(i64::MAX);
         let age_cutoff = diesel::dsl::sql::<Timestamptz>("now() - (")
             .bind::<BigInt, _>(max_age_secs)
             .sql(" * interval '1 second')");
@@ -207,10 +207,11 @@ impl AccountApiTokenRepository for PgConnection {
         use diesel::sql_types::{BigInt, Nullable, Timestamptz};
         use schema::account_api_tokens::{self, dsl};
 
-        let idle_remembered_secs = window.idle_remembered.as_secs() as i64;
-        let idle_default_secs = window.idle_default.as_secs() as i64;
-        let max_age_secs = window.max_age.as_secs() as i64;
-        let throttle_secs = window.throttle.as_secs() as i64;
+        let idle_remembered_secs =
+            i64::try_from(window.idle_remembered.as_secs()).unwrap_or(i64::MAX);
+        let idle_default_secs = i64::try_from(window.idle_default.as_secs()).unwrap_or(i64::MAX);
+        let max_age_secs = i64::try_from(window.max_age.as_secs()).unwrap_or(i64::MAX);
+        let throttle_secs = i64::try_from(window.throttle.as_secs()).unwrap_or(i64::MAX);
 
         // New idle bound, chosen from the row's own `is_remembered` and clamped to
         // the absolute cap so a slide can never push a session past
@@ -318,7 +319,7 @@ impl AccountApiTokenRepository for PgConnection {
         .execute(self)
         .await
         .map_err(Error::from)
-        .map(|rows| rows as i64)
+        .map(|rows| i64::try_from(rows).unwrap_or(i64::MAX))
     }
 
     async fn prune_app_tokens(&mut self, account_id: Uuid, keep: usize) -> Result<i64> {
@@ -340,7 +341,7 @@ impl AccountApiTokenRepository for PgConnection {
                 .filter(dsl::session_type.eq(ApiTokenType::App))
                 .filter(dsl::deleted_at.is_null())
                 .order(dsl::issued_at.desc())
-                .limit(keep as i64)
+                .limit(i64::try_from(keep).unwrap_or(i64::MAX))
                 .select(dsl::issued_at)
                 .load(conn)
                 .await
@@ -368,7 +369,7 @@ impl AccountApiTokenRepository for PgConnection {
             .await
             .map_err(Error::from)?;
 
-            Ok::<_, Error>(deleted as i64)
+            Ok::<_, Error>(i64::try_from(deleted).unwrap_or(i64::MAX))
         })
         .await
     }
@@ -440,7 +441,7 @@ impl AccountApiTokenRepository for PgConnection {
         .execute(self)
         .await
         .map_err(Error::from)
-        .map(|rows| rows as i64)
+        .map(|rows| i64::try_from(rows).unwrap_or(i64::MAX))
     }
 }
 
@@ -504,7 +505,7 @@ mod tests {
         let mut conn = db.client.get_connection().await?;
 
         // A 30-day absolute cap.
-        let max_age = Duration::from_secs(30 * 24 * 3600);
+        let max_age = Duration::from_hours(720);
 
         // A web session issued 60 days ago is past the cap -> inactive.
         let web = conn
@@ -534,7 +535,7 @@ mod tests {
         let db = TestDatabase::start().await;
         let account_id = db.seed_account().await;
         let mut conn = db.client.get_connection().await?;
-        let max_age = Duration::from_secs(30 * 24 * 3600);
+        let max_age = Duration::from_hours(720);
 
         // An api token with a past `expired_at` is inactive despite the cap
         // exemption.
@@ -584,7 +585,7 @@ mod tests {
         assert_eq!(pruned, 3);
 
         // The two most-recent (t-1d, t-2d) remain active; the older three do not.
-        let max_age = Duration::from_secs(365 * 24 * 3600);
+        let max_age = Duration::from_hours(8760);
         for (days_ago, id) in ids {
             let active = conn
                 .account_api_token_is_active(id, account_id, max_age)

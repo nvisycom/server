@@ -1,4 +1,4 @@
-//! Workspace provider model for PostgreSQL database operations.
+//! Workspace provider model for `PostgreSQL` database operations.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;

@@ -21,6 +21,7 @@ pub struct WebhookResponse {
 
 impl WebhookResponse {
     /// Creates a new webhook response.
+    #[must_use]
     pub fn new(request_id: Uuid, status_code: u16, started_at: Timestamp) -> Self {
         Self {
             response_id: Uuid::now_v7(),
@@ -32,11 +33,13 @@ impl WebhookResponse {
     }
 
     /// Returns whether the delivery was successful (2xx status code).
+    #[must_use]
     pub fn is_success(&self) -> bool {
         (200..300).contains(&self.status_code)
     }
 
     /// Calculates the response time as a duration.
+    #[must_use]
     pub fn duration(&self) -> Span {
         self.started_at.until(self.finished_at).unwrap_or_default()
     }

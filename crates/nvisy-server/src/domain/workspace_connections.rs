@@ -44,6 +44,7 @@ pub struct WorkspaceConnectionService {
 
 impl WorkspaceConnectionService {
     /// Creates a [`WorkspaceConnectionService`] over its clients.
+    #[must_use]
     pub fn new(postgres: PgClient, crypto: CryptoService, endpoint_policy: EndpointPolicy) -> Self {
         Self {
             postgres,
@@ -173,7 +174,7 @@ impl WorkspaceConnectionService {
     }
 
     /// Finds a connection by id with its creator, schedule, and last successful
-    /// sync time, or a NotFound.
+    /// sync time, or a `NotFound`.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -334,7 +335,7 @@ fn validate_sync_input(sync: &SyncScheduleInput) -> Result<()> {
 }
 
 /// Finds a connection within a workspace by id, with its creator, schedule, and
-/// last successful sync time, or a NotFound error.
+/// last successful sync time, or a `NotFound` error.
 async fn find_connection(
     conn: &mut PgConn,
     workspace_id: Uuid,

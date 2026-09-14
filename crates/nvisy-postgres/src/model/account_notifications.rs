@@ -1,4 +1,4 @@
-//! Account notification model for PostgreSQL database operations.
+//! Account notification model for `PostgreSQL` database operations.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;

@@ -216,6 +216,8 @@ impl WorkspaceAnalyticsRepository for PgConnection {
     ) -> Result<Vec<DetectionDayPoint>> {
         use std::collections::BTreeMap;
 
+        use bigdecimal::ToPrimitive;
+
         let from = jiff_diesel::Timestamp::from(from);
         let to = jiff_diesel::Timestamp::from(to);
 
@@ -236,7 +238,6 @@ impl WorkspaceAnalyticsRepository for PgConnection {
             .await?;
 
         // Merge the two per-day results by day.
-        use bigdecimal::ToPrimitive;
         let to_i64 = |v: Option<BigDecimal>| v.and_then(|b| b.to_i64());
         let mut tokens: BTreeMap<jiff::Timestamp, DayTokens> = BTreeMap::new();
         for row in token_rows {

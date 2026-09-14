@@ -75,6 +75,7 @@ pub struct Page<T> {
 
 impl<T> Page<T> {
     /// Creates an empty page with no items.
+    #[must_use]
     pub fn empty() -> Self {
         Self {
             items: Vec::new(),
@@ -84,6 +85,7 @@ impl<T> Page<T> {
     }
 
     /// Creates a new page from items and pagination metadata.
+    #[must_use]
     pub fn new(items: Vec<T>, total: Option<i64>, next_cursor: Option<String>) -> Self {
         Self {
             items,
@@ -93,6 +95,7 @@ impl<T> Page<T> {
     }
 
     /// Returns true if there are more items to fetch.
+    #[must_use]
     pub fn has_more(&self) -> bool {
         self.next_cursor.is_some()
     }

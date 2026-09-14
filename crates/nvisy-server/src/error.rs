@@ -105,6 +105,7 @@ impl Error {
     ///
     /// This method consumes the error and returns a new one with the source attached.
     /// It follows the builder pattern for ergonomic error construction.
+    #[must_use]
     #[inline]
     pub fn with_source(mut self, source: impl StdError + Send + Sync + 'static) -> Self {
         self.source = Some(Box::new(source));
@@ -139,7 +140,7 @@ impl Error {
     ) -> Self {
         let service_name = service.into();
         let msg = message.into();
-        let full_message = format!("{}: {}", service_name, msg);
+        let full_message = format!("{service_name}: {msg}");
         Self::new(ErrorKind::External, full_message)
     }
 
@@ -163,7 +164,7 @@ impl Error {
     ) -> Self {
         let service_name = service.into();
         let msg = message.into();
-        let full_message = format!("{}: {}", service_name, msg);
+        let full_message = format!("{service_name}: {msg}");
         Self::new(ErrorKind::Internal, full_message)
     }
 }

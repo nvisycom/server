@@ -45,6 +45,7 @@ pub struct WorkspaceThreadService {
 impl WorkspaceThreadService {
     /// Creates a [`WorkspaceThreadService`] over the connection pool and the
     /// assistant queue.
+    #[must_use]
     pub fn new(postgres: PgClient, assistant: AssistantQueue) -> Self {
         Self {
             postgres,
@@ -275,7 +276,7 @@ impl WorkspaceThreadService {
     }
 
     /// Assigns or unassigns a document's review. A `null` assignee clears the
-    /// current one; a set assignee must be a workspace member (else a NotFound).
+    /// current one; a set assignee must be a workspace member (else a `NotFound`).
     /// Raises the matching review event, notifying the assignee unless they
     /// assigned themselves.
     pub async fn assign_review(

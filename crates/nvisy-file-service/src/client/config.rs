@@ -96,7 +96,7 @@ provider_app_config!(
     "DROPBOX_CLIENT_SECRET"
 );
 provider_app_config!(
-    /// OneDrive OAuth app credentials.
+    /// `OneDrive` OAuth app credentials.
     OneDriveConfig,
     "OneDrive",
     "onedrive-client-id",
@@ -144,7 +144,7 @@ pub struct OAuthAppsConfig {
     /// Dropbox OAuth app.
     #[cfg_attr(feature = "cli", command(flatten))]
     pub dropbox: DropboxConfig,
-    /// OneDrive OAuth app.
+    /// `OneDrive` OAuth app.
     #[cfg_attr(feature = "cli", command(flatten))]
     pub onedrive: OneDriveConfig,
     /// Box OAuth app.

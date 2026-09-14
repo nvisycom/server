@@ -11,7 +11,7 @@ use std::process;
 
 use axum::Router;
 use nvisy_server::handler::{CustomRoutes, routes};
-use nvisy_server::middleware::*;
+use nvisy_server::middleware::{MiddlewareArgs, RouterMiddlewareExt};
 use nvisy_server::service::ServiceState;
 
 use crate::config::Cli;
@@ -19,7 +19,7 @@ use crate::server::TRACING_TARGET_SHUTDOWN;
 
 #[tokio::main]
 async fn main() {
-    let Err(error) = run().await else {
+    let Err(error) = Box::pin(run()).await else {
         process::exit(0);
     };
 

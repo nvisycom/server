@@ -1,4 +1,4 @@
-//! Workspace audit model for PostgreSQL database operations.
+//! Workspace audit model for `PostgreSQL` database operations.
 //!
 //! An audit is the engine's findings set over a document, stored as bytes in a
 //! [`Blob`](crate::model::Blob). Audits and reviews were once two file kinds;

@@ -35,6 +35,7 @@ pub struct WorkspacePolicyService {
 
 impl WorkspacePolicyService {
     /// Creates a [`WorkspacePolicyService`] over the given connection pool.
+    #[must_use]
     pub fn new(postgres: PgClient) -> Self {
         Self { postgres }
     }
@@ -179,7 +180,7 @@ impl WorkspacePolicyService {
             .await?)
     }
 
-    /// Finds a policy by id with its creator and current version, or a NotFound.
+    /// Finds a policy by id with its creator and current version, or a `NotFound`.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -222,7 +223,7 @@ impl WorkspacePolicyService {
         let new_definition = match input.definition {
             Some(draft) => {
                 let template = serde_json::from_value::<Policy>(current.definition)
-                    .map_err(malformed_definition)?
+                    .map_err(|err| malformed_definition(&err))?
                     .template;
                 let definition = draft.into_definition(template);
                 Some(definition_to_json(&definition)?)
@@ -296,13 +297,13 @@ fn definition_to_json(definition: &Policy) -> Result<serde_json::Value> {
 }
 
 /// Maps a failed deserialization of a stored definition to a server error.
-fn malformed_definition(err: serde_json::Error) -> Error<'static> {
+fn malformed_definition(err: &serde_json::Error) -> Error<'static> {
     ErrorKind::InternalServerError
         .with_message("Stored policy definition is malformed")
         .with_context(err.to_string())
 }
 
-/// Finds a policy within a workspace by id, with its creator, or a NotFound.
+/// Finds a policy within a workspace by id, with its creator, or a `NotFound`.
 async fn find_policy(
     conn: &mut PgConn,
     workspace_id: Uuid,
@@ -339,11 +340,15 @@ fn oneshot_display_name(content_hash: &[u8]) -> String {
 
 /// Lowercase hex of the first `bytes` bytes of `content_hash`.
 fn hex_prefix(content_hash: &[u8], bytes: usize) -> String {
+    use std::fmt::Write;
+
     content_hash
         .iter()
         .take(bytes)
-        .map(|b| format!("{b:02x}"))
-        .collect()
+        .fold(String::with_capacity(bytes * 2), |mut acc, b| {
+            let _ = write!(acc, "{b:02x}");
+            acc
+        })
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 //! OpenAPI-documented wrapper around an [`Sse`] response.
 //!
 //! Axum's [`Sse`] does not implement aide's [`OperationOutput`], so a handler
-//! returning it cannot be registered via `api_route`/`get_with` (no OpenAPI is
+//! returning it cannot be registered via `api_route`/`get_with` (no `OpenAPI` is
 //! produced). [`SseResponse`] wraps it, delegating [`IntoResponse`] to the inner
 //! stream while advertising a `200 text/event-stream` response whose media type
 //! carries the JSON Schema of one event's `data` payload.
@@ -26,7 +26,7 @@ use schemars::JsonSchema;
 /// the streams we build never error, so the error half is uninhabited.
 type EventStream = Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>;
 
-/// An [`Sse`] response that also produces OpenAPI documentation.
+/// An [`Sse`] response that also produces `OpenAPI` documentation.
 ///
 /// Wrap a handler's event stream in this so the route can be registered with
 /// `api_route`/`get_with` and appear in the generated schema as a
@@ -34,7 +34,7 @@ type EventStream = Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>
 /// in each event's `data` field; its schema is attached to the media type so
 /// consumers can see the shape of the events they will receive.
 ///
-/// OpenAPI has no first-class model for the SSE wire framing (`event:`/`data:`
+/// `OpenAPI` has no first-class model for the SSE wire framing (`event:`/`data:`
 /// lines), so this documents the per-event `data` payload schema — the standard,
 /// meaningful thing to expose for an event stream.
 #[must_use = "responses do nothing unless returned from a handler"]

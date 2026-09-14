@@ -54,6 +54,7 @@ pub struct SunsetConfig {
 
 impl SunsetConfig {
     /// Creates an empty config with no deprecated versions.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -68,6 +69,7 @@ impl SunsetConfig {
     /// # Panics
     ///
     /// Panics if `version` is 0.
+    #[must_use]
     pub fn deprecate(mut self, version: u16, sunset_date: Date) -> Self {
         assert!(version > 0, "API version must be non-zero");
 
@@ -139,6 +141,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "non-zero")]
     fn deprecate_zero_panics() {
-        SunsetConfig::new().deprecate(0, Date::new(2025, 1, 1).unwrap());
+        let _ = SunsetConfig::new().deprecate(0, Date::new(2025, 1, 1).unwrap());
     }
 }

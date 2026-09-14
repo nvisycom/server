@@ -102,6 +102,8 @@ impl ServerConfig {
     }
 
     /// Returns whether TLS is configured.
+    // reason: reads as a config accessor alongside the other `&self` queries.
+    #[allow(clippy::unused_self)]
     #[must_use]
     pub const fn is_tls_enabled(&self) -> bool {
         cfg!(feature = "tls")

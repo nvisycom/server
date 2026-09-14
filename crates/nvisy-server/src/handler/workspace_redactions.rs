@@ -65,7 +65,7 @@ async fn list_detection_redactions(
     for redaction in page.items {
         let requested_by = resolve_account_ref(&mut conn, redaction.account_id).await?;
         items.push(WorkspaceRedactionResult::from_model(
-            redaction,
+            &redaction,
             workspace.id,
             workspace.handle.clone(),
             requested_by,

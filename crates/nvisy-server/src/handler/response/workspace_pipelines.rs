@@ -1,4 +1,4 @@
-//! WorkspacePipeline response types.
+//! `WorkspacePipeline` response types.
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
@@ -10,7 +10,7 @@ use uuid::Uuid;
 use super::{AccountRef, Page};
 use crate::handler::request::PipelineDefinition;
 
-/// WorkspacePipeline response.
+/// `WorkspacePipeline` response.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -23,12 +23,12 @@ pub struct WorkspacePipeline {
     pub workspace_handle: Handle,
     /// Account that created this pipeline.
     pub created_by: AccountRef,
-    /// WorkspacePipeline display name.
+    /// `WorkspacePipeline` display name.
     pub display_name: String,
-    /// WorkspacePipeline description.
+    /// `WorkspacePipeline` description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// WorkspacePipeline lifecycle status.
+    /// `WorkspacePipeline` lifecycle status.
     pub status: PipelineStatus,
     /// Detection + redaction configuration.
     pub definition: PipelineDefinition,
@@ -88,12 +88,12 @@ pub struct WorkspacePipelineSummary {
     pub workspace_handle: Handle,
     /// Account that created this pipeline.
     pub created_by: AccountRef,
-    /// WorkspacePipeline display name.
+    /// `WorkspacePipeline` display name.
     pub display_name: String,
-    /// WorkspacePipeline description.
+    /// `WorkspacePipeline` description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// WorkspacePipeline lifecycle status.
+    /// `WorkspacePipeline` lifecycle status.
     pub status: PipelineStatus,
     /// Timestamp when the pipeline was created.
     pub created_at: Timestamp,

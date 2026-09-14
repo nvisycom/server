@@ -42,7 +42,7 @@ const TRACING_TARGET: &str = "nvisy_server::worker::reaper";
 
 /// How often the reaper runs. Retention is day-granular, so an hourly sweep is
 /// responsive without being costly.
-const TICK_INTERVAL: Duration = Duration::from_secs(60 * 60);
+const TICK_INTERVAL: Duration = Duration::from_hours(1);
 
 /// Maximum blobs purged per sweep pass, bounding the work per tick.
 const SWEEP_BATCH: i64 = 500;
@@ -67,7 +67,7 @@ impl Worker for BlobReaper {
         let mut ticker = tokio::time::interval(TICK_INTERVAL);
         loop {
             tokio::select! {
-                _ = cancel.cancelled() => break,
+                () = cancel.cancelled() => break,
                 _ = ticker.tick() => self.tick(&cancel).await,
             }
         }
@@ -79,6 +79,7 @@ impl Worker for BlobReaper {
 
 impl BlobReaper {
     /// Creates a new [`BlobReaper`].
+    #[must_use]
     pub fn new(infra: Infra, crypto: CryptoService) -> Self {
         let blob = RunBlobStore::new(infra.clone(), crypto);
         Self { infra, blob }
@@ -142,7 +143,7 @@ impl BlobReaper {
                 }
             };
 
-            let fetched = batch.len() as i64;
+            let fetched = i64::try_from(batch.len()).unwrap_or(i64::MAX);
             let mut reclaimed = 0i64;
             for blob in batch {
                 let mut conn = self.infra.postgres.get_connection().await?;

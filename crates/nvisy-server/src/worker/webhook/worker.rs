@@ -130,6 +130,7 @@ impl Worker for WebhookDeliveryWorker {
 
 impl WebhookDeliveryWorker {
     /// Create a new webhook worker.
+    #[must_use]
     pub fn new(infra: Infra, crypto: CryptoService, webhook: WebhookService) -> Self {
         Self {
             infra,
@@ -146,7 +147,7 @@ impl WebhookDeliveryWorker {
 
         loop {
             tokio::select! {
-                _ = cancel.cancelled() => {
+                () = cancel.cancelled() => {
                     tracing::info!(
                         target: TRACING_TARGET,
                         "Webhook worker shutdown requested"
@@ -188,7 +189,7 @@ impl WebhookDeliveryWorker {
         // The final attempt is the one NATS will not redeliver after.
         let is_final = matches!(
             (message.delivery_count(), WebhookStream::MAX_DELIVER),
-            (Ok(count), Some(max)) if count as i64 >= max
+            (Ok(count), Some(max)) if i64::try_from(count).unwrap_or(i64::MAX) >= max
         );
 
         let ack = match outcome {

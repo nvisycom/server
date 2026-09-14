@@ -28,7 +28,7 @@ pub struct WorkspaceConnectionPathParams {
 
 /// Body for minting a browser file-picker token.
 ///
-/// The OneDrive v8 picker requests a token per resource (it names the resource in
+/// The `OneDrive` v8 picker requests a token per resource (it names the resource in
 /// each `authenticate` command); the caller passes that `resource` so the server
 /// mints a token scoped to exactly it. Ignored by providers whose picker takes a
 /// single provider token (Google Drive, Box); omit it for those.
@@ -126,7 +126,7 @@ pub struct StartFileServiceOAuth {
     /// Human-readable name for the connection to be created on success.
     #[garde(length(chars, min = 1, max = 255), custom(validate_non_blank))]
     pub display_name: String,
-    /// Where to scope the sync: a folder id (Drive, OneDrive, Box) or a folder
+    /// Where to scope the sync: a folder id (Drive, `OneDrive`, Box) or a folder
     /// path (Dropbox). Omit to use the account root.
     #[garde(length(chars, min = 1, max = 255))]
     #[serde(default, skip_serializing_if = "Option::is_none")]

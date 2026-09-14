@@ -1,4 +1,4 @@
-//! Utility modules for common functionality across the PostgreSQL models.
+//! Utility modules for common functionality across the `PostgreSQL` models.
 
 pub mod session;
 mod with_account_ref;

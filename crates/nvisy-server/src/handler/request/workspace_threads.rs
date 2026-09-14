@@ -93,6 +93,7 @@ pub struct WorkspaceThreadsQuery {
 impl WorkspaceThreadsQuery {
     /// Builds the repository filter. All fields are ids passed straight through; a
     /// nonexistent id simply matches no rows.
+    #[must_use]
     pub fn into_filter(self) -> ThreadFilter {
         ThreadFilter {
             document_id: self.document_id,

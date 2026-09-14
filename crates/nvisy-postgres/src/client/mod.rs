@@ -1,6 +1,6 @@
-//! PostgreSQL client with connection pooling and migration management.
+//! `PostgreSQL` client with connection pooling and migration management.
 //!
-//! This module provides a high-level interface for connecting to PostgreSQL databases,
+//! This module provides a high-level interface for connecting to `PostgreSQL` databases,
 //! managing connection pools, and handling database migrations. It includes comprehensive
 //! error handling, observability through tracing, and production-ready configuration.
 

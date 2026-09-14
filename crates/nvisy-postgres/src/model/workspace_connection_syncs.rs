@@ -1,4 +1,4 @@
-//! Workspace connection sync model for PostgreSQL database operations.
+//! Workspace connection sync model for `PostgreSQL` database operations.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;

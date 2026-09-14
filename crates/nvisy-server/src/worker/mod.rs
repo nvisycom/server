@@ -23,7 +23,7 @@ pub use set::{Worker, WorkerSet};
 
 use crate::Result;
 
-/// Reconciles every JetStream stream the workers use, creating each if absent and
+/// Reconciles every `JetStream` stream the workers use, creating each if absent and
 /// updating its config to match.
 ///
 /// Called once at startup so stream reconciliation happens in one place rather

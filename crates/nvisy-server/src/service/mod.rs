@@ -24,14 +24,13 @@ use std::sync::Arc;
 use nvisy_core::health::HealthCheck;
 use nvisy_core::net::EndpointPolicy;
 use nvisy_file_service::FileService;
-use nvisy_nats::NatsConfig;
 pub use nvisy_object_store::client::ExternalObjectStore;
-use nvisy_postgres::PgConfig;
 pub use nvisy_s3::S3Config;
 use nvisy_webhook::WebhookService;
 use tokio_util::sync::CancellationToken;
 
 use crate::Result;
+use crate::args::ServiceArgs;
 use crate::middleware::UploadConfig;
 use crate::response::CookieConfig;
 pub use crate::service::account_provisioner::AccountProvisioner;
@@ -148,41 +147,31 @@ pub struct ServiceState {
 }
 
 impl ServiceState {
-    /// Initializes application state from configuration.
+    /// Initializes application state from the aggregated [`ServiceArgs`] and a
+    /// caller-provided [`WebhookService`].
     ///
-    /// Connects to all external services and loads required resources.
-    pub async fn from_config(
-        postgres_config: PgConfig,
-        nats_config: NatsConfig,
-        session_config: SessionKeysConfig,
-        crypto_config: CryptoConfig,
-        engine_config: EngineConfig,
-        health_config: HealthConfig,
-        integration_config: IntegrationConfig,
-        file_connectors_config: FileConnectorsConfig,
-        oidc_config: OidcConfig,
-        webhook_service: WebhookService,
-        upload_config: UploadConfig,
-        cookie_config: CookieConfig,
-        s3_config: S3Config,
-    ) -> Result<Self> {
-        let infra = Infra::from_config(postgres_config, nats_config, s3_config).await?;
+    /// Connects to all external services and loads required resources. The
+    /// webhook client is injected rather than derived from config, so a caller
+    /// can supply any implementation (the first-party CLI uses the reqwest-based
+    /// one).
+    pub async fn from_config(args: ServiceArgs, webhook_service: WebhookService) -> Result<Self> {
+        let infra = Infra::from_config(args.postgres, args.nats, args.s3).await?;
 
         // Reconcile every JetStream stream once, up front, so the publishers and
         // subscribers built per use later are cheap handles that assume their
         // stream already exists.
         ensure_streams(&infra.nats).await?;
 
-        let crypto = CryptoService::from_config(&crypto_config).await?;
-        let engine = EngineService::from_config(engine_config).await?;
-        let session_keys = SessionKeys::from_config(&session_config).await?;
-        let oidc = OidcConfigured::from_config(&oidc_config)?;
+        let crypto = CryptoService::from_config(&args.crypto).await?;
+        let engine = EngineService::from_config(args.engine).await?;
+        let session_keys = SessionKeys::from_config(&args.session_keys).await?;
+        let oidc = OidcConfigured::from_config(&args.oidc)?;
 
         // Session cookies without `Secure` are only safe over plain HTTP on a
         // trusted network (local development or trusted-network self-hosting); a
         // browser will not even store them over HTTPS. Warn loudly so an
         // accidental production misconfiguration is visible.
-        if !cookie_config.secure {
+        if !args.cookie.secure {
             tracing::warn!(
                 target: TRACING_TARGET,
                 "COOKIE_SECURE is disabled: session cookies are sent without the Secure \
@@ -202,15 +191,15 @@ impl ServiceState {
         // service from the same `Infra` their `FromRef` impls use. The cloud
         // file service (HTTP client + OAuth apps) is built by the crate; the
         // post-auth redirect is a host-side concern kept alongside it.
-        let (file_service, file_service_redirect) = file_connectors_config.build()?;
-        let endpoint_policy = integration_config.endpoint_policy;
+        let (file_service, file_service_redirect) = args.file_service.build()?;
+        let endpoint_policy = args.integration.endpoint_policy;
         let connection_sync = ConnectionSyncService::new(
             infra.clone(),
             crypto.clone(),
             ExternalObjectStore::new(endpoint_policy),
             file_service.clone(),
-            integration_config.import_concurrency,
-            integration_config.export_concurrency,
+            args.integration.import_concurrency,
+            args.integration.export_concurrency,
         );
 
         // The security services and the sign-in orchestration built over them. The
@@ -234,14 +223,14 @@ impl ServiceState {
             detection: Coordinator::new(),
             assistant: Coordinator::new(),
             shutdown: CancellationToken::new(),
-            health_cache: HealthCache::new(&health_config, health_checkers),
+            health_cache: HealthCache::new(&args.health, health_checkers),
             password,
             session_keys,
             sign_in,
             oidc,
             user_agent_parser,
-            upload: upload_config,
-            cookie: cookie_config,
+            upload: args.upload,
+            cookie: args.cookie,
         };
 
         Ok(service_state)

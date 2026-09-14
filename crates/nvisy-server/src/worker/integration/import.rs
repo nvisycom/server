@@ -352,7 +352,7 @@ impl Importer {
         let new_blob = NewBlob {
             workspace_id: connection.workspace_id,
             content_hash: measurements.sha256().to_vec(),
-            file_size_bytes: measurements.bytes() as i64,
+            file_size_bytes: i64::try_from(measurements.bytes()).unwrap_or(i64::MAX),
             storage_path: file_key.to_string(),
             storage_bucket: Bucket::Documents.name().to_owned(),
             expires_at: expires_at.map(Into::into),

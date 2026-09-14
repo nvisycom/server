@@ -1,6 +1,6 @@
 //! OAuth authorization flow for cloud file-service connections.
 //!
-//! A cloud file provider (Google Drive, ...) is connected over OAuth2, not with
+//! A cloud file provider (Google Drive, ...) is connected over `OAuth2`, not with
 //! static credentials, so it cannot be created through the ordinary
 //! [`create_connection`](super::connections) endpoint. Instead:
 //!

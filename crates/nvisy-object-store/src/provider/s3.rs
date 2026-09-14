@@ -1,6 +1,6 @@
 //! S3-compatible provider using [`object_store::aws::AmazonS3Builder`].
 //!
-//! Works with AWS S3, MinIO, and any S3-compatible service.
+//! Works with AWS S3, `MinIO`, and any S3-compatible service.
 
 use std::fmt;
 
@@ -29,7 +29,7 @@ pub struct S3Credentials {
     /// AWS region (defaults to `us-east-1`).
     #[serde(default = "default_region")]
     pub region: String,
-    /// Endpoint URL (e.g. `http://localhost:9000` for MinIO).
+    /// Endpoint URL (e.g. `http://localhost:9000` for `MinIO`).
     /// Required for non-AWS S3-compatible services.
     #[serde(default)]
     pub endpoint: Option<String>,

@@ -144,6 +144,7 @@ impl ConnectionSyncService {
     /// it. Returns whether a token was found and cancelled. This is best-effort:
     /// a run executing on another instance is not reached here and relies on the
     /// DB status flip instead.
+    #[must_use]
     pub fn cancel_local(&self, run_id: Uuid) -> bool {
         let guard = self.running.lock().expect("sync cancel registry poisoned");
         if let Some(token) = guard.get(&run_id) {

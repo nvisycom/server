@@ -1,4 +1,4 @@
-//! Workspace detection model for PostgreSQL database operations.
+//! Workspace detection model for `PostgreSQL` database operations.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;

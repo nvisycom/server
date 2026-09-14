@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// The type of API token, for authentication and tracking.
     ///
-    /// Corresponds to the `API_TOKEN_TYPE` PostgreSQL enum and categorizes tokens
+    /// Corresponds to the `API_TOKEN_TYPE` `PostgreSQL` enum and categorizes tokens
     /// by the client type they authenticate.
     pub enum ApiTokenType: Default = Web, "crate::schema::sql_types::ApiTokenType" {
         /// Web browser token (desktop or mobile browser).

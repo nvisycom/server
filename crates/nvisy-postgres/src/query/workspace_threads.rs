@@ -1138,8 +1138,8 @@ mod tests {
         );
         merged.sort();
 
-        let next = if merged.len() as i64 > limit {
-            merged.truncate(limit as usize);
+        let next = if i64::try_from(merged.len()).unwrap_or(i64::MAX) > limit {
+            merged.truncate(usize::try_from(limit).unwrap_or(0));
             merged
                 .last()
                 .map(|&(created_at, source, id)| TimelineCursor {

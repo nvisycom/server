@@ -44,6 +44,7 @@ pub struct SignInService {
 
 impl SignInService {
     /// Creates a [`SignInService`] over its clients.
+    #[must_use]
     pub fn new(postgres: PgClient, password: PasswordService, issuer: AuthIssuer) -> Self {
         Self {
             postgres,

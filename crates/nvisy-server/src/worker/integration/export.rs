@@ -230,7 +230,7 @@ impl Exporter {
             .put_stream(FileUpload {
                 key: remote_key,
                 content_type: content_type.as_str(),
-                content_length: blob.file_size_bytes.max(0) as u64,
+                content_length: u64::try_from(blob.file_size_bytes.max(0)).unwrap_or(0),
                 body,
             })
             .await?;

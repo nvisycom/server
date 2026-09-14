@@ -407,7 +407,7 @@ fn verify_connection_docs(op: TransformOperation) -> TransformOperation {
 
 /// Mints a short-lived provider OAuth access token for a browser file picker.
 ///
-/// The native pickers (Google Picker, the OneDrive and Box file pickers) run in
+/// The native pickers (Google Picker, the `OneDrive` and Box file pickers) run in
 /// the browser and need a provider access token to do so. Refresh tokens stay
 /// server-side, so this returns only a short-lived access token (refreshing it
 /// from the stored credentials if the current one has expired, and persisting
@@ -512,7 +512,7 @@ fn mint_picker_token_docs(op: TransformOperation) -> TransformOperation {
 
 /// Returns routes for workspace connection management.
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, post_with};
 
     ApiRouter::new()
         .api_route(

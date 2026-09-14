@@ -17,7 +17,7 @@ use crate::service::Infra;
 /// Tracing target for detection enqueue and broadcast primitives.
 const TRACING_TARGET: &str = "nvisy_server::worker::detection";
 
-/// The detection JetStream work-queue, carrying [`DetectionJob`] payloads.
+/// The detection `JetStream` work-queue, carrying [`DetectionJob`] payloads.
 pub type DetectionStream = nvisy_nats::stream::DetectionStream<DetectionJob>;
 
 /// A queued request to run a detection.

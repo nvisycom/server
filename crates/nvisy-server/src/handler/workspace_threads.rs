@@ -519,11 +519,11 @@ fn assign_review_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Builds the event origin shared by every thread event.
-fn origin<'a>(
+fn origin(
     workspace_id: Uuid,
     account_id: Uuid,
-    security: &'a SecurityContext,
-) -> event::EventOrigin<'a> {
+    security: &SecurityContext,
+) -> event::EventOrigin<'_> {
     event::EventOrigin {
         workspace_id,
         account_id,
@@ -555,7 +555,7 @@ async fn find_thread(
 
 /// Returns an [`ApiRouter`] with the thread lifecycle and timeline routes.
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, patch_with, post_with, put_with};
 
     ApiRouter::new()
         .api_route(

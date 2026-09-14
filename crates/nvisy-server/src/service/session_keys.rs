@@ -128,6 +128,7 @@ impl SessionKeys {
     ///
     /// This key is used to verify JWT tokens.
     #[inline]
+    #[must_use]
     pub fn decoding_key(&self) -> &DecodingKey {
         &self.inner.decoding_key
     }
@@ -136,6 +137,7 @@ impl SessionKeys {
     ///
     /// This key is used to sign JWT tokens.
     #[inline]
+    #[must_use]
     pub fn encoding_key(&self) -> &EncodingKey {
         &self.inner.encoding_key
     }
@@ -161,11 +163,15 @@ impl SessionKeys {
 
         let claims = TestClaims {
             sub: "test".to_string(),
-            exp: (SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                + 300) as usize, // 5 minutes from now
+            // 5 minutes from now
+            exp: usize::try_from(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    + 300,
+            )
+            .unwrap_or(usize::MAX),
         };
 
         // Try to encode with the encoding key
@@ -317,13 +323,13 @@ mod tests {
 
     use super::*;
 
-    const TEST_PRIVATE_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
+    const TEST_PRIVATE_KEY: &str = r"-----BEGIN PRIVATE KEY-----
 MC4CAQAwBQYDK2VwBCIEIDQtFc/jcCECuwR6cQqh9Xy3y8pcryWDn/HVN5fPSwm+
------END PRIVATE KEY-----"#;
+-----END PRIVATE KEY-----";
 
-    const TEST_PUBLIC_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
+    const TEST_PUBLIC_KEY: &str = r"-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAMveirBCUUpVI8TCv4W5jAZqtkEzfA7eIvozsugFbvDU=
------END PUBLIC KEY-----"#;
+-----END PUBLIC KEY-----";
 
     #[tokio::test]
     async fn load_valid_keys() {

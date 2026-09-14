@@ -6,7 +6,7 @@ db_enum! {
     /// What a whole-listing import does with a file whose source object no longer
     /// exists.
     ///
-    /// Corresponds to the `SYNC_DELETION_POLICY` PostgreSQL enum. Only
+    /// Corresponds to the `SYNC_DELETION_POLICY` `PostgreSQL` enum. Only
     /// whole-listing import reconciles deletions (it compares the full source
     /// listing against what was imported), so this applies to object-store import
     /// alone; picker-driven file-service import transfers only the files the user

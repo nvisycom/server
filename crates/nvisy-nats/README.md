@@ -2,12 +2,12 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
 
-Task-focused NATS client for the Nvisy platform with JetStream and KV.
+Task-focused NATS client for the Nvisy platform with `JetStream` and KV.
 
 ## Overview
 
 A type-safe wrapper around `async-nats` for the platform's messaging
-needs. JetStream powers a unified stream for real-time updates and
+needs. `JetStream` powers a unified stream for real-time updates and
 durable background jobs, and the KV store holds distributed state.
 Generic parameters keep payloads type-safe, with automatic reconnection
 and retry-aware error handling.

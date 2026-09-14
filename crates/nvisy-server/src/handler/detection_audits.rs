@@ -214,7 +214,7 @@ async fn download_detection_audit(
     let headers = attachment_headers(
         &filename,
         HeaderValue::from_static(content_type),
-        body.len() as u64,
+        u64::try_from(body.len()).unwrap_or(u64::MAX),
     );
 
     tracing::debug!(target: TRACING_TARGET, "Detection audit exported");

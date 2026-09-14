@@ -3,7 +3,7 @@
 //! Records that a document was exported to a connection, so scheduled export of
 //! redacted outputs stays idempotent (a document already exported to a connection
 //! is not pushed again). A document may be exported to more than one connection,
-//! so the key is (document_id, connection_id).
+//! so the key is (`document_id`, `connection_id`).
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;

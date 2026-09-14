@@ -37,6 +37,7 @@ pub struct WorkspaceDocumentService {
 
 impl WorkspaceDocumentService {
     /// Creates a [`WorkspaceDocumentService`] over its clients.
+    #[must_use]
     pub fn new(postgres: PgClient, engine: EngineService) -> Self {
         Self { postgres, engine }
     }
@@ -63,7 +64,7 @@ impl WorkspaceDocumentService {
     }
 
     /// Finds a document by id within a workspace, with its backing blob and
-    /// creator, or a NotFound.
+    /// creator, or a `NotFound`.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -84,9 +85,11 @@ impl WorkspaceDocumentService {
         let mut conn = self.postgres.get_connection().await?;
         find_document(&mut conn, origin.workspace_id, document_id).await?;
 
-        let updates = input.into_model();
+        let document_updates = input.into_model();
         conn.transaction(async |conn| {
-            let updated = conn.update_workspace_document(document_id, updates).await?;
+            let updated = conn
+                .update_workspace_document(document_id, document_updates)
+                .await?;
             conn.emit_event(
                 origin,
                 event::WorkspaceEvent::DocumentUpdated(event::DocumentUpdated {
@@ -179,7 +182,7 @@ impl WorkspaceDocumentService {
     }
 }
 
-/// Finds a document within a workspace, or a NotFound error.
+/// Finds a document within a workspace, or a `NotFound` error.
 async fn find_document(
     conn: &mut PgConn,
     workspace_id: Uuid,
@@ -191,7 +194,7 @@ async fn find_document(
 }
 
 /// Finds a document within a workspace, with its backing blob and uploader's
-/// identity, or a NotFound error.
+/// identity, or a `NotFound` error.
 async fn find_document_with_creator(
     conn: &mut PgConn,
     workspace_id: Uuid,

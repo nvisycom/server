@@ -43,6 +43,7 @@ impl EngineService {
     }
 
     /// Borrows the underlying [`Engine`].
+    #[must_use]
     pub fn engine(&self) -> &Engine {
         &self.engine
     }

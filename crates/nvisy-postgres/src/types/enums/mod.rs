@@ -1,6 +1,6 @@
 //! Database enumeration types for type-safe queries.
 //!
-//! This module provides strongly-typed enumerations that correspond to PostgreSQL ENUM types
+//! This module provides strongly-typed enumerations that correspond to `PostgreSQL` ENUM types
 //! defined in the database schema. Each enumeration provides serialization support for APIs
 //! and database integration through Diesel.
 
@@ -60,7 +60,7 @@ pub use webhook_event::WebhookEvent;
 pub use webhook_status::WebhookStatus;
 pub use workspace_role::WorkspaceRole;
 
-/// Defines a PostgreSQL-backed enum whose wire form is written once per variant.
+/// Defines a `PostgreSQL`-backed enum whose wire form is written once per variant.
 ///
 /// A `DbEnum` needs the same string in three places per variant — `db_rename`
 /// (the Postgres label), `serde(rename)` (the JSON tag), and `strum(serialize)`

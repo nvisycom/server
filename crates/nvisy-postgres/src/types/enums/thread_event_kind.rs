@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// The kind of a non-message entry in a comment thread's timeline.
     ///
-    /// Corresponds to the `THREAD_EVENT_KIND` PostgreSQL enum. A thread's stream
+    /// Corresponds to the `THREAD_EVENT_KIND` `PostgreSQL` enum. A thread's stream
     /// interleaves comments (messages) with these events. A workspace thread uses
     /// only the discussion lifecycle (opened/closed/reopened/renamed); a file
     /// thread is the review of its file and also records its review transitions

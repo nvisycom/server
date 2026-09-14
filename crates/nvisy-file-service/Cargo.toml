@@ -62,3 +62,6 @@ strum = { workspace = true, features = ["derive"] }
 bytes = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["v4"] }
 jiff = { workspace = true, features = [] }
+
+[lints]
+workspace = true

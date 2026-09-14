@@ -32,6 +32,7 @@ pub struct AccountApiTokenService {
 
 impl AccountApiTokenService {
     /// Creates an [`AccountApiTokenService`] over its clients.
+    #[must_use]
     pub fn new(postgres: PgClient, issuer: AuthIssuer) -> Self {
         Self { postgres, issuer }
     }
@@ -81,7 +82,7 @@ impl AccountApiTokenService {
             .await?)
     }
 
-    /// Reads one of the account's API tokens by id, or a NotFound.
+    /// Reads one of the account's API tokens by id, or a `NotFound`.
     pub async fn read(&self, account_id: Uuid, token_id: Uuid) -> Result<AccountApiToken> {
         let mut conn = self.postgres.get_connection().await?;
         find_account_token(&mut conn, account_id, token_id).await

@@ -29,6 +29,7 @@ impl fmt::Debug for UserAgentParser {
 
 impl UserAgentParser {
     /// Creates a new instance of the [`UserAgentParser`] service.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             parser: Arc::new(Parser::new()),
@@ -57,6 +58,7 @@ impl UserAgentParser {
     /// let name = parser.parse("@nvisy/sdk/1.2.3");
     /// assert_eq!(name, "@nvisy/sdk/1.2.3");
     /// ```
+    #[must_use]
     pub fn parse(&self, user_agent: &str) -> String {
         let label = self.browser_label(user_agent).unwrap_or_else(|| {
             // Not a recognized browser. The raw user agent is more useful than a

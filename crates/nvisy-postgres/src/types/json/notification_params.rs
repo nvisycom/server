@@ -177,6 +177,7 @@ pub enum NotificationPayload {
 
 impl NotificationPayload {
     /// The [`NotificationEvent`] this payload is for (its `type` tag).
+    #[must_use]
     pub fn event(&self) -> NotificationEvent {
         match self {
             NotificationPayload::MemberJoined(_) => NotificationEvent::MemberJoined,
@@ -195,6 +196,7 @@ impl NotificationPayload {
     /// Splits the payload into its event (for the indexed `notify_type` column)
     /// and the self-describing [`Json`] body stored in `params` — the tag
     /// stays in the body, so a read decodes it back symmetrically.
+    #[must_use]
     pub fn into_stored(self) -> (NotificationEvent, Json<Self>) {
         let event = self.event();
         let params = Json::encode(&self);

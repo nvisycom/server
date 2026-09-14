@@ -12,7 +12,7 @@ use crate::provider::{
     AnthropicProvider, Client, OllamaCredentials, OllamaProvider, OpenAiProvider,
 };
 
-/// Configuration for a provider reached with an API key (OpenAI, Anthropic).
+/// Configuration for a provider reached with an API key (`OpenAI`, Anthropic).
 ///
 /// The `api_key` is masked in [`Debug`], so neither this struct nor any config
 /// that embeds it leaks the key.
@@ -57,7 +57,7 @@ pub struct UnauthenticatedProvider {
 /// A fully-typed LLM inference connection configuration.
 ///
 /// The `provider` tag selects the variant and thereby the credential shape, so
-/// an OpenAI connection cannot carry Anthropic credentials. The key-bearing
+/// an `OpenAI` connection cannot carry Anthropic credentials. The key-bearing
 /// variants hold an [`AuthenticatedProvider`], which masks the key in `Debug`;
 /// serialization exists only to persist the config encrypted at rest, never to
 /// return it in API responses.
@@ -65,7 +65,7 @@ pub struct UnauthenticatedProvider {
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "provider")]
 pub enum LlmConfig {
-    /// OpenAI (or an OpenAI-compatible endpoint).
+    /// `OpenAI` (or an OpenAI-compatible endpoint).
     #[serde(rename = "openai")]
     OpenAi(AuthenticatedProvider),
     /// Ollama, typically self-hosted.

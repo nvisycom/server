@@ -39,6 +39,7 @@ impl TokenExpiration {
     ///
     /// Uses hours instead of days because `jiff::Timestamp` only supports
     /// units of hours or smaller for arithmetic operations.
+    #[must_use]
     pub fn to_span(self) -> Option<jiff::Span> {
         match self {
             Self::Never => None,
@@ -50,19 +51,21 @@ impl TokenExpiration {
     }
 
     /// Returns the expiry timestamp from now, or None if never expires.
+    #[must_use]
     pub fn to_expiry_timestamp(self) -> Option<jiff::Timestamp> {
         self.to_span()
             .and_then(|span| jiff::Timestamp::now().checked_add(span).ok())
     }
 
     /// Returns the duration until expiration, or None if never expires.
+    #[must_use]
     pub fn to_duration(self) -> Option<Duration> {
         match self {
             Self::Never => None,
-            Self::In7Days => Some(Duration::from_secs(7 * 24 * 60 * 60)),
-            Self::In30Days => Some(Duration::from_secs(30 * 24 * 60 * 60)),
-            Self::In90Days => Some(Duration::from_secs(90 * 24 * 60 * 60)),
-            Self::In1Year => Some(Duration::from_secs(365 * 24 * 60 * 60)),
+            Self::In7Days => Some(Duration::from_hours(168)),
+            Self::In30Days => Some(Duration::from_hours(720)),
+            Self::In90Days => Some(Duration::from_hours(2160)),
+            Self::In1Year => Some(Duration::from_hours(8760)),
         }
     }
 }

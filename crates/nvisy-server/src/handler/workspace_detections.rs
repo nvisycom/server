@@ -8,6 +8,11 @@
 //! many times. The streaming (SSE) and redaction actions stay here, loading a
 //! detection through the service.
 
+// Axum handlers take their dependencies as typed extractor arguments, so a
+// dependency-heavy handler exceeds the arg limit by construction; the signature
+// is fixed by the framework and cannot be bundled into a struct.
+#![allow(clippy::too_many_arguments)]
+
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use async_stream::stream;
@@ -66,7 +71,7 @@ async fn created_response(
     Ok((
         status,
         Json(WorkspaceDetection::from_model(
-            created.detection,
+            &created.detection,
             workspace_id,
             workspace_handle,
             trigger,
@@ -221,7 +226,7 @@ async fn list_pipeline_detections(
 
     let response = WorkspaceDetectionsPage::from_cursor_page(page, |row| {
         WorkspaceDetection::from_model(
-            row.detection,
+            &row.detection,
             workspace.id,
             workspace.handle.clone(),
             row.account.into(),
@@ -274,7 +279,7 @@ async fn list_workspace_detections(
         StatusCode::OK,
         Json(WorkspaceDetectionsPage::from_cursor_page(page, |row| {
             WorkspaceDetection::from_model(
-                row.detection,
+                &row.detection,
                 workspace.id,
                 workspace.handle.clone(),
                 row.account.into(),
@@ -329,7 +334,7 @@ async fn get_detection(
     Ok((
         StatusCode::OK,
         Json(WorkspaceDetection::from_model(
-            detection,
+            &detection,
             workspace.id,
             workspace.handle,
             trigger,
@@ -477,7 +482,7 @@ async fn reread_detection_status(
     }
 }
 
-/// OpenAPI documentation for the detection status SSE stream.
+/// `OpenAPI` documentation for the detection status SSE stream.
 fn stream_detection_events_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Stream detection status")
         .description(
@@ -532,6 +537,8 @@ struct RedactInputs {
         detection_id = %path_params.detection_id,
     )
 )]
+// reason: long but cohesive; splitting adds no clarity.
+#[allow(clippy::too_many_lines)]
 async fn redact_detection(
     State(pg_client): State<PgClient>,
     State(detections): State<domain::WorkspaceDetectionService>,
@@ -660,7 +667,7 @@ async fn redact_detection(
         .detection
         .retention_override
         .as_ref()
-        .map(|snapshot| snapshot.or_default());
+        .map(nvisy_postgres::types::Json::or_default);
     let staged_output = blob
         .stage_redacted_document(
             &inputs.document,
@@ -803,7 +810,7 @@ async fn redact_detection(
     Ok((
         StatusCode::CREATED,
         Json(WorkspaceRedactionResult::from_model(
-            redaction,
+            &redaction,
             workspace.id,
             workspace.handle,
             requested_by,
@@ -833,7 +840,7 @@ fn redact_detection_docs(op: TransformOperation) -> TransformOperation {
 ///
 /// [`Router`]: axum::routing::Router
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, post_with};
 
     ApiRouter::new()
         .api_route(

@@ -173,7 +173,7 @@ impl From<JwtError> for Error<'static> {
                 .with_context("Token was not issued by this authentication system"),
             JwtErrorKind::MissingRequiredClaim(claim) => ErrorKind::MalformedAuthToken
                 .with_message("Authentication token is incomplete")
-                .with_context(format!("Token is missing required field: {}", claim)),
+                .with_context(format!("Token is missing required field: {claim}")),
             JwtErrorKind::Base64(_) => ErrorKind::MalformedAuthToken
                 .with_message("Authentication token format is corrupted")
                 .with_context("Token contains invalid base64 encoding"),

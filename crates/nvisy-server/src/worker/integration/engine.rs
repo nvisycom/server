@@ -33,7 +33,7 @@ use crate::service::{
 const TRACING_TARGET: &str = "nvisy_server::worker::integration";
 
 /// Maximum wall-clock time for a single sync transfer before it is failed.
-const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(30);
 
 /// How a transfer ended: either it ran to a result/timeout, or it was cancelled.
 enum Outcome {
@@ -137,11 +137,11 @@ impl TransferEngine {
         // handle is polled by mutable reference so it can still be aborted in the
         // cancel/timeout branches.
         let outcome = tokio::select! {
-            _ = token.cancelled() => {
+            () = token.cancelled() => {
                 work.abort();
                 Outcome::Cancelled
             }
-            _ = tokio::time::sleep(SYNC_TIMEOUT) => {
+            () = tokio::time::sleep(SYNC_TIMEOUT) => {
                 work.abort();
                 Outcome::Finished(Err(ErrorKind::InternalServerError.with_message("Sync timed out")))
             }
@@ -190,7 +190,7 @@ impl TransferEngine {
                 event::WorkspaceEvent::ConnectionSyncCompleted(event::ConnectionSyncCompleted {
                     connection_id,
                     connection_name: connection_name.to_owned(),
-                    records_synced: Some(*records_synced as i64),
+                    records_synced: Some(i64::try_from(*records_synced).unwrap_or(i64::MAX)),
                     notify: Some(origin.account_id),
                 })
             }
@@ -220,22 +220,23 @@ impl TransferEngine {
                 // The guarded update returns `Some` only if it transitioned an
                 // active run; a run already terminal (cancelled/reaped) returns
                 // `None`, and we record no event for it.
-                let transitioned = match &result {
-                    Ok(records_synced) => conn
-                        .complete_workspace_connection_sync(run_id, *records_synced as i64)
+                let transitioned = if let Ok(records_synced) = &result {
+                    conn.complete_workspace_connection_sync(
+                        run_id,
+                        i64::try_from(*records_synced).unwrap_or(i64::MAX),
+                    )
+                    .await?
+                    .is_some()
+                } else {
+                    let safe_message = match &event {
+                        event::WorkspaceEvent::ConnectionSyncFailed(e) => {
+                            e.error.clone().unwrap_or_else(|| "Sync failed".to_owned())
+                        }
+                        _ => "Sync failed".to_owned(),
+                    };
+                    conn.fail_workspace_connection_sync(run_id, &safe_message)
                         .await?
-                        .is_some(),
-                    Err(_) => {
-                        let safe_message = match &event {
-                            event::WorkspaceEvent::ConnectionSyncFailed(e) => {
-                                e.error.clone().unwrap_or_else(|| "Sync failed".to_owned())
-                            }
-                            _ => "Sync failed".to_owned(),
-                        };
-                        conn.fail_workspace_connection_sync(run_id, &safe_message)
-                            .await?
-                            .is_some()
-                    }
+                        .is_some()
                 };
                 if transitioned {
                     conn.emit_event(origin, event).await?;

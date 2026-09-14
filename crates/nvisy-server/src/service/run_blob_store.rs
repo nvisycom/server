@@ -288,9 +288,9 @@ impl RunBlobStore {
         audit: &Audit,
         encrypt_step: &str,
     ) -> Result<NewBlob> {
-        let plaintext = serde_json::to_vec(audit).map_err(analysis_serde_error)?;
+        let plaintext = serde_json::to_vec(audit).map_err(|error| analysis_serde_error(&error))?;
         let hash = Sha256::digest(&plaintext).to_vec();
-        let size = plaintext.len() as i64;
+        let size = i64::try_from(plaintext.len()).unwrap_or(i64::MAX);
         let ciphertext = self
             .crypto
             .encrypt(workspace_id, &plaintext)
@@ -334,9 +334,10 @@ impl RunBlobStore {
         workspace_settings: &RetentionSettings,
         artifacts: &T,
     ) -> Result<NewBlob> {
-        let plaintext = serde_json::to_vec(artifacts).map_err(analysis_serde_error)?;
+        let plaintext =
+            serde_json::to_vec(artifacts).map_err(|error| analysis_serde_error(&error))?;
         let hash = Sha256::digest(&plaintext).to_vec();
-        let size = plaintext.len() as i64;
+        let size = i64::try_from(plaintext.len()).unwrap_or(i64::MAX);
         let ciphertext = self
             .crypto
             .encrypt(workspace_id, &plaintext)
@@ -382,7 +383,7 @@ impl RunBlobStore {
         bytes: Bytes,
     ) -> Result<(NewBlob, String)> {
         let workspace_id = source_document.workspace_id;
-        let plaintext_size = bytes.len() as i64;
+        let plaintext_size = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
         let plaintext_hash = Sha256::digest(&bytes).to_vec();
         let ciphertext = self.crypto.encrypt(workspace_id, &bytes).map_err(|err| {
             ErrorKind::InternalServerError
@@ -603,7 +604,7 @@ impl RunBlobStore {
 }
 
 /// Maps an analysis (de)serialization failure to an internal error.
-fn analysis_serde_error(error: serde_json::Error) -> Error<'static> {
+fn analysis_serde_error(error: &serde_json::Error) -> Error<'static> {
     ErrorKind::InternalServerError
         .with_message("Failed to process analysis")
         .with_context(error.to_string())

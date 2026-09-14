@@ -5,7 +5,7 @@ use super::db_enum;
 db_enum! {
     /// The capability category of a transfer connection.
     ///
-    /// Corresponds to the `CONNECTION_TYPE` PostgreSQL enum. A stable, closed set:
+    /// Corresponds to the `CONNECTION_TYPE` `PostgreSQL` enum. A stable, closed set:
     /// the concrete provider (the `provider` column, e.g. `s3`) stays open and
     /// extensible, while its capability is one of these types. Both categories are
     /// transfer-capable — an object store is enumerable and syncs on a timer; a
@@ -14,7 +14,7 @@ db_enum! {
     pub enum ConnectionType = "crate::schema::sql_types::ConnectionType" {
         /// External object storage (s3, azure, gcs, ...).
         ObjectStore = "object_store",
-        /// External file service (google_drive, dropbox, ...).
+        /// External file service (`google_drive`, dropbox, ...).
         FileService = "file_service",
     }
 }

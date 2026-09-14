@@ -46,7 +46,9 @@ pub async fn csrf_protect(request: Request, next: Next) -> Result<Response> {
 
     if is_state_changing && via_cookie {
         let jar = CookieJar::from_headers(request.headers());
-        let cookie_token = jar.get(CSRF_COOKIE_NAME).map(|c| c.value());
+        let cookie_token = jar
+            .get(CSRF_COOKIE_NAME)
+            .map(axum_extra::extract::cookie::Cookie::value);
         let header_token = request
             .headers()
             .get(CSRF_HEADER_NAME)

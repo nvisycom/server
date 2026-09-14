@@ -34,6 +34,7 @@ pub struct WorkspacePipelineService {
 
 impl WorkspacePipelineService {
     /// Creates a [`WorkspacePipelineService`] over the given connection pool.
+    #[must_use]
     pub fn new(postgres: PgClient) -> Self {
         Self { postgres }
     }
@@ -51,7 +52,7 @@ impl WorkspacePipelineService {
 
         let (new_pipeline, references) = input
             .into_parts(origin.workspace_id, origin.account_id)
-            .map_err(serialize_error)?;
+            .map_err(|error| serialize_error(&error))?;
         let policy_ids = resolve_references(&mut conn, origin.workspace_id, &references).await?;
 
         let pipeline = conn
@@ -97,7 +98,7 @@ impl WorkspacePipelineService {
     }
 
     /// Finds a pipeline by id with its creator and referenced policy ids, or a
-    /// NotFound.
+    /// `NotFound`.
     pub async fn find(
         &self,
         workspace_id: Uuid,
@@ -128,7 +129,7 @@ impl WorkspacePipelineService {
 
         let (update_data, references) = input
             .into_parts(existing.metadata.or_default())
-            .map_err(serialize_error)?;
+            .map_err(|error| serialize_error(&error))?;
 
         // Resolve any supplied references up front so an unknown handle rejects
         // before the write.
@@ -197,7 +198,7 @@ impl WorkspacePipelineService {
     }
 }
 
-/// Finds a pipeline within a workspace by id, with its creator, or a NotFound.
+/// Finds a pipeline within a workspace by id, with its creator, or a `NotFound`.
 async fn find_pipeline(
     conn: &mut PgConn,
     workspace_id: Uuid,
@@ -209,7 +210,7 @@ async fn find_pipeline(
 }
 
 /// Validates a set of policy ids as live authored policies within a workspace,
-/// rejecting the whole request with a NotFound if any id is unknown.
+/// rejecting the whole request with a `NotFound` if any id is unknown.
 async fn resolve_references(
     conn: &mut PgConn,
     workspace_id: Uuid,
@@ -224,7 +225,7 @@ async fn resolve_references(
 ///
 /// A definition that will not round-trip is a server-side data problem, not a
 /// client error.
-fn serialize_error(error: serde_json::Error) -> Error<'static> {
+fn serialize_error(error: &serde_json::Error) -> Error<'static> {
     ErrorKind::InternalServerError
         .with_message("Failed to process pipeline definition")
         .with_context(error.to_string())

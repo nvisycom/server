@@ -84,7 +84,7 @@ impl Connector {
             ConnectionConfig::ObjectStore(config) => {
                 Ok(ObjectStoreSource(self.object.connect(config).await?))
             }
-            _ => Err(ErrorKind::BadRequest
+            ConnectionConfig::FileService(_) => Err(ErrorKind::BadRequest
                 .with_message("Whole-listing import is only supported for object stores")),
         }
     }

@@ -25,7 +25,7 @@ use crate::service::{ServiceState, event};
 const TRACING_TARGET: &str = "nvisy_server::handler::pipelines";
 
 /// Maps a definition serialization failure to an internal error.
-fn serialize_error(error: serde_json::Error) -> Error<'static> {
+fn serialize_error(error: &serde_json::Error) -> Error<'static> {
     crate::response::ErrorKind::InternalServerError
         .with_message("Failed to process pipeline definition")
         .with_context(error.to_string())
@@ -74,7 +74,7 @@ async fn create_pipeline(
         creator,
         policy_ids,
     )
-    .map_err(serialize_error)?;
+    .map_err(|e| serialize_error(&e))?;
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -167,7 +167,7 @@ async fn get_pipeline(
         found.account.into(),
         policy_ids,
     )
-    .map_err(serialize_error)?;
+    .map_err(|e| serialize_error(&e))?;
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -226,7 +226,7 @@ async fn update_pipeline(
         creator,
         policy_ids,
     )
-    .map_err(serialize_error)?;
+    .map_err(|e| serialize_error(&e))?;
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -286,7 +286,7 @@ fn delete_pipeline_docs(op: TransformOperation) -> TransformOperation {
 ///
 /// [`Router`]: axum::routing::Router
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, post_with};
 
     ApiRouter::new()
         // Workspace-scoped routes for listing and creating

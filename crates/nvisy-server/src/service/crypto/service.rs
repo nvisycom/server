@@ -127,6 +127,7 @@ impl CryptoService {
     ///
     /// For shared secrets that must be recoverable in full (e.g. HMAC signing
     /// keys) — hand the plaintext to the caller once, then store it encrypted.
+    #[must_use]
     pub fn generate_secret(&self) -> String {
         generate_secret()
     }

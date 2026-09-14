@@ -30,11 +30,12 @@ pub struct AccountService {
 
 impl AccountService {
     /// Creates an [`AccountService`] over the given connection pool.
+    #[must_use]
     pub fn new(postgres: PgClient) -> Self {
         Self { postgres }
     }
 
-    /// Finds an account by id, or a NotFound.
+    /// Finds an account by id, or a `NotFound`.
     pub async fn find(&self, account_id: Uuid) -> Result<Account> {
         let mut conn = self.postgres.get_connection().await?;
         conn.find_account_by_id(account_id)
@@ -94,7 +95,7 @@ impl AccountService {
         Ok(account)
     }
 
-    /// Soft-deletes an account, or a NotFound if it does not exist.
+    /// Soft-deletes an account, or a `NotFound` if it does not exist.
     pub async fn delete(&self, account_id: Uuid) -> Result<()> {
         let mut conn = self.postgres.get_connection().await?;
         conn.delete_account(account_id)
@@ -133,8 +134,8 @@ mod tests {
             display_name: Some(Some("Renamed".to_owned())),
             ..Default::default()
         };
-        let updated = service.update(account_id, updates).await?;
-        assert_eq!(updated.display_name.as_deref(), Some("Renamed"));
+        let updated_account = service.update(account_id, updates).await?;
+        assert_eq!(updated_account.display_name.as_deref(), Some("Renamed"));
         Ok(())
     }
 

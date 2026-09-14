@@ -1,4 +1,4 @@
-//! Blob model for PostgreSQL database operations.
+//! Blob model for `PostgreSQL` database operations.
 //!
 //! A blob is a content-addressed lump of stored bytes. It is shared: two
 //! documents, audits, or intermediates with identical bytes point at the same

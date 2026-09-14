@@ -124,18 +124,15 @@ pub(crate) fn connection_result_redirect(
     status: &str,
     workspace_handle: Option<&str>,
 ) -> Response {
-    match base {
-        Some(base) => {
-            let base = match workspace_handle {
-                Some(handle) => base.replace("{workspaceHandle}", handle),
-                None => base.to_owned(),
-            };
-            let separator = if base.contains('?') { '&' } else { '?' };
-            Redirect::to(&format!("{base}{separator}connection={status}")).into_response()
-        }
-        None => {
-            let body = format!("Cloud file connection {status}. You can close this window.");
-            (StatusCode::OK, body).into_response()
-        }
+    if let Some(base) = base {
+        let base = match workspace_handle {
+            Some(handle) => base.replace("{workspaceHandle}", handle),
+            None => base.to_owned(),
+        };
+        let separator = if base.contains('?') { '&' } else { '?' };
+        Redirect::to(&format!("{base}{separator}connection={status}")).into_response()
+    } else {
+        let body = format!("Cloud file connection {status}. You can close this window.");
+        (StatusCode::OK, body).into_response()
     }
 }

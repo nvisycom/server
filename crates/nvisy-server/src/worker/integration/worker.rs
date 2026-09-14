@@ -6,7 +6,7 @@
 //! - **Scheduler tick**: on an interval, one instance wins a KV compare-and-set
 //!   lock (leader election for that tick) and enqueues due connections as jobs
 //!   onto the [`ConnectionSyncStream`] work queue.
-//! - **Consumer**: a durable pull consumer drains the work queue; JetStream
+//! - **Consumer**: a durable pull consumer drains the work queue; `JetStream`
 //!   delivers each job to a single instance, which runs the sync in its
 //!   scheduled direction (import or redacted export) and records a `Scheduled`
 //!   run.
@@ -42,7 +42,7 @@ use crate::worker::Worker;
 const TRACING_TARGET: &str = "nvisy_server::worker::integration";
 
 /// How often the scheduler tick runs.
-const TICK_INTERVAL: Duration = Duration::from_secs(60);
+const TICK_INTERVAL: Duration = Duration::from_mins(1);
 
 /// Runs older than this that are still `Running` at startup are reaped.
 const STALE_RUN_AGE_HOURS: i64 = 6;
@@ -79,7 +79,7 @@ fn first_attempt() -> i32 {
     1
 }
 
-/// The connection-sync JetStream stream, carrying [`ConnectionSyncJob`] payloads.
+/// The connection-sync `JetStream` stream, carrying [`ConnectionSyncJob`] payloads.
 pub type SyncStream = ConnectionSyncStream<ConnectionSyncJob>;
 type JobPublisher = EventPublisher<SyncStream>;
 type JobSubscriber = EventSubscriber<SyncStream>;
@@ -108,7 +108,7 @@ impl Worker for ConnectionSyncWorker {
         match &result {
             Ok(()) => tracing::info!(target: TRACING_TARGET, "Connection sync worker stopped"),
             Err(err) => {
-                tracing::error!(target: TRACING_TARGET, error = %err, "Connection sync worker failed")
+                tracing::error!(target: TRACING_TARGET, error = %err, "Connection sync worker failed");
             }
         }
 
@@ -118,6 +118,7 @@ impl Worker for ConnectionSyncWorker {
 
 impl ConnectionSyncWorker {
     /// Creates a new [`ConnectionSyncWorker`].
+    #[must_use]
     pub fn new(infra: Infra, crypto: CryptoService, sync: ConnectionSyncService) -> Self {
         Self {
             infra,
@@ -157,7 +158,7 @@ impl ConnectionSyncWorker {
         let mut ticker = tokio::time::interval(TICK_INTERVAL);
         loop {
             tokio::select! {
-                _ = cancel.cancelled() => break,
+                () = cancel.cancelled() => break,
                 _ = ticker.tick() => {
                     if let Err(err) = self.schedule_due().await {
                         tracing::error!(target: TRACING_TARGET, error = %err, "Scheduler tick failed");
@@ -177,7 +178,7 @@ impl ConnectionSyncWorker {
         // itself, so exactly one instance wins per period regardless of each
         // instance's tick phase. The bucket TTL reclaims old period keys. Segments
         // are joined with `.`, which NATS KV keys allow (`[-/_=.a-zA-Z0-9]`).
-        let period = now.as_second() / TICK_INTERVAL.as_secs() as i64;
+        let period = now.as_second() / i64::try_from(TICK_INTERVAL.as_secs()).unwrap_or(i64::MAX);
         let lock_key = SchedulerLockKey::from(format!("{SCHEDULER_LOCK_KEY}.{period}"));
         let locks = self.infra.nats.kv_store::<SchedulerLocksBucket>().await?;
         let acquired = locks.create(&lock_key, &1).await?;
@@ -248,7 +249,7 @@ impl ConnectionSyncWorker {
 
         loop {
             tokio::select! {
-                _ = cancel.cancelled() => {
+                () = cancel.cancelled() => {
                     tracing::info!(target: TRACING_TARGET, "Connection sync worker shutdown requested");
                     break;
                 }
@@ -384,15 +385,15 @@ impl ConnectionSyncWorker {
         }
 
         let next_attempt = attempt + 1;
-        let backoff = RETRY_BACKOFF * attempt as u32;
+        let backoff = RETRY_BACKOFF * u32::try_from(attempt).unwrap_or(0);
         let nats = self.infra.nats.clone();
         let cancel = cancel.clone();
         tokio::spawn(async move {
             // Wait out the backoff, but abandon the retry if the worker is
             // shutting down so no sleeping task outlives the process.
             tokio::select! {
-                _ = cancel.cancelled() => return,
-                _ = tokio::time::sleep(backoff) => {}
+                () = cancel.cancelled() => return,
+                () = tokio::time::sleep(backoff) => {}
             }
 
             let job = ConnectionSyncJob {

@@ -50,7 +50,7 @@ pub struct DeleteWorkspaceDocuments {
     pub document_ids: Vec<Uuid>,
 }
 
-/// Defines a transparent string newtype whose OpenAPI schema enumerates the
+/// Defines a transparent string newtype whose `OpenAPI` schema enumerates the
 /// values the built-in codec registry supports, so the API advertises exactly
 /// which values are accepted (each is validated again at request time).
 ///
@@ -141,7 +141,7 @@ mod tests {
     use super::*;
 
     /// The filter schemas must advertise the registry's supported values as an
-    /// OpenAPI `enum`, so the API contract stays in sync with what the
+    /// `OpenAPI` `enum`, so the API contract stays in sync with what the
     /// deployment actually accepts.
     #[test]
     fn filter_schemas_enumerate_supported_values() {

@@ -346,7 +346,7 @@ fn verify_provider_docs(op: TransformOperation) -> TransformOperation {
 
 /// Returns routes for workspace provider management.
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, post_with};
 
     ApiRouter::new()
         .api_route(

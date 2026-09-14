@@ -1,4 +1,4 @@
-//! OpenAPI documentation helper for download (raw-body) responses.
+//! `OpenAPI` documentation helper for download (raw-body) responses.
 
 use aide::openapi::MediaType;
 use aide::transform::TransformOperation;
@@ -20,7 +20,7 @@ pub trait DownloadDocs<'a> {
 impl<'a> DownloadDocs<'a> for TransformOperation<'a> {
     fn download_response(self, description: &str, content_types: &[&str]) -> Self {
         self.response_with::<200, (), _>(|mut res| {
-            res.inner().description = description.to_owned();
+            description.clone_into(&mut res.inner().description);
             for content_type in content_types {
                 res.inner()
                     .content

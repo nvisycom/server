@@ -17,7 +17,7 @@ use crate::types::ConstraintViolation;
 /// Type-erased error type for dynamic error handling.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-/// Comprehensive error type for all PostgreSQL database operations.
+/// Comprehensive error type for all `PostgreSQL` database operations.
 ///
 /// This enum covers all possible error conditions that can occur when working
 /// with the database, including connection issues, query failures, timeouts,
@@ -84,6 +84,7 @@ impl Error {
     ///
     /// - `Some(constraint_name)` if this error represents a constraint violation
     /// - `None` if this error is not related to a constraint violation
+    #[must_use]
     pub fn constraint(&self) -> Option<&str> {
         let Error::Query(err) = self else {
             return None;
@@ -119,6 +120,7 @@ impl Error {
     ///
     /// Distinguishes a genuine not-found from an infrastructure failure so
     /// callers can map the former to a 404/401 and the latter to a 500.
+    #[must_use]
     pub fn is_not_found(&self) -> bool {
         matches!(self, Error::Query(DieselError::NotFound))
     }
@@ -127,6 +129,7 @@ impl Error {
     ///
     /// Lets a find-or-create path treat a losing concurrent insert as "already
     /// exists" and read the winner back, rather than surfacing a 500.
+    #[must_use]
     pub fn is_unique_violation(&self) -> bool {
         matches!(
             self,
@@ -141,6 +144,7 @@ impl Error {
     ///
     /// Transient errors include timeouts and certain connection issues that may
     /// be resolved by retrying the operation.
+    #[must_use]
     pub fn is_transient(&self) -> bool {
         matches!(
             self,
@@ -152,6 +156,7 @@ impl Error {
     ///
     /// Permanent errors include authentication failures, syntax errors, and
     /// constraint violations that require data or schema changes to resolve.
+    #[must_use]
     pub fn is_permanent(&self) -> bool {
         !self.is_transient()
     }
@@ -205,7 +210,7 @@ mod tests {
     }
 
     impl DatabaseErrorInformation for MockDbError {
-        fn message(&self) -> &str {
+        fn message(&self) -> &'static str {
             "mock database error"
         }
 

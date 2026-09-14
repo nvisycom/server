@@ -282,7 +282,7 @@ fn delete_policy_docs(op: TransformOperation) -> TransformOperation {
 
 /// Returns routes for workspace policy management.
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, post_with};
 
     ApiRouter::new()
         .api_route(

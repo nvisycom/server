@@ -35,6 +35,7 @@ impl DocumentKey {
     ///
     /// Uses UUID v7, which is time-ordered and contains randomness, making keys
     /// both sortable and collision-resistant.
+    #[must_use]
     pub fn generate(workspace_id: Uuid) -> Self {
         Self {
             workspace_id,
@@ -43,6 +44,7 @@ impl DocumentKey {
     }
 
     /// Creates a document key from existing IDs (for parsing stored keys).
+    #[must_use]
     pub fn from_parts(workspace_id: Uuid, object_id: Uuid) -> Self {
         Self {
             workspace_id,
@@ -103,6 +105,7 @@ impl ObjectKey for AuditKey {
 
 impl AuditKey {
     /// Generates a new audit key with a fresh UUID v7 object ID.
+    #[must_use]
     pub fn generate(workspace_id: Uuid) -> Self {
         Self {
             workspace_id,
@@ -111,6 +114,7 @@ impl AuditKey {
     }
 
     /// Creates an audit key from existing IDs (for parsing stored keys).
+    #[must_use]
     pub fn from_parts(workspace_id: Uuid, object_id: Uuid) -> Self {
         Self {
             workspace_id,
@@ -158,6 +162,7 @@ impl ObjectKey for IntermediateKey {
 
 impl IntermediateKey {
     /// Generates a new intermediate key with a fresh UUID v7 object ID.
+    #[must_use]
     pub fn generate(workspace_id: Uuid) -> Self {
         Self {
             workspace_id,
@@ -166,6 +171,7 @@ impl IntermediateKey {
     }
 
     /// Creates an intermediate key from existing IDs (for parsing stored keys).
+    #[must_use]
     pub fn from_parts(workspace_id: Uuid, object_id: Uuid) -> Self {
         Self {
             workspace_id,

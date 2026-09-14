@@ -37,6 +37,7 @@ pub struct WorkspaceInviteService {
 
 impl WorkspaceInviteService {
     /// Creates a [`WorkspaceInviteService`] over the given connection pool.
+    #[must_use]
     pub fn new(postgres: PgClient) -> Self {
         Self { postgres }
     }
@@ -383,7 +384,7 @@ async fn verify_invitee_matches(
     }
 }
 
-/// Finds an invite within a workspace, or a NotFound.
+/// Finds an invite within a workspace, or a `NotFound`.
 async fn find_invite(
     conn: &mut PgConn,
     workspace_id: Uuid,
@@ -394,7 +395,7 @@ async fn find_invite(
         .ok_or_else(|| ErrorKind::NotFound.with_message("Invitation not found"))
 }
 
-/// Finds an invite by its shareable code token, or a NotFound.
+/// Finds an invite by its shareable code token, or a `NotFound`.
 async fn find_code(conn: &mut PgConn, invite_code: &str) -> Result<WorkspaceInvite> {
     conn.find_workspace_invite_by_token(invite_code)
         .await?

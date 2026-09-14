@@ -1,6 +1,6 @@
 //! Test-only support for query-layer integration tests.
 //!
-//! Starts an ephemeral PostgreSQL container, applies the crate's embedded
+//! Starts an ephemeral `PostgreSQL` container, applies the crate's embedded
 //! migrations, and hands out a connected [`PgClient`] — so the query repositories
 //! can be exercised against a real database without any external setup. Gated on
 //! the `test_util` feature, so it never ships in a default build.

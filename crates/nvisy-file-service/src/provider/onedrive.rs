@@ -1,4 +1,4 @@
-//! OneDrive provider, over the Microsoft Graph API and a bearer access token.
+//! `OneDrive` provider, over the Microsoft Graph API and a bearer access token.
 //!
 //! Files are addressed by their stable Graph `id`. The download endpoint answers
 //! with a `302` to a short-lived, pre-authenticated URL; reqwest follows it (and
@@ -26,7 +26,7 @@ const TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/to
 /// Microsoft Graph v1.0 base.
 const API_BASE: &str = "https://graph.microsoft.com/v1.0";
 
-/// The OAuth endpoints and scopes for OneDrive (Microsoft Graph).
+/// The OAuth endpoints and scopes for `OneDrive` (Microsoft Graph).
 #[must_use]
 pub fn oauth_provider() -> OAuthProvider {
     OAuthProvider {
@@ -43,26 +43,26 @@ pub fn oauth_provider() -> OAuthProvider {
     }
 }
 
-/// Mints a v8 file-picker token for a OneDrive connection, scoped to the
-/// SharePoint resource that backs the account's drive.
+/// Mints a v8 file-picker token for a `OneDrive` connection, scoped to the
+/// `SharePoint` resource that backs the account's drive.
 ///
-/// A OneDrive for Business drive is a SharePoint personal site, and the picker
+/// A `OneDrive` for Business drive is a `SharePoint` personal site, and the picker
 /// requires a SharePoint-audience token (not the Graph token the connector uses).
-/// This resolves that per-account SharePoint host from Graph via `service`, then
+/// This resolves that per-account `SharePoint` host from Graph via `service`, then
 /// mints a `{resource}/.default` token from the stored refresh token — a scope
 /// subset of the existing grant, so no re-consent. `resource`, when given, is the
 /// exact resource the picker named in its `authenticate` command; otherwise the
 /// resolved host is used. The resolved host also gates account type. The
 /// connector's own Graph token is never disturbed.
 ///
-/// The OneDrive arm of [`FileServiceProvider::mint_picker_token`](super::FileServiceProvider::mint_picker_token),
+/// The `OneDrive` arm of [`FileServiceProvider::mint_picker_token`](super::FileServiceProvider::mint_picker_token),
 /// kept here so the dispatch holds no provider-specific logic.
 ///
 /// # Errors
 ///
 /// Returns [`ErrorKind::BadRequest`](crate::error::ErrorKind::BadRequest) for a
-/// personal/consumer account (no SharePoint host) — the modern picker is only
-/// supported for OneDrive for Business — or an auth error if the token cannot be
+/// personal/consumer account (no `SharePoint` host) — the modern picker is only
+/// supported for `OneDrive` for Business — or an auth error if the token cannot be
 /// minted.
 pub(super) async fn mint_picker_token(
     service: &FileService,
@@ -112,15 +112,15 @@ pub(super) async fn mint_picker_token(
     })
 }
 
-/// Resolves the SharePoint host that backs a OneDrive account's drive, using a
+/// Resolves the `SharePoint` host that backs a `OneDrive` account's drive, using a
 /// Microsoft Graph access token. Returns `None` for a consumer/personal account,
-/// whose drive is on the legacy consumer OneDrive service and has no SharePoint
+/// whose drive is on the legacy consumer `OneDrive` service and has no `SharePoint`
 /// host.
 ///
-/// A OneDrive for Business drive is a SharePoint personal site, so `webUrl` is a
+/// A `OneDrive` for Business drive is a `SharePoint` personal site, so `webUrl` is a
 /// `https://{tenant}-my.sharepoint.com/...` URL; the origin of that URL is the
 /// audience the v8 file picker's tokens must target. A personal account's `webUrl`
-/// points at `onedrive.live.com` (no SharePoint), which is why the modern picker
+/// points at `onedrive.live.com` (no `SharePoint`), which is why the modern picker
 /// is unsupported there.
 ///
 /// # Errors
@@ -164,10 +164,10 @@ pub(super) async fn resolve_sharepoint_host(
     Ok(host)
 }
 
-/// Whether a client-supplied picker `resource` belongs to the same SharePoint
+/// Whether a client-supplied picker `resource` belongs to the same `SharePoint`
 /// tenant as the account's resolved `host`.
 ///
-/// The picker may legitimately name either the tenant's SharePoint root
+/// The picker may legitimately name either the tenant's `SharePoint` root
 /// (`{tenant}.sharepoint.com`) or its personal-site host
 /// (`{tenant}-my.sharepoint.com`), so the check is on the tenant label rather
 /// than an exact host match: both hosts must be `*.sharepoint.com` and share the
@@ -191,7 +191,7 @@ fn same_sharepoint_tenant(host: &str, resource: &str) -> bool {
     }
 }
 
-/// A connected OneDrive client holding a valid access token.
+/// A connected `OneDrive` client holding a valid access token.
 pub struct OneDriveClient {
     http: reqwest::Client,
     access_token: String,

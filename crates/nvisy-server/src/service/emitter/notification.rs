@@ -129,20 +129,17 @@ impl NotificationEmitter {
         // "all events" (the column defaults to every event), so only a member who
         // has narrowed the set and excluded this event is skipped.
         let member = conn.find_workspace_member(workspace_id, account_id).await?;
-        let deliver = match member {
-            Some(member) => {
-                let prefs = member.app_notification_events();
-                prefs.is_empty() || prefs.contains(&event)
-            }
-            None => {
-                tracing::debug!(
-                    target: TRACING_TARGET,
-                    %account_id,
-                    %workspace_id,
-                    "Account is not a workspace member; skipping notification",
-                );
-                false
-            }
+        let deliver = if let Some(member) = member {
+            let prefs = member.app_notification_events();
+            prefs.is_empty() || prefs.contains(&event)
+        } else {
+            tracing::debug!(
+                target: TRACING_TARGET,
+                %account_id,
+                %workspace_id,
+                "Account is not a workspace member; skipping notification",
+            );
+            false
         };
 
         if !deliver {

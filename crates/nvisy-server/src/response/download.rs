@@ -1,5 +1,7 @@
 //! Response headers for file-download (attachment) responses.
 
+use std::fmt::Write;
+
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue};
 
@@ -74,7 +76,7 @@ fn percent_encode_rfc5987(value: &str) -> String {
             out.push(byte as char);
         } else {
             out.push('%');
-            out.push_str(&format!("{byte:02X}"));
+            let _ = write!(out, "{byte:02X}");
         }
     }
     out

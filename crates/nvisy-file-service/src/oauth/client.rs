@@ -15,7 +15,7 @@ use crate::error::{Error, ErrorKind, Result};
 type ConfiguredClient =
     BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
-/// An OAuth2 client bound to a provider, an app, and an HTTP client.
+/// An `OAuth2` client bound to a provider, an app, and an HTTP client.
 ///
 /// Groups the parameters every flow step shares, so building the authorize URL,
 /// exchanging a code, and refreshing a token are methods rather than functions
@@ -103,7 +103,7 @@ impl OAuthClient {
     /// original grant), yielding a token whose audience matches those scopes.
     ///
     /// Used to mint a resource-specific token from the same refresh token without
-    /// re-consent — e.g. a SharePoint-audience token for the OneDrive file picker,
+    /// re-consent — e.g. a SharePoint-audience token for the `OneDrive` file picker,
     /// distinct from the Graph token the connector uses. An empty `scopes` refreshes
     /// with the originally granted scopes (see [`refresh_tokens`](Self::refresh_tokens)).
     pub async fn refresh_with_scopes(
@@ -140,11 +140,14 @@ fn tokens_from_response(
     existing_refresh: Option<String>,
 ) -> OAuthTokens {
     let expires_at = response.expires_in().map(|d| {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-        now + d.as_secs() as i64
+        let now = i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        )
+        .unwrap_or(i64::MAX);
+        now + i64::try_from(d.as_secs()).unwrap_or(i64::MAX)
     });
     OAuthTokens {
         access_token: response.access_token().secret().clone(),

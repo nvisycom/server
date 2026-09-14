@@ -1,7 +1,7 @@
 //! Enhanced path parameter extractor with improved error handling.
 //!
 //! This module provides [`Path`], an enhanced version of [`axum::extract::Path`]
-//! with better error messages and OpenAPI documentation support.
+//! with better error messages and `OpenAPI` documentation support.
 
 use aide::OperationInput;
 use aide::generate::GenContext;
@@ -52,8 +52,7 @@ impl From<PathRejection> for Error<'static> {
                 ErrorKind::BadRequest
                     .with_message("Invalid path parameter format")
                     .with_context(format!(
-                        "Path parameter deserialization failed: {}. Check that the parameter matches the expected type.",
-                        error_message
+                        "Path parameter deserialization failed: {error_message}. Check that the parameter matches the expected type."
                     ))
             }
             PathRejection::MissingPathParams(err) => {
@@ -67,8 +66,7 @@ impl From<PathRejection> for Error<'static> {
                 ErrorKind::MissingPathParam
                     .with_message("Required path parameter missing")
                     .with_context(format!(
-                        "Path parameter extraction failed: {}. Ensure all required parameters are present in the URL path and match the expected route pattern.",
-                        error_message
+                        "Path parameter extraction failed: {error_message}. Ensure all required parameters are present in the URL path and match the expected route pattern."
                     ))
             }
             _ => {

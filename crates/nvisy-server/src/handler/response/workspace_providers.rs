@@ -43,6 +43,7 @@ pub type WorkspaceProvidersPage = Page<WorkspaceProvider>;
 
 impl WorkspaceProvider {
     /// Creates a response from a database model and its creator.
+    #[must_use]
     pub fn from_model(
         provider: WorkspaceProviderModel,
         workspace_id: Uuid,

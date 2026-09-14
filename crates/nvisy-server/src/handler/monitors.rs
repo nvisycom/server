@@ -99,7 +99,7 @@ fn health_status_docs(op: TransformOperation) -> TransformOperation {
 ///
 /// [`Router`]: axum::routing::Router
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::get_with;
 
     ApiRouter::new()
         .api_route("/health/", get_with(health_status, health_status_docs))

@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn blocks_private_and_loopback() {
-        assert!(is_blocked(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
+        assert!(is_blocked(IpAddr::V4(Ipv4Addr::LOCALHOST)));
         assert!(is_blocked(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))));
         assert!(is_blocked(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
         assert!(is_blocked(IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1))));
@@ -234,7 +234,7 @@ mod tests {
         let url = Url::parse("https://example.com").unwrap();
         let addrs = [
             IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34)),
-            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
         ];
         assert!(url.check_resolved_addrs(addrs).is_err());
     }

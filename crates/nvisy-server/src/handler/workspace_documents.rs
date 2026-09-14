@@ -6,6 +6,11 @@
 //! here, loading a document through the service. All operations are secured with
 //! workspace-level authorization.
 
+// Axum handlers take their dependencies as typed extractor arguments, so a
+// dependency-heavy handler exceeds the arg limit by construction; the signature
+// is fixed by the framework and cannot be bundled into a struct.
+#![allow(clippy::too_many_arguments)]
+
 use std::str::FromStr;
 
 use aide::axum::ApiRouter;
@@ -135,10 +140,10 @@ struct StagedDocument {
 
 /// Streams one multipart document to storage and builds its unsaved rows.
 async fn stage_document(ctx: &DocumentUploadContext, field: Field<'_>) -> Result<StagedDocument> {
-    let filename = field
-        .file_name()
-        .map(ToString::to_string)
-        .unwrap_or_else(|| format!("file_{}.bin", Uuid::now_v7()));
+    let filename = field.file_name().map_or_else(
+        || format!("file_{}.bin", Uuid::now_v7()),
+        ToString::to_string,
+    );
 
     let file_extension = std::path::Path::new(&filename)
         .extension()
@@ -205,7 +210,7 @@ async fn stage_document(ctx: &DocumentUploadContext, field: Field<'_>) -> Result
     let blob = NewBlob {
         workspace_id: ctx.workspace_id,
         content_hash: measurements.sha256().to_vec(),
-        file_size_bytes: measurements.bytes() as i64,
+        file_size_bytes: i64::try_from(measurements.bytes()).unwrap_or(i64::MAX),
         storage_path: document_key.to_string(),
         storage_bucket: Bucket::Documents.name().to_owned(),
         expires_at: ctx.expires_at.map(Into::into),
@@ -604,7 +609,7 @@ async fn download_document(
         );
         ErrorKind::InternalServerError
             .with_message("Invalid document storage path")
-            .with_context(format!("Parse error: {}", err))
+            .with_context(format!("Parse error: {err}"))
     })?;
 
     // Get streaming content from the blob store.
@@ -620,7 +625,7 @@ async fn download_document(
             );
             ErrorKind::InternalServerError
                 .with_message("Failed to retrieve document")
-                .with_context(format!("Storage retrieval failed: {}", err))
+                .with_context(format!("Storage retrieval failed: {err}"))
         })?
         .ok_or_else(|| {
             tracing::warn!(
@@ -639,7 +644,7 @@ async fn download_document(
     let headers = attachment_headers(
         &document.display_name,
         HeaderValue::from_static("application/octet-stream"),
-        blob.file_size_bytes as u64,
+        u64::try_from(blob.file_size_bytes).unwrap_or(0),
     );
 
     tracing::debug!(
@@ -766,7 +771,7 @@ fn bulk_delete_documents_docs(op: TransformOperation) -> TransformOperation {
 ///
 /// [`Router`]: axum::routing::Router
 pub fn routes(max_file_body_bytes: usize) -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, post_with};
 
     ApiRouter::new()
         // Workspace-scoped routes (require workspace context)

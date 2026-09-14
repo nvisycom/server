@@ -35,7 +35,7 @@ pub struct WorkspaceMember {
 
 impl WorkspaceMember {
     /// Creates a Member response from database models.
-    pub fn from_model(member: WorkspaceMemberModel, account: Account) -> Self {
+    pub fn from_model(member: &WorkspaceMemberModel, account: Account) -> Self {
         Self {
             id: account.id,
             username: account.username,
@@ -48,10 +48,11 @@ impl WorkspaceMember {
     }
 
     /// Creates a list of Member responses from database models.
+    #[must_use]
     pub fn from_models(models: Vec<(WorkspaceMemberModel, Account)>) -> Vec<Self> {
         models
             .into_iter()
-            .map(|(member, account)| Self::from_model(member, account))
+            .map(|(member, account)| Self::from_model(&member, account))
             .collect()
     }
 }

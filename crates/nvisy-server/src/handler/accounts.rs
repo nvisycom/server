@@ -203,7 +203,7 @@ fn authorize_self(account: &AccountModel, account_id: Uuid) -> Result<()> {
 ///
 /// [`Router`]: axum::routing::Router
 pub fn routes(_state: ServiceState) -> ApiRouter<ServiceState> {
-    use aide::axum::routing::*;
+    use aide::axum::routing::{get_with, put_with};
 
     ApiRouter::new()
         .api_route(

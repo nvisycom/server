@@ -82,6 +82,7 @@ pub struct WorkspaceConnectionVerification {
 
 impl WorkspaceConnectionVerification {
     /// A successful verification.
+    #[must_use]
     pub fn reachable() -> Self {
         Self {
             reachable: true,
@@ -117,6 +118,7 @@ pub struct WorkspacePickerToken {
 
 impl WorkspaceConnection {
     /// Creates a response from a database model and its creator.
+    #[must_use]
     pub fn from_model(
         connection: WorkspaceConnectionModel,
         workspace_id: Uuid,

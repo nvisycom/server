@@ -48,7 +48,7 @@ const TRACING_TARGET: &str = "nvisy_server::worker::detection";
 /// slow-but-healthy worker whose job is redelivered keeps its claim; only a
 /// detection whose worker died (no progress past the lease) is re-claimed and
 /// re-analyzed.
-const DETECTION_LEASE: Duration = Duration::from_secs(30 * 60);
+const DETECTION_LEASE: Duration = Duration::from_mins(30);
 
 /// Background worker that runs pipeline detection off the request thread.
 ///
@@ -85,7 +85,7 @@ impl Worker for DetectionWorker {
         match &result {
             Ok(()) => tracing::info!(target: TRACING_TARGET, "Detection worker stopped"),
             Err(err) => {
-                tracing::error!(target: TRACING_TARGET, error = %err, "Detection worker failed")
+                tracing::error!(target: TRACING_TARGET, error = %err, "Detection worker failed");
             }
         }
 
@@ -99,10 +99,10 @@ impl DetectionWorker {
     /// Concurrency is sized to the deployment's available parallelism (falling
     /// back to a small default when the runtime cannot report it), so in-flight
     /// detections stay near core count.
+    #[must_use]
     pub fn new(infra: Infra, engine: EngineService, blob: RunBlobStore) -> Self {
         let concurrency = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(DEFAULT_DETECTION_CONCURRENCY);
+            .map_or(DEFAULT_DETECTION_CONCURRENCY, std::num::NonZero::get);
         Self {
             infra,
             engine,
@@ -136,7 +136,7 @@ impl DetectionWorker {
             // is busy. The semaphore is never closed, so acquire only errors on a
             // closed semaphore — treat that as fatal for the loop.
             let permit = tokio::select! {
-                _ = cancel.cancelled() => {
+                () = cancel.cancelled() => {
                     tracing::info!(target: TRACING_TARGET, "Detection worker shutdown requested");
                     break;
                 }
@@ -150,7 +150,7 @@ impl DetectionWorker {
             };
 
             tokio::select! {
-                _ = cancel.cancelled() => {
+                () = cancel.cancelled() => {
                     tracing::info!(target: TRACING_TARGET, "Detection worker shutdown requested");
                     break;
                 }
@@ -165,6 +165,8 @@ impl DetectionWorker {
                             let worker = self.clone();
                             tasks.spawn(async move {
                                 let _permit = permit;
+                                // reason: detection job future is inherently large; boxing would only move the allocation
+                                #[allow(clippy::large_futures)]
                                 let outcome = worker.run_job(job).await;
                                 let ack_result = match outcome {
                                     JobOutcome::Done => message.ack().await,
@@ -381,6 +383,8 @@ impl DetectionWorker {
     /// inputs under a connection and releases it, phase 2 runs the (slow) document
     /// build, analysis, and audit staging with no connection held, and phase 3
     /// re-acquires a connection only for the finalize transaction.
+    // reason: long but cohesive; splitting adds no clarity
+    #[allow(clippy::too_many_lines)]
     async fn detect(
         &self,
         job: &DetectionJob,
@@ -486,7 +490,7 @@ impl DetectionWorker {
         let retention_override = detection
             .retention_override
             .as_ref()
-            .map(|snapshot| snapshot.or_default());
+            .map(nvisy_postgres::types::Json::or_default);
         let audit_blob = self
             .blob
             .stage_analyzed_document(
@@ -579,11 +583,11 @@ impl DetectionWorker {
                     .await?;
                 // The intermediate is a blob-ref on the detection; resolving the
                 // blob records the detection's reference to it.
-                let intermediate_blob = match intermediates_blob {
+                let resolved_blob = match intermediates_blob {
                     Some(blob) => Some(conn.find_or_create_blob(blob).await?),
                     None => None,
                 };
-                let intermediate_blob_id = intermediate_blob.as_ref().map(|blob| blob.id);
+                let intermediate_blob_id = resolved_blob.as_ref().map(|blob| blob.id);
                 if let Some(usage) = &usage {
                     conn.record_detection_usage(&usage.per_model).await?;
                 }
@@ -607,7 +611,7 @@ impl DetectionWorker {
                 conn.insert_event_outbox(outbox_row).await?;
                 // The resolved storage paths, so an object staged for content that
                 // deduplicated onto an existing blob can be reclaimed after commit.
-                let intermediate_path = intermediate_blob.map(|blob| blob.storage_path);
+                let intermediate_path = resolved_blob.map(|blob| blob.storage_path);
                 Ok::<_, PgError>((audit.blob_id, intermediate_path))
             })
             .await;

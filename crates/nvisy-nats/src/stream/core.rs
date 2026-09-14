@@ -12,7 +12,7 @@ use crate::{Error, Result, TRACING_TARGET_STREAM};
 
 /// Marker trait for event streams.
 ///
-/// Defines the configuration for a NATS JetStream stream, including the single
+/// Defines the configuration for a NATS `JetStream` stream, including the single
 /// payload type it carries. A stream is a pure type-level tag — all of its
 /// configuration lives in an associated type and consts — so it is never
 /// instantiated and carries no value bounds.
@@ -20,7 +20,7 @@ pub trait EventStream: 'static {
     /// The payload type published to and consumed from this stream.
     type Message: Serialize + DeserializeOwned + Send + Sync + 'static;
 
-    /// Stream name used in NATS JetStream.
+    /// Stream name used in NATS `JetStream`.
     const NAME: &'static str;
 
     /// Human-readable description recorded on the stream, shown to operators
@@ -38,7 +38,7 @@ pub trait EventStream: 'static {
     const CONSUMER_NAME: &'static str;
 
     /// How long the server waits for an ack before redelivering a message.
-    /// `None` uses the JetStream default (30s). Set this above the longest
+    /// `None` uses the `JetStream` default (30s). Set this above the longest
     /// expected processing time so a slow-but-healthy job is not redelivered
     /// and run a second time concurrently.
     const ACK_WAIT: Option<Duration> = None;
@@ -54,7 +54,7 @@ pub trait EventStream: 'static {
 /// [`publish`](super::EventPublisher::publish) uses, plus the `SUBJECT.>`
 /// wildcard for the sub-subjects [`publish_to`](super::EventPublisher::publish_to)
 /// appends. The stream and the consumer filter must both cover these, or a
-/// published message the stream does not capture never gets a JetStream ack.
+/// published message the stream does not capture never gets a `JetStream` ack.
 ///
 /// `SUBJECT.>` alone would not match a bare `publish` (the `>` requires a token
 /// after the dot), so the exact subject is listed too.
@@ -63,7 +63,7 @@ pub(super) fn subjects<S: EventStream>() -> Vec<String> {
 }
 
 /// Whether a `get_stream` error means the stream simply does not exist yet (as
-/// opposed to a real failure). A missing stream surfaces as a JetStream protocol
+/// opposed to a real failure). A missing stream surfaces as a `JetStream` protocol
 /// error carrying the `STREAM_NOT_FOUND` code, not a dedicated error kind.
 fn is_stream_not_found(err: &GetStreamError) -> bool {
     matches!(
@@ -80,7 +80,7 @@ fn is_stream_not_found(err: &GetStreamError) -> bool {
 /// version keeps its old subject filter, so publishing to the current
 /// [`SUBJECT`](EventStream::SUBJECT) would match no stream and fail. Leaving the
 /// old stream as-is (the previous behavior) let that drift break publishing
-/// silently; updating it in place fixes it without an operator wiping JetStream.
+/// silently; updating it in place fixes it without an operator wiping `JetStream`.
 pub(crate) async fn ensure_stream<S: EventStream>(jetstream: &Context) -> Result<()> {
     // JetStream treats a zero `max_age` as unlimited retention, which is exactly
     // what `MAX_AGE = None` ("messages should not expire") means. Mapping `None`

@@ -86,8 +86,8 @@ impl BlobStore {
         let first = read_part(&mut reader).await?;
 
         // Small object: one PutObject, no multipart bookkeeping.
-        if (first.len() as u64) < PART_SIZE as u64 {
-            let size = first.len() as u64;
+        if first.len() < PART_SIZE {
+            let size = u64::try_from(first.len()).unwrap_or(u64::MAX);
             self.client
                 .put_object()
                 .bucket(&self.bucket)
@@ -187,7 +187,7 @@ impl BlobStore {
                 ));
             }
 
-            total += part.len() as u64;
+            total += u64::try_from(part.len()).unwrap_or(u64::MAX);
             let uploaded = self
                 .client
                 .upload_part()
@@ -263,7 +263,7 @@ impl BlobStore {
             }
         };
 
-        let size = output.content_length().unwrap_or_default().max(0) as u64;
+        let size = u64::try_from(output.content_length().unwrap_or_default().max(0)).unwrap_or(0);
         let reader = output.body.into_async_read();
         Ok(Some(GetObject {
             reader: Box::new(reader),

@@ -116,6 +116,7 @@ impl ConstraintViolation {
     /// let unknown = ConstraintViolation::new("unknown_constraint");
     /// assert!(unknown.is_none());
     /// ```
+    #[must_use]
     pub fn new(constraint: &str) -> Option<Self> {
         // Every per-table enum matches the full constraint name via strum, so
         // parsing is tried against each in turn until one succeeds.

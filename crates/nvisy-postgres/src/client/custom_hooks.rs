@@ -79,6 +79,8 @@ where
 /// See [`PoolBuilder`] for more details.
 ///
 /// [`PoolBuilder`]: deadpool::managed::PoolBuilder
+// reason: signature is fixed by deadpool's `Hook::sync_fn` interface.
+#[allow(clippy::unnecessary_wraps)]
 pub fn post_create(conn: &mut AsyncPgConnection, metrics: &Metrics) -> HookResult<PoolError> {
     let is_broken = conn.is_broken();
 
@@ -108,6 +110,8 @@ pub fn post_create(conn: &mut AsyncPgConnection, metrics: &Metrics) -> HookResul
 /// See [`PoolBuilder`] for more details.
 ///
 /// [`PoolBuilder`]: deadpool::managed::PoolBuilder
+// reason: signature is fixed by deadpool's `Hook::sync_fn` interface.
+#[allow(clippy::unnecessary_wraps)]
 pub fn pre_recycle(conn: &mut AsyncPgConnection, metrics: &Metrics) -> HookResult<PoolError> {
     let is_broken = conn.is_broken();
 
@@ -139,6 +143,8 @@ pub fn pre_recycle(conn: &mut AsyncPgConnection, metrics: &Metrics) -> HookResul
 /// See [`PoolBuilder`] for more details.
 ///
 /// [`PoolBuilder`]: deadpool::managed::PoolBuilder
+// reason: signature is fixed by deadpool's `Hook::sync_fn` interface.
+#[allow(clippy::unnecessary_wraps)]
 pub fn post_recycle(conn: &mut AsyncPgConnection, metrics: &Metrics) -> HookResult<PoolError> {
     let is_broken = conn.is_broken();
 
