@@ -13,16 +13,16 @@ impl From<WorkspaceConstraints> for Error<'static> {
         let error = match c {
             WorkspaceConstraints::DisplayNameLength => ErrorKind::BadRequest
                 .with_message("Workspace name must be between 3 and 32 characters long"),
-            WorkspaceConstraints::SlugLength => ErrorKind::BadRequest
-                .with_message("Workspace slug must be between 3 and 32 characters long"),
-            WorkspaceConstraints::SlugFormat => ErrorKind::BadRequest.with_message(
-                "Workspace slug must be lowercase alphanumeric with single internal dashes",
+            WorkspaceConstraints::HandleLength => ErrorKind::BadRequest
+                .with_message("Workspace handle must be between 3 and 32 characters long"),
+            WorkspaceConstraints::HandleFormat => ErrorKind::BadRequest.with_message(
+                "Workspace handle must be lowercase alphanumeric with single internal dashes",
             ),
             WorkspaceConstraints::NameUnique => {
                 ErrorKind::Conflict.with_message("A workspace with this name already exists")
             }
-            WorkspaceConstraints::SlugUnique => {
-                ErrorKind::Conflict.with_message("A workspace with this slug already exists")
+            WorkspaceConstraints::HandleUnique => {
+                ErrorKind::Conflict.with_message("A workspace with this handle already exists")
             }
             WorkspaceConstraints::DescriptionLengthMax => {
                 ErrorKind::BadRequest.with_message("Workspace description is too long")

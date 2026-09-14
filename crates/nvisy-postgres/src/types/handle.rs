@@ -1,4 +1,5 @@
-//! Handle: a validated, URL-safe identifier shared by usernames and slugs.
+//! Handle: a validated, URL-safe identifier shared by account usernames and
+//! workspace handles.
 
 use std::str::FromStr;
 
@@ -33,9 +34,8 @@ pub enum HandleError {
 
 /// A validated, URL-safe identifier.
 ///
-/// Handles are the human-readable identifiers used both for account usernames
-/// and for resource slugs (workspaces, pipelines, policies, and so on). They are
-/// lowercase and dash-separated. The invariants — `[a-z0-9]` with single
+/// Handles are the human-readable identifiers used for account usernames and
+/// workspace handles. They are lowercase and dash-separated. The invariants — `[a-z0-9]` with single
 /// internal dashes, length [`HANDLE_MIN_LENGTH`]–[`HANDLE_MAX_LENGTH`] — are
 /// enforced on construction, so an existing `Handle` is always valid; the
 /// matching database `CHECK`s mirror this exact shape. Uniqueness scope (global

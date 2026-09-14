@@ -20,14 +20,6 @@ impl From<WorkspacePipelineConstraints> for Error<'static> {
                     .with_message("Pipeline definition size exceeds maximum limit"),
                 WorkspacePipelineConstraints::MetadataSize => ErrorKind::BadRequest
                     .with_message("Pipeline metadata size exceeds maximum limit"),
-                WorkspacePipelineConstraints::SlugLength => ErrorKind::BadRequest
-                    .with_message("Pipeline slug must be between 3 and 32 characters long"),
-                WorkspacePipelineConstraints::SlugFormat => ErrorKind::BadRequest.with_message(
-                    "Pipeline slug must be lowercase alphanumeric with single internal dashes",
-                ),
-                WorkspacePipelineConstraints::SlugUnique => {
-                    ErrorKind::Conflict.with_message("A pipeline with this slug already exists")
-                }
                 WorkspacePipelineConstraints::WorkspaceIdIdUnique => ErrorKind::Conflict
                     .with_message("A pipeline with this identifier already exists"),
             };
@@ -119,14 +111,6 @@ impl From<WorkspacePolicyConstraints> for Error<'static> {
             }
             WorkspacePolicyConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Policy metadata size exceeds maximum limit")
-            }
-            WorkspacePolicyConstraints::SlugLength => ErrorKind::BadRequest
-                .with_message("Policy slug must be between 3 and 32 characters long"),
-            WorkspacePolicyConstraints::SlugFormat => ErrorKind::BadRequest.with_message(
-                "Policy slug must be lowercase alphanumeric with single internal dashes",
-            ),
-            WorkspacePolicyConstraints::SlugUnique => {
-                ErrorKind::Conflict.with_message("A policy with this slug already exists")
             }
             WorkspacePolicyConstraints::NameUnique => {
                 ErrorKind::Conflict.with_message("A policy with this name already exists")

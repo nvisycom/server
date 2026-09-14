@@ -70,7 +70,7 @@ async fn create_provider(
         Json(WorkspaceProvider::from_model(
             created.item,
             workspace.id,
-            workspace.slug,
+            workspace.handle,
             created.account.into(),
         )),
     ))
@@ -119,7 +119,7 @@ async fn list_providers(
             WorkspaceProvider::from_model(
                 wp.item,
                 workspace.id,
-                workspace.slug.clone(),
+                workspace.handle.clone(),
                 wp.account.into(),
             )
         })),
@@ -166,7 +166,7 @@ async fn read_provider(
         Json(WorkspaceProvider::from_model(
             found.item,
             workspace.id,
-            workspace.slug,
+            workspace.handle,
             found.account.into(),
         )),
     ))
@@ -219,7 +219,7 @@ async fn update_provider(
         Json(WorkspaceProvider::from_model(
             found.item,
             workspace.id,
-            workspace.slug,
+            workspace.handle,
             found.account.into(),
         )),
     ))

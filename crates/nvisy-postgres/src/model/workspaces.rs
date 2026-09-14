@@ -16,8 +16,8 @@ pub struct Workspace {
     pub id: Uuid,
     /// Human-readable workspace name (3-32 characters).
     pub display_name: String,
-    /// URL-safe workspace identifier, unique across the platform.
-    pub slug: Handle,
+    /// Display handle for the workspace, unique across the platform.
+    pub handle: Handle,
     /// Detailed description of the workspace purpose and goals.
     pub description: Option<String>,
     /// URL to workspace avatar/logo image.
@@ -44,8 +44,8 @@ pub struct Workspace {
 pub struct NewWorkspace {
     /// Workspace display name.
     pub display_name: String,
-    /// URL-safe workspace identifier, unique across the platform.
-    pub slug: Handle,
+    /// Display handle for the workspace, unique across the platform.
+    pub handle: Handle,
     /// Workspace description.
     pub description: Option<String>,
     /// Optional avatar URL.
@@ -59,12 +59,12 @@ pub struct NewWorkspace {
 }
 
 impl NewWorkspace {
-    /// Creates a workspace with the required name, slug, and creator; the
+    /// Creates a workspace with the required name, handle, and creator; the
     /// description, avatar, metadata, and settings default to `None`.
-    pub fn new(display_name: impl Into<String>, slug: Handle, created_by: Uuid) -> Self {
+    pub fn new(display_name: impl Into<String>, handle: Handle, created_by: Uuid) -> Self {
         Self {
             display_name: display_name.into(),
-            slug,
+            handle,
             description: None,
             avatar_url: None,
             metadata: None,
@@ -75,7 +75,7 @@ impl NewWorkspace {
 
     /// A workspace owned by `created_by`, for tests.
     ///
-    /// Both the slug and the display name are unique per call, so one owner can
+    /// Both the handle and the display name are unique per call, so one owner can
     /// hold several test workspaces without colliding on the per-owner
     /// display-name unique index.
     #[cfg(any(feature = "test_util", test))]

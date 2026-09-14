@@ -23,7 +23,7 @@ pub struct WorkspaceInvite {
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
     /// URL-safe workspace handle. Display-only.
-    pub workspace_slug: Handle,
+    pub workspace_handle: Handle,
     /// Email address of the invitee (omitted for open invite codes).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invitee_email: Option<String>,
@@ -46,12 +46,12 @@ impl WorkspaceInvite {
     pub fn from_model(
         invite: WorkspaceInviteModel,
         workspace_id: Uuid,
-        workspace_slug: Handle,
+        workspace_handle: Handle,
     ) -> Self {
         Self {
             invite_id: invite.id,
             workspace_id,
-            workspace_slug,
+            workspace_handle,
             invitee_email: invite.invitee_email,
             invited_role: invite.invited_role,
             invite_status: invite.invite_status,
@@ -103,7 +103,7 @@ pub struct WorkspaceInviteCode {
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
     /// URL-safe workspace handle. Display-only.
-    pub workspace_slug: Handle,
+    pub workspace_handle: Handle,
     /// Role assigned when someone joins via this code.
     pub role: WorkspaceRole,
     /// When the invite code expires.
@@ -115,12 +115,12 @@ impl WorkspaceInviteCode {
     pub fn from_invite(
         invite: &model::WorkspaceInvite,
         workspace_id: Uuid,
-        workspace_slug: Handle,
+        workspace_handle: Handle,
     ) -> Self {
         Self {
             invite_code: invite.invite_token.clone(),
             workspace_id,
-            workspace_slug,
+            workspace_handle,
             role: invite.invited_role,
             expires_at: invite.expires_at.into(),
         }
@@ -138,7 +138,7 @@ pub struct InvitePreview {
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
     /// URL-safe workspace handle. Display-only.
-    pub workspace_slug: Handle,
+    pub workspace_handle: Handle,
     /// Display name of the workspace.
     pub display_name: String,
     /// Description of the workspace.
@@ -157,7 +157,7 @@ impl InvitePreview {
     pub fn from_models(workspace: model::Workspace, invite: model::WorkspaceInvite) -> Self {
         Self {
             workspace_id: workspace.id,
-            workspace_slug: workspace.slug,
+            workspace_handle: workspace.handle,
             display_name: workspace.display_name,
             description: workspace.description,
             invited_role: invite.invited_role,

@@ -17,7 +17,7 @@ pub struct Workspace {
     /// Unique identifier of the workspace.
     pub id: Uuid,
     /// URL-safe workspace handle. Display-only.
-    pub slug: Handle,
+    pub handle: Handle,
     /// Display name of the workspace.
     pub display_name: String,
     /// Description of the workspace.
@@ -51,7 +51,7 @@ impl Workspace {
     ) -> Self {
         Self {
             id: workspace.id,
-            slug: workspace.slug,
+            handle: workspace.handle,
             display_name: workspace.display_name,
             description: workspace.description,
             avatar_url: workspace.avatar_url,
@@ -75,7 +75,7 @@ impl Workspace {
     ) -> Self {
         Self {
             id: workspace.id,
-            slug: workspace.slug,
+            handle: workspace.handle,
             display_name: workspace.display_name,
             description: workspace.description,
             avatar_url: workspace.avatar_url,

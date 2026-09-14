@@ -69,7 +69,7 @@ impl WorkspaceService {
             })
             .await?;
 
-        tracing::info!(target: TRACING_TARGET, workspace_slug = %workspace.slug, "Workspace created");
+        tracing::info!(target: TRACING_TARGET, workspace_handle = %workspace.handle, "Workspace created");
         Ok(WorkspaceWithMembership {
             workspace,
             membership,

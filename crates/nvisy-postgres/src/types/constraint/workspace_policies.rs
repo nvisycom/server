@@ -5,10 +5,6 @@ use strum::EnumString;
 /// Workspace policies table constraint violations.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, EnumString)]
 pub enum WorkspacePolicyConstraints {
-    #[strum(serialize = "workspace_policies_slug_length")]
-    SlugLength,
-    #[strum(serialize = "workspace_policies_slug_format")]
-    SlugFormat,
     #[strum(serialize = "workspace_policies_display_name_length")]
     NameLength,
     #[strum(serialize = "workspace_policies_description_length")]
@@ -19,8 +15,6 @@ pub enum WorkspacePolicyConstraints {
     MetadataSize,
     #[strum(serialize = "workspace_policies_workspace_id_id_key")]
     WorkspaceIdIdUnique,
-    #[strum(serialize = "workspace_policies_slug_unique_idx")]
-    SlugUnique,
     #[strum(serialize = "workspace_policies_display_name_unique_idx")]
     NameUnique,
 }

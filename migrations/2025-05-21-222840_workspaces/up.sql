@@ -11,13 +11,13 @@ CREATE TABLE workspaces (
     display_name     TEXT             NOT NULL,
     CONSTRAINT workspaces_display_name_length CHECK (length(trim(display_name)) BETWEEN 2 AND 32),
 
-    -- Human-readable URL identity, unique among live workspaces (enforced by a
-    -- partial index below so a slug frees up after soft deletion). Mirrors the
-    -- WorkspaceSlug newtype: lowercase alphanumeric with single internal dashes,
+    -- Human-readable display identity, unique among live workspaces (enforced by
+    -- a partial index below so a handle frees up after soft deletion). Mirrors the
+    -- Handle newtype: lowercase alphanumeric with single internal dashes,
     -- 3-32 characters.
-    slug             TEXT             NOT NULL,
-    CONSTRAINT workspaces_slug_length CHECK (length(slug) BETWEEN 3 AND 32),
-    CONSTRAINT workspaces_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
+    handle           TEXT             NOT NULL,
+    CONSTRAINT workspaces_handle_length CHECK (length(handle) BETWEEN 3 AND 32),
+    CONSTRAINT workspaces_handle_format CHECK (handle ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
 
     description      TEXT             DEFAULT NULL,
     CONSTRAINT workspaces_description_length_max CHECK (length(description) <= 500),
@@ -46,9 +46,9 @@ CREATE TABLE workspaces (
 -- Auto-maintain updated_at (and guard soft-delete) on writes.
 SELECT setup_updated_at('workspaces');
 
--- One live workspace per slug (frees the slug after soft deletion).
-CREATE UNIQUE INDEX workspaces_slug_unique_idx
-    ON workspaces (slug)
+-- One live workspace per handle (frees the handle after soft deletion).
+CREATE UNIQUE INDEX workspaces_handle_unique_idx
+    ON workspaces (handle)
     WHERE deleted_at IS NULL;
 
 -- One live workspace per display name and owner.
@@ -79,7 +79,7 @@ CREATE INDEX workspaces_display_name_trgm_idx
 COMMENT ON TABLE workspaces IS 'Multi-tenant workspaces that own documents, members, and connections.';
 COMMENT ON COLUMN workspaces.id IS 'Unique workspace identifier';
 COMMENT ON COLUMN workspaces.display_name IS 'Human-readable workspace name (2-32 characters)';
-COMMENT ON COLUMN workspaces.slug IS 'Unique URL slug among live workspaces (3-32 chars, lowercase)';
+COMMENT ON COLUMN workspaces.handle IS 'Unique display handle among live workspaces (3-32 chars, lowercase)';
 COMMENT ON COLUMN workspaces.description IS 'Optional workspace description (up to 500 characters)';
 COMMENT ON COLUMN workspaces.avatar_url IS 'URL to workspace avatar/logo image';
 COMMENT ON COLUMN workspaces.metadata IS 'Extended workspace metadata (JSON, 2B-8KB)';

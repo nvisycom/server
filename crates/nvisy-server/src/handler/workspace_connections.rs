@@ -80,7 +80,7 @@ async fn create_connection(
         Json(WorkspaceConnection::from_model(
             found.connection.item,
             workspace.id,
-            workspace.slug,
+            workspace.handle,
             found.connection.account.into(),
             found.schedule,
             found.last_synced_at,
@@ -131,7 +131,7 @@ async fn list_connections(
             WorkspaceConnection::from_model(
                 entry.connection.item,
                 workspace.id,
-                workspace.slug.clone(),
+                workspace.handle.clone(),
                 entry.connection.account.into(),
                 entry.schedule,
                 entry.last_synced_at,
@@ -180,7 +180,7 @@ async fn read_connection(
         Json(WorkspaceConnection::from_model(
             found.connection.item,
             workspace.id,
-            workspace.slug,
+            workspace.handle,
             found.connection.account.into(),
             found.schedule,
             found.last_synced_at,
@@ -235,7 +235,7 @@ async fn update_connection(
         Json(WorkspaceConnection::from_model(
             found.connection.item,
             workspace.id,
-            workspace.slug,
+            workspace.handle,
             found.connection.account.into(),
             found.schedule,
             found.last_synced_at,

@@ -21,7 +21,7 @@ pub struct WorkspaceWebhook {
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
     /// URL-safe workspace handle. Display-only.
-    pub workspace_slug: Handle,
+    pub workspace_handle: Handle,
     /// Human-readable name for the webhook.
     pub display_name: String,
     /// Detailed description of the webhook's purpose.
@@ -54,7 +54,7 @@ impl WorkspaceWebhook {
     pub fn from_model(
         webhook: model::WorkspaceWebhook,
         workspace_id: Uuid,
-        workspace_slug: Handle,
+        workspace_handle: Handle,
         created_by: AccountRef,
     ) -> Self {
         let events = webhook.subscribed_events();
@@ -63,7 +63,7 @@ impl WorkspaceWebhook {
         Self {
             id: WebhookId::from_uuid(webhook.id),
             workspace_id,
-            workspace_slug,
+            workspace_handle,
             display_name: webhook.display_name,
             description: webhook.description,
             url: webhook.url,
@@ -103,7 +103,7 @@ impl WorkspaceWebhookCreated {
     pub fn from_model(
         webhook: model::WorkspaceWebhook,
         workspace_id: Uuid,
-        workspace_slug: Handle,
+        workspace_handle: Handle,
         created_by: AccountRef,
         secret: String,
     ) -> Self {
@@ -111,7 +111,7 @@ impl WorkspaceWebhookCreated {
             webhook: WorkspaceWebhook::from_model(
                 webhook,
                 workspace_id,
-                workspace_slug,
+                workspace_handle,
                 created_by,
             ),
             secret,

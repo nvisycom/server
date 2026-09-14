@@ -51,9 +51,9 @@ const TRACING_TARGET: &str = "nvisy_server::handler::connection_oauth";
 struct OAuthFlowState {
     /// Workspace the connection will be created in.
     workspace_id: Uuid,
-    /// The workspace's slug, carried so the post-auth redirect can substitute a
+    /// The workspace's handle, carried so the post-auth redirect can substitute a
     /// `{workspaceId}` placeholder without a lookup in the callback.
-    workspace_slug: String,
+    workspace_handle: String,
     /// Account that started the flow; the connection is attributed to it.
     account_id: Uuid,
     /// The provider being connected.
@@ -75,7 +75,7 @@ type OAuthStateBucket = OAuthStateKvBucket<OAuthFlowState>;
 /// the workspace it belongs to (used to build the post-auth redirect).
 struct CallbackOutcome {
     connection_id: Uuid,
-    workspace_slug: String,
+    workspace_handle: String,
 }
 
 /// The response to a successful authorization start: where to send the user.
@@ -109,7 +109,7 @@ async fn start_oauth(
 
     let flow = OAuthFlowState {
         workspace_id: authz.workspace.id,
-        workspace_slug: authz.workspace.slug.to_string(),
+        workspace_handle: authz.workspace.handle.to_string(),
         account_id: authz.account_id,
         provider,
         display_name: request.display_name,
@@ -158,26 +158,26 @@ async fn oauth_callback(
     // The callback is a top-level browser navigation, so its outcome is conveyed
     // by a redirect back to the frontend rather than a response body.
     let outcome = complete_callback(&pg_client, &nats, &crypto, &cloud, &security, query).await;
-    let (status, workspace_slug) = match outcome {
+    let (status, workspace_handle) = match outcome {
         Ok(outcome) => {
             tracing::info!(
                 target: TRACING_TARGET,
                 connection_id = %outcome.connection_id,
                 "Cloud file connection created via OAuth",
             );
-            ("success", Some(outcome.workspace_slug))
+            ("success", Some(outcome.workspace_handle))
         }
         Err(err) => {
             tracing::warn!(target: TRACING_TARGET, error = %err, "Cloud file OAuth failed");
             ("error", None)
         }
     };
-    connection_result_redirect(redirect.0.as_deref(), status, workspace_slug.as_deref())
+    connection_result_redirect(redirect.0.as_deref(), status, workspace_handle.as_deref())
 }
 
 /// Runs the callback's work: consume the pending authorization, exchange the
 /// code, and create the connection. Returns the new connection id and the
-/// workspace slug (for the post-auth redirect) on success.
+/// workspace handle (for the post-auth redirect) on success.
 async fn complete_callback(
     pg_client: &PgClient,
     nats: &NatsClient,
@@ -264,7 +264,7 @@ async fn complete_callback(
 
     Ok(CallbackOutcome {
         connection_id,
-        workspace_slug: flow.workspace_slug,
+        workspace_handle: flow.workspace_handle,
     })
 }
 

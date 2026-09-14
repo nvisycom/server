@@ -67,7 +67,7 @@ async fn create_policy(
     let mut conn = pg_client.get_connection().await?;
     let creator = resolve_account_ref(&mut conn, account_id).await?;
     let response =
-        WorkspacePolicy::from_model(policy, version, workspace.id, workspace.slug, creator)?;
+        WorkspacePolicy::from_model(policy, version, workspace.id, workspace.handle, creator)?;
 
     // A one-shot body reuses an identical live policy (200) rather than minting a
     // duplicate; everything else creates a new policy (201).
@@ -128,7 +128,7 @@ async fn list_policies(
         WorkspacePolicySummary::from_model(
             wc.item,
             workspace.id,
-            workspace.slug.clone(),
+            workspace.handle.clone(),
             wc.account.into(),
         )
     });
@@ -171,7 +171,7 @@ async fn read_policy(
         found.item,
         version,
         workspace.id,
-        workspace.slug,
+        workspace.handle,
         found.account.into(),
     )?;
 
@@ -225,7 +225,7 @@ async fn update_policy(
         found.item,
         version,
         workspace.id,
-        workspace.slug,
+        workspace.handle,
         found.account.into(),
     )?;
 

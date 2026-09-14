@@ -20,7 +20,7 @@ pub struct WorkspacePipeline {
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
     /// URL-safe workspace handle. Display-only.
-    pub workspace_slug: Handle,
+    pub workspace_handle: Handle,
     /// Account that created this pipeline.
     pub created_by: AccountRef,
     /// WorkspacePipeline display name.
@@ -50,7 +50,7 @@ impl WorkspacePipeline {
     pub fn from_model(
         pipeline: model::WorkspacePipeline,
         workspace_id: Uuid,
-        workspace_slug: Handle,
+        workspace_handle: Handle,
         created_by: AccountRef,
         policy_ids: Vec<Uuid>,
     ) -> serde_json::Result<Self> {
@@ -59,7 +59,7 @@ impl WorkspacePipeline {
         Ok(Self {
             id: pipeline.id,
             workspace_id,
-            workspace_slug,
+            workspace_handle,
             created_by,
             display_name: pipeline.display_name,
             description: pipeline.description,
@@ -85,7 +85,7 @@ pub struct WorkspacePipelineSummary {
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
     /// URL-safe workspace handle. Display-only.
-    pub workspace_slug: Handle,
+    pub workspace_handle: Handle,
     /// Account that created this pipeline.
     pub created_by: AccountRef,
     /// WorkspacePipeline display name.
@@ -107,13 +107,13 @@ impl WorkspacePipelineSummary {
     pub fn from_model(
         pipeline: model::WorkspacePipeline,
         workspace_id: Uuid,
-        workspace_slug: Handle,
+        workspace_handle: Handle,
         created_by: AccountRef,
     ) -> Self {
         Self {
             id: pipeline.id,
             workspace_id,
-            workspace_slug,
+            workspace_handle,
             created_by,
             display_name: pipeline.display_name,
             description: pipeline.description,

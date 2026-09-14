@@ -49,7 +49,7 @@ struct ActivityExportRow {
     actor: String,
     /// Stable id of the acted-on object, when it has one; empty otherwise.
     object_id: String,
-    /// Human-readable name of the acted-on object (slug, filename, email), when
+    /// Human-readable name of the acted-on object (handle, filename, email), when
     /// it has one; empty otherwise.
     object_label: String,
     /// Originating IP address, when recorded; empty otherwise.
@@ -134,7 +134,7 @@ async fn list_activities(
         WorkspaceActivity::from_model(
             wc.item,
             workspace.id,
-            workspace.slug.clone(),
+            workspace.handle.clone(),
             wc.account.into(),
         )
     });

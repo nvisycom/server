@@ -55,7 +55,7 @@ async fn created_response(
     conn: &mut PgConn,
     created: domain::output::CreatedDetection,
     workspace_id: uuid::Uuid,
-    workspace_slug: nvisy_postgres::types::Handle,
+    workspace_handle: nvisy_postgres::types::Handle,
 ) -> Result<(StatusCode, Json<WorkspaceDetection>)> {
     let status = if created.created {
         StatusCode::ACCEPTED
@@ -68,7 +68,7 @@ async fn created_response(
         Json(WorkspaceDetection::from_model(
             created.detection,
             workspace_id,
-            workspace_slug,
+            workspace_handle,
             trigger,
             created.documents,
         )),
@@ -115,7 +115,7 @@ async fn create_detection(
         .await?;
 
     let mut conn = pg_client.get_connection().await?;
-    created_response(&mut conn, created, workspace.id, workspace.slug).await
+    created_response(&mut conn, created, workspace.id, workspace.handle).await
 }
 
 fn create_detection_docs(op: TransformOperation) -> TransformOperation {
@@ -172,7 +172,7 @@ async fn create_adhoc_detection(
         .await?;
 
     let mut conn = pg_client.get_connection().await?;
-    created_response(&mut conn, created, workspace.id, workspace.slug).await
+    created_response(&mut conn, created, workspace.id, workspace.handle).await
 }
 
 fn create_adhoc_detection_docs(op: TransformOperation) -> TransformOperation {
@@ -223,7 +223,7 @@ async fn list_pipeline_detections(
         WorkspaceDetection::from_model(
             row.detection,
             workspace.id,
-            workspace.slug.clone(),
+            workspace.handle.clone(),
             row.account.into(),
             DetectionDocuments {
                 input: row.input_document_name,
@@ -276,7 +276,7 @@ async fn list_workspace_detections(
             WorkspaceDetection::from_model(
                 row.detection,
                 workspace.id,
-                workspace.slug.clone(),
+                workspace.handle.clone(),
                 row.account.into(),
                 DetectionDocuments {
                     input: row.input_document_name,
@@ -331,7 +331,7 @@ async fn get_detection(
         Json(WorkspaceDetection::from_model(
             detection,
             workspace.id,
-            workspace.slug,
+            workspace.handle,
             trigger,
             documents,
         )),
@@ -505,7 +505,7 @@ fn status_event(event: &DetectionStatusEvent) -> Event {
 /// for the slow analysis and staging work.
 struct RedactInputs {
     detection: WorkspaceDetectionModel,
-    /// The detection's owning pipeline, if it still has one (for the event slug).
+    /// The detection's owning pipeline, if it still has one (for the event handle).
     pipeline: Option<WorkspacePipeline>,
     /// The detection's input document.
     document: WorkspaceDocument,
@@ -811,7 +811,7 @@ async fn redact_detection(
         Json(WorkspaceRedactionResult::from_model(
             redaction,
             workspace.id,
-            workspace.slug,
+            workspace.handle,
             requested_by,
         )),
     ))
