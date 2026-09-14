@@ -2,8 +2,10 @@
 //!
 //! The background executor that delivers queued webhook jobs
 //! ([`WebhookDeliveryWorker`]), plus the job and stream types it consumes. The
-//! request-side emitter that enqueues these jobs
-//! ([`WebhookEmitter`](crate::service::WebhookEmitter)) stays in `service`.
+//! request-side emitter that enqueues these jobs ([`WebhookEmitter`]) stays in
+//! `service`.
+//!
+//! [`WebhookEmitter`]: crate::service::WebhookEmitter
 
 mod job;
 mod worker;

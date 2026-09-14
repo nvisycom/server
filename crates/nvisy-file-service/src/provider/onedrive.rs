@@ -55,15 +55,17 @@ pub fn oauth_provider() -> OAuthProvider {
 /// resolved host is used. The resolved host also gates account type. The
 /// connector's own Graph token is never disturbed.
 ///
-/// The `OneDrive` arm of [`FileServiceProvider::mint_picker_token`](super::FileServiceProvider::mint_picker_token),
-/// kept here so the dispatch holds no provider-specific logic.
+/// The `OneDrive` arm of [`FileServiceProvider::mint_picker_token`], kept here so
+/// the dispatch holds no provider-specific logic.
 ///
 /// # Errors
 ///
-/// Returns [`ErrorKind::BadRequest`](crate::error::ErrorKind::BadRequest) for a
-/// personal/consumer account (no `SharePoint` host) — the modern picker is only
-/// supported for `OneDrive` for Business — or an auth error if the token cannot be
-/// minted.
+/// Returns [`ErrorKind::BadRequest`] for a personal/consumer account (no
+/// `SharePoint` host) — the modern picker is only supported for `OneDrive` for
+/// Business — or an auth error if the token cannot be minted.
+///
+/// [`FileServiceProvider::mint_picker_token`]: super::FileServiceProvider::mint_picker_token
+/// [`ErrorKind::BadRequest`]: crate::error::ErrorKind::BadRequest
 pub(super) async fn mint_picker_token(
     service: &FileService,
     config: &FileServiceConfig,

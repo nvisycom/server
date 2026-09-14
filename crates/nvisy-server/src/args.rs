@@ -2,13 +2,17 @@
 //! downstream binary that embeds this server.
 //!
 //! [`ServiceArgs`] flattens every config [`ServiceState`] needs into one
-//! `clap::Args` group, and [`ServiceState::from_config`](crate::service::ServiceState::from_config) turns it into a running
+//! `clap::Args` group, and [`ServiceState::from_config`] turns it into a running
 //! state. A wrapping binary can `#[clap(flatten)]` this struct instead of
 //! re-declaring the individual config types.
 //!
 //! The webhook client is deliberately *not* part of the aggregate: it is a
-//! pluggable [`WebhookService`], passed to [`from_config`](crate::service::ServiceState::from_config)
-//! so a caller can choose its own implementation.
+//! pluggable [`WebhookService`], passed to [`ServiceState::from_config`] so a
+//! caller can choose its own implementation.
+//!
+//! [`ServiceState`]: crate::service::ServiceState
+//! [`ServiceState::from_config`]: crate::service::ServiceState::from_config
+//! [`WebhookService`]: nvisy_webhook::WebhookService
 
 use nvisy_nats::NatsConfig;
 use nvisy_postgres::PgConfig;
@@ -26,8 +30,11 @@ pub(crate) const TRACING_TARGET_CONFIG: &str = "nvisy_server::args";
 /// Every external-service and resource config [`ServiceState`] is built from.
 ///
 /// Grouped so a binary flattens one struct rather than the ten configs it wraps;
-/// [`ServiceState::from_config`](crate::service::ServiceState::from_config) consumes it. The `clap::Args` derive is gated on
+/// [`ServiceState::from_config`] consumes it. The `clap::Args` derive is gated on
 /// the `cli` feature.
+///
+/// [`ServiceState`]: crate::service::ServiceState
+/// [`ServiceState::from_config`]: crate::service::ServiceState::from_config
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 #[must_use = "config does nothing unless you use it"]
@@ -117,8 +124,10 @@ impl ServiceArgs {
 /// Compile-time guard for the downstream-embedding contract: a wrapping state
 /// `S` that embeds [`ServiceState`] (via [`FromRef`]) can carry its own
 /// `ApiRouter<S>` routes through [`CustomRoutes<S>`] and compose them with the
-/// built-ins via [`routes`](crate::routes). Never executed; it exists so this
-/// contract cannot regress silently.
+/// built-ins via [`routes`]. Never executed; it exists so this contract cannot
+/// regress silently.
+///
+/// [`routes`]: crate::routes
 #[cfg(test)]
 mod embed_contract {
     use aide::axum::ApiRouter;

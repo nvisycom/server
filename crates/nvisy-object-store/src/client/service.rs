@@ -1,9 +1,11 @@
 //! The dependency-injected entry point for external object-store access.
 //!
-//! Bridges stored workspace connections to the [`providers`](crate::provider): a
-//! connection carries an encrypted, typed
-//! [`StorageConfig`](crate::provider::StorageConfig), which [`ExternalObjectStore`]
+//! Bridges stored workspace connections to the [`providers`]: a connection
+//! carries an encrypted, typed [`StorageConfig`], which [`ExternalObjectStore`]
 //! turns into a connected [`ObjectStoreClient`] at runtime.
+//!
+//! [`providers`]: crate::provider
+//! [`StorageConfig`]: crate::provider::StorageConfig
 
 use nvisy_core::net::EndpointPolicy;
 

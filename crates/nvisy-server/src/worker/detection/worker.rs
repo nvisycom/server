@@ -7,6 +7,7 @@
 //! detection's core-NATS status subject (for SSE watchers) and emitted as a
 //! webhook event.
 
+use std::num::NonZero;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -102,7 +103,7 @@ impl DetectionWorker {
     #[must_use]
     pub fn new(infra: Infra, engine: EngineService, blob: RunBlobStore) -> Self {
         let concurrency = std::thread::available_parallelism()
-            .map_or(DEFAULT_DETECTION_CONCURRENCY, std::num::NonZero::get);
+            .map_or(DEFAULT_DETECTION_CONCURRENCY, NonZero::get);
         Self {
             infra,
             engine,

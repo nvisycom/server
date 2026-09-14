@@ -46,10 +46,12 @@ impl GetObject {
 
 /// A first-party blob store backed by an S3-compatible service.
 ///
-/// One S3 bucket holds every logical [`Bucket`](crate::Bucket); each object is
-/// addressed by `"{bucket.prefix()}/{key}"`, and the bucket is derived from the
-/// key's [`ObjectKey::BUCKET`]. Cloneable and cheap to pass around — it wraps an
+/// One S3 bucket holds every logical [`Bucket`]; each object is addressed by
+/// `"{bucket.prefix()}/{key}"`, and the bucket is derived from the key's
+/// [`ObjectKey::BUCKET`]. Cloneable and cheap to pass around — it wraps an
 /// `Arc`-backed SDK client.
+///
+/// [`Bucket`]: crate::Bucket
 #[derive(Clone)]
 pub struct BlobStore {
     client: Client,
@@ -69,11 +71,13 @@ impl BlobStore {
 
     /// Streams `reader` into `key`'s store, returning the number of bytes written.
     ///
-    /// The target store is [`K::BUCKET`](ObjectKey::BUCKET), so a key can only be
-    /// written to its own store. Uploads as a single S3 object when the content
-    /// fits one part, and as a multipart upload otherwise, so an object of unknown
-    /// length streams without being buffered whole in memory. A failure after the
-    /// multipart upload begins aborts it so no partial upload lingers.
+    /// The target store is [`K::BUCKET`], so a key can only be written to its own
+    /// store. Uploads as a single S3 object when the content fits one part, and as
+    /// a multipart upload otherwise, so an object of unknown length streams without
+    /// being buffered whole in memory. A failure after the multipart upload begins
+    /// aborts it so no partial upload lingers.
+    ///
+    /// [`K::BUCKET`]: ObjectKey::BUCKET
     pub async fn put<K, R>(&self, key: &K, reader: R) -> Result<u64>
     where
         K: ObjectKey,

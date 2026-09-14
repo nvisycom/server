@@ -1,12 +1,13 @@
 //! Workspace documents repository for managing human-facing files.
 //!
 //! A document is the human-facing file: an uploaded/imported original or a
-//! redacted output. Its bytes live in a [`Blob`](crate::model::Blob), shared and
-//! ref-counted; creating a document records a reference to its blob and
-//! soft-deleting one drops that reference, both in the same transaction as the
-//! document write. Retention and object reclamation live on the blob, so this
-//! module has no expiry sweep — [`WorkspaceBlobRepository`] owns that.
+//! redacted output. Its bytes live in a [`Blob`], shared and ref-counted;
+//! creating a document records a reference to its blob and soft-deleting one drops
+//! that reference, both in the same transaction as the document write. Retention
+//! and object reclamation live on the blob, so this module has no expiry sweep —
+//! [`WorkspaceBlobRepository`] owns that.
 //!
+//! [`Blob`]: crate::model::Blob
 //! [`WorkspaceBlobRepository`]: crate::query::WorkspaceBlobRepository
 
 use std::future::Future;

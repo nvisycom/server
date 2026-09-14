@@ -7,8 +7,8 @@ use crate::service::ServiceState;
 /// Custom routes a wrapping binary contributes alongside the built-in ones.
 ///
 /// A host embeds this crate's [`ServiceState`] in its own state `S` and adds its
-/// own private (authenticated) and public routes; [`routes`](crate::handler::routes)
-/// merges them with the built-ins under one final state type.
+/// own private (authenticated) and public routes; [`routes`] merges them with the
+/// built-ins under one final state type.
 ///
 /// # Examples
 ///
@@ -23,6 +23,8 @@ use crate::service::ServiceState;
 /// The type parameter `S` is the application state the custom routes are typed
 /// to — [`ServiceState`] for the first-party binary (the default), or a
 /// downstream state that embeds it.
+///
+/// [`routes`]: crate::handler::routes
 #[derive(Clone)]
 pub struct CustomRoutes<S = ServiceState> {
     /// Custom private routes that require authentication.

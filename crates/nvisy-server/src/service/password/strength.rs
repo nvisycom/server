@@ -210,7 +210,7 @@ impl PasswordStrength {
             suggestions: feedback
                 .suggestions()
                 .iter()
-                .map(std::string::ToString::to_string)
+                .map(ToString::to_string)
                 .collect(),
         }
     }

@@ -53,7 +53,9 @@ impl Retention {
 }
 
 /// The class of stored data a retention rule applies to. Each maps 1:1 to a
-/// [`DocumentKind`](super::super::DocumentKind).
+/// [`DocumentKind`].
+///
+/// [`DocumentKind`]: super::super::DocumentKind
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RetentionScope {
     /// Uploaded or imported source documents.

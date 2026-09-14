@@ -1,21 +1,25 @@
 //! The `workspace_events!` macro: one table binds every event struct into the
 //! outbox envelope and its trait dispatch.
 
-/// Generates the [`WorkspaceEvent`](super::WorkspaceEvent) outbox envelope from a
-/// table of `Variant => "wire.tag"` entries.
+/// Generates the [`WorkspaceEvent`] outbox envelope from a table of
+/// `Variant => "wire.tag"` entries.
 ///
 /// Each variant wraps the like-named event struct (which must implement
-/// [`EventKind`](super::EventKind)). The macro expands to:
+/// [`EventKind`]). The macro expands to:
 ///
 /// 1. the `WorkspaceEvent` enum, `#[serde(tag = "type", content = "data")]`, one
 ///    newtype variant per entry carrying its serde `rename`;
 /// 2. an inherent impl forwarding `tag`, `resource_id`, `activity`, `webhook`,
-///    and `notification` to the wrapped struct's [`EventKind`](super::EventKind);
+///    and `notification` to the wrapped struct's [`EventKind`];
 /// 3. a test asserting each variant's serde rename equals the wrapped struct's
-///    [`EventKind::TAG`](super::EventKind::TAG), so the tag lives once (in the
-///    table) and the two can never drift.
+///    [`EventKind::TAG`], so the tag lives once (in the table) and the two can
+///    never drift.
 ///
 /// The tag string appears once per event, in the table.
+///
+/// [`WorkspaceEvent`]: super::WorkspaceEvent
+/// [`EventKind`]: super::EventKind
+/// [`EventKind::TAG`]: super::EventKind::TAG
 macro_rules! workspace_events {
     ($( $variant:ident => $tag:literal ),+ $(,)?) => {
         /// A workspace event: the raw facts of one action, as written to the
@@ -108,7 +112,7 @@ pub(crate) use workspace_events;
 /// differ only by action (created / updated / deleted / …).
 ///
 /// Each action `Foo` in the family expands to a `pub struct Foo { <fields> }` and
-/// its [`EventKind`](super::EventKind) impl, where:
+/// its [`EventKind`] impl, where:
 /// - `TAG` is the given per-action wire tag;
 /// - `resource_id()` returns the named `id` field;
 /// - `activity()` is `ActivityPayload::Foo(<activity params>)` — the payload
@@ -120,6 +124,8 @@ pub(crate) use workspace_events;
 /// Families whose actions carry a payload body, a notification, or per-action
 /// fields are written out by hand instead — this macro is only for the plain,
 /// uniform CRUD families.
+///
+/// [`EventKind`]: super::EventKind
 macro_rules! crud_events {
     (
         fields $fields:tt

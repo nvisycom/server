@@ -3,7 +3,9 @@
 //! Provides [`SessionToken`], the extractor that reads and validates the session
 //! JWT from an incoming request — a session cookie (browser) or an
 //! `Authorization: Bearer` header (programmatic) — and records which transport
-//! carried it. Signing outbound tokens is [`AuthIssuer`](crate::service::AuthIssuer).
+//! carried it. Signing outbound tokens is [`AuthIssuer`].
+//!
+//! [`AuthIssuer`]: crate::service::AuthIssuer
 
 use std::fmt::Debug;
 
@@ -42,7 +44,7 @@ pub enum AuthTransport {
 /// Read from a request, it validates the session JWT (from the session cookie or
 /// an `Authorization: Bearer` header) and records which transport delivered it —
 /// the distinction CSRF protection depends on. Signing outbound tokens is not its
-/// job; that is [`AuthIssuer`](crate::service::AuthIssuer).
+/// job; that is [`AuthIssuer`].
 ///
 /// # Security
 ///
@@ -54,6 +56,7 @@ pub enum AuthTransport {
 /// This extractor only performs JWT validation. For full authentication including
 /// database verification, use [`AuthState`] instead.
 ///
+/// [`AuthIssuer`]: crate::service::AuthIssuer
 /// [`AuthState`]: crate::extract::AuthState
 #[must_use]
 #[derive(Debug, Clone)]

@@ -64,17 +64,13 @@ impl MigrationStatus {
     /// Returns the last applied migration version, if any.
     #[must_use]
     pub fn last_applied_version(&self) -> Option<&str> {
-        self.applied_versions
-            .last()
-            .map(std::string::String::as_str)
+        self.applied_versions.last().map(String::as_str)
     }
 
     /// Returns the next pending migration version, if any.
     #[must_use]
     pub fn next_pending_version(&self) -> Option<&str> {
-        self.pending_versions
-            .first()
-            .map(std::string::String::as_str)
+        self.pending_versions.first().map(String::as_str)
     }
 
     /// Returns the number of applied migrations.
@@ -178,9 +174,7 @@ impl MigrationResult {
     /// Returns the last processed migration version, if any.
     #[must_use]
     pub fn last_processed_version(&self) -> Option<&str> {
-        self.processed_versions
-            .last()
-            .map(std::string::String::as_str)
+        self.processed_versions.last().map(String::as_str)
     }
 }
 

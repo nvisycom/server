@@ -8,9 +8,12 @@
 //! The keyset is defined once per query as a [`CursorKey`] type `K`. The same
 //! `K` drives all three things that must agree — the `ORDER BY`, the keyset
 //! `WHERE` comparison, and the opaque cursor the client echoes back — so they
-//! cannot silently disagree. The [`keyset`](crate::keyset) macro applies the
-//! order, comparison, and limit to a query from a `K`'s columns and a
-//! [`Direction`](crate::types::Direction) direction, eliminating the hand-written comparison at each call site.
+//! cannot silently disagree. The [`keyset`] macro applies the order, comparison,
+//! and limit to a query from a `K`'s columns and a [`Direction`] direction,
+//! eliminating the hand-written comparison at each call site.
+//!
+//! [`keyset`]: crate::keyset
+//! [`Direction`]: crate::types::Direction
 
 use base64::prelude::*;
 use serde::Serialize;
@@ -214,9 +217,10 @@ impl<T> CursorPage<T> {
 ///
 /// Generic over the sort column's type: `sort_col` may be any orderable column
 /// (a timestamp, a text field, …) and `after`'s first element is its comparable
-/// value — nothing here assumes a timestamp. `direction` is a
-/// [`Direction`](crate::types::Direction); `after` is typically
-/// `pagination.after_key().map(|k| (k.field.into(), k.id))`.
+/// value — nothing here assumes a timestamp. `direction` is a [`Direction`];
+/// `after` is typically `pagination.after_key().map(|k| (k.field.into(), k.id))`.
+///
+/// [`Direction`]: crate::types::Direction
 macro_rules! keyset {
     ($query:expr, $sort:expr, $id:expr, $direction:expr, $after:expr) => {{
         use $crate::types::Direction;

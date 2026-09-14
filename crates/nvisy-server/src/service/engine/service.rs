@@ -14,11 +14,13 @@ use super::config::{self, EngineConfig};
 use super::error::UnknownFormatToken;
 use crate::Result;
 
-/// The redaction engine, injectable via [`State`](axum::extract::State).
+/// The redaction engine, injectable via [`State`].
 ///
 /// Cheaply cloneable — the underlying [`Engine`] is `Arc`-backed, so every clone
 /// shares one configured codec registry and recognizer lineup. Derefs to the
 /// [`Engine`] so callers can `analyze_document` / `anonymize_document` directly.
+///
+/// [`State`]: axum::extract::State
 #[derive(Clone, Deref)]
 #[must_use = "the engine does nothing unless you analyze or anonymize with it"]
 pub struct EngineService {
@@ -48,7 +50,7 @@ impl EngineService {
         &self.engine
     }
 
-    /// Runs [`analyze`](Engine::analyze) on a blocking thread.
+    /// Runs [`analyze`] on a blocking thread.
     ///
     /// With the default (local) recognizer lineup, `analyze` is CPU-bound: its
     /// future does regex and language-detection work inline and never yields to
@@ -65,6 +67,8 @@ impl EngineService {
     /// default local lineup runs to completion on the first poll and never
     /// touches the reactor. Inputs are moved in by value (the [`Engine`] is
     /// `Arc`-backed, so the clone is cheap and shares one configured lineup).
+    ///
+    /// [`analyze`]: Engine::analyze
     pub async fn analyze_blocking(
         &self,
         document: Document,

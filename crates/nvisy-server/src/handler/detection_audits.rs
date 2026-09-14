@@ -5,8 +5,9 @@
 //! findings) can be reviewed inline or downloaded as JSON or a zip of CSV tables,
 //! and the enrichment intermediates (an image's OCR layout, an audio clip's
 //! transcript) can be read for client-side search and entity addition. The
-//! detection lifecycle itself (create, list, redact) lives in
-//! [`detections`](super::detections).
+//! detection lifecycle itself (create, list, redact) lives in [`detections`].
+//!
+//! [`detections`]: super::detections
 
 use aide::axum::ApiRouter;
 use aide::axum::routing::get_with;

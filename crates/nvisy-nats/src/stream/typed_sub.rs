@@ -31,8 +31,11 @@ impl<S: EventStream> EventSubscriber<S> {
     /// Create a subscriber for the stream.
     ///
     /// The stream is not reconciled here — that is a startup concern done once via
-    /// [`NatsClient::ensure_stream`](crate::NatsClient::ensure_stream). The durable
-    /// consumer is still upserted lazily in [`subscribe`](Self::subscribe).
+    /// [`NatsClient::ensure_stream`]. The durable consumer is still upserted lazily
+    /// in [`subscribe`].
+    ///
+    /// [`NatsClient::ensure_stream`]: crate::NatsClient::ensure_stream
+    /// [`subscribe`]: Self::subscribe
     pub(crate) fn new(jetstream: &Context) -> Self {
         Self {
             inner: Arc::new(EventSubscriberInner {

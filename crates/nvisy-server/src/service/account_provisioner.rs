@@ -27,7 +27,9 @@ const MAX_USERNAME_ATTEMPTS: u32 = 100;
 /// Resolves, links, and provisions accounts for verified OIDC identities.
 ///
 /// Stateless: every method takes the connection to act on. Resolved per request
-/// from [`ServiceState`](crate::service::ServiceState).
+/// from [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone, Copy, Default)]
 pub struct AccountProvisioner;
 

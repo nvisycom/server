@@ -23,7 +23,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::account";
 ///
 /// Holds the Postgres client (own-connection-per-call) and the auth issuer (to
 /// sign the JWT for a new token). Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct AccountApiTokenService {
     postgres: PgClient,

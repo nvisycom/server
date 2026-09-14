@@ -114,8 +114,10 @@ impl LlmConfig {
     /// credentials against the provider.
     ///
     /// Used by the connection test endpoint. Returns `Ok(())` when the provider
-    /// accepts the credentials, or an [`Error`](crate::Error) describing the
-    /// build or verification failure.
+    /// accepts the credentials, or an [`Error`] describing the build or
+    /// verification failure.
+    ///
+    /// [`Error`]: crate::Error
     pub async fn validate(&self) -> Result<()> {
         match self {
             Self::OpenAi(p) => {
@@ -138,8 +140,10 @@ impl LlmConfig {
 
     /// Builds a ready-to-use [`InferenceClient`] for this config.
     ///
-    /// `model` overrides the configured [`default_model`](Self::default_model);
-    /// if neither is set, the provider's own default applies.
+    /// `model` overrides the configured [`default_model`]; if neither is set, the
+    /// provider's own default applies.
+    ///
+    /// [`default_model`]: Self::default_model
     pub fn connect(&self, model: Option<&str>) -> Result<InferenceClient> {
         let model = model.or_else(|| self.default_model()).unwrap_or_default();
         let client = match self {
@@ -196,8 +200,10 @@ impl InferenceConfig {
     ///
     /// # Errors
     ///
-    /// Returns an [`Error`](crate::Error) describing the build or verification
-    /// failure when the provider does not accept the credentials.
+    /// Returns an [`Error`] describing the build or verification failure when the
+    /// provider does not accept the credentials.
+    ///
+    /// [`Error`]: crate::Error
     pub async fn validate(&self) -> Result<()> {
         match self {
             Self::Llm(config) => config.validate().await,

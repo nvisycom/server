@@ -26,7 +26,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::provider";
 /// Holds the Postgres client (acquiring its own connection per call), the crypto
 /// service (to encrypt and decrypt the provider config), and the endpoint policy
 /// (to validate custom endpoints at write time). Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct WorkspaceProviderService {
     postgres: PgClient,

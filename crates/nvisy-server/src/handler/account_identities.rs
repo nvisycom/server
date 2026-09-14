@@ -11,12 +11,14 @@
 //! - `POST   /account/identities/{provider}` — link a provider.
 //! - `DELETE /account/identities/{provider}` — unlink a provider.
 //!
-//! Linking a provider is the OIDC redirect flow in [`auth_oidc`](super::auth_oidc)
-//! (it needs a browser round-trip); everything else is a plain authenticated
-//! request here. Two invariants hold across the deletes: an account may never
-//! lose its **last** identity (it must keep a way to sign in), and adding a
-//! credential from a merely-live session is refused (a stolen session must not
-//! plant a durable credential — see the step-up proof).
+//! Linking a provider is the OIDC redirect flow in [`auth_oidc`] (it needs a
+//! browser round-trip); everything else is a plain authenticated request here.
+//! Two invariants hold across the deletes: an account may never lose its **last**
+//! identity (it must keep a way to sign in), and adding a credential from a
+//! merely-live session is refused (a stolen session must not plant a durable
+//! credential — see the step-up proof).
+//!
+//! [`auth_oidc`]: super::auth_oidc
 
 use aide::axum::ApiRouter;
 use aide::axum::routing::{get_with, post_with, put_with};

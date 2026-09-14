@@ -22,7 +22,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::account";
 ///
 /// Holds the Postgres client (own-connection-per-call) and the notification
 /// emitter (to broadcast the unread count after a mark-read). Resolved per request
-/// from [`ServiceState`](crate::service::ServiceState).
+/// from [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct AccountNotificationService {
     postgres: PgClient,

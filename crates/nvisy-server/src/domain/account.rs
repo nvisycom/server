@@ -4,9 +4,11 @@
 //! shared-workspace visibility gate for a public profile and the email/username
 //! uniqueness checks on update. Account CRUD carries no workspace events, so there
 //! is no event emission here. Credentials (password, linked providers) are managed
-//! by [`AccountIdentityService`](super::AccountIdentityService), not here, and
-//! avatar upload/delete stay in the handler over
-//! [`AvatarService`](crate::service::AvatarService).
+//! by [`AccountIdentityService`], not here, and avatar upload/delete stay in the
+//! handler over [`AvatarService`].
+//!
+//! [`AccountIdentityService`]: super::AccountIdentityService
+//! [`AvatarService`]: crate::service::AvatarService
 
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Account, UpdateAccount};
@@ -22,7 +24,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::account";
 ///
 /// Holds the Postgres client and acquires its own connection per call, so each
 /// mutation is a self-contained transaction. Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct AccountService {
     postgres: PgClient,

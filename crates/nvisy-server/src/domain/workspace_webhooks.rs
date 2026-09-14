@@ -30,7 +30,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::webhook";
 /// Holds the Postgres client (acquiring its own connection per call), the crypto
 /// service (to mint, encrypt, and decrypt the signing secret), and the delivery
 /// client (to send a test request). Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct WorkspaceWebhookService {
     postgres: PgClient,

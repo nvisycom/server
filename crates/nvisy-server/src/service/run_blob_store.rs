@@ -2,18 +2,21 @@
 //!
 //! [`RunBlobStore`] reads and writes a run's document, redacted output, audit,
 //! and enrichment intermediates in the platform's first-party S3-compatible blob
-//! store (the `Documents`, `Audits`, and `Intermediates`
-//! [`Bucket`](nvisy_s3::Bucket)s), handling per-workspace encryption and the
-//! blob bookkeeping each one needs. It is distinct from
-//! [`ExternalObjectStore`](crate::service::ExternalObjectStore), which bridges
-//! external tenant object stores.
+//! store (the `Documents`, `Audits`, and `Intermediates` [`Bucket`]s), handling
+//! per-workspace encryption and the blob bookkeeping each one needs. It is
+//! distinct from [`ExternalObjectStore`], which bridges external tenant object
+//! stores.
 //!
 //! Bytes are content-addressed: each `stage_*` method writes the (encrypted)
 //! object and returns a [`NewBlob`] describing it, which the caller resolves
-//! through [`find_or_create_blob`](nvisy_postgres::query::WorkspaceBlobRepository::find_or_create_blob)
-//! (directly or via [`create_audit`](nvisy_postgres::query::WorkspaceAuditRepository::create_audit)
-//! / [`create_workspace_document`](nvisy_postgres::query::WorkspaceDocumentRepository::create_workspace_document))
-//! so identical content is stored once and shared.
+//! through [`find_or_create_blob`] (directly or via [`create_audit`] /
+//! [`create_workspace_document`]) so identical content is stored once and shared.
+//!
+//! [`Bucket`]: nvisy_s3::Bucket
+//! [`ExternalObjectStore`]: crate::service::ExternalObjectStore
+//! [`find_or_create_blob`]: nvisy_postgres::query::WorkspaceBlobRepository::find_or_create_blob
+//! [`create_audit`]: nvisy_postgres::query::WorkspaceAuditRepository::create_audit
+//! [`create_workspace_document`]: nvisy_postgres::query::WorkspaceDocumentRepository::create_workspace_document
 
 use std::io::Cursor;
 use std::str::FromStr;
@@ -60,11 +63,13 @@ fn invalid_key(err: impl std::fmt::Display) -> Error<'static> {
 ///
 /// Cloneable and cheap to pass around: it holds the shared [`Infra`] clients
 /// (all `Arc`-backed) and takes the per-request database connection as a method
-/// argument. Not to be confused with
-/// [`ExternalObjectStore`](crate::service::ExternalObjectStore), which bridges *external*
-/// tenant object stores; this operates on the platform's own S3-compatible
-/// store, routing to the `Documents`, `Audits`, and `Intermediates`
-/// [`Bucket`](nvisy_s3::Bucket) prefixes.
+/// argument. Not to be confused with [`ExternalObjectStore`], which bridges
+/// *external* tenant object stores; this operates on the platform's own
+/// S3-compatible store, routing to the `Documents`, `Audits`, and
+/// `Intermediates` [`Bucket`] prefixes.
+///
+/// [`ExternalObjectStore`]: crate::service::ExternalObjectStore
+/// [`Bucket`]: nvisy_s3::Bucket
 #[derive(Clone)]
 #[must_use = "service does nothing unless you use it"]
 pub struct RunBlobStore {
@@ -234,7 +239,9 @@ impl RunBlobStore {
     /// is resolved (with the run's other writes) atomically. A rollback therefore
     /// leaves at worst an orphan object in the bucket, never a blob that points at
     /// bytes that were never written; the caller reclaims that orphan via
-    /// [`discard_staged_object`](Self::discard_staged_object).
+    /// [`discard_staged_object`].
+    ///
+    /// [`discard_staged_object`]: Self::discard_staged_object
     pub async fn stage_analyzed_document(
         &self,
         workspace_id: Uuid,
@@ -371,10 +378,11 @@ impl RunBlobStore {
     /// A redaction commits its output document, review-audit row, and redaction
     /// row together in one transaction, so the output is staged (object written,
     /// blob returned for the caller to resolve) rather than inserted here, and is
-    /// reclaimed on rollback via
-    /// [`discard_staged_object`](Self::discard_staged_object). The redacted
-    /// document is a first-class document (a sibling of the source), downloadable
-    /// through the normal document endpoints.
+    /// reclaimed on rollback via [`discard_staged_object`]. The redacted document
+    /// is a first-class document (a sibling of the source), downloadable through
+    /// the normal document endpoints.
+    ///
+    /// [`discard_staged_object`]: Self::discard_staged_object
     pub async fn stage_redacted_document(
         &self,
         source_document: &WorkspaceDocument,
@@ -430,10 +438,12 @@ impl RunBlobStore {
 
     /// Resolves the blob holding a detection's analysis (its base audit).
     ///
-    /// The connection-bound step of loading an analysis; pair with
-    /// [`load_audit`](Self::load_audit) to release the connection before the
-    /// object-store round-trip. A detection with no base audit yet (409) and one
-    /// whose audit blob has been reclaimed (404) map to distinct responses.
+    /// The connection-bound step of loading an analysis; pair with [`load_audit`]
+    /// to release the connection before the object-store round-trip. A detection
+    /// with no base audit yet (409) and one whose audit blob has been reclaimed
+    /// (404) map to distinct responses.
+    ///
+    /// [`load_audit`]: Self::load_audit
     pub async fn resolve_audit_blob(
         &self,
         conn: &mut PgConn,
@@ -501,10 +511,12 @@ impl RunBlobStore {
 
     /// Resolves the blob holding a detection's enrichment intermediates.
     ///
-    /// The connection-bound step; pair with [`load_intermediates`](Self::load_intermediates)
-    /// to release the connection before the object-store round-trip. A detection
-    /// whose modality produced no enrichment (text, tabular) has none — a `None`
-    /// reference maps to a 404, distinct from a reference to a reclaimed blob.
+    /// The connection-bound step; pair with [`load_intermediates`] to release the
+    /// connection before the object-store round-trip. A detection whose modality
+    /// produced no enrichment (text, tabular) has none — a `None` reference maps
+    /// to a 404, distinct from a reference to a reclaimed blob.
+    ///
+    /// [`load_intermediates`]: Self::load_intermediates
     pub async fn resolve_intermediates_blob(
         &self,
         conn: &mut PgConn,
@@ -572,9 +584,11 @@ impl RunBlobStore {
     /// Resolves the blob holding a redaction's review audit.
     ///
     /// The connection-bound step of loading a review audit; pair with
-    /// [`load_audit`](Self::load_audit) to release the connection before the
-    /// object-store round-trip. Errors if the redaction has no review audit (409)
-    /// or its blob has since been reclaimed (404).
+    /// [`load_audit`] to release the connection before the object-store
+    /// round-trip. Errors if the redaction has no review audit (409) or its blob
+    /// has since been reclaimed (404).
+    ///
+    /// [`load_audit`]: Self::load_audit
     pub async fn resolve_review_blob(&self, conn: &mut PgConn, redaction_id: Uuid) -> Result<Blob> {
         let audit = conn
             .find_redaction_audit(redaction_id)

@@ -22,8 +22,10 @@ use crate::service::{
     WebhookEmitter,
 };
 
-/// Derives [`FromRef`](axum::extract::FromRef) for a single ambient client by
-/// cloning it out of the shared [`Infra`].
+/// Derives [`FromRef`] for a single ambient client by cloning it out of the
+/// shared [`Infra`].
+///
+/// [`FromRef`]: axum::extract::FromRef
 macro_rules! impl_di_infra {
     ($($f:ident: $t:ty),+ $(,)?) => {$(
         impl FromRef<ServiceState> for $t {
@@ -34,9 +36,10 @@ macro_rules! impl_di_infra {
     )+};
 }
 
-/// Derives [`FromRef`](axum::extract::FromRef) by composing a stateless service
-/// from [`Infra`]. The body is a pure move over `Arc`-backed handles, so
-/// per-request construction is free.
+/// Derives [`FromRef`] by composing a stateless service from [`Infra`]. The body
+/// is a pure move over `Arc`-backed handles, so per-request construction is free.
+///
+/// [`FromRef`]: axum::extract::FromRef
 macro_rules! impl_di_compose {
     ($($t:ty => $ctor:expr),+ $(,)?) => {$(
         impl FromRef<ServiceState> for $t {
@@ -48,8 +51,10 @@ macro_rules! impl_di_compose {
     )+};
 }
 
-/// Derives [`FromRef`](axum::extract::FromRef) for a stateless unit service that
-/// holds nothing and operates entirely on the connection passed to each method.
+/// Derives [`FromRef`] for a stateless unit service that holds nothing and
+/// operates entirely on the connection passed to each method.
+///
+/// [`FromRef`]: axum::extract::FromRef
 macro_rules! impl_di_unit {
     ($($t:ident),+ $(,)?) => {$(
         impl FromRef<ServiceState> for $t {
@@ -60,9 +65,11 @@ macro_rules! impl_di_unit {
     )+};
 }
 
-/// Derives [`FromRef`](axum::extract::FromRef) for a per-resource domain service
-/// built over the Postgres client alone. Each holds only the client and acquires
-/// its own connection per call, so construction is a cheap clone.
+/// Derives [`FromRef`] for a per-resource domain service built over the Postgres
+/// client alone. Each holds only the client and acquires its own connection per
+/// call, so construction is a cheap clone.
+///
+/// [`FromRef`]: axum::extract::FromRef
 macro_rules! impl_di_domain {
     ($($t:ty),+ $(,)?) => {$(
         impl FromRef<ServiceState> for $t {
@@ -73,10 +80,9 @@ macro_rules! impl_di_domain {
     )+};
 }
 
-/// Derives [`FromRef`](axum::extract::FromRef) for a service constructed from the
-/// pooled Postgres client plus one or more extra handles. Collapses the
-/// otherwise-identical hand-written impls for the domain services that hold an
-/// ambient dependency.
+/// Derives [`FromRef`] for a service constructed from the pooled Postgres client
+/// plus one or more extra handles. Collapses the otherwise-identical hand-written
+/// impls for the domain services that hold an ambient dependency.
 ///
 /// Each arm is `Type => |state| dep, ...`: the leading `|state|` binds the state
 /// reference (once per arm) so every dependency expression can resolve against it
@@ -84,6 +90,8 @@ macro_rules! impl_di_domain {
 /// (`AuthIssuer::from_ref(state)`), or a `Copy` field (`state.endpoint_policy`).
 /// The binding is threaded through the macro rather than hidden inside it so the
 /// expressions are hygienic.
+///
+/// [`FromRef`]: axum::extract::FromRef
 macro_rules! impl_di_new {
     ($($t:ty => |$state:ident| $($dep:expr),+ $(,)?);+ $(;)?) => {$(
         impl FromRef<ServiceState> for $t {

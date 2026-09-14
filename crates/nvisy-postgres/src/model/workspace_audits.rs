@@ -1,8 +1,8 @@
 //! Workspace audit model for `PostgreSQL` database operations.
 //!
 //! An audit is the engine's findings set over a document, stored as bytes in a
-//! [`Blob`](crate::model::Blob). Audits and reviews were once two file kinds;
-//! they are the same entity, distinguished only by lineage:
+//! [`Blob`]. Audits and reviews were once two file kinds; they are the same
+//! entity, distinguished only by lineage:
 //!
 //! - a **base audit** is produced by a detection: `detection_id` set,
 //!   `redaction_id` and `derived_from` NULL.
@@ -12,6 +12,8 @@
 //!   audit it was edited from).
 //!
 //! A database CHECK keeps `redaction_id` and `derived_from` set or NULL together.
+//!
+//! [`Blob`]: crate::model::Blob
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;

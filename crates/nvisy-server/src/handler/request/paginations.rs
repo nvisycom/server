@@ -94,8 +94,9 @@ impl CursorPagination {
     /// Converts to typed database pagination, decoding the opaque `after` cursor
     /// against the query's keyset `K`. An `after` that does not decode to `K` is
     /// treated as no cursor (a fresh first page). Defaults to descending; a caller
-    /// that walks ascending sets it with
-    /// [`with_direction`](types::CursorPagination::with_direction).
+    /// that walks ascending sets it with [`with_direction`].
+    ///
+    /// [`with_direction`]: types::CursorPagination::with_direction
     #[must_use]
     pub fn into_cursor<K>(self) -> types::CursorPagination<K>
     where

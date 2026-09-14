@@ -1,12 +1,12 @@
 //! The `.env.example` template, rendered from the clap argument tree.
 //!
 //! Every environment variable the server accepts is an `env`-backed argument
-//! reachable from [`Cli`](crate::config::Cli). The committed `.env.example` is
-//! rendered straight from that tree: each variable's help text becomes its
-//! comment, its clap default becomes its value, and a variable with no default is
-//! written commented-out and blank (so it is documented without inventing a value
-//! — this matters for the ones whose "unset" is a deliberate production behavior,
-//! such as the S3 endpoint and credentials).
+//! reachable from [`Cli`]. The committed `.env.example` is rendered straight from
+//! that tree: each variable's help text becomes its comment, its clap default
+//! becomes its value, and a variable with no default is written commented-out and
+//! blank (so it is documented without inventing a value — this matters for the
+//! ones whose "unset" is a deliberate production behavior, such as the S3 endpoint
+//! and credentials).
 //!
 //! A handful of variables are read outside clap ([`NON_CLAP_VARS`]); they are
 //! declared with the same section/comment/value shape and rendered through the
@@ -17,6 +17,8 @@
 //! ```sh
 //! ENV_EXAMPLE_WRITE=1 cargo test -p nvisy-cli --all-features env_example
 //! ```
+//!
+//! [`Cli`]: crate::config::Cli
 
 use std::path::PathBuf;
 
@@ -59,7 +61,9 @@ const NON_CLAP_VARS: &[NonClapVar] = &[
 
 /// Accumulates the `.env.example` text, tracking the current section so a banner
 /// is written only when it changes. Clap-derived and non-clap variables both go
-/// through [`var`](Renderer::var), so they format identically.
+/// through [`var`], so they format identically.
+///
+/// [`var`]: Renderer::var
 struct Renderer {
     out: String,
     section: Option<String>,

@@ -4,8 +4,10 @@
 //! (a language model today, other model kinds later). The outer enum is untagged,
 //! so on the wire it is flat: the inner config's own `provider` tag is the sole
 //! discriminator (`{ "provider": "openai", ... }`). This is the inference analog
-//! of [`ConnectionConfig`](super::ConnectionConfig): a provider is a service the
-//! platform calls, not a data connection.
+//! of [`ConnectionConfig`]: a provider is a service the platform calls, not a
+//! data connection.
+//!
+//! [`ConnectionConfig`]: super::ConnectionConfig
 
 use nvisy_core::net::EndpointPolicy;
 use nvisy_inference::InferenceConfig;

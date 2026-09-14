@@ -26,7 +26,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::pipeline";
 ///
 /// Holds the Postgres client and acquires its own connection per call, so each
 /// method is a self-contained transaction. Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct WorkspacePipelineService {
     postgres: PgClient,

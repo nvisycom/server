@@ -4,13 +4,15 @@
 //! [`MiddlewareArgs`] groups the middleware configs a binary applies to the
 //! router (CORS, `OpenAPI`, recovery) into one `clap::Args` group, so a wrapping
 //! binary can `#[clap(flatten)]` it instead of re-declaring each config. The
-//! request-limit [`UploadConfig`](crate::middleware::UploadConfig) is part of
-//! [`ServiceArgs`](crate::ServiceArgs) instead, since the running state also
-//! needs it.
+//! request-limit [`UploadConfig`] is part of [`ServiceArgs`] instead, since the
+//! running state also needs it.
 //!
 //! [`RouterMiddlewareExt::with_middleware`] applies the full standard stack in
 //! one call, so a binary need not re-chain `with_open_api` → `with_metrics` →
 //! `with_security` → `with_observability` → `with_recovery` by hand.
+//!
+//! [`UploadConfig`]: crate::middleware::UploadConfig
+//! [`ServiceArgs`]: crate::ServiceArgs
 
 use aide::axum::ApiRouter;
 use axum::Router;
@@ -111,10 +113,11 @@ pub trait RouterMiddlewareExt<S> {
     /// limits, observability, and recovery — the full standard stack, in the
     /// order the server applies them.
     ///
-    /// `upload` supplies the request-body limits (it lives on
-    /// [`ServiceArgs`](crate::ServiceArgs), so pass `service.upload`). Security
-    /// headers use their defaults; a binary needing custom headers should apply
-    /// the individual `with_*` layers itself.
+    /// `upload` supplies the request-body limits (it lives on [`ServiceArgs`], so
+    /// pass `service.upload`). Security headers use their defaults; a binary
+    /// needing custom headers should apply the individual `with_*` layers itself.
+    ///
+    /// [`ServiceArgs`]: crate::ServiceArgs
     fn with_middleware(self, middleware: &MiddlewareArgs, upload: &UploadConfig) -> Router<S>;
 }
 

@@ -93,8 +93,9 @@ pub trait AccountIdentityRepository {
     ) -> impl Future<Output = Result<DeleteIdentityOutcome>> + Send;
 }
 
-/// The result of a [`link_oidc_identity`](AccountIdentityRepository::link_oidc_identity)
-/// call.
+/// The result of a [`link_oidc_identity`] call.
+///
+/// [`link_oidc_identity`]: AccountIdentityRepository::link_oidc_identity
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkIdentityOutcome {
     /// The identity was linked by this call.
@@ -107,8 +108,9 @@ pub enum LinkIdentityOutcome {
     ProviderConflict,
 }
 
-/// The result of a [`delete_account_identity`](AccountIdentityRepository::delete_account_identity)
-/// call.
+/// The result of a [`delete_account_identity`] call.
+///
+/// [`delete_account_identity`]: AccountIdentityRepository::delete_account_identity
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeleteIdentityOutcome {
     /// The identity was deleted.
@@ -323,10 +325,11 @@ impl AccountIdentityRepository for PgConnection {
 /// not-found error if the account is absent or soft-deleted (`deleted_at` set).
 ///
 /// Called inside an identity-write transaction so the write serializes against a
-/// concurrent [`delete_account`](super::AccountRepository::delete_account): the
-/// lock forces the delete's `UPDATE accounts … SET deleted_at` to commit before
-/// this sees the row, and the `deleted_at` recheck then rejects the write against
-/// a tombstoned account.
+/// concurrent [`delete_account`]: the lock forces the delete's `UPDATE accounts …
+/// SET deleted_at` to commit before this sees the row, and the `deleted_at`
+/// recheck then rejects the write against a tombstoned account.
+///
+/// [`delete_account`]: super::AccountRepository::delete_account
 async fn lock_active_account(conn: &mut PgConnection, account_id: Uuid) -> Result<()> {
     use schema::accounts::{self, dsl};
 

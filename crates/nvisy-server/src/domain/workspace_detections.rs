@@ -8,7 +8,9 @@
 //! worker, not here; the service only owns the request side and meets the worker
 //! at the outbox job and the [`DetectionQueue`]. The streaming (SSE) and
 //! inference-and-staging (redact) actions stay in the handler, loading a detection
-//! through [`find`](WorkspaceDetectionService::find).
+//! through [`find`].
+//!
+//! [`find`]: WorkspaceDetectionService::find
 
 use elide_pipeline::governance::policy::Policy;
 use elide_pipeline::provider::DocumentContext;
@@ -39,8 +41,9 @@ use crate::worker::detection::DetectionJob;
 const TRACING_TARGET: &str = "nvisy_server::domain::detection";
 
 /// The detection to commit, bundling the row and the analysis-job inputs that
-/// [`commit_detection`](WorkspaceDetectionService::commit_detection) persists in
-/// one transaction.
+/// [`commit_detection`] persists in one transaction.
+///
+/// [`commit_detection`]: WorkspaceDetectionService::commit_detection
 struct CommitDetection {
     /// Workspace the detection belongs to.
     workspace_id: Uuid,
@@ -61,7 +64,9 @@ struct CommitDetection {
 /// Holds the Postgres client (acquiring its own connection per call) and the
 /// detection queue (to broadcast the initial status and wake the outbox drainer
 /// after a create commits). Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct WorkspaceDetectionService {
     postgres: PgClient,
@@ -192,8 +197,10 @@ impl WorkspaceDetectionService {
     /// Starts an ad-hoc detection against an explicit policy list, with no pipeline.
     ///
     /// Validates the document and every named policy synchronously, then commits and
-    /// enqueues the detection the same way as [`create`](Self::create). An
-    /// idempotency key replays an existing detection.
+    /// enqueues the detection the same way as [`create`]. An idempotency key replays
+    /// an existing detection.
+    ///
+    /// [`create`]: Self::create
     pub async fn create_adhoc(
         &self,
         origin: event::EventOrigin<'_>,

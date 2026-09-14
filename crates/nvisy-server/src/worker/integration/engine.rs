@@ -8,10 +8,13 @@
 //! the exporter (`export` module) pushes them out. Both stream end to end and keep
 //! files encrypted at rest.
 //!
-//! The request-time [`ConnectionSyncService`](crate::service::ConnectionSyncService)
-//! and the scheduled [`ConnectionSyncWorker`](super::ConnectionSyncWorker) both
-//! drive a transfer through this engine; the process-local cancel registry lives on
-//! the service handle, which hands the engine the token to observe.
+//! The request-time [`ConnectionSyncService`] and the scheduled
+//! [`ConnectionSyncWorker`] both drive a transfer through this engine; the
+//! process-local cancel registry lives on the service handle, which hands the
+//! engine the token to observe.
+//!
+//! [`ConnectionSyncService`]: crate::service::ConnectionSyncService
+//! [`ConnectionSyncWorker`]: super::ConnectionSyncWorker
 
 use nvisy_file_service::FileService;
 use nvisy_postgres::AsyncConnection;
@@ -56,7 +59,9 @@ pub struct TransferEngine {
 impl TransferEngine {
     /// Creates a new [`TransferEngine`]. `import_concurrency` and
     /// `export_concurrency` bound the in-flight imports and exports per sync (see
-    /// [`IntegrationConfig`](crate::service::IntegrationConfig)).
+    /// [`IntegrationConfig`]).
+    ///
+    /// [`IntegrationConfig`]: crate::service::IntegrationConfig
     pub fn new(
         infra: Infra,
         crypto: CryptoService,

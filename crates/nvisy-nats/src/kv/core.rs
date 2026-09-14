@@ -54,10 +54,12 @@ pub fn validate_kv_key(value: &str) -> Result<String, InvalidKvKey> {
 /// stores.
 ///
 /// A bucket fixes both the key and the value it stores, so they are associated
-/// types rather than free parameters on [`kv_store`](crate::NatsClient::kv_store):
-/// a store is selected by its bucket alone. A bucket is a pure type-level tag —
-/// all of its configuration lives in associated types and consts — so it is
-/// never instantiated and carries no value bounds.
+/// types rather than free parameters on [`kv_store`]: a store is selected by its
+/// bucket alone. A bucket is a pure type-level tag — all of its configuration
+/// lives in associated types and consts — so it is never instantiated and carries
+/// no value bounds.
+///
+/// [`kv_store`]: crate::NatsClient::kv_store
 pub trait KvBucket: 'static {
     /// The key type addressing entries in this bucket.
     type Key: KvKey;

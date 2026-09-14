@@ -23,8 +23,10 @@ impl<S: EventStream> EventPublisher<S> {
     /// Create a publisher for the stream.
     ///
     /// The stream is not reconciled here — that is a startup concern done once via
-    /// [`NatsClient::ensure_stream`](crate::NatsClient::ensure_stream) — so this is
-    /// a cheap handle over the `JetStream` context and can be built per use.
+    /// [`NatsClient::ensure_stream`] — so this is a cheap handle over the
+    /// `JetStream` context and can be built per use.
+    ///
+    /// [`NatsClient::ensure_stream`]: crate::NatsClient::ensure_stream
     pub(crate) fn new(jetstream: &Context) -> Self {
         Self {
             jetstream: jetstream.clone(),

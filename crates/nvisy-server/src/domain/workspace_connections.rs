@@ -6,7 +6,9 @@
 //! onto a replacement config) — in one place, factored out of the handler. The
 //! service owns the crypto service and the endpoint policy. The external-store
 //! actions (verify, picker token) stay in the handler; they load a connection
-//! through [`find`](WorkspaceConnectionService::find).
+//! through [`find`].
+//!
+//! [`find`]: WorkspaceConnectionService::find
 
 use nvisy_core::net::EndpointPolicy;
 use nvisy_postgres::model::{
@@ -34,7 +36,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::connection";
 /// Holds the Postgres client (acquiring its own connection per call), the crypto
 /// service (to encrypt and decrypt the connection config), and the endpoint policy
 /// (to validate custom endpoints at write time). Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct WorkspaceConnectionService {
     postgres: PgClient,

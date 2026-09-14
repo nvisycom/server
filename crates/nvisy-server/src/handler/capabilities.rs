@@ -5,9 +5,11 @@
 //! target), the recognizers the engine has registered, which connectors can be
 //! created, and which sign-in methods are available. All are deployment-owned
 //! reference data, not persisted rows: labels come from the runtime's built-in
-//! [`LabelCatalog`], recognizers from the configured
-//! [`Engine`](elide_pipeline::Engine) lineup, connector availability from the
-//! host's configuration, and sign-in methods from the configured auth providers.
+//! [`LabelCatalog`], recognizers from the configured [`Engine`] lineup, connector
+//! availability from the host's configuration, and sign-in methods from the
+//! configured auth providers.
+//!
+//! [`Engine`]: elide_pipeline::Engine
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;

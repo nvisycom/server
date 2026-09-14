@@ -7,6 +7,7 @@
 //! comment flows through the normal comment-created event, so the thread's
 //! timeline and mention notifications need no special handling here.
 
+use std::num::NonZero;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -90,7 +91,7 @@ impl AssistantWorker {
     #[must_use]
     pub fn new(infra: Infra, crypto: CryptoService) -> Self {
         let concurrency = std::thread::available_parallelism()
-            .map_or(DEFAULT_ASSISTANT_CONCURRENCY, std::num::NonZero::get);
+            .map_or(DEFAULT_ASSISTANT_CONCURRENCY, NonZero::get);
         Self {
             infra,
             crypto,

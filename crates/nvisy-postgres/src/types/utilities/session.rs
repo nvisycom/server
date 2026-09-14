@@ -75,8 +75,10 @@ pub const APP_TOKEN_LIFETIME_SECS: i64 = secs_i64(APP_TOKEN_LIFETIME);
 /// clamps to, and the throttle interval below which a slide is skipped.
 ///
 /// Groups the four durations that always travel together so
-/// [`slide_account_api_token`](crate::query::AccountApiTokenRepository::slide_account_api_token)
-/// takes one parameter, not four positional `Duration`s.
+/// [`slide_account_api_token`] takes one parameter, not four positional
+/// `Duration`s.
+///
+/// [`slide_account_api_token`]: crate::query::AccountApiTokenRepository::slide_account_api_token
 #[derive(Debug, Clone, Copy)]
 pub struct SlidingWindow {
     /// Idle window for a "remembered" session.

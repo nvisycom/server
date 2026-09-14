@@ -35,7 +35,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::thread";
 /// Holds the Postgres client (acquiring its own connection per call) and the
 /// assistant queue (to wake the reply drainer when a comment addresses the
 /// assistant). Resolved per request from
-/// [`ServiceState`](crate::service::ServiceState).
+/// [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct WorkspaceThreadService {
     postgres: PgClient,

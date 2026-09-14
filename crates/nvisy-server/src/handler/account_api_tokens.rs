@@ -1,8 +1,9 @@
 //! API token management handlers for user API token operations.
 //!
 //! These handlers are thin: they authenticate, parse the request, delegate the
-//! token rules to [`AccountApiTokenService`](crate::domain::AccountApiTokenService),
-//! and map the result to a response.
+//! token rules to [`AccountApiTokenService`], and map the result to a response.
+//!
+//! [`AccountApiTokenService`]: crate::domain::AccountApiTokenService
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;

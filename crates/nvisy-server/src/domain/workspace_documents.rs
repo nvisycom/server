@@ -5,7 +5,9 @@
 //! reference — in one place, factored out of the handler. The service holds the
 //! engine (to resolve format and modality filter tokens). The byte-I/O actions
 //! (upload, download) stay in the handler; they load a document through
-//! [`find`](WorkspaceDocumentService::find).
+//! [`find`].
+//!
+//! [`find`]: WorkspaceDocumentService::find
 
 use std::collections::BTreeSet;
 
@@ -28,7 +30,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::document";
 ///
 /// Holds the Postgres client (acquiring its own connection per call) and the
 /// engine (to resolve list-filter format and modality tokens to file extensions).
-/// Resolved per request from [`ServiceState`](crate::service::ServiceState).
+/// Resolved per request from [`ServiceState`].
+///
+/// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct WorkspaceDocumentService {
     postgres: PgClient,

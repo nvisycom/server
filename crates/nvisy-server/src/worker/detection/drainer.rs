@@ -58,9 +58,11 @@ pub struct DetectionOutboxDrainer {
     coordinator: Coordinator,
 }
 
-/// The tally of one [`drain_batch`](DetectionOutboxDrainer::drain_batch) pass: of
-/// the rows claimed, how many published, how many were deferred for a later retry,
-/// and how many were dead-lettered.
+/// The tally of one [`drain_batch`] pass: of the rows claimed, how many
+/// published, how many were deferred for a later retry, and how many were
+/// dead-lettered.
+///
+/// [`drain_batch`]: DetectionOutboxDrainer::drain_batch
 struct DrainPass {
     claimed: usize,
     processed: usize,
@@ -100,9 +102,10 @@ impl Worker for DetectionOutboxDrainer {
 impl DetectionOutboxDrainer {
     /// Creates a new [`DetectionOutboxDrainer`].
     ///
-    /// Shares the [`Coordinator`] with the enqueue-side
-    /// [`DetectionQueue`](crate::service::DetectionQueue) so a job committed on this
-    /// instance wakes this drainer at once.
+    /// Shares the [`Coordinator`] with the enqueue-side [`DetectionQueue`] so a
+    /// job committed on this instance wakes this drainer at once.
+    ///
+    /// [`DetectionQueue`]: crate::service::DetectionQueue
     #[must_use]
     pub fn new(infra: Infra, coordinator: Coordinator) -> Self {
         Self { infra, coordinator }

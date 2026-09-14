@@ -11,9 +11,11 @@ use crate::schema::workspace_redactions;
 /// A detection can be redacted many times — each redact request may carry a
 /// different set of reviewer edits — so each redaction is its own row. Its review
 /// audit (the engine's audit after the reviewer edits were applied) is a
-/// [`WorkspaceAudit`](crate::model::WorkspaceAudit) row pointing back via
-/// `redaction_id`; the redacted output is a
-/// [`WorkspaceDocument`](crate::model::WorkspaceDocument) of kind `redacted`.
+/// [`WorkspaceAudit`] row pointing back via `redaction_id`; the redacted output is
+/// a [`WorkspaceDocument`] of kind `redacted`.
+///
+/// [`WorkspaceAudit`]: crate::model::WorkspaceAudit
+/// [`WorkspaceDocument`]: crate::model::WorkspaceDocument
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_redactions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
