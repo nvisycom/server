@@ -123,6 +123,7 @@ impl_di_unit!(AccountProvisioner);
 // Per-resource domain services built over the Postgres client alone:
 impl_di_domain!(
     crate::domain::AccountService,
+    crate::domain::WorkspaceReviewService,
     crate::domain::WorkspaceInviteService,
     crate::domain::WorkspaceMemberService,
     crate::domain::WorkspacePolicyService,

@@ -124,10 +124,6 @@ pub struct CommentMentionedParams {
     pub comment_id: Uuid,
     /// Id of the thread the comment is in.
     pub thread_id: Uuid,
-    /// Id of the document the thread is on, when it is document-pinned; `None` for
-    /// a workspace-level thread.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub document_id: Option<Uuid>,
     /// Id of the account that wrote the comment (the mentioner).
     pub author_id: Uuid,
 }

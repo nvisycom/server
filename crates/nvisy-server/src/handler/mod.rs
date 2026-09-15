@@ -30,6 +30,7 @@ mod workspace_pipelines;
 mod workspace_policies;
 mod workspace_providers;
 mod workspace_redactions;
+mod workspace_reviews;
 mod workspace_thread_comments;
 mod workspace_threads;
 mod workspace_webhooks;
@@ -79,6 +80,7 @@ fn private_routes(service_state: &ServiceState) -> ApiRouter<ServiceState> {
         .merge(workspace_members::routes())
         .merge(workspace_threads::routes())
         .merge(workspace_thread_comments::routes())
+        .merge(workspace_reviews::routes())
         .merge(workspace_connections::routes())
         .merge(workspace_providers::routes())
         .merge(connection_oauth::private_routes())

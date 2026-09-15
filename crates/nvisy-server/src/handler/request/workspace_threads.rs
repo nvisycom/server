@@ -2,7 +2,7 @@
 //! listing).
 
 use garde::Validate;
-use nvisy_postgres::types::{ReviewStatus, ThreadFilter};
+use nvisy_postgres::types::ThreadFilter;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -47,16 +47,6 @@ impl From<OpenWorkspaceThread> for OpenThreadInput {
     }
 }
 
-/// Request payload to assign or unassign a document review.
-#[must_use]
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
-#[serde(rename_all = "camelCase")]
-pub struct AssignWorkspaceReview {
-    /// Account to assign the review to, or `null` to clear the current assignee.
-    #[garde(skip)]
-    pub assignee: Option<Uuid>,
-}
-
 /// Request payload to rename a thread (set or clear its title).
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
@@ -78,16 +68,10 @@ pub struct RenameWorkspaceThread {
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceThreadsQuery {
-    /// Filter by the document the thread reviews.
-    pub document_id: Option<Uuid>,
     /// Filter by the thread's opening author (account id).
     pub author: Option<Uuid>,
-    /// Filter document reviews by their assigned reviewer (account id).
-    pub assignee: Option<Uuid>,
     /// Filter by open/closed state: `true` = closed only, `false` = open only.
     pub closed: Option<bool>,
-    /// Filter document reviews by their derived review status.
-    pub review_status: Option<ReviewStatus>,
 }
 
 impl WorkspaceThreadsQuery {
@@ -96,11 +80,8 @@ impl WorkspaceThreadsQuery {
     #[must_use]
     pub fn into_filter(self) -> ThreadFilter {
         ThreadFilter {
-            document_id: self.document_id,
             author_account_id: self.author,
-            assignee_account_id: self.assignee,
             closed: self.closed,
-            review_status: self.review_status,
         }
     }
 }

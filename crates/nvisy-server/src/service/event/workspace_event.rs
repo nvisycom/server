@@ -767,7 +767,6 @@ pub struct ThreadOpened {
     pub thread_id: Uuid,
     /// Id of the thread's opening comment, referenced by mention notifications.
     pub opening_comment_id: Uuid,
-    pub document_id: Option<Uuid>,
     /// Id of the thread's opener, shown in the mention notification.
     pub author_id: Uuid,
     /// Accounts mentioned in the opening body, to notify. Empty when none.
@@ -784,7 +783,6 @@ impl EventKind for ThreadOpened {
     fn activity(&self) -> ActivityPayload {
         ActivityPayload::ThreadOpened(ThreadActivityParams {
             thread_id: self.thread_id,
-            document_id: self.document_id,
         })
     }
 
@@ -805,7 +803,6 @@ impl EventKind for ThreadOpened {
                 payload: NotificationPayload::CommentMentioned(CommentMentionedParams {
                     comment_id: self.opening_comment_id,
                     thread_id: self.thread_id,
-                    document_id: self.document_id,
                     author_id: self.author_id,
                 }),
             })
@@ -816,9 +813,9 @@ impl EventKind for ThreadOpened {
 // Thread close / reopen / rename: activity + webhook, no notification or extra
 // fields.
 crud_events! {
-    fields { thread_id: Uuid, document_id: Option<Uuid> }
+    fields { thread_id: Uuid }
     id = thread_id;
-    activity(this) = ThreadActivityParams { thread_id: this.thread_id, document_id: this.document_id };
+    activity(this) = ThreadActivityParams { thread_id: this.thread_id };
     webhook = yes;
 
     /// A thread was closed.
@@ -831,9 +828,9 @@ crud_events! {
 
 // Thread deletion: activity only, no webhook.
 crud_events! {
-    fields { thread_id: Uuid, document_id: Option<Uuid> }
+    fields { thread_id: Uuid }
     id = thread_id;
-    activity(this) = ThreadActivityParams { thread_id: this.thread_id, document_id: this.document_id };
+    activity(this) = ThreadActivityParams { thread_id: this.thread_id };
     webhook = no;
 
     /// A thread was deleted.
@@ -847,7 +844,6 @@ crud_events! {
 pub struct ThreadCommentCreated {
     pub comment_id: Uuid,
     pub thread_id: Uuid,
-    pub document_id: Option<Uuid>,
     /// Id of the comment's author, shown in the mention notification.
     pub author_id: Uuid,
     /// Accounts mentioned in the comment body, to notify. Empty when none.
@@ -865,7 +861,6 @@ impl EventKind for ThreadCommentCreated {
         ActivityPayload::ThreadCommentCreated(ThreadCommentActivityParams {
             comment_id: self.comment_id,
             thread_id: self.thread_id,
-            document_id: self.document_id,
         })
     }
 
@@ -878,7 +873,6 @@ impl EventKind for ThreadCommentCreated {
                 payload: NotificationPayload::CommentMentioned(CommentMentionedParams {
                     comment_id: self.comment_id,
                     thread_id: self.thread_id,
-                    document_id: self.document_id,
                     author_id: self.author_id,
                 }),
             })

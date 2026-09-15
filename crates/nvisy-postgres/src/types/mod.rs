@@ -22,10 +22,12 @@ pub use constraint::{
 pub use enums::{
     ActivityType, ApiTokenType, ConnectionType, DetectionStatus, DocumentKind, IdentityProvider,
     InviteStatus, NotificationEvent, OutboxStatus, PipelineStatus, PipelineTriggerType, PolicyKind,
-    ProviderType, ReviewStatus, SyncDeletionPolicy, SyncMode, SyncStatus, SyncTriggerType,
-    ThreadEventKind, WebhookEvent, WebhookStatus, WorkspaceRole,
+    ProviderType, ReviewEventKind, ReviewStatus, SyncDeletionPolicy, SyncMode, SyncStatus,
+    SyncTriggerType, ThreadEventKind, WebhookEvent, WebhookStatus, WorkspaceRole,
 };
-pub use filtering::{DetectionFilter, DocumentFilter, InviteFilter, MemberFilter, ThreadFilter};
+pub use filtering::{
+    DetectionFilter, DocumentFilter, DocumentReviewFilter, InviteFilter, MemberFilter, ThreadFilter,
+};
 pub use handle::{HANDLE_MAX_LENGTH, HANDLE_MIN_LENGTH, Handle, HandleError};
 pub use json::{
     ActivityPayload, CommentMentionedParams, ConnectionActivityParams,
