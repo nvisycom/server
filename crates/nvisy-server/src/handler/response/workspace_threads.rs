@@ -36,7 +36,7 @@ pub struct WorkspaceThread {
 }
 
 /// One non-message entry in a thread timeline (opened, closed, reopened,
-/// renamed, or a review transition).
+/// renamed).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceThreadEvent {
@@ -61,8 +61,7 @@ pub struct WorkspaceThreadEvent {
 pub enum WorkspaceThreadEntry {
     /// A message posted in the thread.
     Comment(WorkspaceComment),
-    /// A lifecycle event (opened, closed, reopened, renamed, or a review
-    /// transition).
+    /// A lifecycle event (opened, closed, reopened, renamed).
     Event(WorkspaceThreadEvent),
 }
 

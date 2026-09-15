@@ -382,11 +382,15 @@ async fn verify_review(
 
 fn verify_review_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Verify a review")
-        .description("Verifies a review, moving it to `resolved`. Requires Review.")
+        .description(
+            "Verifies a review, moving it to `resolved`. 409 if already resolved. \
+             Requires Review.",
+        )
         .response::<200, Json<WorkspaceReview>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
 }
 
 /// Reopens a resolved review back to `needs_review`. Requires `Review`.

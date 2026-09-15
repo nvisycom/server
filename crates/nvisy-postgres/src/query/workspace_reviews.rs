@@ -38,8 +38,8 @@ pub struct DocumentReviewCursor {
     pub id: uuid::Uuid,
 }
 
-/// Keyset for paginating a review's activity events: oldest first by `created_at`,
-/// `id` tiebreaker.
+/// Keyset for paginating a review's activity events by `created_at`, `id`
+/// tiebreaker (direction is the caller's).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewEventCursor {
     /// When the event happened.
@@ -122,8 +122,9 @@ pub trait WorkspaceReviewRepository {
     ) -> impl Future<Output = Result<WorkspaceReview>> + Send;
 
     /// Verifies a review, moving it to [`Resolved`](ReviewStatus::Resolved) and
-    /// recording a `verified` event. A review already resolved matches no row and
-    /// returns `NotFound`.
+    /// recording a `verified` event. Guarded on `status != resolved`, so an
+    /// already-resolved review matches no row (callers pre-check to report a clean
+    /// conflict).
     fn verify_review(
         &mut self,
         review_id: Uuid,
@@ -139,8 +140,12 @@ pub trait WorkspaceReviewRepository {
         actor: Uuid,
     ) -> impl Future<Output = Result<WorkspaceReview>> + Send;
 
-    /// Lists a review's activity events, oldest first, with cursor pagination, each
-    /// paired with the actor's account reference (when the account still exists).
+    /// Lists a review's activity events with cursor pagination, each paired with
+    /// the actor's account reference (when the account still exists). Order follows
+    /// `pagination.direction`; pass [`Direction::Ascending`] for a chronological
+    /// (oldest-first) timeline.
+    ///
+    /// [`Direction::Ascending`]: crate::types::Direction::Ascending
     fn cursor_list_review_events(
         &mut self,
         review_id: Uuid,
@@ -400,25 +405,25 @@ impl WorkspaceReviewRepository for PgConnection {
         self.transaction(async |conn| {
             use schema::workspace_reviews::{self, dsl};
 
-            let update = workspace_reviews::table.filter(dsl::id.eq(review_id));
-            // Assigning a reviewer takes the review into `in_review`; clearing the
-            // assignee leaves the status untouched (it may still be in review).
-            let review = match assignee {
-                Some(id) => diesel::update(update)
-                    .set((
-                        dsl::assignee_account_id.eq(Some(id)),
-                        dsl::review_status.eq(ReviewStatus::InReview),
-                    ))
+            // Always update the assignee. Assigning a reviewer also takes a
+            // not-yet-resolved review into `in_review`; a resolved review keeps its
+            // status (verified work is not silently un-resolved by an assignment —
+            // use reopen for that), and clearing the assignee never changes it.
+            let review = diesel::update(workspace_reviews::table.filter(dsl::id.eq(review_id)))
+                .set(dsl::assignee_account_id.eq(assignee))
+                .returning(WorkspaceReview::as_returning())
+                .get_result(conn)
+                .await
+                .map_err(Error::from)?;
+            let review = if assignee.is_some() && review.review_status != ReviewStatus::Resolved {
+                diesel::update(workspace_reviews::table.filter(dsl::id.eq(review_id)))
+                    .set(dsl::review_status.eq(ReviewStatus::InReview))
                     .returning(WorkspaceReview::as_returning())
                     .get_result(conn)
                     .await
-                    .map_err(Error::from)?,
-                None => diesel::update(update)
-                    .set(dsl::assignee_account_id.eq(None::<Uuid>))
-                    .returning(WorkspaceReview::as_returning())
-                    .get_result(conn)
-                    .await
-                    .map_err(Error::from)?,
+                    .map_err(Error::from)?
+            } else {
+                review
             };
 
             let (kind, target) = match assignee {
@@ -698,6 +703,33 @@ mod tests {
                 ReviewEventKind::Reopened,
             ]
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn assigning_a_resolved_review_keeps_it_resolved() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_pipeline_and_document().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let review = conn
+            .create_review(
+                seeded.workspace_id,
+                seeded.document_id,
+                None,
+                seeded.account_id,
+            )
+            .await?;
+        let resolved = conn.verify_review(review.id, seeded.account_id).await?;
+        assert_eq!(resolved.review_status, ReviewStatus::Resolved);
+
+        // Assigning a reviewer to a resolved review updates the assignee but does
+        // NOT silently un-resolve verified work.
+        let assigned = conn
+            .assign_review(review.id, Some(seeded.account_id), seeded.account_id)
+            .await?;
+        assert_eq!(assigned.assignee_account_id, Some(seeded.account_id));
+        assert_eq!(assigned.review_status, ReviewStatus::Resolved);
         Ok(())
     }
 

@@ -131,7 +131,7 @@ fn list_threads_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List threads")
         .description(
             "Returns the workspace's threads, most recent first, with optional \
-             document, author, assignee, review-status, and open/closed filters.",
+             author and open/closed filters.",
         )
         .response::<200, Json<WorkspaceThreadsPage>>()
         .response::<401, Json<ErrorResponse>>()
@@ -374,8 +374,8 @@ fn list_thread_timeline_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List a thread's timeline")
         .description(
             "Returns the thread's timeline — comments and lifecycle events (opened, \
-             closed, reopened, renamed, and review transitions) interleaved, oldest \
-             first, with cursor pagination.",
+             closed, reopened, renamed) interleaved, oldest first, with cursor \
+             pagination.",
         )
         .response::<200, Json<WorkspaceTimelinePage>>()
         .response::<401, Json<ErrorResponse>>()

@@ -15,7 +15,7 @@ use nvisy_postgres::types::{CursorPage, CursorPagination, DocumentReviewFilter};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
-use crate::response::{Error, Result};
+use crate::response::{Error, ErrorKind, Result};
 use crate::service::event;
 use crate::service::event::EventEmitter;
 
@@ -145,10 +145,18 @@ impl WorkspaceReviewService {
         actor: Uuid,
     ) -> Result<WorkspaceReview> {
         let mut conn = self.postgres.get_connection().await?;
-        find_review(&mut conn, workspace_id, review_id).await?;
-        conn.find_workspace_detection_by_id(workspace_id, detection_id)
+        let review = find_review(&mut conn, workspace_id, review_id).await?;
+        let (detection, _) = conn
+            .find_workspace_detection_by_id(workspace_id, detection_id)
             .await?
             .ok_or_else(|| Error::not_found("workspace_detection"))?;
+
+        // A review references only its own document's work: the detection must
+        // analyze the review's document.
+        if detection.input_document_id != review.document_id {
+            return Err(ErrorKind::BadRequest
+                .with_message("Detection is for a different document than this review"));
+        }
 
         let review = conn.link_detection(review_id, detection_id, actor).await?;
         tracing::info!(target: TRACING_TARGET, "Detection linked to review");
@@ -169,10 +177,21 @@ impl WorkspaceReviewService {
         actor: Uuid,
     ) -> Result<WorkspaceReview> {
         let mut conn = self.postgres.get_connection().await?;
-        find_review(&mut conn, workspace_id, review_id).await?;
-        conn.find_redaction_in_workspace(workspace_id, redaction_id)
+        let review = find_review(&mut conn, workspace_id, review_id).await?;
+        let redaction = conn
+            .find_redaction_in_workspace(workspace_id, redaction_id)
             .await?
             .ok_or_else(|| Error::not_found("workspace_redaction"))?;
+        // A redaction's document is its detection's input document; it must be the
+        // review's document.
+        let (detection, _) = conn
+            .find_workspace_detection_by_id(workspace_id, redaction.detection_id)
+            .await?
+            .ok_or_else(|| Error::not_found("workspace_detection"))?;
+        if detection.input_document_id != review.document_id {
+            return Err(ErrorKind::BadRequest
+                .with_message("Redaction is for a different document than this review"));
+        }
 
         let review = conn.link_redaction(review_id, redaction_id, actor).await?;
         tracing::info!(target: TRACING_TARGET, "Redaction linked to review");
@@ -185,14 +204,20 @@ impl WorkspaceReviewService {
     /// # Errors
     ///
     /// - `NotFound` if the review does not exist in the workspace.
+    /// - `Conflict` if the review is already resolved.
     /// - A database error if the query fails.
     pub async fn verify(
         &self,
         origin: event::EventOrigin<'_>,
         review_id: Uuid,
     ) -> Result<WorkspaceReview> {
+        use nvisy_postgres::types::ReviewStatus;
+
         let mut conn = self.postgres.get_connection().await?;
         let review = find_review(&mut conn, origin.workspace_id, review_id).await?;
+        if review.review_status == ReviewStatus::Resolved {
+            return Err(ErrorKind::Conflict.with_message("This review is already resolved"));
+        }
         let document = review_document(&mut conn, &review).await?;
 
         let verified = conn
