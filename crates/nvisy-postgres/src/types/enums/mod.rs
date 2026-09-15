@@ -34,6 +34,7 @@ pub mod pipeline_status;
 pub mod pipeline_trigger_type;
 pub mod policy_kind;
 
+pub mod review_event_kind;
 pub mod review_status;
 pub mod thread_event_kind;
 
@@ -50,6 +51,7 @@ pub use pipeline_status::PipelineStatus;
 pub use pipeline_trigger_type::PipelineTriggerType;
 pub use policy_kind::PolicyKind;
 pub use provider_type::ProviderType;
+pub use review_event_kind::ReviewEventKind;
 pub use review_status::ReviewStatus;
 pub use sync_deletion_policy::SyncDeletionPolicy;
 pub use sync_mode::SyncMode;

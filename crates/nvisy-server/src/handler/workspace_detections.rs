@@ -27,7 +27,7 @@ use nvisy_postgres::model::{
 };
 use nvisy_postgres::query::{
     DetectionDocuments, WorkspaceAuditRepository, WorkspaceBlobRepository,
-    WorkspaceDocumentRepository, WorkspaceRedactionRepository, WorkspaceThreadRepository,
+    WorkspaceDocumentRepository, WorkspaceRedactionRepository,
 };
 use nvisy_postgres::types::{DetectionStatus, DocumentKind};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
@@ -766,15 +766,8 @@ async fn redact_detection(
             )
             .await?;
 
-            // A redaction pass moves the document's review to `in_review` (unless
-            // it is already resolved), recording a `review.redaction.created`
-            // timeline event. The review thread already exists from detection;
-            // find-or-create keeps this robust if it somehow does not.
-            let thread = conn
-                .find_or_create_document_thread(workspace.id, inputs.document.id, authz.account_id)
-                .await?;
-            conn.mark_review_in_review(thread.id, authz.account_id)
-                .await?;
+            // A redaction is just a produced output; it creates and touches no
+            // review. A reviewer links this redaction to a review explicitly.
             // The resolved storage paths, so an object staged for content that
             // deduplicated onto an existing blob can be reclaimed after commit.
             let output_path = conn

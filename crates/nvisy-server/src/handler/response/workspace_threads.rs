@@ -4,41 +4,26 @@
 use jiff::Timestamp;
 use nvisy_postgres::model::{WorkspaceThread as ThreadModel, WorkspaceThreadEvent as EventModel};
 use nvisy_postgres::query::{TimelineCursor, TimelineSource};
-use nvisy_postgres::types::{ReviewStatus, ThreadEventKind};
+use nvisy_postgres::types::ThreadEventKind;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{AccountRef, Page, WorkspaceComment};
 
-/// Response type for a thread.
-///
-/// A thread is either a free-form workspace discussion (no `documentId`, opened
-/// and closed by members) or a document's review (`documentId` set, one live
-/// thread per document, auto-created on the document's first detection). A
-/// document thread carries a derived `reviewStatus` and an optional `assignee`; a
-/// workspace thread carries neither. Its stream is a [`WorkspaceThreadEntry`] timeline.
+/// Response type for a thread: a discussion with an author, an optional title, and
+/// an open/closed lifecycle. Its stream is a [`WorkspaceThreadEntry`] timeline. A
+/// document review (see the reviews endpoints) references a thread by its id.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceThread {
     /// Unique identifier of the thread.
     pub id: Uuid,
-    /// Document this thread reviews; `None` for a workspace-level thread.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub document_id: Option<Uuid>,
     /// The thread's title; `None` for an untitled thread.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
     /// Account that opened the thread.
     pub author: AccountRef,
-    /// The document review's current status, derived from the review timeline;
-    /// `None` for a workspace thread.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub review_status: Option<ReviewStatus>,
-    /// Account the document review is assigned to; `None` for a workspace thread
-    /// or an unassigned document review.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub assignee: Option<AccountRef>,
     /// Whether the thread is closed.
     pub closed: bool,
     /// When the thread was closed, when closed.
@@ -116,21 +101,13 @@ pub type WorkspaceThreadsPage = Page<WorkspaceThread>;
 pub type WorkspaceTimelinePage = Page<WorkspaceThreadEntry>;
 
 impl WorkspaceThread {
-    /// Creates a thread response from the database model, the resolved author
-    /// reference, and the resolved assignee reference (absent for a workspace
-    /// thread or an unassigned document review).
-    pub fn from_model(
-        thread: ThreadModel,
-        author: AccountRef,
-        assignee: Option<AccountRef>,
-    ) -> Self {
+    /// Creates a thread response from the database model and the resolved author
+    /// reference.
+    pub fn from_model(thread: ThreadModel, author: AccountRef) -> Self {
         Self {
             id: thread.id,
-            document_id: thread.document_id,
             display_name: thread.display_name,
             author,
-            review_status: thread.review_status,
-            assignee,
             closed: thread.closed_at.is_some(),
             closed_at: thread.closed_at.map(Into::into),
             created_at: thread.created_at.into(),

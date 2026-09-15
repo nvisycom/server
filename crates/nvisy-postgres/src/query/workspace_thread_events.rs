@@ -198,12 +198,26 @@ pub(crate) async fn record_event(
     actor: Uuid,
     target: Option<Value>,
 ) -> Result<()> {
+    record_event_for(conn, thread.workspace_id, thread.id, kind, actor, target).await
+}
+
+/// Inserts one thread timeline event addressed by workspace and thread id, for
+/// callers that hold the ids but not a full [`WorkspaceThread`] (e.g. the document
+/// review repository, which records review transitions against the owned thread).
+pub(crate) async fn record_event_for(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    thread_id: Uuid,
+    kind: ThreadEventKind,
+    actor: Uuid,
+    target: Option<Value>,
+) -> Result<()> {
     use schema::workspace_thread_events;
 
     diesel::insert_into(workspace_thread_events::table)
         .values(&NewWorkspaceThreadEvent {
-            workspace_id: thread.workspace_id,
-            thread_id: thread.id,
+            workspace_id,
+            thread_id,
             kind,
             actor_account_id: Some(actor),
             target,

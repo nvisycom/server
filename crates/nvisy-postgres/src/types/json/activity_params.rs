@@ -154,10 +154,6 @@ pub struct PolicyActivityParams {
 pub struct ThreadActivityParams {
     /// Id of the thread.
     pub thread_id: Uuid,
-    /// Id of the document the thread is pinned to; omitted for a workspace-level
-    /// thread.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub document_id: Option<Uuid>,
 }
 
 /// Params of a thread-comment activity (`thread.comment.created`).
@@ -169,10 +165,6 @@ pub struct ThreadCommentActivityParams {
     pub comment_id: Uuid,
     /// Id of the thread the comment is in.
     pub thread_id: Uuid,
-    /// Id of the document the thread is pinned to; omitted for a workspace-level
-    /// thread.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub document_id: Option<Uuid>,
 }
 
 /// The typed payload of an audit-log activity, tagged by `type` with its params

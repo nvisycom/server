@@ -1,6 +1,7 @@
 //! Workspace thread and comment domain logic: the thread lifecycle
-//! (open/close/reopen/rename/delete), a document review's transitions
-//! (verify/assign), and the messages within a thread (post/edit/delete).
+//! (open/close/reopen/rename/delete) and the messages within a thread
+//! (post/edit/delete). Document-review transitions live in
+//! [`WorkspaceReviewService`](super::WorkspaceReviewService).
 //!
 //! Threads and comments share one aggregate — mention resolution, the assistant
 //! enqueue, and the timeline events — so they live in one service. It holds the
@@ -14,8 +15,8 @@ use nvisy_postgres::model::{
     UpdateWorkspaceThreadComment, WorkspaceThread, WorkspaceThreadComment,
 };
 use nvisy_postgres::query::{
-    AssistantJobOutboxRepository, WorkspaceDocumentRepository, WorkspaceMemberRepository,
-    WorkspaceThreadCommentRepository, WorkspaceThreadRepository,
+    AssistantJobOutboxRepository, WorkspaceMemberRepository, WorkspaceThreadCommentRepository,
+    WorkspaceThreadRepository,
 };
 use nvisy_postgres::types::Handle;
 use nvisy_postgres::{ASSISTANT_ACCOUNT_ID, ASSISTANT_HANDLE, AsyncConnection, PgClient, PgConn};
@@ -77,10 +78,8 @@ impl WorkspaceThreadService {
 
         let new_thread = NewWorkspaceThread {
             workspace_id,
-            document_id: None,
             author_account_id: author_id,
             display_name: input.display_name,
-            review_status: None,
         };
 
         let (thread, queued_assistant) = conn
@@ -91,7 +90,6 @@ impl WorkspaceThreadService {
                     event::WorkspaceEvent::ThreadOpened(event::ThreadOpened {
                         thread_id: thread.id,
                         opening_comment_id: opening.id,
-                        document_id: thread.document_id,
                         author_id,
                         mentioned: mentions.recipients,
                     }),
@@ -135,7 +133,6 @@ impl WorkspaceThreadService {
                 origin,
                 event::WorkspaceEvent::ThreadDeleted(event::ThreadDeleted {
                     thread_id: thread.id,
-                    document_id: thread.document_id,
                 }),
             )
             .await?;
@@ -173,7 +170,6 @@ impl WorkspaceThreadService {
                     origin,
                     event::WorkspaceEvent::ThreadClosed(event::ThreadClosed {
                         thread_id: thread.id,
-                        document_id: thread.document_id,
                     }),
                 )
                 .await?;
@@ -211,7 +207,6 @@ impl WorkspaceThreadService {
                     origin,
                     event::WorkspaceEvent::ThreadReopened(event::ThreadReopened {
                         thread_id: thread.id,
-                        document_id: thread.document_id,
                     }),
                 )
                 .await?;
@@ -253,7 +248,6 @@ impl WorkspaceThreadService {
                     origin,
                     event::WorkspaceEvent::ThreadRenamed(event::ThreadRenamed {
                         thread_id: thread.id,
-                        document_id: thread.document_id,
                     }),
                 )
                 .await?;
@@ -263,113 +257,6 @@ impl WorkspaceThreadService {
 
         tracing::info!(target: TRACING_TARGET, "Thread renamed");
         Ok(renamed)
-    }
-
-    /// Verifies a document's review as a whole, moving it to `resolved`, and
-    /// raises the review-verified event.
-    ///
-    /// # Errors
-    ///
-    /// - `NotFound` if the document, or its review thread, does not exist in the
-    ///   workspace.
-    /// - A database error if the query fails.
-    pub async fn verify_review(
-        &self,
-        origin: event::EventOrigin<'_>,
-        document_id: Uuid,
-    ) -> Result<WorkspaceThread> {
-        let mut conn = self.postgres.get_connection().await?;
-        let document = conn
-            .find_document_in_workspace(origin.workspace_id, document_id)
-            .await?
-            .ok_or_else(|| Error::not_found("document"))?;
-        let thread = conn
-            .find_document_thread(origin.workspace_id, document_id)
-            .await?
-            .ok_or_else(|| Error::not_found("workspace_thread"))?;
-
-        let verified = conn
-            .transaction(async |conn| {
-                let verified = conn.verify_review(thread.id, origin.account_id).await?;
-                conn.emit_event(
-                    origin,
-                    event::WorkspaceEvent::ReviewVerified(event::ReviewVerified {
-                        thread_id: thread.id,
-                        document_id: document.id,
-                        document_name: document.display_name.clone(),
-                    }),
-                )
-                .await?;
-                Ok::<_, Error>(verified)
-            })
-            .await?;
-
-        tracing::info!(target: TRACING_TARGET, "Document review verified");
-        Ok(verified)
-    }
-
-    /// Assigns or unassigns a document's review. A `null` assignee clears the
-    /// current one; a set assignee must be a workspace member (else a `NotFound`).
-    /// Raises the matching review event, notifying the assignee unless they
-    /// assigned themselves.
-    ///
-    /// # Errors
-    ///
-    /// - `NotFound` if the document or its review thread does not exist in the
-    ///   workspace, or a set assignee is not a workspace member.
-    /// - A database error if the query fails.
-    pub async fn assign_review(
-        &self,
-        origin: event::EventOrigin<'_>,
-        document_id: Uuid,
-        assignee: Option<Uuid>,
-    ) -> Result<WorkspaceThread> {
-        let mut conn = self.postgres.get_connection().await?;
-        let document = conn
-            .find_document_in_workspace(origin.workspace_id, document_id)
-            .await?
-            .ok_or_else(|| Error::not_found("document"))?;
-        let thread = conn
-            .find_document_thread(origin.workspace_id, document_id)
-            .await?
-            .ok_or_else(|| Error::not_found("workspace_thread"))?;
-
-        // A set assignee must be a workspace member; the membership check keeps a
-        // non-member from being assigned across workspaces.
-        if let Some(assignee) = assignee {
-            conn.find_workspace_member_with_account(origin.workspace_id, assignee)
-                .await?
-                .ok_or_else(|| Error::not_found("account"))?;
-        }
-
-        let actor_id = origin.account_id;
-        let updated = conn
-            .transaction(async |conn| {
-                let updated = conn.assign_review(thread.id, assignee, actor_id).await?;
-                let event = match assignee {
-                    Some(assignee) => {
-                        event::WorkspaceEvent::ReviewAssigned(event::ReviewAssigned {
-                            thread_id: thread.id,
-                            document_id: document.id,
-                            document_name: document.display_name.clone(),
-                            assignee_id: assignee,
-                            // The reviewer is notified unless they assigned themselves.
-                            notify: (assignee != actor_id).then_some(assignee),
-                        })
-                    }
-                    None => event::WorkspaceEvent::ReviewUnassigned(event::ReviewUnassigned {
-                        thread_id: thread.id,
-                        document_id: document.id,
-                        document_name: Some(document.display_name.clone()),
-                    }),
-                };
-                conn.emit_event(origin, event).await?;
-                Ok::<_, Error>(updated)
-            })
-            .await?;
-
-        tracing::info!(target: TRACING_TARGET, "Document review assignment updated");
-        Ok(updated)
     }
 
     /// Posts a comment in a thread, records its event, and — if the assistant was
@@ -426,7 +313,6 @@ impl WorkspaceThreadService {
                     event::WorkspaceEvent::ThreadCommentCreated(event::ThreadCommentCreated {
                         comment_id: comment.id,
                         thread_id: thread.id,
-                        document_id: thread.document_id,
                         author_id,
                         mentioned: mentions.recipients,
                     }),

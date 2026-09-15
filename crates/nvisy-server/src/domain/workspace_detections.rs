@@ -22,7 +22,7 @@ use nvisy_postgres::query::{
     DetectionCursor, DetectionDocuments, DetectionJobOutboxRepository, DetectionListRow,
     DetectionPolicyVersionRepository, PipelineReferenceRepository, WorkspaceDetectionRepository,
     WorkspaceDocumentRepository, WorkspacePipelineRepository, WorkspacePolicyRepository,
-    WorkspacePolicyVersionRepository, WorkspaceThreadRepository,
+    WorkspacePolicyVersionRepository,
 };
 use nvisy_postgres::types::{CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Json};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
@@ -47,8 +47,6 @@ const TRACING_TARGET: &str = "nvisy_server::domain::detection";
 struct CommitDetection {
     /// Workspace the detection belongs to.
     workspace_id: Uuid,
-    /// Document being analyzed.
-    document_id: Uuid,
     /// The detection row to insert.
     new_detection: NewWorkspaceDetection,
     /// Pipeline the detection runs, if any.
@@ -180,7 +178,6 @@ impl WorkspaceDetectionService {
                 origin,
                 CommitDetection {
                     workspace_id,
-                    document_id: document.id,
                     new_detection,
                     pipeline_id: Some(pipeline.id),
                     scope: input.scope,
@@ -270,7 +267,6 @@ impl WorkspaceDetectionService {
                 origin,
                 CommitDetection {
                     workspace_id,
-                    document_id: document.id,
                     new_detection,
                     pipeline_id: None,
                     scope: input.scope,
@@ -443,7 +439,6 @@ impl WorkspaceDetectionService {
         origin: event::EventOrigin<'_>,
         detection: CommitDetection,
     ) -> Result<WorkspaceDetectionModel> {
-        let account_id = origin.account_id;
         conn.transaction(async |conn| {
             let detection_row = conn
                 .create_workspace_detection(detection.new_detection)
@@ -457,18 +452,9 @@ impl WorkspaceDetectionService {
             )
             .await?;
 
-            // The document's review is its thread: ensure it exists (one live thread
-            // per document) so this detection has somewhere to be reviewed, and
-            // reopen it if a prior review had resolved.
-            let thread = conn
-                .find_or_create_document_thread(
-                    detection.workspace_id,
-                    detection.document_id,
-                    account_id,
-                )
-                .await?;
-            conn.reopen_review(thread.id, account_id).await?;
-
+            // Detection is just analysis: it produces findings and creates no
+            // review. A reviewer opens a review explicitly (for a purpose) and links
+            // the relevant detections/redactions to it.
             let job = DetectionJob {
                 workspace_id: detection.workspace_id,
                 detection_id: detection_row.id,

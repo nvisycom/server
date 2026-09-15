@@ -378,7 +378,6 @@ impl AssistantWorker {
             let event = event::WorkspaceEvent::ThreadCommentCreated(event::ThreadCommentCreated {
                 comment_id: comment.id,
                 thread_id: thread.id,
-                document_id: thread.document_id,
                 author_id: ASSISTANT_ACCOUNT_ID,
                 mentioned: Vec::new(),
             });

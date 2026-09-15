@@ -6,7 +6,7 @@ mod documents;
 mod invites;
 mod members;
 
-pub use comments::ThreadFilter;
+pub use comments::{DocumentReviewFilter, ThreadFilter};
 pub use detections::DetectionFilter;
 pub use documents::DocumentFilter;
 pub use invites::InviteFilter;

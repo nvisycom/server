@@ -164,11 +164,7 @@ mod tests {
         let mut conn = db.client.get_connection().await?;
         let (_thread, opening) = conn
             .open_thread(
-                NewWorkspaceThread::test(
-                    seeded.workspace_id,
-                    seeded.document_id,
-                    seeded.account_id,
-                ),
+                NewWorkspaceThread::test(seeded.workspace_id, seeded.account_id),
                 "@assistant help".to_owned(),
             )
             .await?;
