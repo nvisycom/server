@@ -79,7 +79,7 @@ pub use workspace_policy_versions::{NewWorkspacePolicyVersion, WorkspacePolicyVe
 pub use workspace_providers::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};
 pub use workspace_redactions::{NewWorkspaceRedaction, WorkspaceRedaction};
 pub use workspace_review_events::{NewWorkspaceReviewEvent, WorkspaceReviewEvent};
-pub use workspace_review_links::{NewReviewDetection, NewReviewRedaction};
+pub use workspace_review_links::{NewReviewAssignee, NewReviewDetection, NewReviewRedaction};
 pub use workspace_reviews::{NewWorkspaceReview, UpdateWorkspaceReview, WorkspaceReview};
 pub use workspace_thread_comments::{
     NewWorkspaceThreadComment, UpdateWorkspaceThreadComment, WorkspaceThreadComment,

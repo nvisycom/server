@@ -25,9 +25,9 @@ COMMENT ON TYPE REVIEW_STATUS IS 'The state of a document review: needs_review, 
 -- Document reviews: an optional, purpose-scoped sign-off effort on a document. A
 -- document has 0..N reviews — none when someone works alone, one or more when a
 -- formal sign-off is wanted, each for a distinct purpose (an "audience": public,
--- legal, internal, …). A review owns a discussion thread and carries the reviewer
--- (assignee) and its state; it references (does not own) the detections and
--- redactions done for its purpose via the link tables below.
+-- legal, internal, …). A review owns a discussion thread and carries its state;
+-- it references (does not own) its assignees and the detections and redactions
+-- done for its purpose via the link tables below.
 CREATE TABLE workspace_reviews (
     -- Primary identifier
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -46,11 +46,8 @@ CREATE TABLE workspace_reviews (
     purpose             TEXT        DEFAULT NULL,
     CONSTRAINT workspace_reviews_purpose_length CHECK (purpose IS NULL OR length(trim(purpose)) BETWEEN 1 AND 255),
 
-    -- The reviewer who owns the review; NULL when unassigned (a review can be in
-    -- progress with no assignee). SET NULL if that account is removed.
-    assignee_account_id UUID        DEFAULT NULL REFERENCES accounts (id) ON DELETE SET NULL,
-
-    -- The review state (manual reviewer workflow).
+    -- The review state (manual reviewer workflow). Assignees live in the
+    -- workspace_review_assignees link table (a review may have 0..N reviewers).
     review_status       REVIEW_STATUS NOT NULL DEFAULT 'needs_review',
 
     -- Lifecycle timestamps
@@ -74,11 +71,6 @@ CREATE INDEX workspace_reviews_document_idx
 CREATE INDEX workspace_reviews_workspace_idx
     ON workspace_reviews (workspace_id, review_status, created_at DESC);
 
--- A reviewer's assigned reviews (backs the "my reviews" queue).
-CREATE INDEX workspace_reviews_assignee_idx
-    ON workspace_reviews (assignee_account_id)
-    WHERE assignee_account_id IS NOT NULL;
-
 -- Keep updated_at current on every row modification. Reviews have no `deleted_at`
 -- (they cascade with their document/thread), so they use the no-soft-delete
 -- trigger variant.
@@ -90,10 +82,28 @@ COMMENT ON COLUMN workspace_reviews.workspace_id IS 'Denormalized workspace scop
 COMMENT ON COLUMN workspace_reviews.document_id IS 'Document under review (a document may have many reviews)';
 COMMENT ON COLUMN workspace_reviews.thread_id IS 'Discussion thread this review owns (one review per thread)';
 COMMENT ON COLUMN workspace_reviews.purpose IS 'Optional free-text label for the review''s purpose/audience (1-255 chars)';
-COMMENT ON COLUMN workspace_reviews.assignee_account_id IS 'Reviewer who owns the review; NULL when unassigned or that account was removed';
 COMMENT ON COLUMN workspace_reviews.review_status IS 'Review state (needs_review/in_review/resolved)';
 COMMENT ON COLUMN workspace_reviews.created_at IS 'Timestamp when the review was created';
 COMMENT ON COLUMN workspace_reviews.updated_at IS 'Timestamp of the last update';
+
+-- Review assignees: the reviewers responsible for a review (0..N). A review with
+-- no assignees is unassigned; the first assignee moves it to `in_review` and
+-- removing the last returns it to `needs_review` (handled in the query layer).
+CREATE TABLE workspace_review_assignees (
+    review_id  UUID NOT NULL REFERENCES workspace_reviews (id) ON DELETE CASCADE,
+    account_id UUID NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    PRIMARY KEY (review_id, account_id)
+);
+
+-- A reviewer's assigned reviews (backs the "my reviews" queue).
+CREATE INDEX workspace_review_assignees_account_idx
+    ON workspace_review_assignees (account_id);
+
+COMMENT ON TABLE workspace_review_assignees IS 'The reviewers assigned to a review (many-to-many); a review may have 0..N assignees.';
+COMMENT ON COLUMN workspace_review_assignees.review_id IS 'The review';
+COMMENT ON COLUMN workspace_review_assignees.account_id IS 'The assigned reviewer';
+COMMENT ON COLUMN workspace_review_assignees.created_at IS 'When the reviewer was assigned';
 
 -- Review ← detection links: the detections a review references for its purpose.
 -- Many-to-many — a shared detection's findings can feed redactions across several

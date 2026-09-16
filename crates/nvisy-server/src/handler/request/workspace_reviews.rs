@@ -51,14 +51,15 @@ pub struct CreateWorkspaceReview {
     pub purpose: Option<String>,
 }
 
-/// Request payload to assign or unassign a review.
+/// Path parameters addressing a reviewer assignment on a review.
 #[must_use]
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct AssignWorkspaceReview {
-    /// Account to assign the review to, or `null` to clear the current assignee.
-    #[garde(skip)]
-    pub assignee: Option<Uuid>,
+pub struct WorkspaceReviewAssigneePathParams {
+    /// Unique identifier of the review.
+    pub review_id: Uuid,
+    /// Account id of the reviewer to assign or unassign.
+    pub account_id: Uuid,
 }
 
 /// Query parameters for listing a workspace's reviews (the review queue).

@@ -7,9 +7,9 @@
 
 use nvisy_postgres::model::{WorkspaceDocument, WorkspaceReview, WorkspaceReviewEvent};
 use nvisy_postgres::query::{
-    DocumentReviewCursor, ReviewEventCursor, WithActor, WithReviewer, WorkspaceDetectionRepository,
-    WorkspaceDocumentRepository, WorkspaceMemberRepository, WorkspaceRedactionRepository,
-    WorkspaceReviewRepository,
+    DocumentReviewCursor, ReviewEventCursor, WithActor, WithReviewers,
+    WorkspaceDetectionRepository, WorkspaceDocumentRepository, WorkspaceMemberRepository,
+    WorkspaceRedactionRepository, WorkspaceReviewRepository,
 };
 use nvisy_postgres::types::{CursorPage, CursorPagination, DocumentReviewFilter};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
@@ -78,7 +78,7 @@ impl WorkspaceReviewService {
         workspace_id: Uuid,
         pagination: CursorPagination<DocumentReviewCursor>,
         filter: &DocumentReviewFilter,
-    ) -> Result<CursorPage<WithReviewer<WorkspaceReview>>> {
+    ) -> Result<CursorPage<WithReviewers<WorkspaceReview>>> {
         let mut conn = self.postgres.get_connection().await?;
         conn.cursor_list_reviews(workspace_id, pagination, filter)
             .await
@@ -94,7 +94,7 @@ impl WorkspaceReviewService {
         &self,
         workspace_id: Uuid,
         document_id: Uuid,
-    ) -> Result<Vec<WithReviewer<WorkspaceReview>>> {
+    ) -> Result<Vec<WithReviewers<WorkspaceReview>>> {
         let mut conn = self.postgres.get_connection().await?;
         conn.list_document_reviews(workspace_id, document_id)
             .await
@@ -259,60 +259,92 @@ impl WorkspaceReviewService {
         Ok(review)
     }
 
-    /// Assigns or unassigns a review. A `null` assignee clears the current one; a
-    /// set assignee must be a workspace member (else a `NotFound`). Raises the
-    /// matching review event, notifying the assignee unless they assigned themselves.
+    /// Assigns a reviewer to a review (idempotent). The assignee must be a
+    /// workspace member. Raises the review-assigned event, notifying the assignee
+    /// unless they assigned themselves. The first assignee of a not-yet-resolved
+    /// review moves it to `in_review`.
     ///
     /// # Errors
     ///
-    /// - `NotFound` if the review does not exist in the workspace, or a set assignee
+    /// - `NotFound` if the review does not exist in the workspace, or the assignee
     ///   is not a workspace member.
     /// - A database error if the query fails.
-    pub async fn assign(
+    pub async fn add_assignee(
         &self,
         origin: event::EventOrigin<'_>,
         review_id: Uuid,
-        assignee: Option<Uuid>,
+        account_id: Uuid,
     ) -> Result<WorkspaceReview> {
         let mut conn = self.postgres.get_connection().await?;
         let review = find_review(&mut conn, origin.workspace_id, review_id).await?;
         let document = review_document(&mut conn, &review).await?;
 
-        // A set assignee must be a workspace member; the membership check keeps a
-        // non-member from being assigned across workspaces.
-        if let Some(assignee) = assignee {
-            conn.find_workspace_member_with_account(origin.workspace_id, assignee)
-                .await?
-                .ok_or_else(|| Error::not_found("account"))?;
-        }
+        // The assignee must be a workspace member (keeps a non-member from being
+        // assigned across workspaces).
+        conn.find_workspace_member_with_account(origin.workspace_id, account_id)
+            .await?
+            .ok_or_else(|| Error::not_found("account"))?;
 
         let actor_id = origin.account_id;
         let updated = conn
             .transaction(async |conn| {
-                let updated = conn.assign_review(review_id, assignee, actor_id).await?;
-                let event = match assignee {
-                    Some(assignee) => {
-                        event::WorkspaceEvent::ReviewAssigned(event::ReviewAssigned {
-                            thread_id: review.thread_id,
-                            document_id: document.id,
-                            document_name: document.display_name.clone(),
-                            assignee_id: assignee,
-                            // The reviewer is notified unless they assigned themselves.
-                            notify: (assignee != actor_id).then_some(assignee),
-                        })
-                    }
-                    None => event::WorkspaceEvent::ReviewUnassigned(event::ReviewUnassigned {
+                let updated = conn.add_assignee(review_id, account_id, actor_id).await?;
+                conn.emit_event(
+                    origin,
+                    event::WorkspaceEvent::ReviewAssigned(event::ReviewAssigned {
                         thread_id: review.thread_id,
                         document_id: document.id,
-                        document_name: Some(document.display_name.clone()),
+                        document_name: document.display_name.clone(),
+                        assignee_id: account_id,
+                        // The reviewer is notified unless they assigned themselves.
+                        notify: (account_id != actor_id).then_some(account_id),
                     }),
-                };
-                conn.emit_event(origin, event).await?;
+                )
+                .await?;
                 Ok::<_, Error>(updated)
             })
             .await?;
 
-        tracing::info!(target: TRACING_TARGET, "Review assignment updated");
+        tracing::info!(target: TRACING_TARGET, "Reviewer assigned");
+        Ok(updated)
+    }
+
+    /// Removes a reviewer from a review. Raises the review-unassigned event. Clearing
+    /// the last assignee of an in-review review returns it to `needs_review`.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the review does not exist in the workspace.
+    /// - A database error if the query fails.
+    pub async fn remove_assignee(
+        &self,
+        origin: event::EventOrigin<'_>,
+        review_id: Uuid,
+        account_id: Uuid,
+    ) -> Result<WorkspaceReview> {
+        let mut conn = self.postgres.get_connection().await?;
+        let review = find_review(&mut conn, origin.workspace_id, review_id).await?;
+        let document = review_document(&mut conn, &review).await?;
+
+        let updated = conn
+            .transaction(async |conn| {
+                let updated = conn
+                    .remove_assignee(review_id, account_id, origin.account_id)
+                    .await?;
+                conn.emit_event(
+                    origin,
+                    event::WorkspaceEvent::ReviewUnassigned(event::ReviewUnassigned {
+                        thread_id: review.thread_id,
+                        document_id: document.id,
+                        document_name: Some(document.display_name.clone()),
+                    }),
+                )
+                .await?;
+                Ok::<_, Error>(updated)
+            })
+            .await?;
+
+        tracing::info!(target: TRACING_TARGET, "Reviewer unassigned");
         Ok(updated)
     }
 }

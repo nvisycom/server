@@ -4,6 +4,7 @@
 DROP TABLE IF EXISTS workspace_review_events;
 DROP TABLE IF EXISTS workspace_review_redactions;
 DROP TABLE IF EXISTS workspace_review_detections;
+DROP TABLE IF EXISTS workspace_review_assignees;
 DROP TABLE IF EXISTS workspace_reviews;
 
 DROP TYPE IF EXISTS REVIEW_EVENT_KIND;

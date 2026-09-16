@@ -85,7 +85,7 @@ pub use workspace_policy_versions::WorkspacePolicyVersionRepository;
 pub use workspace_providers::{ProviderCursor, WorkspaceProviderRepository};
 pub use workspace_redactions::{RedactionCursor, WorkspaceRedactionRepository};
 pub use workspace_reviews::{
-    DocumentReviewCursor, ReviewEventCursor, WithActor, WithReviewer, WorkspaceReviewRepository,
+    DocumentReviewCursor, ReviewEventCursor, WithActor, WithReviewers, WorkspaceReviewRepository,
 };
 pub use workspace_thread_comments::WorkspaceThreadCommentRepository;
 pub use workspace_thread_events::{TimelineCursor, TimelineSource, WorkspaceThreadEventRepository};

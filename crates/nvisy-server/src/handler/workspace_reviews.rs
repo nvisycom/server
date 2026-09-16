@@ -19,9 +19,9 @@ use uuid::Uuid;
 use crate::domain;
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
-    AssignWorkspaceReview, CreateWorkspaceReview, CursorPagination, WorkspaceDocumentPathParams,
-    WorkspaceReviewDetectionPathParams, WorkspaceReviewPathParams,
-    WorkspaceReviewRedactionPathParams, WorkspaceReviewsQuery,
+    CreateWorkspaceReview, CursorPagination, WorkspaceDocumentPathParams,
+    WorkspaceReviewAssigneePathParams, WorkspaceReviewDetectionPathParams,
+    WorkspaceReviewPathParams, WorkspaceReviewRedactionPathParams, WorkspaceReviewsQuery,
 };
 use crate::handler::response::{
     AccountRef, WorkspaceReview, WorkspaceReviewEvent, WorkspaceReviewTimelinePage,
@@ -63,7 +63,7 @@ async fn open_review(
         )
         .await?;
 
-    let response = WorkspaceReview::from_model(&review, None);
+    let response = WorkspaceReview::from_model(&review, Vec::new());
     Ok((StatusCode::CREATED, Json(response)))
 }
 
@@ -103,7 +103,12 @@ async fn list_document_reviews(
 
     let items = rows
         .into_iter()
-        .map(|row| WorkspaceReview::from_model(&row.item, row.assignee.map(AccountRef::from)))
+        .map(|row| {
+            WorkspaceReview::from_model(
+                &row.item,
+                row.assignees.into_iter().map(AccountRef::from).collect(),
+            )
+        })
         .collect();
 
     Ok((StatusCode::OK, Json(items)))
@@ -142,11 +147,16 @@ async fn list_reviews(
         .list(workspace.id, pagination.into_cursor(), &query.into_filter())
         .await?;
 
-    // The assignee reference rides along on each row (a left join), so no N+1.
+    // Assignees are batch-loaded per page (one grouped query), so no N+1.
     let items = page
         .items
         .into_iter()
-        .map(|row| WorkspaceReview::from_model(&row.item, row.assignee.map(AccountRef::from)))
+        .map(|row| {
+            WorkspaceReview::from_model(
+                &row.item,
+                row.assignees.into_iter().map(AccountRef::from).collect(),
+            )
+        })
         .collect();
 
     let response = WorkspaceReviewsPage {
@@ -430,34 +440,33 @@ fn reopen_review_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Assigns or unassigns a review.
+/// Assigns a reviewer to a review (idempotent).
 ///
-/// A `null` assignee clears the current one. An assignee must be a workspace
-/// member. Requires `AssignReviews`.
+/// The account must be a workspace member. Requires `AssignReviews`.
 #[tracing::instrument(
     skip_all,
     fields(
         account_id = %authz.account_id,
         workspace_id = %authz.workspace.id,
         review_id = %path_params.review_id,
+        assignee_id = %path_params.account_id,
     )
 )]
-async fn assign_review(
+async fn add_review_assignee(
     State(pg_client): State<nvisy_postgres::PgClient>,
     State(reviews): State<domain::WorkspaceReviewService>,
     authz: Authorized<markers::AssignReviews>,
-    Path(path_params): Path<WorkspaceReviewPathParams>,
+    Path(path_params): Path<WorkspaceReviewAssigneePathParams>,
     security: SecurityContext,
-    ValidateJson(request): ValidateJson<AssignWorkspaceReview>,
 ) -> Result<(StatusCode, Json<WorkspaceReview>)> {
-    tracing::debug!(target: TRACING_TARGET, "Assigning review");
+    tracing::debug!(target: TRACING_TARGET, "Assigning reviewer");
 
     let workspace = authz.workspace;
     let updated = reviews
-        .assign(
+        .add_assignee(
             origin(workspace.id, authz.account_id, &security),
             path_params.review_id,
-            request.assignee,
+            path_params.account_id,
         )
         .await?;
 
@@ -467,14 +476,62 @@ async fn assign_review(
     Ok((StatusCode::OK, Json(response)))
 }
 
-fn assign_review_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Assign a review")
+fn add_review_assignee_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Assign a reviewer")
         .description(
-            "Assigns a review to a workspace member, or clears the assignee with a null \
-             `assignee`. Requires AssignReviews.",
+            "Assigns a workspace member as a reviewer of a review (idempotent). The \
+             first assignee moves a needs-review review to in-review. Requires \
+             AssignReviews.",
         )
         .response::<200, Json<WorkspaceReview>>()
-        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
+/// Removes a reviewer from a review.
+///
+/// Requires `AssignReviews`.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
+        review_id = %path_params.review_id,
+        assignee_id = %path_params.account_id,
+    )
+)]
+async fn remove_review_assignee(
+    State(pg_client): State<nvisy_postgres::PgClient>,
+    State(reviews): State<domain::WorkspaceReviewService>,
+    authz: Authorized<markers::AssignReviews>,
+    Path(path_params): Path<WorkspaceReviewAssigneePathParams>,
+    security: SecurityContext,
+) -> Result<(StatusCode, Json<WorkspaceReview>)> {
+    tracing::debug!(target: TRACING_TARGET, "Unassigning reviewer");
+
+    let workspace = authz.workspace;
+    let updated = reviews
+        .remove_assignee(
+            origin(workspace.id, authz.account_id, &security),
+            path_params.review_id,
+            path_params.account_id,
+        )
+        .await?;
+
+    let mut conn = pg_client.get_connection().await?;
+    let response = review_response(&mut conn, updated).await?;
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+fn remove_review_assignee_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Unassign a reviewer")
+        .description(
+            "Removes a reviewer from a review. Removing the last assignee returns an \
+             in-review review to needs-review. Requires AssignReviews.",
+        )
+        .response::<200, Json<WorkspaceReview>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -493,19 +550,24 @@ fn origin(
     }
 }
 
-/// Builds a full [`WorkspaceReview`] response, resolving its assignee.
+/// Builds a full [`WorkspaceReview`] response, resolving its assignees.
 async fn review_response(
     conn: &mut PgConn,
     review: nvisy_postgres::model::WorkspaceReview,
 ) -> Result<WorkspaceReview> {
-    use crate::handler::utility::resolve_account_ref_opt;
-    let assignee = resolve_account_ref_opt(conn, review.assignee_account_id).await?;
-    Ok(WorkspaceReview::from_model(&review, assignee))
+    use nvisy_postgres::query::WorkspaceReviewRepository;
+    let assignees = conn
+        .list_review_assignees(review.id)
+        .await?
+        .into_iter()
+        .map(AccountRef::from)
+        .collect();
+    Ok(WorkspaceReview::from_model(&review, assignees))
 }
 
 /// Returns an [`ApiRouter`] with the document-review routes.
 pub fn routes() -> ApiRouter<ServiceState> {
-    use aide::axum::routing::{get_with, post_with, put_with};
+    use aide::axum::routing::{get_with, post_with};
 
     ApiRouter::new()
         .api_route(
@@ -534,8 +596,9 @@ pub fn routes() -> ApiRouter<ServiceState> {
             post_with(reopen_review, reopen_review_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/reviews/{reviewId}/assign",
-            put_with(assign_review, assign_review_docs),
+            "/workspaces/{workspaceId}/reviews/{reviewId}/assignees/{accountId}",
+            post_with(add_review_assignee, add_review_assignee_docs)
+                .delete_with(remove_review_assignee, remove_review_assignee_docs),
         )
         .api_route(
             "/workspaces/{workspaceId}/reviews/{reviewId}/detections/{detectionId}",

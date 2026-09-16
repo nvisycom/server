@@ -20,8 +20,9 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::model::{
-    NewReviewDetection, NewReviewRedaction, NewWorkspaceReview, NewWorkspaceReviewEvent,
-    NewWorkspaceThread, WorkspaceReview, WorkspaceReviewEvent, WorkspaceThread,
+    NewReviewAssignee, NewReviewDetection, NewReviewRedaction, NewWorkspaceReview,
+    NewWorkspaceReviewEvent, NewWorkspaceThread, WorkspaceReview, WorkspaceReviewEvent,
+    WorkspaceThread,
 };
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, DocumentReviewFilter, ReviewEventKind,
@@ -48,13 +49,13 @@ pub struct ReviewEventCursor {
     pub id: uuid::Uuid,
 }
 
-/// A review paired with its assignee's account reference (absent when unassigned).
+/// A review paired with its assignees' account references (empty when unassigned).
 #[derive(Debug, Clone)]
-pub struct WithReviewer<T> {
+pub struct WithReviewers<T> {
     /// The review.
     pub item: T,
-    /// The assignee's account reference, or `None` when unassigned.
-    pub assignee: Option<AccountRefRow>,
+    /// The assigned reviewers' account references (empty when unassigned).
+    pub assignees: Vec<AccountRefRow>,
 }
 
 /// Read and write operations on document reviews.
@@ -78,21 +79,21 @@ pub trait WorkspaceReviewRepository {
         review_id: Uuid,
     ) -> impl Future<Output = Result<Option<WorkspaceReview>>> + Send;
 
-    /// Lists a document's reviews, newest first.
+    /// Lists a document's reviews, newest first, each paired with its assignees.
     fn list_document_reviews(
         &mut self,
         workspace_id: Uuid,
         document_id: Uuid,
-    ) -> impl Future<Output = Result<Vec<WithReviewer<WorkspaceReview>>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WithReviewers<WorkspaceReview>>>> + Send;
 
     /// Lists a workspace's reviews (the review queue) with cursor pagination, each
-    /// paired with the assignee's account reference (when assigned).
+    /// paired with its assignees' account references.
     fn cursor_list_reviews(
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination<DocumentReviewCursor>,
         filter: &DocumentReviewFilter,
-    ) -> impl Future<Output = Result<CursorPage<WithReviewer<WorkspaceReview>>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<WithReviewers<WorkspaceReview>>>> + Send;
 
     /// References a detection from a review (idempotent), recording a
     /// `detection.linked` event on first link. Returns the review.
@@ -112,14 +113,31 @@ pub trait WorkspaceReviewRepository {
         actor: Uuid,
     ) -> impl Future<Output = Result<WorkspaceReview>> + Send;
 
-    /// Sets or clears a review's assignee, moving it to `in_review` when assigned,
-    /// and recording an `assigned`/`unassigned` event. Returns the review.
-    fn assign_review(
+    /// Assigns a reviewer to a review (idempotent). Records an `assigned` event on
+    /// first assignment and, when this is the first assignee of a non-resolved
+    /// review, moves it to `in_review`. Returns the review.
+    fn add_assignee(
         &mut self,
         review_id: Uuid,
-        assignee: Option<Uuid>,
+        account_id: Uuid,
         actor: Uuid,
     ) -> impl Future<Output = Result<WorkspaceReview>> + Send;
+
+    /// Removes a reviewer from a review. Records an `unassigned` event when a link
+    /// existed and, when this clears the last assignee of a non-resolved review,
+    /// returns it to `needs_review`. Returns the review.
+    fn remove_assignee(
+        &mut self,
+        review_id: Uuid,
+        account_id: Uuid,
+        actor: Uuid,
+    ) -> impl Future<Output = Result<WorkspaceReview>> + Send;
+
+    /// Lists a review's assignees' account references.
+    fn list_review_assignees(
+        &mut self,
+        review_id: Uuid,
+    ) -> impl Future<Output = Result<Vec<AccountRefRow>>> + Send;
 
     /// Verifies a review, moving it to [`Resolved`](ReviewStatus::Resolved) and
     /// recording a `verified` event. Guarded on `status != resolved`, so an
@@ -222,33 +240,19 @@ impl WorkspaceReviewRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         document_id: Uuid,
-    ) -> Result<Vec<WithReviewer<WorkspaceReview>>> {
-        use schema::workspace_reviews::dsl;
-        use schema::{accounts, workspace_reviews};
+    ) -> Result<Vec<WithReviewers<WorkspaceReview>>> {
+        use schema::workspace_reviews::{self, dsl};
 
-        let rows: Vec<(WorkspaceReview, Option<AccountRefRow>)> = workspace_reviews::table
-            .left_join(accounts::table.on(dsl::assignee_account_id.eq(accounts::id.nullable())))
+        let reviews: Vec<WorkspaceReview> = workspace_reviews::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::document_id.eq(document_id))
             .order((dsl::created_at.desc(), dsl::id.desc()))
-            .select((
-                WorkspaceReview::as_select(),
-                (
-                    accounts::id,
-                    accounts::username,
-                    accounts::display_name,
-                    accounts::avatar_url,
-                )
-                    .nullable(),
-            ))
+            .select(WorkspaceReview::as_select())
             .load(self)
             .await
             .map_err(Error::from)?;
 
-        Ok(rows
-            .into_iter()
-            .map(|(item, assignee)| WithReviewer { item, assignee })
-            .collect())
+        attach_assignees(self, reviews).await
     }
 
     async fn cursor_list_reviews(
@@ -256,20 +260,25 @@ impl WorkspaceReviewRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination<DocumentReviewCursor>,
         filter: &DocumentReviewFilter,
-    ) -> Result<CursorPage<WithReviewer<WorkspaceReview>>> {
-        use schema::workspace_reviews::dsl;
-        use schema::{accounts, workspace_reviews};
+    ) -> Result<CursorPage<WithReviewers<WorkspaceReview>>> {
+        use schema::workspace_reviews::{self, dsl};
 
+        // The assignee filter is a membership test against the link table, so it
+        // is applied as an EXISTS subquery rather than a join.
         let scoped = || {
             let mut query = workspace_reviews::table
-                .left_join(accounts::table.on(dsl::assignee_account_id.eq(accounts::id.nullable())))
                 .filter(dsl::workspace_id.eq(workspace_id))
                 .into_boxed();
             if let Some(document_id) = filter.document_id {
                 query = query.filter(dsl::document_id.eq(document_id));
             }
-            if let Some(assignee_account_id) = filter.assignee_account_id {
-                query = query.filter(dsl::assignee_account_id.eq(assignee_account_id));
+            if let Some(assignee) = filter.assignee_account_id {
+                use schema::workspace_review_assignees as wra;
+                query = query.filter(diesel::dsl::exists(
+                    wra::table
+                        .filter(wra::review_id.eq(dsl::id))
+                        .filter(wra::account_id.eq(assignee)),
+                ));
             }
             if let Some(review_status) = filter.review_status {
                 query = query.filter(dsl::review_status.eq(review_status));
@@ -292,32 +301,20 @@ impl WorkspaceReviewRepository for PgConnection {
         let after = pagination
             .after_key()
             .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
-        let rows: Vec<(WorkspaceReview, Option<AccountRefRow>)> = keyset!(
+        let reviews: Vec<WorkspaceReview> = keyset!(
             scoped(),
             dsl::created_at,
             dsl::id,
             pagination.direction,
             after
         )
-        .select((
-            WorkspaceReview::as_select(),
-            (
-                accounts::id,
-                accounts::username,
-                accounts::display_name,
-                accounts::avatar_url,
-            )
-                .nullable(),
-        ))
+        .select(WorkspaceReview::as_select())
         .limit(pagination.fetch_limit())
         .load(self)
         .await
         .map_err(Error::from)?;
 
-        let items: Vec<WithReviewer<WorkspaceReview>> = rows
-            .into_iter()
-            .map(|(item, assignee)| WithReviewer { item, assignee })
-            .collect();
+        let items = attach_assignees(self, reviews).await?;
 
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
             DocumentReviewCursor {
@@ -396,47 +393,117 @@ impl WorkspaceReviewRepository for PgConnection {
         .await
     }
 
-    async fn assign_review(
+    async fn add_assignee(
         &mut self,
         review_id: Uuid,
-        assignee: Option<Uuid>,
+        account_id: Uuid,
         actor: Uuid,
     ) -> Result<WorkspaceReview> {
         self.transaction(async |conn| {
-            use schema::workspace_reviews::{self, dsl};
+            let review = load_review(conn, review_id).await?;
 
-            // Always update the assignee. Assigning a reviewer also takes a
-            // not-yet-resolved review into `in_review`; a resolved review keeps its
-            // status (verified work is not silently un-resolved by an assignment —
-            // use reopen for that), and clearing the assignee never changes it.
-            let review = diesel::update(workspace_reviews::table.filter(dsl::id.eq(review_id)))
-                .set(dsl::assignee_account_id.eq(assignee))
-                .returning(WorkspaceReview::as_returning())
-                .get_result(conn)
+            let inserted = diesel::insert_into(schema::workspace_review_assignees::table)
+                .values(&NewReviewAssignee {
+                    review_id,
+                    account_id,
+                })
+                .on_conflict_do_nothing()
+                .execute(conn)
                 .await
                 .map_err(Error::from)?;
-            let review = if assignee.is_some() && review.review_status != ReviewStatus::Resolved {
-                diesel::update(workspace_reviews::table.filter(dsl::id.eq(review_id)))
-                    .set(dsl::review_status.eq(ReviewStatus::InReview))
-                    .returning(WorkspaceReview::as_returning())
-                    .get_result(conn)
-                    .await
-                    .map_err(Error::from)?
-            } else {
-                review
-            };
 
-            let (kind, target) = match assignee {
-                Some(id) => (
-                    ReviewEventKind::Assigned,
-                    serde_json::json!({ "assigneeAccountId": id }),
-                ),
-                None => (ReviewEventKind::Unassigned, serde_json::json!({})),
-            };
-            record_review_event(conn, &review, kind, actor, Some(target)).await?;
+            // Already assigned: idempotent no-op, no event, no status change.
+            if inserted == 0 {
+                return Ok(review);
+            }
+
+            record_review_event(
+                conn,
+                &review,
+                ReviewEventKind::Assigned,
+                actor,
+                Some(serde_json::json!({ "assigneeAccountId": account_id })),
+            )
+            .await?;
+
+            // The first assignee of a not-yet-resolved review takes it to
+            // `in_review`; a resolved review keeps its status (reopen is explicit).
+            if review.review_status == ReviewStatus::NeedsReview {
+                return update_status(conn, review_id, ReviewStatus::InReview).await;
+            }
             Ok(review)
         })
         .await
+    }
+
+    async fn remove_assignee(
+        &mut self,
+        review_id: Uuid,
+        account_id: Uuid,
+        actor: Uuid,
+    ) -> Result<WorkspaceReview> {
+        self.transaction(async |conn| {
+            use schema::workspace_review_assignees as wra;
+
+            let review = load_review(conn, review_id).await?;
+
+            let deleted = diesel::delete(
+                wra::table
+                    .filter(wra::review_id.eq(review_id))
+                    .filter(wra::account_id.eq(account_id)),
+            )
+            .execute(conn)
+            .await
+            .map_err(Error::from)?;
+
+            // Not assigned: nothing to do.
+            if deleted == 0 {
+                return Ok(review);
+            }
+
+            record_review_event(
+                conn,
+                &review,
+                ReviewEventKind::Unassigned,
+                actor,
+                Some(serde_json::json!({ "assigneeAccountId": account_id })),
+            )
+            .await?;
+
+            // Clearing the last assignee of an in-review review returns it to
+            // `needs_review`; a resolved review keeps its status.
+            if review.review_status == ReviewStatus::InReview {
+                let remaining: i64 = wra::table
+                    .filter(wra::review_id.eq(review_id))
+                    .count()
+                    .get_result(conn)
+                    .await
+                    .map_err(Error::from)?;
+                if remaining == 0 {
+                    return update_status(conn, review_id, ReviewStatus::NeedsReview).await;
+                }
+            }
+            Ok(review)
+        })
+        .await
+    }
+
+    async fn list_review_assignees(&mut self, review_id: Uuid) -> Result<Vec<AccountRefRow>> {
+        use schema::{accounts, workspace_review_assignees as wra, workspace_review_assignees};
+
+        workspace_review_assignees::table
+            .inner_join(accounts::table.on(wra::account_id.eq(accounts::id)))
+            .filter(wra::review_id.eq(review_id))
+            .order(accounts::username.asc())
+            .select((
+                accounts::id,
+                accounts::username,
+                accounts::display_name,
+                accounts::avatar_url,
+            ))
+            .load(self)
+            .await
+            .map_err(Error::from)
     }
 
     async fn verify_review(&mut self, review_id: Uuid, actor: Uuid) -> Result<WorkspaceReview> {
@@ -570,6 +637,65 @@ async fn load_review(conn: &mut PgConnection, review_id: Uuid) -> Result<Workspa
         .map_err(Error::from)
 }
 
+/// Sets a review's status and returns the updated row.
+async fn update_status(
+    conn: &mut PgConnection,
+    review_id: Uuid,
+    status: ReviewStatus,
+) -> Result<WorkspaceReview> {
+    use schema::workspace_reviews::{self, dsl};
+
+    diesel::update(workspace_reviews::table.filter(dsl::id.eq(review_id)))
+        .set(dsl::review_status.eq(status))
+        .returning(WorkspaceReview::as_returning())
+        .get_result(conn)
+        .await
+        .map_err(Error::from)
+}
+
+/// Pairs each review with its assignees' account references in one grouped query
+/// (no N+1): all assignees for the given reviews are loaded together and grouped
+/// by review, preserving the input order.
+async fn attach_assignees(
+    conn: &mut PgConnection,
+    reviews: Vec<WorkspaceReview>,
+) -> Result<Vec<WithReviewers<WorkspaceReview>>> {
+    use std::collections::HashMap;
+
+    use schema::{accounts, workspace_review_assignees as wra, workspace_review_assignees};
+
+    let review_ids: Vec<Uuid> = reviews.iter().map(|r| r.id).collect();
+    let rows: Vec<(Uuid, AccountRefRow)> = workspace_review_assignees::table
+        .inner_join(accounts::table.on(wra::account_id.eq(accounts::id)))
+        .filter(wra::review_id.eq_any(&review_ids))
+        .order(accounts::username.asc())
+        .select((
+            wra::review_id,
+            (
+                accounts::id,
+                accounts::username,
+                accounts::display_name,
+                accounts::avatar_url,
+            ),
+        ))
+        .load(conn)
+        .await
+        .map_err(Error::from)?;
+
+    let mut by_review: HashMap<Uuid, Vec<AccountRefRow>> = HashMap::new();
+    for (review_id, account) in rows {
+        by_review.entry(review_id).or_default().push(account);
+    }
+
+    Ok(reviews
+        .into_iter()
+        .map(|item| {
+            let assignees = by_review.remove(&item.id).unwrap_or_default();
+            WithReviewers { item, assignees }
+        })
+        .collect())
+}
+
 /// Inserts one review activity event.
 async fn record_review_event(
     conn: &mut PgConnection,
@@ -596,7 +722,8 @@ async fn record_review_event(
 
 #[cfg(test)]
 mod tests {
-    use crate::query::{WorkspaceReviewRepository, WorkspaceThreadRepository};
+    use crate::model::NewAccount;
+    use crate::query::{AccountRepository, WorkspaceReviewRepository, WorkspaceThreadRepository};
     use crate::test_util::TestDatabase;
     use crate::types::{
         CursorPagination, Direction, DocumentReviewFilter, ReviewEventKind, ReviewStatus,
@@ -646,9 +773,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn assign_moves_to_in_review_then_verify_resolves() -> anyhow::Result<()> {
+    async fn assignees_drive_status_and_the_timeline() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_pipeline_and_document().await;
+        let bob = {
+            let mut conn = db.client.get_connection().await?;
+            conn.create_account(NewAccount::test()).await?.id
+        };
         let mut conn = db.client.get_connection().await?;
 
         let review = conn
@@ -660,30 +791,35 @@ mod tests {
             )
             .await?;
 
-        // Assigning takes it to in_review.
-        let assigned = conn
-            .assign_review(review.id, Some(seeded.account_id), seeded.account_id)
+        // First assignee moves needs_review -> in_review.
+        let a = conn
+            .add_assignee(review.id, seeded.account_id, seeded.account_id)
             .await?;
-        assert_eq!(assigned.assignee_account_id, Some(seeded.account_id));
-        assert_eq!(assigned.review_status, ReviewStatus::InReview);
+        assert_eq!(a.review_status, ReviewStatus::InReview);
 
-        // Unassigning clears the assignee but leaves the status.
-        let unassigned = conn
-            .assign_review(review.id, None, seeded.account_id)
+        // A second assignee is added (still in_review); re-adding the same one is a
+        // no-op (idempotent).
+        conn.add_assignee(review.id, bob, seeded.account_id).await?;
+        let again = conn.add_assignee(review.id, bob, seeded.account_id).await?;
+        assert_eq!(again.review_status, ReviewStatus::InReview);
+        let assignees = conn.list_review_assignees(review.id).await?;
+        assert_eq!(assignees.len(), 2, "two distinct assignees");
+
+        // Removing one of two leaves it in_review.
+        let one_left = conn
+            .remove_assignee(review.id, bob, seeded.account_id)
             .await?;
-        assert_eq!(unassigned.assignee_account_id, None);
-        assert_eq!(unassigned.review_status, ReviewStatus::InReview);
+        assert_eq!(one_left.review_status, ReviewStatus::InReview);
 
-        // Verify resolves; a repeat verify is a no-op error (NotFound), so reopen
-        // then re-verify would be the path — here just check resolve and reopen.
-        let resolved = conn.verify_review(review.id, seeded.account_id).await?;
-        assert_eq!(resolved.review_status, ReviewStatus::Resolved);
+        // Removing the last returns it to needs_review.
+        let none_left = conn
+            .remove_assignee(review.id, seeded.account_id, seeded.account_id)
+            .await?;
+        assert_eq!(none_left.review_status, ReviewStatus::NeedsReview);
+        assert!(conn.list_review_assignees(review.id).await?.is_empty());
 
-        let reopened = conn.reopen_review(review.id, seeded.account_id).await?;
-        assert_eq!(reopened.review_status, ReviewStatus::NeedsReview);
-
-        // The timeline records assigned, unassigned, verified, reopened in order
-        // (oldest first).
+        // The timeline records the assign/unassign activity (oldest first): two
+        // assigns (the idempotent re-add records nothing), then two unassigns.
         let kinds: Vec<_> = conn
             .cursor_list_review_events(
                 review.id,
@@ -698,9 +834,9 @@ mod tests {
             kinds,
             vec![
                 ReviewEventKind::Assigned,
+                ReviewEventKind::Assigned,
                 ReviewEventKind::Unassigned,
-                ReviewEventKind::Verified,
-                ReviewEventKind::Reopened,
+                ReviewEventKind::Unassigned,
             ]
         );
         Ok(())
@@ -723,13 +859,13 @@ mod tests {
         let resolved = conn.verify_review(review.id, seeded.account_id).await?;
         assert_eq!(resolved.review_status, ReviewStatus::Resolved);
 
-        // Assigning a reviewer to a resolved review updates the assignee but does
+        // Assigning a reviewer to a resolved review records the assignment but does
         // NOT silently un-resolve verified work.
         let assigned = conn
-            .assign_review(review.id, Some(seeded.account_id), seeded.account_id)
+            .add_assignee(review.id, seeded.account_id, seeded.account_id)
             .await?;
-        assert_eq!(assigned.assignee_account_id, Some(seeded.account_id));
         assert_eq!(assigned.review_status, ReviewStatus::Resolved);
+        assert_eq!(conn.list_review_assignees(review.id).await?.len(), 1);
         Ok(())
     }
 
@@ -755,7 +891,7 @@ mod tests {
                 seeded.account_id,
             )
             .await?;
-        conn.assign_review(a.id, Some(seeded.account_id), seeded.account_id)
+        conn.add_assignee(a.id, seeded.account_id, seeded.account_id)
             .await?;
 
         // Filter to the reviewer's in_review queue: only `a`.
@@ -772,7 +908,7 @@ mod tests {
             .await?;
         assert_eq!(queue.items.len(), 1);
         assert_eq!(queue.items[0].item.id, a.id);
-        assert!(queue.items[0].assignee.is_some());
+        assert_eq!(queue.items[0].assignees.len(), 1);
         Ok(())
     }
 
