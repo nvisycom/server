@@ -1044,6 +1044,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lock_comment_returns_only_live_in_scope_comments() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_pipeline_and_document().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let review = conn
+            .create_review(NewWorkspaceReview::test(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            ))
+            .await?;
+        let comment = conn
+            .create_comment(NewWorkspaceReviewComment {
+                parent_id: None,
+                review_id: review.id,
+                author_account_id: seeded.account_id,
+                body: "@assistant help".to_owned(),
+            })
+            .await?;
+
+        // A live comment in the workspace is locked and returned.
+        let locked = conn
+            .lock_comment_in_workspace(seeded.workspace_id, comment.id)
+            .await?;
+        assert_eq!(locked.map(|c| c.id), Some(comment.id));
+
+        // A different workspace does not see it (scoped through its review).
+        assert!(
+            conn.lock_comment_in_workspace(uuid::Uuid::new_v4(), comment.id)
+                .await?
+                .is_none(),
+            "a comment outside the workspace is not locked"
+        );
+
+        // Once soft-deleted it is gone: this is what keeps a reply from landing
+        // under a parent deleted while the model ran.
+        conn.delete_comment(comment.id).await?;
+        assert!(
+            conn.lock_comment_in_workspace(seeded.workspace_id, comment.id)
+                .await?
+                .is_none(),
+            "a soft-deleted comment is not locked"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn assignees_drive_status_and_the_timeline() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_pipeline_and_document().await;

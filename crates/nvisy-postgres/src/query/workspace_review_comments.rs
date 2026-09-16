@@ -44,6 +44,21 @@ pub trait WorkspaceReviewCommentRepository {
         comment_id: Uuid,
     ) -> impl Future<Output = Result<Option<WorkspaceReviewComment>>> + Send;
 
+    /// Locks a live comment by id within a workspace for the transaction (`SELECT
+    /// ... FOR UPDATE`), returning `None` if it is missing or soft-deleted.
+    ///
+    /// Serializes against a concurrent [`delete_comment`], whose soft-delete
+    /// `UPDATE` takes the same row's write lock: locking a parent here before
+    /// inserting a reply makes the "parent still live?" check and the insert
+    /// atomic, so a reply can never land under a comment that is being deleted.
+    ///
+    /// [`delete_comment`]: Self::delete_comment
+    fn lock_comment_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        comment_id: Uuid,
+    ) -> impl Future<Output = Result<Option<WorkspaceReviewComment>>> + Send;
+
     /// Lists a review's live comments, oldest first, each paired with the author's
     /// account reference. `review_id` scopes to one review (and so one workspace).
     fn list_review_comments(
@@ -125,6 +140,33 @@ impl WorkspaceReviewCommentRepository for PgConnection {
             .filter(workspace_reviews::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceReviewComment::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)
+    }
+
+    async fn lock_comment_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        comment_id: Uuid,
+    ) -> Result<Option<WorkspaceReviewComment>> {
+        use schema::workspace_review_comments::{self, dsl};
+        use schema::workspace_reviews;
+
+        // Scope through the review with a subquery rather than a join, so
+        // `FOR UPDATE` locks only the comment row (a join would lock the review
+        // too). The lock serializes against `delete_comment`'s soft-delete UPDATE.
+        let in_workspace = workspace_reviews::table
+            .filter(workspace_reviews::workspace_id.eq(workspace_id))
+            .select(workspace_reviews::id);
+
+        workspace_review_comments::table
+            .filter(dsl::id.eq(comment_id))
+            .filter(dsl::review_id.eq_any(in_workspace))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspaceReviewComment::as_select())
+            .for_update()
             .first(self)
             .await
             .optional()

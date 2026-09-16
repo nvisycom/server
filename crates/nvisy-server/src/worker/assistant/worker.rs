@@ -379,11 +379,14 @@ impl AssistantWorker {
 
             // Revalidate the trigger inside the transaction: inference ran without
             // the connection, so the parent may have been soft-deleted meanwhile.
-            // The reply's FK permits a soft-deleted parent, so without this check a
-            // live reply would land under a deleted comment and surface in the
-            // timeline. `find_comment_in_workspace` filters `deleted_at IS NULL`.
+            // The reply's FK permits a soft-deleted parent, so without this a live
+            // reply would land under a deleted comment and surface in the timeline.
+            // Lock the parent (`FOR UPDATE`) so this check and the insert are atomic
+            // against a concurrent `delete_comment`: either we see the delete and
+            // bail, or we hold the lock and the delete blocks until our reply
+            // commits (its cascade then soft-deletes the reply too).
             if conn
-                .find_comment_in_workspace(review.workspace_id, trigger_comment_id)
+                .lock_comment_in_workspace(review.workspace_id, trigger_comment_id)
                 .await?
                 .is_none()
             {
