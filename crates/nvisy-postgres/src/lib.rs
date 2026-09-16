@@ -42,10 +42,16 @@ mod client;
 mod error;
 pub mod model;
 pub mod query;
-mod schema;
+pub mod types;
+
 #[cfg(feature = "test_util")]
 pub mod test_util;
-pub mod types;
+
+// Diesel-generated (`diesel print-schema`); its `diesel::table!` blocks use
+// wildcard sql-type imports, so the pedantic wildcard-imports lint is allowed on
+// the generated module rather than hand-editing it.
+#[allow(clippy::wildcard_imports)]
+mod schema;
 
 pub use diesel_async::{AsyncConnection, AsyncPgConnection as PgConnection};
 pub use jiff_diesel::Timestamp as JiffTimestamp;
