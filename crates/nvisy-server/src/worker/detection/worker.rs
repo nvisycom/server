@@ -567,14 +567,13 @@ impl DetectionWorker {
         let staged_audit = audit_blob.clone();
         let staged_intermediates = intermediates_blob.clone();
         let detection_id = detection.id;
-        let workspace_id = job.workspace_id;
         let finalized = conn
             .transaction(async |conn| {
                 // The base audit resolves (shares or inserts) its blob and records
                 // the reference in this same transaction.
                 let audit = conn
                     .create_audit(
-                        NewWorkspaceAudit::base(workspace_id, Uuid::nil(), detection_id),
+                        NewWorkspaceAudit::base(Uuid::nil(), detection_id),
                         audit_blob,
                     )
                     .await?;

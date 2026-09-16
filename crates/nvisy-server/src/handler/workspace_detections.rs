@@ -741,7 +741,6 @@ async fn redact_detection(
             let review_audit = conn
                 .create_audit(
                     NewWorkspaceAudit::review(
-                        workspace.id,
                         Uuid::nil(),
                         inputs.detection.id,
                         redaction.id,

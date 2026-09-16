@@ -1,8 +1,8 @@
 //! Workspace audit model for `PostgreSQL` database operations.
 //!
 //! An audit is the engine's findings set over a document, stored as bytes in a
-//! [`Blob`]. Audits and reviews were once two file kinds; they are the same
-//! entity, distinguished only by lineage:
+//! [`Blob`]. A base audit and a review audit are one entity, distinguished only by
+//! lineage:
 //!
 //! - a **base audit** is produced by a detection: `detection_id` set,
 //!   `redaction_id` and `derived_from` NULL.
@@ -28,8 +28,6 @@ use crate::schema::workspace_audits;
 pub struct WorkspaceAudit {
     /// Unique audit identifier.
     pub id: Uuid,
-    /// Owning workspace.
-    pub workspace_id: Uuid,
     /// Blob holding the findings bytes.
     pub blob_id: Uuid,
     /// Detection whose analysis this audit belongs to (always set).
@@ -51,11 +49,9 @@ pub struct WorkspaceAudit {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[must_use]
 pub struct NewWorkspaceAudit {
-    /// Workspace ID (required).
-    pub workspace_id: Uuid,
     /// Blob holding the findings bytes (required).
     pub blob_id: Uuid,
-    /// Detection this audit belongs to (required).
+    /// Detection this audit belongs to (required); its workspace is the audit's.
     pub detection_id: Uuid,
     /// Redaction that produced this review audit (set for a review audit).
     pub redaction_id: Option<Uuid>,
@@ -65,9 +61,8 @@ pub struct NewWorkspaceAudit {
 
 impl NewWorkspaceAudit {
     /// A base audit for `detection_id` backed by `blob_id`.
-    pub fn base(workspace_id: Uuid, blob_id: Uuid, detection_id: Uuid) -> Self {
+    pub fn base(blob_id: Uuid, detection_id: Uuid) -> Self {
         Self {
-            workspace_id,
             blob_id,
             detection_id,
             redaction_id: None,
@@ -78,14 +73,12 @@ impl NewWorkspaceAudit {
     /// A review audit for `redaction_id`, edited from the base audit
     /// `derived_from`.
     pub fn review(
-        workspace_id: Uuid,
         blob_id: Uuid,
         detection_id: Uuid,
         redaction_id: Uuid,
         derived_from: Uuid,
     ) -> Self {
         Self {
-            workspace_id,
             blob_id,
             detection_id,
             redaction_id: Some(redaction_id),

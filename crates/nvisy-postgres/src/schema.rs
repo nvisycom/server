@@ -197,7 +197,6 @@ diesel::table! {
 
     workspace_audits (id) {
         id -> Uuid,
-        workspace_id -> Uuid,
         blob_id -> Uuid,
         detection_id -> Uuid,
         redaction_id -> Nullable<Uuid>,
@@ -665,7 +664,6 @@ diesel::joinable!(workspace_assistant_jobs -> workspace_review_comments (comment
 diesel::joinable!(workspace_audits -> workspace_blobs (blob_id));
 diesel::joinable!(workspace_audits -> workspace_detections (detection_id));
 diesel::joinable!(workspace_audits -> workspace_redactions (redaction_id));
-diesel::joinable!(workspace_audits -> workspaces (workspace_id));
 diesel::joinable!(workspace_blobs -> workspaces (workspace_id));
 diesel::joinable!(workspace_connection_schedule -> workspace_connections (connection_id));
 diesel::joinable!(workspace_connection_syncs -> accounts (account_id));

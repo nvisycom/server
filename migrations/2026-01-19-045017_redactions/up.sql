@@ -40,19 +40,6 @@ COMMENT ON COLUMN workspace_redactions.account_id IS 'Account that requested the
 COMMENT ON COLUMN workspace_redactions.output_document_id IS 'Redacted document this redaction produced';
 COMMENT ON COLUMN workspace_redactions.created_at IS 'When the redaction was created';
 
--- The workspace_audits table lives with the detections migration (its always-set
--- parent is detection_id). The redaction link cannot be declared there because
--- workspace_redactions does not exist yet, so it is added here: a review audit's
--- redaction_id names the redaction that produced it.
-ALTER TABLE workspace_audits
-    ADD CONSTRAINT workspace_audits_redaction_id_fkey
-    FOREIGN KEY (redaction_id) REFERENCES workspace_redactions (id) ON DELETE CASCADE;
-
--- A redaction's review audit.
-CREATE INDEX workspace_audits_redaction_idx
-    ON workspace_audits (redaction_id)
-    WHERE redaction_id IS NOT NULL;
-
 -- Redaction creation feeds the activity log, webhooks, and in-app notifications.
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.redaction.created';
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.redaction.created';

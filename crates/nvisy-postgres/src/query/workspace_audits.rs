@@ -66,19 +66,17 @@ impl WorkspaceAuditRepository for PgConnection {
         self.transaction(async |conn| {
             // A review audit's lineage must stay within its own detection: the base
             // it derives from and the redaction that produced it both belong to the
-            // same detection and workspace. The foreign keys only prove the rows
-            // exist; this rejects a cross-detection or cross-workspace mix that the
+            // same detection (and so the same workspace). The foreign keys only
+            // prove the rows exist; this rejects a cross-detection mix that the
             // both-or-neither check constraint cannot catch.
             if let Some(derived_from) = new_audit.derived_from {
-                let base = workspace_audits::table
+                let base_detection_id = workspace_audits::table
                     .filter(workspace_audits::id.eq(derived_from))
-                    .select(WorkspaceAudit::as_select())
-                    .first(conn)
+                    .select(workspace_audits::detection_id)
+                    .first::<Uuid>(conn)
                     .await
                     .map_err(Error::from)?;
-                if base.detection_id != new_audit.detection_id
-                    || base.workspace_id != new_audit.workspace_id
-                {
+                if base_detection_id != new_audit.detection_id {
                     return Err(Error::unexpected(
                         "Review audit derives from an audit of another detection",
                     ));
@@ -248,7 +246,7 @@ mod tests {
         // resolves and references its blob.
         let base = conn
             .create_audit(
-                NewWorkspaceAudit::base(seeded.workspace_id, Uuid::nil(), detection.id),
+                NewWorkspaceAudit::base(Uuid::nil(), detection.id),
                 NewBlob::test(seeded.workspace_id),
             )
             .await?;
@@ -277,13 +275,7 @@ mod tests {
             .await?;
         let review = conn
             .create_audit(
-                NewWorkspaceAudit::review(
-                    seeded.workspace_id,
-                    Uuid::nil(),
-                    detection.id,
-                    redaction.id,
-                    base.id,
-                ),
+                NewWorkspaceAudit::review(Uuid::nil(), detection.id, redaction.id, base.id),
                 NewBlob::test(seeded.workspace_id),
             )
             .await?;
@@ -328,10 +320,7 @@ mod tests {
         let mut new_blob = NewBlob::test(seeded.workspace_id);
         new_blob.expires_at = Some((Timestamp::now() + Span::new().hours(1)).into());
         let audit = conn
-            .create_audit(
-                NewWorkspaceAudit::base(seeded.workspace_id, Uuid::nil(), detection.id),
-                new_blob,
-            )
+            .create_audit(NewWorkspaceAudit::base(Uuid::nil(), detection.id), new_blob)
             .await?;
         backdate::blob_span(
             &mut conn,
@@ -395,10 +384,7 @@ mod tests {
         let mut new_blob = NewBlob::test(seeded.workspace_id);
         new_blob.expires_at = Some((Timestamp::now() + Span::new().hours(1)).into());
         let audit = conn
-            .create_audit(
-                NewWorkspaceAudit::base(seeded.workspace_id, Uuid::nil(), detection.id),
-                new_blob,
-            )
+            .create_audit(NewWorkspaceAudit::base(Uuid::nil(), detection.id), new_blob)
             .await?;
         backdate::blob_span(
             &mut conn,
@@ -444,7 +430,7 @@ mod tests {
         base_blob.expires_at = Some((Timestamp::now() + Span::new().hours(1)).into());
         let base = conn
             .create_audit(
-                NewWorkspaceAudit::base(seeded.workspace_id, Uuid::nil(), detection.id),
+                NewWorkspaceAudit::base(Uuid::nil(), detection.id),
                 base_blob,
             )
             .await?;
@@ -466,13 +452,7 @@ mod tests {
         review_blob.expires_at = Some((Timestamp::now() + Span::new().hours(1)).into());
         let review = conn
             .create_audit(
-                NewWorkspaceAudit::review(
-                    seeded.workspace_id,
-                    Uuid::nil(),
-                    detection.id,
-                    redaction.id,
-                    base.id,
-                ),
+                NewWorkspaceAudit::review(Uuid::nil(), detection.id, redaction.id, base.id),
                 review_blob,
             )
             .await?;
