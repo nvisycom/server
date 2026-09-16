@@ -166,9 +166,9 @@ pub trait WorkspaceReviewRepository {
     ) -> impl Future<Output = Result<Vec<AccountRefRow>>> + Send;
 
     /// Verifies a review, moving it to [`Resolved`](ReviewStatus::Resolved) and
-    /// recording a `verified` event. Guarded on `status != resolved`, so an
-    /// already-resolved review matches no row (callers pre-check to report a clean
-    /// conflict).
+    /// recording a `verified` event. Locks the review first; an already-resolved
+    /// review is returned unchanged (the domain layer pre-checks to report a clean
+    /// conflict, so this only guards a concurrent double-verify).
     fn verify_review(
         &mut self,
         review_id: Uuid,
@@ -381,18 +381,22 @@ impl WorkspaceReviewRepository for PgConnection {
         actor: Uuid,
     ) -> Result<WorkspaceReview> {
         self.transaction(async |conn| {
-            use schema::workspace_reviews::{self, dsl};
+            let review = lock_review(conn, review_id).await?;
 
-            let review = diesel::update(
-                workspace_reviews::table
-                    .filter(dsl::id.eq(review_id))
-                    .filter(dsl::deleted_at.is_null()),
-            )
-            .set(dsl::display_name.eq(display_name.clone()))
-            .returning(WorkspaceReview::as_returning())
-            .get_result(conn)
-            .await
-            .map_err(Error::from)?;
+            // Renaming to the current name is a no-op: no write, no rename event.
+            if review.display_name == display_name {
+                return Ok(review);
+            }
+
+            let review = {
+                use schema::workspace_reviews::{self, dsl};
+                diesel::update(workspace_reviews::table.filter(dsl::id.eq(review_id)))
+                    .set(dsl::display_name.eq(display_name.clone()))
+                    .returning(WorkspaceReview::as_returning())
+                    .get_result(conn)
+                    .await
+                    .map_err(Error::from)?
+            };
 
             // The new name is the event's target so the timeline shows what it was
             // renamed to.
@@ -442,7 +446,7 @@ impl WorkspaceReviewRepository for PgConnection {
         actor: Uuid,
     ) -> Result<WorkspaceReview> {
         self.transaction(async |conn| {
-            let review = load_review(conn, review_id).await?;
+            let review = lock_review(conn, review_id).await?;
 
             let inserted = diesel::insert_into(schema::workspace_review_detections::table)
                 .values(&NewReviewDetection {
@@ -477,7 +481,7 @@ impl WorkspaceReviewRepository for PgConnection {
         actor: Uuid,
     ) -> Result<WorkspaceReview> {
         self.transaction(async |conn| {
-            let review = load_review(conn, review_id).await?;
+            let review = lock_review(conn, review_id).await?;
 
             let inserted = diesel::insert_into(schema::workspace_review_redactions::table)
                 .values(&NewReviewRedaction {
@@ -639,21 +643,15 @@ impl WorkspaceReviewRepository for PgConnection {
 
     async fn verify_review(&mut self, review_id: Uuid, actor: Uuid) -> Result<WorkspaceReview> {
         self.transaction(async |conn| {
-            use schema::workspace_reviews::{self, dsl};
+            let review = lock_review(conn, review_id).await?;
 
-            // Only a review not already resolved can be verified; a repeat verify
-            // matches no row -> `NotFound`.
-            let review = diesel::update(
-                workspace_reviews::table
-                    .filter(dsl::id.eq(review_id))
-                    .filter(dsl::review_status.ne(ReviewStatus::Resolved)),
-            )
-            .set(dsl::review_status.eq(ReviewStatus::Resolved))
-            .returning(WorkspaceReview::as_returning())
-            .get_result(conn)
-            .await
-            .map_err(Error::from)?;
+            // Already resolved: idempotent no-op (the domain layer pre-checks and
+            // reports a 409, so this only guards a concurrent double-verify).
+            if review.review_status == ReviewStatus::Resolved {
+                return Ok(review);
+            }
 
+            let review = update_status(conn, review_id, ReviewStatus::Resolved).await?;
             record_event(conn, &review, ReviewEventKind::Verified, actor, None).await?;
             Ok(review)
         })
@@ -662,29 +660,16 @@ impl WorkspaceReviewRepository for PgConnection {
 
     async fn reopen_review(&mut self, review_id: Uuid, actor: Uuid) -> Result<WorkspaceReview> {
         self.transaction(async |conn| {
-            use schema::workspace_reviews::{self, dsl};
+            let review = lock_review(conn, review_id).await?;
 
-            // Only a resolved review reopens; otherwise it is left as is (the update
-            // matches no row, so fall back to reading it).
-            let reopened = diesel::update(
-                workspace_reviews::table
-                    .filter(dsl::id.eq(review_id))
-                    .filter(dsl::review_status.eq(ReviewStatus::Resolved)),
-            )
-            .set(dsl::review_status.eq(ReviewStatus::NeedsReview))
-            .returning(WorkspaceReview::as_returning())
-            .get_result(conn)
-            .await
-            .optional()
-            .map_err(Error::from)?;
-
-            match reopened {
-                Some(review) => {
-                    record_event(conn, &review, ReviewEventKind::Reopened, actor, None).await?;
-                    Ok(review)
-                }
-                None => load_review(conn, review_id).await,
+            // Only a resolved review reopens; otherwise leave it as is.
+            if review.review_status != ReviewStatus::Resolved {
+                return Ok(review);
             }
+
+            let review = update_status(conn, review_id, ReviewStatus::NeedsReview).await?;
+            record_event(conn, &review, ReviewEventKind::Reopened, actor, None).await?;
+            Ok(review)
         })
         .await
     }
@@ -755,26 +740,17 @@ impl WorkspaceReviewRepository for PgConnection {
     }
 }
 
-/// Loads a review by id or returns `NotFound`.
-async fn load_review(conn: &mut PgConnection, review_id: Uuid) -> Result<WorkspaceReview> {
-    use schema::workspace_reviews::{self, dsl};
-
-    workspace_reviews::table
-        .filter(dsl::id.eq(review_id))
-        .select(WorkspaceReview::as_select())
-        .first(conn)
-        .await
-        .map_err(Error::from)
-}
-
-/// Loads a review by id under a row lock (`FOR UPDATE`) or returns `NotFound`, so
-/// a read-decide-write on its status serializes against concurrent mutators. Call
-/// inside a transaction.
+/// Loads a live review by id under a row lock (`FOR UPDATE`) or returns
+/// `NotFound`, so a read-decide-write on its status serializes against concurrent
+/// mutators (including a concurrent soft-delete). Call inside a transaction. Every
+/// mutating method locks the review through this before acting, so a soft-deleted
+/// review is uniformly `NotFound` to a mutation.
 async fn lock_review(conn: &mut PgConnection, review_id: Uuid) -> Result<WorkspaceReview> {
     use schema::workspace_reviews::{self, dsl};
 
     workspace_reviews::table
         .filter(dsl::id.eq(review_id))
+        .filter(dsl::deleted_at.is_null())
         .select(WorkspaceReview::as_select())
         .for_update()
         .first(conn)
@@ -932,6 +908,17 @@ mod tests {
             kinds,
             vec![ReviewEventKind::Opened, ReviewEventKind::Renamed]
         );
+
+        // Renaming to the current name is a no-op: no second rename event.
+        conn.rename_review(review.id, "A title".to_owned(), seeded.account_id)
+            .await?;
+        let rename_events = conn
+            .list_review_events(review.id)
+            .await?
+            .into_iter()
+            .filter(|(e, _)| e.kind == ReviewEventKind::Renamed)
+            .count();
+        assert_eq!(rename_events, 1, "an identical rename records no new event");
         Ok(())
     }
 

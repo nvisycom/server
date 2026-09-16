@@ -189,6 +189,10 @@ impl WorkspaceReviewService {
         let Some(display_name) = display_name else {
             return Ok(review);
         };
+        // Renaming to the current name is a no-op: skip the write and the event.
+        if review.display_name == display_name {
+            return Ok(review);
+        }
         let document = review_document(&mut conn, &review).await?;
 
         let renamed = conn

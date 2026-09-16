@@ -98,8 +98,10 @@ CREATE TABLE workspace_review_comments (
     -- The comment this one answers, when it is a reply: for an assistant reply,
     -- the message that addressed the assistant; NULL for an ordinary message. A
     -- unique index below allows at most one live reply per parent, so a
-    -- redelivered assistant job cannot post a second reply.
-    parent_id           UUID        DEFAULT NULL REFERENCES workspace_review_comments (id) ON DELETE SET NULL,
+    -- redelivered assistant job cannot post a second reply. A reply is deleted
+    -- with the parent it answers (CASCADE), so a hard-deleted parent never leaves
+    -- an orphan reply promoted to a root message.
+    parent_id           UUID        DEFAULT NULL REFERENCES workspace_review_comments (id) ON DELETE CASCADE,
 
     -- References. Denormalized workspace scope for fast per-workspace queries, and
     -- the review this message belongs to; deleting the review removes its comments
