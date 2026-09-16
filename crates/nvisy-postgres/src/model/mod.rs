@@ -10,7 +10,6 @@ mod accounts;
 mod pipeline_references;
 mod workspace_activities;
 mod workspace_assistant_jobs;
-mod workspace_audits;
 mod workspace_blobs;
 mod workspace_connection_schedule;
 mod workspace_connection_syncs;
@@ -30,12 +29,10 @@ mod workspace_policies;
 mod workspace_policy_versions;
 mod workspace_providers;
 mod workspace_redactions;
+mod workspace_review_comments;
 mod workspace_review_events;
 mod workspace_review_links;
 mod workspace_reviews;
-mod workspace_thread_comments;
-mod workspace_thread_events;
-mod workspace_threads;
 mod workspace_webhooks;
 mod workspaces;
 
@@ -49,7 +46,6 @@ pub use accounts::{Account, NewAccount, UpdateAccount};
 pub use pipeline_references::PipelinePolicy;
 pub use workspace_activities::{NewWorkspaceActivity, WorkspaceActivity};
 pub use workspace_assistant_jobs::{NewWorkspaceAssistantJob, WorkspaceAssistantJob};
-pub use workspace_audits::{NewWorkspaceAudit, WorkspaceAudit};
 pub use workspace_blobs::{Blob, NewBlob};
 pub use workspace_connection_schedule::{
     NewWorkspaceConnectionSchedule, WorkspaceConnectionSchedule,
@@ -78,14 +74,12 @@ pub use workspace_policies::{NewWorkspacePolicy, UpdateWorkspacePolicy, Workspac
 pub use workspace_policy_versions::{NewWorkspacePolicyVersion, WorkspacePolicyVersion};
 pub use workspace_providers::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};
 pub use workspace_redactions::{NewWorkspaceRedaction, WorkspaceRedaction};
-pub use workspace_review_events::{NewWorkspaceReviewEvent, WorkspaceReviewEvent};
-pub use workspace_review_links::{NewReviewDetection, NewReviewRedaction};
-pub use workspace_reviews::{NewWorkspaceReview, UpdateWorkspaceReview, WorkspaceReview};
-pub use workspace_thread_comments::{
-    NewWorkspaceThreadComment, UpdateWorkspaceThreadComment, WorkspaceThreadComment,
+pub use workspace_review_comments::{
+    NewWorkspaceReviewComment, UpdateWorkspaceReviewComment, WorkspaceReviewComment,
 };
-pub use workspace_thread_events::{NewWorkspaceThreadEvent, WorkspaceThreadEvent};
-pub use workspace_threads::{NewWorkspaceThread, UpdateWorkspaceThread, WorkspaceThread};
+pub use workspace_review_events::{NewWorkspaceReviewEvent, WorkspaceReviewEvent};
+pub use workspace_review_links::{NewReviewAssignee, NewReviewDetection, NewReviewRedaction};
+pub use workspace_reviews::{NewWorkspaceReview, UpdateWorkspaceReview, WorkspaceReview};
 pub use workspace_webhooks::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
 // Workspace models
 pub use workspaces::{NewWorkspace, UpdateWorkspace, Workspace};

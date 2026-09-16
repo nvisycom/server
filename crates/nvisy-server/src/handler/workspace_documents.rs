@@ -385,7 +385,9 @@ async fn upload_document(
                 // Resolve the blob the document was pointed at (shared or freshly
                 // created), for the response's content-addressed fields.
                 let blob = conn
-                    .find_blob_by_id(document.blob_id)
+                    .find_blob_by_id(document.blob_id.ok_or_else(|| {
+                        ErrorKind::InternalServerError.with_message("Staged blob not found")
+                    })?)
                     .await?
                     .ok_or_else(|| {
                         ErrorKind::InternalServerError.with_message("Staged blob not found")

@@ -17,8 +17,8 @@ mod workspace_settings;
 pub use activity_params::{
     ActivityPayload, ConnectionActivityParams, DetectionActivityParams, DocumentActivityParams,
     InviteActivityParams, MemberActivityParams, PipelineActivityParams, PolicyActivityParams,
-    ProviderActivityParams, RedactionActivityParams, ReviewActivityParams, ThreadActivityParams,
-    ThreadCommentActivityParams, WebhookActivityParams, WorkspaceActivityParams,
+    ProviderActivityParams, RedactionActivityParams, ReviewActivityParams,
+    ReviewCommentActivityParams, WebhookActivityParams, WorkspaceActivityParams,
 };
 pub use detection_metadata::DetectionMetadata;
 pub use notification_params::{

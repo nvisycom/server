@@ -22,12 +22,12 @@ use axum::response::sse::Event;
 use elide_pipeline::governance::policy::Policy;
 use futures::StreamExt;
 use nvisy_postgres::model::{
-    Blob, NewWorkspaceAudit, NewWorkspaceDocument, NewWorkspaceRedaction,
+    Blob, NewWorkspaceDocument, NewWorkspaceRedaction,
     WorkspaceDetection as WorkspaceDetectionModel, WorkspaceDocument, WorkspacePipeline,
 };
 use nvisy_postgres::query::{
-    DetectionDocuments, WorkspaceAuditRepository, WorkspaceBlobRepository,
-    WorkspaceDocumentRepository, WorkspaceRedactionRepository,
+    DetectionDocuments, WorkspaceBlobRepository, WorkspaceDocumentRepository,
+    WorkspaceRedactionRepository,
 };
 use nvisy_postgres::types::{DetectionStatus, DocumentKind};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
@@ -508,6 +508,13 @@ fn status_event(event: &DetectionStatusEvent) -> Event {
         .unwrap_or_else(|_| Event::default().event("status"))
 }
 
+/// The 409 raised when a redaction's source document (or its bytes) is gone: the
+/// document row was deleted, or its blob reference cleared. Named once so the
+/// document-lookup and blob-lookup paths surface the same message.
+fn source_document_gone() -> Error<'static> {
+    ErrorKind::Conflict.with_message("The detection's source document is no longer available")
+}
+
 /// The pre-flight inputs a redaction reads under a connection before releasing it
 /// for the slow analysis and staging work.
 struct RedactInputs {
@@ -518,10 +525,7 @@ struct RedactInputs {
     document: WorkspaceDocument,
     /// The input document's backing blob (for its extension and byte access).
     source_blob: Blob,
-    /// The detection's base audit id, recorded as the review audit's
-    /// `derived_from`.
-    base_audit_id: Uuid,
-    /// The base audit's backing blob, loaded to seed the working audit.
+    /// The base analysis's backing blob, loaded to seed the working audit.
     audit_blob: Blob,
     policies: Vec<Policy>,
 }
@@ -590,34 +594,30 @@ async fn redact_detection(
         let document = conn
             .find_document_in_workspace(workspace.id, detection.input_document_id)
             .await?
-            .ok_or_else(|| {
-                ErrorKind::Conflict
-                    .with_message("The detection's source document is no longer available")
-            })?;
+            .ok_or_else(source_document_gone)?;
         let source_blob = conn
-            .find_blob_by_id(document.blob_id)
+            .find_blob_by_id(document.blob_id.ok_or_else(source_document_gone)?)
             .await?
-            .ok_or_else(|| {
-                ErrorKind::Conflict
-                    .with_message("The detection's source document is no longer available")
-            })?;
+            .ok_or_else(source_document_gone)?;
 
-        // The base audit (its `derived_from` for the review audit) and its blob.
-        let base_audit = conn.find_base_audit(detection.id).await?.ok_or_else(|| {
-            ErrorKind::Conflict.with_message("WorkspaceDetection has no analysis yet")
-        })?;
-        let audit_blob = conn
-            .find_blob_by_id(base_audit.blob_id)
-            .await?
-            .ok_or_else(|| {
+        // The detection's base analysis blob, loaded to seed the working audit.
+        // A completed detection with a NULL pointer had its bytes reclaimed (404);
+        // an incomplete one has no analysis yet (409).
+        let audit_blob_id = detection.audit_blob_id.ok_or_else(|| {
+            if detection.status.is_complete() {
                 ErrorKind::NotFound.with_message("The analysis for this detection has been deleted")
-            })?;
+            } else {
+                ErrorKind::Conflict.with_message("WorkspaceDetection has no analysis yet")
+            }
+        })?;
+        let audit_blob = conn.find_blob_by_id(audit_blob_id).await?.ok_or_else(|| {
+            ErrorKind::NotFound.with_message("The analysis for this detection has been deleted")
+        })?;
         RedactInputs {
             detection,
             pipeline,
             document,
             source_blob,
-            base_audit_id: base_audit.id,
             audit_blob,
             policies,
         }
@@ -728,27 +728,17 @@ async fn redact_detection(
                     staged_output.0.clone(),
                 )
                 .await?;
+            // The review analysis is a blob-ref on the redaction: resolve (share or
+            // insert) its blob to record the reference, then point the redaction at
+            // it via `review_audit_blob_id`.
+            let review_resolved = conn.find_or_create_blob(staged_review.clone()).await?;
             let redaction = conn
                 .create_redaction(NewWorkspaceRedaction {
                     detection_id: inputs.detection.id,
                     account_id: authz.account_id,
                     output_document_id: Some(output_document.id),
+                    review_audit_blob_id: Some(review_resolved.id),
                 })
-                .await?;
-            // The review audit records its lineage: the redaction that produced it
-            // and the base audit it was edited from. Creating it resolves and
-            // references its blob in this same transaction.
-            let review_audit = conn
-                .create_audit(
-                    NewWorkspaceAudit::review(
-                        workspace.id,
-                        Uuid::nil(),
-                        inputs.detection.id,
-                        redaction.id,
-                        inputs.base_audit_id,
-                    ),
-                    staged_review.clone(),
-                )
                 .await?;
             conn.emit_event(
                 event::EventOrigin {
@@ -770,14 +760,16 @@ async fn redact_detection(
             // review. A reviewer links this redaction to a review explicitly.
             // The resolved storage paths, so an object staged for content that
             // deduplicated onto an existing blob can be reclaimed after commit.
-            let output_path = conn
-                .find_blob_by_id(output_document.blob_id)
-                .await?
-                .map(|blob| blob.storage_path);
-            let review_path = conn
-                .find_blob_by_id(review_audit.blob_id)
-                .await?
-                .map(|blob| blob.storage_path);
+            // These rows were just inserted with a blob, so the pointers are set;
+            // resolve a storage path only when present (a defensive `None` skips it).
+            let output_path = match output_document.blob_id {
+                Some(blob_id) => conn
+                    .find_blob_by_id(blob_id)
+                    .await?
+                    .map(|blob| blob.storage_path),
+                None => None,
+            };
+            let review_path = Some(review_resolved.storage_path);
             Ok::<_, Error>((redaction, output_path, review_path))
         })
         .await;

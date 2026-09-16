@@ -17,16 +17,16 @@ pub use constraint::{
     WorkspaceConstraints, WorkspaceDetectionConstraints, WorkspaceDocumentConstraints,
     WorkspaceInviteConstraints, WorkspaceMemberConstraints, WorkspacePipelineConstraints,
     WorkspacePipelineReferenceConstraints, WorkspacePolicyConstraints,
-    WorkspaceThreadCommentConstraints, WorkspaceThreadConstraints, WorkspaceWebhookConstraints,
+    WorkspaceReviewCommentConstraints, WorkspaceReviewConstraints, WorkspaceWebhookConstraints,
 };
 pub use enums::{
     ActivityType, ApiTokenType, ConnectionType, DetectionStatus, DocumentKind, IdentityProvider,
     InviteStatus, NotificationEvent, OutboxStatus, PipelineStatus, PipelineTriggerType, PolicyKind,
     ProviderType, ReviewEventKind, ReviewStatus, SyncDeletionPolicy, SyncMode, SyncStatus,
-    SyncTriggerType, ThreadEventKind, WebhookEvent, WebhookStatus, WorkspaceRole,
+    SyncTriggerType, WebhookEvent, WebhookStatus, WorkspaceRole,
 };
 pub use filtering::{
-    DetectionFilter, DocumentFilter, DocumentReviewFilter, InviteFilter, MemberFilter, ThreadFilter,
+    DetectionFilter, DocumentFilter, DocumentReviewFilter, InviteFilter, MemberFilter,
 };
 pub use handle::{HANDLE_MAX_LENGTH, HANDLE_MIN_LENGTH, Handle, HandleError};
 pub use json::{
@@ -37,8 +37,8 @@ pub use json::{
     NotificationPayload, PipelineActivityParams, PipelineMetadata, PolicyActivityParams,
     ProviderActivityParams, RasterPolicy, RedactionActivityParams, RedactionCreatedParams,
     Retention, RetentionOverride, RetentionScope, RetentionSettings, ReviewActivityParams,
-    ReviewAssignedParams, ThreadActivityParams, ThreadCommentActivityParams, WebhookActivityParams,
-    WebhookHeaders, WorkspaceActivityParams, WorkspaceMetadata, WorkspaceSettings,
+    ReviewAssignedParams, ReviewCommentActivityParams, WebhookActivityParams, WebhookHeaders,
+    WorkspaceActivityParams, WorkspaceMetadata, WorkspaceSettings,
 };
 pub(crate) use pagination::keyset;
 pub use pagination::{

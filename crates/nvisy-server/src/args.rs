@@ -23,6 +23,7 @@ use crate::service::{
     AuthKeysConfig, CryptoConfig, EngineConfig, FileConnectorsConfig, HealthConfig,
     IntegrationConfig, OidcConfig, S3Config,
 };
+use crate::worker::purge::PurgeConfig;
 
 /// Tracing target for configuration echoes emitted by the config aggregates.
 pub(crate) const TRACING_TARGET_CONFIG: &str = "nvisy_server::args";
@@ -73,6 +74,10 @@ pub struct ServiceArgs {
     /// Integration deployment configuration (endpoint policy, sync concurrency).
     #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "Connections"))]
     pub integration: IntegrationConfig,
+
+    /// Workspace purge configuration (soft-delete grace window).
+    #[cfg_attr(feature = "cli", clap(flatten, next_help_heading = "Workspace purge"))]
+    pub purge: PurgeConfig,
 
     /// Cloud file-service OAuth app configuration.
     #[cfg_attr(

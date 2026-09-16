@@ -187,21 +187,6 @@ pub trait WorkspaceDetectionRepository {
         &mut self,
         usage: &[NewWorkspaceDetectionUsage],
     ) -> impl Future<Output = Result<()>> + Send;
-
-    /// Clears up to `limit` detections' intermediate references whose blob has
-    /// passed its retention window, dropping each cleared detection's reference to
-    /// its intermediate blob, and returns how many were cleared.
-    ///
-    /// An intermediate blob carries the `Intermediates` retention window, but
-    /// nothing else releases the detection's reference, so the blob would stay
-    /// pinned at `ref_count >= 1` and never reclaim. Nulling `intermediate_blob_id`
-    /// and releasing the reference here lets the blob reaper purge the bytes once
-    /// `ref_count` reaches zero; the detection row itself is retained. Runs in one
-    /// transaction so the null and the reference drop commit together.
-    fn clear_expired_intermediates(
-        &mut self,
-        limit: i64,
-    ) -> impl Future<Output = Result<usize>> + Send;
 }
 
 impl WorkspaceDetectionRepository for PgConnection {
@@ -241,6 +226,7 @@ impl WorkspaceDetectionRepository for PgConnection {
             )
             .filter(detections::id.eq(detection_id))
             .filter(detections::workspace_id.eq(workspace_id))
+            .filter(detections::deleted_at.is_null())
             .select((
                 WorkspaceDetection::as_select(),
                 Option::<WorkspacePipeline>::as_select(),
@@ -263,6 +249,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         let detection = workspace_detections::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::idempotency_key.eq(idempotency_key))
+            .filter(dsl::deleted_at.is_null())
             .select(WorkspaceDetection::as_select())
             .first(self)
             .await
@@ -296,6 +283,7 @@ impl WorkspaceDetectionRepository for PgConnection {
                         .and(workspace_documents::deleted_at.is_null())),
                 )
                 .filter(dsl::pipeline_id.eq(pipeline_id))
+                .filter(dsl::deleted_at.is_null())
                 .into_boxed();
             if let Some(status) = filter.status {
                 query = query.filter(dsl::status.eq(status));
@@ -395,6 +383,7 @@ impl WorkspaceDetectionRepository for PgConnection {
                         .and(documents::deleted_at.is_null())),
                 )
                 .filter(detections::workspace_id.eq(workspace_id))
+                .filter(detections::deleted_at.is_null())
                 .into_boxed();
             if let Some(status) = filter.status {
                 query = query.filter(detections::status.eq(status));
@@ -488,6 +477,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         let claimed = diesel::update(
             workspace_detections::table
                 .filter(dsl::id.eq(detection_id))
+                .filter(dsl::deleted_at.is_null())
                 .filter(
                     dsl::status.eq(DetectionStatus::Pending).or(dsl::status
                         .eq(DetectionStatus::Executing)
@@ -556,10 +546,13 @@ impl WorkspaceDetectionRepository for PgConnection {
         // Guard on the claim we hold: same detection, still `Executing`, and the
         // exact `claimed_at` our claim stamped. A worker that re-claimed a stale
         // detection renews `claimed_at`, so a lost claim matches no row and
-        // returns false.
+        // returns false. The `deleted_at IS NULL` guard keeps a finalize that
+        // raced a workspace purge from re-attaching blob pointers to the freed,
+        // soft-deleted row (which later purge passes skip), stranding the blobs.
         let rows_affected = diesel::update(
             workspace_detections::table
                 .filter(dsl::id.eq(detection_id))
+                .filter(dsl::deleted_at.is_null())
                 .filter(dsl::status.eq(DetectionStatus::Executing))
                 .filter(dsl::claimed_at.eq(claimed_at)),
         )
@@ -585,11 +578,13 @@ impl WorkspaceDetectionRepository for PgConnection {
         updates.completed_at = Some(Some(jiff::Timestamp::now().into()));
         let claimed_at = jiff_diesel::Timestamp::from(claimed_at);
 
-        // Same claim guard as the complete finalize: only our still-live claim
-        // (detection `Executing`, `claimed_at` unchanged) may fail the detection.
+        // Same claim guard as the complete finalize, including `deleted_at IS
+        // NULL`: only our still-live claim (detection `Executing`, `claimed_at`
+        // unchanged, not purged) may fail the detection.
         let rows_affected = diesel::update(
             workspace_detections::table
                 .filter(dsl::id.eq(detection_id))
+                .filter(dsl::deleted_at.is_null())
                 .filter(dsl::status.eq(DetectionStatus::Executing))
                 .filter(dsl::claimed_at.eq(claimed_at)),
         )
@@ -614,10 +609,12 @@ impl WorkspaceDetectionRepository for PgConnection {
         updates.completed_at = Some(Some(jiff::Timestamp::now().into()));
 
         // Guard on `Pending`: once a worker claims the detection (moving it to
-        // `Executing`), this matches no row and the worker owns the outcome.
+        // `Executing`), this matches no row and the worker owns the outcome. The
+        // `deleted_at IS NULL` guard leaves a purged row to the reaper.
         let rows_affected = diesel::update(
             workspace_detections::table
                 .filter(dsl::id.eq(detection_id))
+                .filter(dsl::deleted_at.is_null())
                 .filter(dsl::status.eq(DetectionStatus::Pending)),
         )
         .set(&updates)
@@ -642,58 +639,6 @@ impl WorkspaceDetectionRepository for PgConnection {
             .map_err(Error::from)?;
 
         Ok(())
-    }
-
-    async fn clear_expired_intermediates(&mut self, limit: i64) -> Result<usize> {
-        use diesel::dsl::now;
-        use diesel_async::AsyncConnection;
-
-        use crate::query::WorkspaceBlobRepository;
-        use crate::schema::{workspace_blobs, workspace_detections};
-
-        self.transaction(async |conn| {
-            // The detections whose intermediate blob has passed its retention
-            // window, with that blob so its reference can be dropped after the
-            // pointer is nulled. Locked FOR UPDATE SKIP LOCKED so a concurrent
-            // sweep never selects the same row and double-drops its reference.
-            let expired: Vec<(Uuid, Uuid)> = workspace_detections::table
-                .inner_join(workspace_blobs::table.on(
-                    workspace_detections::intermediate_blob_id.eq(workspace_blobs::id.nullable()),
-                ))
-                .filter(workspace_blobs::expires_at.is_not_null())
-                .filter(workspace_blobs::expires_at.lt(now))
-                .filter(workspace_blobs::purged_at.is_null())
-                .limit(limit)
-                .select((workspace_detections::id, workspace_blobs::id))
-                .for_update()
-                .skip_locked()
-                .load(conn)
-                .await
-                .map_err(Error::from)?;
-
-            let mut dropped = 0usize;
-            for (detection_id, blob_id) in &expired {
-                // Scope the clear to the pointer still holding this blob, and gate
-                // the decrement on it actually being cleared: a concurrent sweep
-                // that already nulled it affects zero rows and must not decrement.
-                let cleared = diesel::update(
-                    workspace_detections::table
-                        .filter(workspace_detections::id.eq(detection_id))
-                        .filter(workspace_detections::intermediate_blob_id.eq(blob_id)),
-                )
-                .set(workspace_detections::intermediate_blob_id.eq(None::<Uuid>))
-                .execute(conn)
-                .await
-                .map_err(Error::from)?;
-                if cleared == 1 {
-                    conn.decrement_ref(*blob_id).await?;
-                    dropped += 1;
-                }
-            }
-
-            Ok(dropped)
-        })
-        .await
     }
 }
 
@@ -1164,7 +1109,7 @@ mod tests {
             "a referenced intermediate blob is not due while the pointer is set"
         );
 
-        let cleared = conn.clear_expired_intermediates(50).await?;
+        let cleared = crate::query::clear_expired_detection_intermediates(&mut conn, 50).await?;
         assert_eq!(cleared, 1);
 
         // The pointer is nulled and the blob dropped to zero references, so it is

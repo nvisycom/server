@@ -1,5 +1,5 @@
 -- Assistant: the reserved AI assistant account and the transactional outbox that
--- queues its replies. A user addresses the assistant (@assistant) in a thread,
+-- queues its replies. A user addresses the assistant (@assistant) in a review,
 -- and a background worker posts the model's reply as a comment authored by this
 -- account, so it is a real `accounts` row that the existing author foreign key,
 -- account-reference resolution, and timeline rendering all handle unchanged.
@@ -51,7 +51,7 @@ $$;
 -- Assistant-reply outbox: when a user posts a comment addressing the assistant, a
 -- job row is inserted in the same transaction as the comment, then relayed by the
 -- assistant drainer to the assistant NATS work-queue. A worker runs the model
--- over the thread's conversation and posts the reply. Mirrors the detection-job
+-- over the review's conversation and posts the reply. Mirrors the detection-job
 -- outbox: at-least-once delivery, deduped by the worker.
 CREATE TABLE workspace_assistant_jobs (
     -- Primary identifier
@@ -59,9 +59,9 @@ CREATE TABLE workspace_assistant_jobs (
 
     -- References. The comment that triggered this reply (the message addressing
     -- the assistant); the row is deleted with its comment.
-    comment_id      UUID          NOT NULL REFERENCES workspace_thread_comments (id) ON DELETE CASCADE,
+    comment_id      UUID          NOT NULL REFERENCES workspace_review_comments (id) ON DELETE CASCADE,
 
-    -- The job: a serialized `AssistantJob` (the workspace, thread, and triggering
+    -- The job: a serialized `AssistantJob` (the workspace, review, and triggering
     -- comment) the drainer publishes to the worker.
     job             JSONB         NOT NULL,
     CONSTRAINT workspace_assistant_jobs_job_size CHECK (length(job::TEXT) BETWEEN 2 AND 16384),

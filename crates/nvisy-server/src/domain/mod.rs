@@ -29,7 +29,6 @@ mod workspace_pipelines;
 mod workspace_policies;
 mod workspace_providers;
 mod workspace_reviews;
-mod workspace_threads;
 mod workspace_webhooks;
 mod workspaces;
 
@@ -46,6 +45,5 @@ pub use workspace_pipelines::WorkspacePipelineService;
 pub use workspace_policies::WorkspacePolicyService;
 pub use workspace_providers::WorkspaceProviderService;
 pub use workspace_reviews::WorkspaceReviewService;
-pub use workspace_threads::WorkspaceThreadService;
 pub use workspace_webhooks::WorkspaceWebhookService;
 pub use workspaces::WorkspaceService;

@@ -152,23 +152,32 @@ mod tests {
     use uuid::Uuid;
 
     use super::{AssistantJobOutboxRepository, OutboxStatus, WorkspaceAssistantJob, schema};
-    use crate::model::{NewWorkspaceAssistantJob, NewWorkspaceThread};
-    use crate::query::WorkspaceThreadRepository;
+    use crate::model::{NewWorkspaceAssistantJob, NewWorkspaceReview, NewWorkspaceReviewComment};
+    use crate::query::{WorkspaceReviewCommentRepository, WorkspaceReviewRepository};
     use crate::test_util::TestDatabase;
     use crate::{AsyncConnection, PgConn, Result};
 
-    /// Seeds a thread with its opening comment and returns that comment's id — the
-    /// FK parent an outbox row needs.
+    /// Seeds a review with a comment and returns that comment's id — the FK parent
+    /// an outbox row needs.
     async fn seed_comment(db: &TestDatabase) -> anyhow::Result<Uuid> {
         let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
-        let (_thread, opening) = conn
-            .open_thread(
-                NewWorkspaceThread::test(seeded.workspace_id, seeded.account_id),
-                "@assistant help".to_owned(),
-            )
+        let review = conn
+            .create_review(NewWorkspaceReview::test(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            ))
             .await?;
-        Ok(opening.id)
+        let comment = conn
+            .create_comment(NewWorkspaceReviewComment {
+                parent_id: None,
+                review_id: review.id,
+                author_account_id: seeded.account_id,
+                body: "@assistant help".to_owned(),
+            })
+            .await?;
+        Ok(comment.id)
     }
 
     /// Re-reads an outbox row by id, bypassing the repository (which has no

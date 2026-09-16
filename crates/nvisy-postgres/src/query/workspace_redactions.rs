@@ -88,7 +88,9 @@ impl WorkspaceRedactionRepository for PgConnection {
         let redaction = workspace_redactions::table
             .inner_join(workspace_detections::table)
             .filter(redactions::id.eq(redaction_id))
+            .filter(redactions::deleted_at.is_null())
             .filter(detections::workspace_id.eq(workspace_id))
+            .filter(detections::deleted_at.is_null())
             .select(WorkspaceRedaction::as_select())
             .first(self)
             .await
@@ -105,7 +107,9 @@ impl WorkspaceRedactionRepository for PgConnection {
     ) -> Result<CursorPage<WorkspaceRedaction>> {
         use schema::workspace_redactions::{self, dsl};
 
-        let base_query = workspace_redactions::table.filter(dsl::detection_id.eq(detection_id));
+        let base_query = workspace_redactions::table
+            .filter(dsl::detection_id.eq(detection_id))
+            .filter(dsl::deleted_at.is_null());
 
         let total = if pagination.include_count {
             Some(
@@ -121,6 +125,7 @@ impl WorkspaceRedactionRepository for PgConnection {
 
         let scoped = workspace_redactions::table
             .filter(dsl::detection_id.eq(detection_id))
+            .filter(dsl::deleted_at.is_null())
             .into_boxed();
 
         let after = pagination

@@ -2,9 +2,7 @@
 
 use std::time::Duration;
 
-use nvisy_postgres::query::{
-    WorkspaceAuditRepository, WorkspaceBlobRepository, WorkspaceDetectionRepository,
-};
+use nvisy_postgres::query::WorkspaceBlobRepository;
 use tokio_util::sync::CancellationToken;
 
 use crate::response::Result;
@@ -78,19 +76,28 @@ impl BlobReaper {
     }
 
     /// Releases the references machine byproducts hold on their blobs once past
-    /// retention: deletes expired audit rows and nulls expired detection
-    /// intermediates, each dropping one blob reference. Pages through both until a
-    /// pass clears nothing, so the following Expire sweep sees the now-unreferenced
-    /// blobs. Stops early on cancellation so shutdown is not held up by a backlog.
+    /// retention: nulls the blob pointer on expired detection intermediates,
+    /// detection base-analysis (audit) blobs, and redaction review-analysis blobs,
+    /// keeping the rows and each dropping one blob reference. Pages through all
+    /// three until a pass clears nothing, so the following Expire sweep sees the
+    /// now-unreferenced blobs. Stops early on cancellation so shutdown is not held
+    /// up by a backlog.
     async fn release_expired_referrers(&self, cancel: &CancellationToken) -> Result<()> {
+        use nvisy_postgres::query::{
+            clear_expired_detection_audits, clear_expired_detection_intermediates,
+            clear_expired_review_audits,
+        };
+
         loop {
             if cancel.is_cancelled() {
                 break;
             }
             let mut conn = self.infra.postgres.get_connection().await?;
-            let audits = conn.delete_expired_audits(SWEEP_BATCH).await?;
-            let intermediates = conn.clear_expired_intermediates(SWEEP_BATCH).await?;
-            if audits == 0 && intermediates == 0 {
+            let intermediates =
+                clear_expired_detection_intermediates(&mut conn, SWEEP_BATCH).await?;
+            let detection_audits = clear_expired_detection_audits(&mut conn, SWEEP_BATCH).await?;
+            let review_audits = clear_expired_review_audits(&mut conn, SWEEP_BATCH).await?;
+            if intermediates == 0 && detection_audits == 0 && review_audits == 0 {
                 break;
             }
         }

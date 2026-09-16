@@ -26,8 +26,8 @@ pub struct WorkspaceDocument {
     pub workspace_id: Uuid,
     /// Account that created (uploaded or produced) this document.
     pub account_id: Uuid,
-    /// Blob holding this document's bytes.
-    pub blob_id: Uuid,
+    /// Blob holding this document's bytes; `None` once the bytes are reclaimed.
+    pub blob_id: Option<Uuid>,
     /// The document's role (original or redacted).
     pub kind: DocumentKind,
     /// Human-readable name for display.

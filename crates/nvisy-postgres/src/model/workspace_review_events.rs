@@ -1,6 +1,7 @@
-//! Workspace review-event model: an immutable entry in a review's activity log
-//! (a detection/redaction linked, the assignee changed, verified, reopened).
-//! Distinct from a thread's discussion timeline.
+//! Workspace review-event model: an immutable non-message entry in a review's
+//! timeline (opened, renamed, a detection/redaction linked, the assignee changed,
+//! verified, reopened). The reader merges these with the review's comments into one
+//! timeline.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
@@ -17,9 +18,7 @@ use crate::types::ReviewEventKind;
 pub struct WorkspaceReviewEvent {
     /// Unique event identifier.
     pub id: Uuid,
-    /// Workspace this event belongs to (denormalized).
-    pub workspace_id: Uuid,
-    /// Review this event belongs to.
+    /// Review this event belongs to (its workspace is the review's).
     pub review_id: Uuid,
     /// What happened.
     pub kind: ReviewEventKind,
@@ -38,8 +37,6 @@ pub struct WorkspaceReviewEvent {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[must_use]
 pub struct NewWorkspaceReviewEvent {
-    /// Workspace ID (required).
-    pub workspace_id: Uuid,
     /// Review ID (required).
     pub review_id: Uuid,
     /// What happened (required).

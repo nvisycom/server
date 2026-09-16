@@ -1,13 +1,13 @@
 //! Filtering options for database queries.
 
-mod comments;
 mod detections;
 mod documents;
 mod invites;
 mod members;
+mod reviews;
 
-pub use comments::{DocumentReviewFilter, ThreadFilter};
 pub use detections::DetectionFilter;
 pub use documents::DocumentFilter;
 pub use invites::InviteFilter;
 pub use members::MemberFilter;
+pub use reviews::DocumentReviewFilter;

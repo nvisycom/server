@@ -32,14 +32,21 @@ CREATE TABLE workspace_detections (
     account_id      UUID                    NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- What a detection relates to. The input is the source document (required);
-    -- the produced analysis (Audit) is its own row in workspace_audits pointing
-    -- back here, so there is no audit column. The enrichment intermediate (OCR
-    -- layout, transcript) is a blob the analysis may produce, served to the client;
-    -- null until (and unless) an enricher runs. A detection is append-only history:
+    -- the produced analysis (the "audit" findings set) is a blob pointed at by
+    -- `audit_blob_id` below. The enrichment intermediate (OCR layout, transcript)
+    -- is a blob the analysis may produce, served to the client; null until (and
+    -- unless) an enricher runs. A detection is append-only history:
     -- the input cascades with a whole-workspace teardown; the intermediate blob
     -- reference clears (SET NULL) as the correct action for a produced artifact.
     input_document_id     UUID              NOT NULL REFERENCES workspace_documents (id) ON DELETE CASCADE,
     intermediate_blob_id  UUID              DEFAULT NULL REFERENCES workspace_blobs (id) ON DELETE SET NULL,
+
+    -- The detection's base analysis: the engine's findings set (the "audit"),
+    -- stored as bytes in a blob. NULL before the analysis commits and again once
+    -- the bytes are reclaimed on retention (the detection row — a ledger record —
+    -- is kept either way). Served as the detection's findings and reloaded to
+    -- re-redact.
+    audit_blob_id         UUID              DEFAULT NULL REFERENCES workspace_blobs (id) ON DELETE SET NULL,
 
     -- Detection attributes
     trigger_type    PIPELINE_TRIGGER_TYPE   NOT NULL DEFAULT 'user',
@@ -72,22 +79,30 @@ CREATE TABLE workspace_detections (
     -- Timing
     started_at      TIMESTAMPTZ             NOT NULL DEFAULT current_timestamp,
     completed_at    TIMESTAMPTZ             DEFAULT NULL,
-    CONSTRAINT workspace_detections_completed_after_started CHECK (completed_at IS NULL OR completed_at >= started_at)
+    CONSTRAINT workspace_detections_completed_after_started CHECK (completed_at IS NULL OR completed_at >= started_at),
+
+    -- Soft-delete. A detection is a ledger record (it ran, it cost credits), so
+    -- deleting one keeps the row and only releases its blob bytes; the row is hard-
+    -- removed only when its workspace is purged.
+    deleted_at      TIMESTAMPTZ             DEFAULT NULL,
+    CONSTRAINT workspace_detections_deleted_after_started CHECK (deleted_at IS NULL OR deleted_at >= started_at)
 );
 
 -- A workspace's detections, newest first (the workspace detection list,
 -- including ad-hoc detections with no pipeline).
 CREATE INDEX workspace_detections_workspace_idx
-    ON workspace_detections (workspace_id, started_at DESC);
+    ON workspace_detections (workspace_id, started_at DESC)
+    WHERE deleted_at IS NULL;
 
 -- A pipeline's detections, newest first (the per-pipeline detection list).
 CREATE INDEX workspace_detections_pipeline_idx
     ON workspace_detections (pipeline_id, started_at DESC)
-    WHERE pipeline_id IS NOT NULL;
+    WHERE pipeline_id IS NOT NULL AND deleted_at IS NULL;
 
 -- Detections triggered by an account, newest first.
 CREATE INDEX workspace_detections_account_idx
-    ON workspace_detections (account_id, started_at DESC);
+    ON workspace_detections (account_id, started_at DESC)
+    WHERE deleted_at IS NULL;
 
 -- In-flight detections by status (queue and ready backlog).
 CREATE INDEX workspace_detections_status_idx
@@ -104,11 +119,19 @@ CREATE INDEX workspace_detections_intermediate_blob_idx
     ON workspace_detections (intermediate_blob_id)
     WHERE intermediate_blob_id IS NOT NULL;
 
--- Idempotent detect: at most one detection per (workspace, idempotency key), so
--- a retry replays the existing detection whether or not it names a pipeline.
+-- Back the base-audit blob reference, walked by the retention sweep that reclaims
+-- the analysis bytes and nulls this pointer.
+CREATE INDEX workspace_detections_audit_blob_idx
+    ON workspace_detections (audit_blob_id)
+    WHERE audit_blob_id IS NOT NULL;
+
+-- Idempotent detect: at most one live detection per (workspace, idempotency key),
+-- so a retry replays the existing detection whether or not it names a pipeline.
+-- Partial on live rows: a soft-deleted detection does not block a fresh run under
+-- the same key.
 CREATE UNIQUE INDEX workspace_detections_idempotency_idx
     ON workspace_detections (workspace_id, idempotency_key)
-    WHERE idempotency_key IS NOT NULL;
+    WHERE idempotency_key IS NOT NULL AND deleted_at IS NULL;
 
 -- A detection is append-only history: its document reference is kept even after
 -- the document is soft-deleted, so the record of what it analyzed survives; a
@@ -121,6 +144,7 @@ COMMENT ON COLUMN workspace_detections.pipeline_id IS 'Pipeline whose config dro
 COMMENT ON COLUMN workspace_detections.account_id IS 'Account that triggered the detection';
 COMMENT ON COLUMN workspace_detections.input_document_id IS 'Source document the detection analyzes';
 COMMENT ON COLUMN workspace_detections.intermediate_blob_id IS 'Enrichment intermediate blob (OCR layout, transcript) served to the client; NULL if no enricher ran';
+COMMENT ON COLUMN workspace_detections.audit_blob_id IS 'Base analysis (findings set) blob; NULL before analysis commits and once the bytes are reclaimed on retention (the row is kept)';
 COMMENT ON COLUMN workspace_detections.trigger_type IS 'How the detection was initiated';
 COMMENT ON COLUMN workspace_detections.status IS 'Current detection status';
 COMMENT ON COLUMN workspace_detections.idempotency_key IS 'Detect idempotency key (dedupes retries)';
@@ -129,6 +153,7 @@ COMMENT ON COLUMN workspace_detections.metadata IS 'Non-encrypted metadata for f
 COMMENT ON COLUMN workspace_detections.claimed_at IS 'Detection lease: when a worker last claimed this detection';
 COMMENT ON COLUMN workspace_detections.started_at IS 'When the detection started';
 COMMENT ON COLUMN workspace_detections.completed_at IS 'When the detection completed; NULL while in flight';
+COMMENT ON COLUMN workspace_detections.deleted_at IS 'Soft-deletion timestamp; NULL means live. The row is kept as a ledger record; only its blob bytes are reclaimed';
 
 -- Per-model inference usage for a detection: one row per distinct model a
 -- detection's recognizers used. Token counts are aggregated across the
@@ -250,57 +275,6 @@ COMMENT ON COLUMN workspace_detection_jobs.attempts IS 'Number of publish attemp
 COMMENT ON COLUMN workspace_detection_jobs.next_attempt_at IS 'Earliest time the row may next be claimed; advanced by a backoff after each failed attempt';
 COMMENT ON COLUMN workspace_detection_jobs.created_at IS 'Timestamp when the job was queued';
 COMMENT ON COLUMN workspace_detection_jobs.resolved_at IS 'When a terminal (processed or failed) row was resolved by an operator; NULL until then. A manual affordance for inspecting the outbox after the fact';
-
--- Audits: the engine's findings set over a document. Every audit is one row.
--- The base audit is produced by a detection (redaction_id and derived_from NULL);
--- a review audit is produced by a redaction applying reviewer edits, and carries
--- redaction_id plus derived_from — the base audit it was edited from. The bytes
--- live in a blob; this row is the provenance. Audits and reviews were once two
--- file kinds; they are the same type, distinguished only by this lineage.
---
--- The table's natural home is here, with its always-set detection_id parent. The
--- redaction_id foreign key is added by the later redactions migration, since
--- workspace_redactions does not exist yet.
-CREATE TABLE workspace_audits (
-    -- Primary identifier
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- References
-    workspace_id        UUID                NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    blob_id             UUID                NOT NULL REFERENCES workspace_blobs (id),
-
-    -- The detection that produced the base analysis this audit belongs to
-    -- (always set). A review audit additionally names the redaction that produced
-    -- it and the base audit it was edited from; both NULL for a base audit. The
-    -- redaction_id foreign key is added by the redactions migration.
-    detection_id        UUID                NOT NULL REFERENCES workspace_detections (id) ON DELETE CASCADE,
-    redaction_id        UUID                DEFAULT NULL,
-    derived_from        UUID                DEFAULT NULL REFERENCES workspace_audits (id) ON DELETE SET NULL,
-    CONSTRAINT workspace_audits_review_consistent CHECK (
-        (redaction_id IS NULL) = (derived_from IS NULL)
-    ),
-
-    -- Timing
-    created_at          TIMESTAMPTZ         NOT NULL DEFAULT current_timestamp
-);
-
--- A detection's audits, newest first (its base audit and every review derived
--- through its redactions).
-CREATE INDEX workspace_audits_detection_idx
-    ON workspace_audits (detection_id, created_at DESC);
-
--- Back the blob foreign key (ref-count maintenance and reclamation walks it).
-CREATE INDEX workspace_audits_blob_idx
-    ON workspace_audits (blob_id);
-
-COMMENT ON TABLE workspace_audits IS 'Findings sets over a document: a detection''s base audit and the review audits redactions derive from it, sharing one type via lineage.';
-COMMENT ON COLUMN workspace_audits.id IS 'Unique audit identifier';
-COMMENT ON COLUMN workspace_audits.workspace_id IS 'Owning workspace';
-COMMENT ON COLUMN workspace_audits.blob_id IS 'Blob holding the findings bytes';
-COMMENT ON COLUMN workspace_audits.detection_id IS 'Detection whose analysis this audit belongs to';
-COMMENT ON COLUMN workspace_audits.redaction_id IS 'Redaction that produced this review audit; NULL for a base audit';
-COMMENT ON COLUMN workspace_audits.derived_from IS 'Base audit this review was edited from; NULL for a base audit';
-COMMENT ON COLUMN workspace_audits.created_at IS 'When the audit was created';
 
 -- Detection policy-version pin: the exact policy versions a detection's analysis
 -- ran against, captured when the analysis is committed. A policy's definition is

@@ -2,9 +2,9 @@
 //!
 //! Owns the create/enqueue orchestration a detection handler would otherwise
 //! inline — synchronous fail-fast validation, the retention-override snapshot, and
-//! the transaction that creates the detection row, records the start event, ensures
-//! the document's review thread, and enqueues the analysis job — plus the read
-//! queries. The async analysis and redaction execution live in the detection
+//! the transaction that creates the detection row, records the start event, and
+//! enqueues the analysis job — plus the read queries. The async analysis and
+//! redaction execution live in the detection
 //! worker, not here; the service only owns the request side and meets the worker
 //! at the outbox job and the [`DetectionQueue`]. The streaming (SSE) and
 //! inference-and-staging (redact) actions stay in the handler, loading a detection
@@ -426,8 +426,8 @@ impl WorkspaceDetectionService {
         Ok(policies)
     }
 
-    /// Commits the detection row, its start event, its review thread, and its
-    /// analysis job in one transaction.
+    /// Commits the detection row, its start event, and its analysis job in one
+    /// transaction.
     ///
     /// The job goes onto the outbox rather than being published inline, so the
     /// detection is never lost to a publish that failed after the row committed, nor

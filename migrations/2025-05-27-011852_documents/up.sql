@@ -93,10 +93,12 @@ CREATE TABLE workspace_documents (
     -- Primary identifier
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-    -- References
+    -- References. `blob_id` is nullable: the bytes are reclaimable, and once the
+    -- blob's retention window passes the reference is released and the pointer is
+    -- nulled while the document row (the ledger record) is kept.
     workspace_id            UUID             NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     account_id              UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-    blob_id                 UUID             NOT NULL REFERENCES workspace_blobs (id),
+    blob_id                 UUID             DEFAULT NULL REFERENCES workspace_blobs (id),
 
     -- Composite key target for workspace-scoped foreign keys.
     CONSTRAINT workspace_documents_workspace_id_id_key UNIQUE (workspace_id, id),

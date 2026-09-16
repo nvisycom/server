@@ -78,10 +78,6 @@ pub mod sql_types {
     pub struct SyncTriggerType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "thread_event_kind"))]
-    pub struct ThreadEventKind;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "webhook_event"))]
     pub struct WebhookEvent;
 
@@ -95,7 +91,7 @@ pub mod sql_types {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Text, Nullable, Inet, Bool, Timestamptz};
+    use diesel::sql_types::*;
     use super::sql_types::ApiTokenType;
 
     account_api_tokens (id) {
@@ -114,7 +110,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Nullable, Text, Timestamptz};
+    use diesel::sql_types::*;
     use super::sql_types::IdentityProvider;
 
     account_identities (id) {
@@ -130,7 +126,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Nullable, Timestamptz, Jsonb};
+    use diesel::sql_types::*;
     use super::sql_types::NotificationEvent;
 
     account_notifications (id) {
@@ -145,7 +141,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Bool, Text, Nullable, Timestamptz};
+    use diesel::sql_types::*;
 
     accounts (id) {
         id -> Uuid,
@@ -165,7 +161,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Jsonb, Nullable, Inet, Text, Timestamptz};
+    use diesel::sql_types::*;
     use super::sql_types::ActivityType;
 
     workspace_activities (id) {
@@ -181,7 +177,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Jsonb, Int4, Timestamptz, Nullable};
+    use diesel::sql_types::*;
     use super::sql_types::OutboxStatus;
 
     workspace_assistant_jobs (id) {
@@ -197,21 +193,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Nullable, Timestamptz};
-
-    workspace_audits (id) {
-        id -> Uuid,
-        workspace_id -> Uuid,
-        blob_id -> Uuid,
-        detection_id -> Uuid,
-        redaction_id -> Nullable<Uuid>,
-        derived_from -> Nullable<Uuid>,
-        created_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::{Uuid, Bytea, Int8, Text, Int4, Timestamptz, Nullable};
+    use diesel::sql_types::*;
 
     workspace_blobs (id) {
         id -> Uuid,
@@ -229,7 +211,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Nullable, Text};
+    use diesel::sql_types::*;
     use super::sql_types::SyncMode;
     use super::sql_types::SyncDeletionPolicy;
 
@@ -242,7 +224,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Int8, Int4, Nullable, Text, Jsonb, Timestamptz};
+    use diesel::sql_types::*;
     use super::sql_types::SyncTriggerType;
     use super::sql_types::SyncStatus;
 
@@ -262,7 +244,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Text, Bytea, Bool, Jsonb, Timestamptz, Nullable};
+    use diesel::sql_types::*;
     use super::sql_types::ConnectionType;
 
     workspace_connections (id) {
@@ -282,7 +264,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Jsonb, Int4, Timestamptz, Nullable};
+    use diesel::sql_types::*;
     use super::sql_types::OutboxStatus;
 
     workspace_detection_jobs (id) {
@@ -298,7 +280,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::Uuid;
+    use diesel::sql_types::*;
 
     workspace_detection_policy_versions (detection_id, policy_version_id) {
         detection_id -> Uuid,
@@ -307,7 +289,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Text, Nullable, Int8};
+    use diesel::sql_types::*;
 
     workspace_detection_usage (id) {
         id -> Uuid,
@@ -322,7 +304,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Nullable, Text, Jsonb, Timestamptz};
+    use diesel::sql_types::*;
     use super::sql_types::PipelineTriggerType;
     use super::sql_types::DetectionStatus;
 
@@ -333,6 +315,7 @@ diesel::table! {
         account_id -> Uuid,
         input_document_id -> Uuid,
         intermediate_blob_id -> Nullable<Uuid>,
+        audit_blob_id -> Nullable<Uuid>,
         trigger_type -> PipelineTriggerType,
         status -> DetectionStatus,
         idempotency_key -> Nullable<Text>,
@@ -341,11 +324,12 @@ diesel::table! {
         claimed_at -> Nullable<Timestamptz>,
         started_at -> Timestamptz,
         completed_at -> Nullable<Timestamptz>,
+        deleted_at -> Nullable<Timestamptz>,
     }
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Text, Timestamptz};
+    use diesel::sql_types::*;
 
     workspace_document_exports (document_id, connection_id) {
         document_id -> Uuid,
@@ -356,7 +340,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Text, Timestamptz};
+    use diesel::sql_types::*;
 
     workspace_document_imports (document_id) {
         document_id -> Uuid,
@@ -367,66 +351,14 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Nullable, Text, Timestamptz};
-    use super::sql_types::ReviewStatus;
-
-    workspace_reviews (id) {
-        id -> Uuid,
-        workspace_id -> Uuid,
-        document_id -> Uuid,
-        thread_id -> Uuid,
-        purpose -> Nullable<Text>,
-        assignee_account_id -> Nullable<Uuid>,
-        review_status -> ReviewStatus,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::{Uuid, Timestamptz};
-
-    workspace_review_detections (review_id, detection_id) {
-        review_id -> Uuid,
-        detection_id -> Uuid,
-        created_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::{Uuid, Timestamptz};
-
-    workspace_review_redactions (review_id, redaction_id) {
-        review_id -> Uuid,
-        redaction_id -> Uuid,
-        created_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::{Uuid, Nullable, Jsonb, Timestamptz};
-    use super::sql_types::ReviewEventKind;
-
-    workspace_review_events (id) {
-        id -> Uuid,
-        workspace_id -> Uuid,
-        review_id -> Uuid,
-        kind -> ReviewEventKind,
-        actor_account_id -> Nullable<Uuid>,
-        target -> Nullable<Jsonb>,
-        created_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::{Uuid, Text, Jsonb, Timestamptz, Nullable};
+    use diesel::sql_types::*;
     use super::sql_types::DocumentKind;
 
     workspace_documents (id) {
         id -> Uuid,
         workspace_id -> Uuid,
         account_id -> Uuid,
-        blob_id -> Uuid,
+        blob_id -> Nullable<Uuid>,
         kind -> DocumentKind,
         display_name -> Text,
         original_filename -> Text,
@@ -439,7 +371,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Jsonb, Nullable, Inet, Text, Int4, Timestamptz};
+    use diesel::sql_types::*;
     use super::sql_types::OutboxStatus;
 
     workspace_event_outbox (id) {
@@ -458,7 +390,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Nullable, Text, Timestamptz};
+    use diesel::sql_types::*;
     use super::sql_types::WorkspaceRole;
     use super::sql_types::InviteStatus;
 
@@ -479,7 +411,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Bool, Array, Nullable, Timestamptz};
+    use diesel::sql_types::*;
     use super::sql_types::WorkspaceRole;
     use super::sql_types::NotificationEvent;
 
@@ -498,7 +430,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::Uuid;
+    use diesel::sql_types::*;
 
     workspace_pipeline_policies (pipeline_id, policy_id) {
         workspace_id -> Uuid,
@@ -508,7 +440,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Text, Nullable, Jsonb, Timestamptz};
+    use diesel::sql_types::*;
     use super::sql_types::PipelineStatus;
 
     workspace_pipelines (id) {
@@ -527,7 +459,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Text, Nullable, Bytea, Jsonb, Timestamptz};
+    use diesel::sql_types::*;
     use super::sql_types::PolicyKind;
 
     workspace_policies (id) {
@@ -547,7 +479,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Int4, Jsonb, Timestamptz};
+    use diesel::sql_types::*;
 
     workspace_policy_versions (id) {
         id -> Uuid,
@@ -562,7 +494,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Text, Bytea, Bool, Jsonb, Timestamptz, Nullable};
+    use diesel::sql_types::*;
     use super::sql_types::ProviderType;
 
     workspace_providers (id) {
@@ -582,25 +514,36 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Nullable, Timestamptz};
+    use diesel::sql_types::*;
 
     workspace_redactions (id) {
         id -> Uuid,
         detection_id -> Uuid,
         account_id -> Uuid,
         output_document_id -> Nullable<Uuid>,
+        review_audit_blob_id -> Nullable<Uuid>,
+        created_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
+    workspace_review_assignees (review_id, account_id) {
+        review_id -> Uuid,
+        account_id -> Uuid,
         created_at -> Timestamptz,
     }
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Nullable, Text, Timestamptz};
+    use diesel::sql_types::*;
 
-    workspace_thread_comments (id) {
+    workspace_review_comments (id) {
         id -> Uuid,
         parent_id -> Nullable<Uuid>,
-        workspace_id -> Uuid,
-        thread_id -> Uuid,
+        review_id -> Uuid,
         author_account_id -> Uuid,
         body -> Text,
         created_at -> Timestamptz,
@@ -610,14 +553,23 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Nullable, Jsonb, Timestamptz};
-    use super::sql_types::ThreadEventKind;
+    use diesel::sql_types::*;
 
-    workspace_thread_events (id) {
+    workspace_review_detections (review_id, detection_id) {
+        review_id -> Uuid,
+        detection_id -> Uuid,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::ReviewEventKind;
+
+    workspace_review_events (id) {
         id -> Uuid,
-        workspace_id -> Uuid,
-        thread_id -> Uuid,
-        kind -> ThreadEventKind,
+        review_id -> Uuid,
+        kind -> ReviewEventKind,
         actor_account_id -> Nullable<Uuid>,
         target -> Nullable<Jsonb>,
         created_at -> Timestamptz,
@@ -625,15 +577,26 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Nullable, Text, Timestamptz};
+    use diesel::sql_types::*;
 
-    workspace_threads (id) {
+    workspace_review_redactions (review_id, redaction_id) {
+        review_id -> Uuid,
+        redaction_id -> Uuid,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::ReviewStatus;
+
+    workspace_reviews (id) {
         id -> Uuid,
         workspace_id -> Uuid,
+        document_id -> Uuid,
         author_account_id -> Uuid,
-        display_name -> Nullable<Text>,
-        closed_at -> Nullable<Timestamptz>,
-        closed_by -> Nullable<Uuid>,
+        display_name -> Text,
+        review_status -> ReviewStatus,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,
@@ -641,7 +604,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Text, Array, Nullable, Jsonb, Bytea, Timestamptz, Int4};
+    use diesel::sql_types::*;
     use super::sql_types::WebhookEvent;
     use super::sql_types::WebhookStatus;
 
@@ -666,7 +629,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::{Uuid, Text, Nullable, Jsonb, Timestamptz};
+    use diesel::sql_types::*;
 
     workspaces (id) {
         id -> Uuid,
@@ -688,11 +651,7 @@ diesel::joinable!(account_identities -> accounts (account_id));
 diesel::joinable!(account_notifications -> accounts (account_id));
 diesel::joinable!(workspace_activities -> accounts (account_id));
 diesel::joinable!(workspace_activities -> workspaces (workspace_id));
-diesel::joinable!(workspace_assistant_jobs -> workspace_thread_comments (comment_id));
-diesel::joinable!(workspace_audits -> workspace_blobs (blob_id));
-diesel::joinable!(workspace_audits -> workspace_detections (detection_id));
-diesel::joinable!(workspace_audits -> workspace_redactions (redaction_id));
-diesel::joinable!(workspace_audits -> workspaces (workspace_id));
+diesel::joinable!(workspace_assistant_jobs -> workspace_review_comments (comment_id));
 diesel::joinable!(workspace_blobs -> workspaces (workspace_id));
 diesel::joinable!(workspace_connection_schedule -> workspace_connections (connection_id));
 diesel::joinable!(workspace_connection_syncs -> accounts (account_id));
@@ -704,7 +663,6 @@ diesel::joinable!(workspace_detection_policy_versions -> workspace_detections (d
 diesel::joinable!(workspace_detection_policy_versions -> workspace_policy_versions (policy_version_id));
 diesel::joinable!(workspace_detection_usage -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detections -> accounts (account_id));
-diesel::joinable!(workspace_detections -> workspace_blobs (intermediate_blob_id));
 diesel::joinable!(workspace_detections -> workspace_documents (input_document_id));
 diesel::joinable!(workspace_detections -> workspace_pipelines (pipeline_id));
 diesel::joinable!(workspace_detections -> workspaces (workspace_id));
@@ -712,10 +670,6 @@ diesel::joinable!(workspace_document_exports -> workspace_connections (connectio
 diesel::joinable!(workspace_document_exports -> workspace_documents (document_id));
 diesel::joinable!(workspace_document_imports -> workspace_connections (connection_id));
 diesel::joinable!(workspace_document_imports -> workspace_documents (document_id));
-diesel::joinable!(workspace_reviews -> accounts (assignee_account_id));
-diesel::joinable!(workspace_reviews -> workspace_documents (document_id));
-diesel::joinable!(workspace_reviews -> workspace_threads (thread_id));
-diesel::joinable!(workspace_reviews -> workspaces (workspace_id));
 diesel::joinable!(workspace_documents -> accounts (account_id));
 diesel::joinable!(workspace_documents -> workspace_blobs (blob_id));
 diesel::joinable!(workspace_documents -> workspaces (workspace_id));
@@ -733,22 +687,21 @@ diesel::joinable!(workspace_policy_versions -> workspaces (workspace_id));
 diesel::joinable!(workspace_providers -> accounts (account_id));
 diesel::joinable!(workspace_providers -> workspaces (workspace_id));
 diesel::joinable!(workspace_redactions -> accounts (account_id));
+diesel::joinable!(workspace_redactions -> workspace_blobs (review_audit_blob_id));
 diesel::joinable!(workspace_redactions -> workspace_detections (detection_id));
 diesel::joinable!(workspace_redactions -> workspace_documents (output_document_id));
+diesel::joinable!(workspace_review_assignees -> accounts (account_id));
+diesel::joinable!(workspace_review_assignees -> workspace_reviews (review_id));
+diesel::joinable!(workspace_review_comments -> accounts (author_account_id));
+diesel::joinable!(workspace_review_comments -> workspace_reviews (review_id));
 diesel::joinable!(workspace_review_detections -> workspace_detections (detection_id));
 diesel::joinable!(workspace_review_detections -> workspace_reviews (review_id));
 diesel::joinable!(workspace_review_events -> accounts (actor_account_id));
 diesel::joinable!(workspace_review_events -> workspace_reviews (review_id));
-diesel::joinable!(workspace_review_events -> workspaces (workspace_id));
-diesel::joinable!(workspace_review_redactions -> workspace_reviews (review_id));
 diesel::joinable!(workspace_review_redactions -> workspace_redactions (redaction_id));
-diesel::joinable!(workspace_thread_comments -> accounts (author_account_id));
-diesel::joinable!(workspace_thread_comments -> workspace_threads (thread_id));
-diesel::joinable!(workspace_thread_comments -> workspaces (workspace_id));
-diesel::joinable!(workspace_thread_events -> accounts (actor_account_id));
-diesel::joinable!(workspace_thread_events -> workspace_threads (thread_id));
-diesel::joinable!(workspace_thread_events -> workspaces (workspace_id));
-diesel::joinable!(workspace_threads -> workspaces (workspace_id));
+diesel::joinable!(workspace_review_redactions -> workspace_reviews (review_id));
+diesel::joinable!(workspace_reviews -> accounts (author_account_id));
+diesel::joinable!(workspace_reviews -> workspaces (workspace_id));
 diesel::joinable!(workspace_webhooks -> accounts (created_by));
 diesel::joinable!(workspace_webhooks -> workspaces (workspace_id));
 diesel::joinable!(workspaces -> accounts (created_by));
@@ -760,7 +713,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     accounts,
     workspace_activities,
     workspace_assistant_jobs,
-    workspace_audits,
     workspace_blobs,
     workspace_connection_schedule,
     workspace_connection_syncs,
@@ -771,7 +723,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_detections,
     workspace_document_exports,
     workspace_document_imports,
-    workspace_reviews,
     workspace_documents,
     workspace_event_outbox,
     workspace_invites,
@@ -782,12 +733,12 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_policy_versions,
     workspace_providers,
     workspace_redactions,
+    workspace_review_assignees,
+    workspace_review_comments,
     workspace_review_detections,
     workspace_review_events,
     workspace_review_redactions,
-    workspace_thread_comments,
-    workspace_thread_events,
-    workspace_threads,
+    workspace_reviews,
     workspace_webhooks,
     workspaces,
 );

@@ -2,7 +2,6 @@
 -- Objects are dropped in reverse order of creation.
 
 DROP TABLE IF EXISTS workspace_detection_policy_versions;
-DROP TABLE IF EXISTS workspace_audits;
 DROP TABLE IF EXISTS workspace_detection_jobs;
 DROP TABLE IF EXISTS workspace_detection_usage;
 DROP TABLE IF EXISTS workspace_detections;

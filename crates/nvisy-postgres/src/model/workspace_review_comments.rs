@@ -1,24 +1,22 @@
-//! Workspace thread-comment model: one message within a thread.
+//! Workspace review-comment model: one message within a review's discussion.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
 use uuid::Uuid;
 
-use crate::schema::workspace_thread_comments;
+use crate::schema::workspace_review_comments;
 
-/// A comment: one message within a thread.
+/// A comment: one message within a review's discussion.
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
-#[diesel(table_name = workspace_thread_comments)]
+#[diesel(table_name = workspace_review_comments)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct WorkspaceThreadComment {
+pub struct WorkspaceReviewComment {
     /// Unique comment identifier.
     pub id: Uuid,
     /// For a reply, the comment it answers; `None` for an ordinary message.
     pub parent_id: Option<Uuid>,
-    /// Workspace this comment belongs to (denormalized).
-    pub workspace_id: Uuid,
-    /// Thread this message belongs to.
-    pub thread_id: Uuid,
+    /// Review this message belongs to (its workspace is the review's).
+    pub review_id: Uuid,
     /// Account that wrote the message.
     pub author_account_id: Uuid,
     /// The message text.
@@ -31,34 +29,31 @@ pub struct WorkspaceThreadComment {
     pub deleted_at: Option<Timestamp>,
 }
 
-/// Data for creating a new comment (a message in a thread).
+/// Data for creating a new comment (a message in a review).
 #[derive(Debug, Default, Clone, Insertable)]
-#[diesel(table_name = workspace_thread_comments)]
+#[diesel(table_name = workspace_review_comments)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[must_use]
-pub struct NewWorkspaceThreadComment {
+pub struct NewWorkspaceReviewComment {
     /// For a reply, the comment it answers; `None` for an ordinary comment. The
     /// database's partial unique index on this column makes at most one live reply
     /// exist per parent.
     pub parent_id: Option<Uuid>,
-    /// Workspace ID (required).
-    pub workspace_id: Uuid,
-    /// Thread ID (required).
-    pub thread_id: Uuid,
+    /// Review ID (required).
+    pub review_id: Uuid,
     /// Author account ID (required).
     pub author_account_id: Uuid,
     /// The message text (required).
     pub body: String,
 }
 
-impl NewWorkspaceThreadComment {
-    /// A minimal message in `thread_id`, for tests.
+impl NewWorkspaceReviewComment {
+    /// A minimal message in `review_id`, for tests.
     #[cfg(any(feature = "test_util", test))]
-    pub fn test(workspace_id: Uuid, thread_id: Uuid, author_account_id: Uuid) -> Self {
+    pub fn test(review_id: Uuid, author_account_id: Uuid) -> Self {
         Self {
             parent_id: None,
-            workspace_id,
-            thread_id,
+            review_id,
             author_account_id,
             body: "A test comment.".to_owned(),
         }
@@ -67,10 +62,10 @@ impl NewWorkspaceThreadComment {
 
 /// Data for updating a comment's body. Only the body is editable.
 #[derive(Debug, Clone, Default, AsChangeset)]
-#[diesel(table_name = workspace_thread_comments)]
+#[diesel(table_name = workspace_review_comments)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[must_use]
-pub struct UpdateWorkspaceThreadComment {
+pub struct UpdateWorkspaceReviewComment {
     /// The new message text.
     pub body: Option<String>,
 }

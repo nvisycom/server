@@ -14,11 +14,13 @@ pub mod assistant;
 pub mod detection;
 pub mod event;
 pub mod integration;
+pub mod purge;
 pub mod reaper;
 pub mod webhook;
 
 pub use coordinator::Coordinator;
 use nvisy_nats::NatsClient;
+pub use purge::WorkspacePurgeWorker;
 pub use reaper::BlobReaper;
 pub use set::{Worker, WorkerSet};
 

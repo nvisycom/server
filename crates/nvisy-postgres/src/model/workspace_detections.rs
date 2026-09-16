@@ -11,16 +11,14 @@ use crate::types::{
 
 /// A detection: one analysis pass of a document, optionally through a pipeline.
 ///
-/// Detect creates the detection and stores the engine's `Audit` as a
-/// [`WorkspaceAudit`] row (the base audit) pointing back via `detection_id`; the
-/// detection then stays `Complete` and can be redacted any number of times (each
-/// redaction is its own row).
+/// Detect creates the detection and stores the engine's `Audit` (the base
+/// analysis) in a blob pointed at by `audit_blob_id`; the detection then stays
+/// `Complete` and can be redacted any number of times (each redaction is its own
+/// row).
 ///
 /// A detection is workspace-scoped directly. A pipeline detection names the
 /// pipeline whose config drove it; an ad-hoc detection names its policies at
 /// create time and carries no pipeline.
-///
-/// [`WorkspaceAudit`]: crate::model::WorkspaceAudit
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_detections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -41,6 +39,9 @@ pub struct WorkspaceDetection {
     /// tokenized text). `None` until analysis writes it, and stays `None` when the
     /// analysis ran no enricher. A blob reference, not a document.
     pub intermediate_blob_id: Option<Uuid>,
+    /// Base-analysis (findings set) blob. `None` before analysis commits and once
+    /// the bytes are reclaimed on retention (the row is kept). A blob reference.
+    pub audit_blob_id: Option<Uuid>,
     /// How the detection was initiated.
     pub trigger_type: PipelineTriggerType,
     /// Current detection status.
@@ -61,6 +62,9 @@ pub struct WorkspaceDetection {
     pub started_at: Timestamp,
     /// When the detection completed analysis.
     pub completed_at: Option<Timestamp>,
+    /// When the detection was soft-deleted; `None` means live (the row is kept as
+    /// a ledger record even after its bytes are reclaimed).
+    pub deleted_at: Option<Timestamp>,
 }
 
 /// Data for creating a new workspace detection.
@@ -124,6 +128,8 @@ pub struct UpdateWorkspaceDetection {
     pub status: Option<DetectionStatus>,
     /// Intermediate blob holding the encrypted enrichment.
     pub intermediate_blob_id: Option<Option<Uuid>>,
+    /// Base-analysis (findings set) blob, set when the analysis commits.
+    pub audit_blob_id: Option<Option<Uuid>>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<Json<DetectionMetadata>>,
     /// When a worker last claimed this detection (lease timestamp).

@@ -121,7 +121,7 @@ async fn get_redaction_review(
         let redaction =
             find_redaction(&mut conn, workspace.id, path_params.redaction_id.as_uuid()).await?;
 
-        blob.resolve_review_blob(&mut conn, redaction.id).await?
+        blob.resolve_review_blob(&mut conn, &redaction).await?
     };
 
     let review = blob.load_audit(&engine, workspace.id, &review_blob).await?;
