@@ -36,7 +36,6 @@ pub mod policy_kind;
 
 pub mod review_event_kind;
 pub mod review_status;
-pub mod thread_event_kind;
 
 pub use activity_type::ActivityType;
 pub use api_token_type::ApiTokenType;
@@ -57,7 +56,6 @@ pub use sync_deletion_policy::SyncDeletionPolicy;
 pub use sync_mode::SyncMode;
 pub use sync_status::SyncStatus;
 pub use sync_trigger_type::SyncTriggerType;
-pub use thread_event_kind::ThreadEventKind;
 pub use webhook_event::WebhookEvent;
 pub use webhook_status::WebhookStatus;
 pub use workspace_role::WorkspaceRole;

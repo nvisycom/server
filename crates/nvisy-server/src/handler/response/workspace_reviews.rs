@@ -1,10 +1,12 @@
-//! Document-review response types: a review (its status, purpose, assignee, and
-//! the id of the discussion thread it owns) and its activity-timeline events.
+//! Review response types: the review itself, its comments, its timeline events,
+//! and its interleaved timeline.
 
 use jiff::Timestamp;
 use nvisy_postgres::model::{
-    WorkspaceReview as ReviewModel, WorkspaceReviewEvent as ReviewEventModel,
+    WorkspaceReview as ReviewModel, WorkspaceReviewComment as CommentModel,
+    WorkspaceReviewEvent as ReviewEventModel,
 };
+use nvisy_postgres::query::{TimelineCursor, TimelineSource};
 use nvisy_postgres::types::{ReviewEventKind, ReviewStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -12,12 +14,10 @@ use uuid::Uuid;
 
 use super::{AccountRef, Page};
 
-/// Response type for a document's review.
-///
-/// A review is an optional, purpose-scoped sign-off effort on a document (0..N per
-/// document), opened explicitly. It owns a discussion thread (referenced by
-/// `threadId`) and carries a `reviewStatus`, an optional `purpose`, and its
-/// `assignees` (0..N reviewers).
+/// Response type for a review: a named discussion on a document with a manual
+/// sign-off lifecycle (0..N per document), opened explicitly. It carries a
+/// `reviewStatus`, a `displayName`, and its `assignees` (0..N reviewers); its
+/// stream is a [`WorkspaceReviewEntry`] timeline.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceReview {
@@ -25,11 +25,10 @@ pub struct WorkspaceReview {
     pub id: Uuid,
     /// Document under review.
     pub document_id: Uuid,
-    /// Discussion thread this review owns.
-    pub thread_id: Uuid,
-    /// Optional purpose/audience label.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub purpose: Option<String>,
+    /// The review's title.
+    pub display_name: String,
+    /// Account that opened the review.
+    pub author: AccountRef,
     /// The review's current status.
     pub review_status: ReviewStatus,
     /// The reviewers assigned to this review (empty when unassigned).
@@ -44,15 +43,19 @@ pub struct WorkspaceReview {
 pub type WorkspaceReviewsPage = Page<WorkspaceReview>;
 
 impl WorkspaceReview {
-    /// Creates a review response from the database model and its resolved assignee
-    /// references (empty when unassigned).
+    /// Creates a review response from the database model, its author, and its
+    /// resolved assignee references (empty when unassigned).
     #[must_use]
-    pub fn from_model(review: &ReviewModel, assignees: Vec<AccountRef>) -> Self {
+    pub fn from_model(
+        review: &ReviewModel,
+        author: AccountRef,
+        assignees: Vec<AccountRef>,
+    ) -> Self {
         Self {
             id: review.id,
             document_id: review.document_id,
-            thread_id: review.thread_id,
-            purpose: review.purpose.clone(),
+            display_name: review.display_name.clone(),
+            author,
             review_status: review.review_status,
             assignees,
             created_at: review.created_at.into(),
@@ -61,8 +64,42 @@ impl WorkspaceReview {
     }
 }
 
-/// One entry in a review's activity timeline (a link, assignment, verification,
-/// or reopen).
+/// Response type for a comment: one message within a review's discussion.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceComment {
+    /// Unique identifier of the comment.
+    pub id: Uuid,
+    /// Review this message belongs to.
+    pub review_id: Uuid,
+    /// Account that wrote the message.
+    pub author: AccountRef,
+    /// The message text.
+    pub body: String,
+    /// When the comment was created.
+    pub created_at: Timestamp,
+    /// When the comment was last updated.
+    pub updated_at: Timestamp,
+}
+
+impl WorkspaceComment {
+    /// Creates a comment response from the database model and the resolved author
+    /// reference.
+    #[must_use]
+    pub fn from_model(comment: CommentModel, author: AccountRef) -> Self {
+        Self {
+            id: comment.id,
+            review_id: comment.review_id,
+            author,
+            body: comment.body,
+            created_at: comment.created_at.into(),
+            updated_at: comment.updated_at.into(),
+        }
+    }
+}
+
+/// One non-message entry in a review timeline (opened, renamed, a detection or
+/// redaction linked, an assignment change, verified, or reopened).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceReviewEvent {
@@ -73,14 +110,15 @@ pub struct WorkspaceReviewEvent {
     /// Account that performed the action; `None` if that account was removed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actor: Option<AccountRef>,
-    /// Event-specific detail (the linked id, the assignee); `None` when none.
+    /// Event-specific detail (the new name, a linked id, an assignee); `None` when
+    /// none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<serde_json::Value>,
     /// When the event happened.
     pub created_at: Timestamp,
 }
 
-/// Paginated response for a review's activity timeline.
+/// Paginated response for a review's activity timeline (its events only).
 pub type WorkspaceReviewTimelinePage = Page<WorkspaceReviewEvent>;
 
 impl WorkspaceReviewEvent {
@@ -97,3 +135,45 @@ impl WorkspaceReviewEvent {
         }
     }
 }
+
+/// One entry in a review's timeline: either a message or a lifecycle event, tagged
+/// so a client renders them interleaved in order.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WorkspaceReviewEntry {
+    /// A message posted in the review.
+    Comment(WorkspaceComment),
+    /// A lifecycle event.
+    Event(WorkspaceReviewEvent),
+}
+
+impl WorkspaceReviewEntry {
+    /// The entry's position in the merged timeline: `(created_at, source, id)`.
+    /// Comments sort after events at the same instant; `id` breaks a tie within one
+    /// stream. This is the total order the timeline is paginated by.
+    #[must_use]
+    pub fn cursor(&self) -> TimelineCursor {
+        match self {
+            WorkspaceReviewEntry::Comment(c) => TimelineCursor {
+                created_at: c.created_at,
+                source: TimelineSource::Comment,
+                id: c.id,
+            },
+            WorkspaceReviewEntry::Event(e) => TimelineCursor {
+                created_at: e.created_at,
+                source: TimelineSource::Event,
+                id: e.id,
+            },
+        }
+    }
+
+    /// The sort tuple for merging the two streams, derived from [`Self::cursor`].
+    #[must_use]
+    pub fn sort_key(&self) -> (Timestamp, TimelineSource, uuid::Uuid) {
+        let c = self.cursor();
+        (c.created_at, c.source, c.id)
+    }
+}
+
+/// Paginated response for a review's interleaved timeline (comments + events).
+pub type WorkspaceTimelinePage = Page<WorkspaceReviewEntry>;

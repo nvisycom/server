@@ -30,12 +30,10 @@ mod workspace_policies;
 mod workspace_policy_versions;
 mod workspace_providers;
 mod workspace_redactions;
+mod workspace_review_comments;
 mod workspace_review_events;
 mod workspace_review_links;
 mod workspace_reviews;
-mod workspace_thread_comments;
-mod workspace_thread_events;
-mod workspace_threads;
 mod workspace_webhooks;
 mod workspaces;
 
@@ -78,14 +76,12 @@ pub use workspace_policies::{NewWorkspacePolicy, UpdateWorkspacePolicy, Workspac
 pub use workspace_policy_versions::{NewWorkspacePolicyVersion, WorkspacePolicyVersion};
 pub use workspace_providers::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};
 pub use workspace_redactions::{NewWorkspaceRedaction, WorkspaceRedaction};
+pub use workspace_review_comments::{
+    NewWorkspaceReviewComment, UpdateWorkspaceReviewComment, WorkspaceReviewComment,
+};
 pub use workspace_review_events::{NewWorkspaceReviewEvent, WorkspaceReviewEvent};
 pub use workspace_review_links::{NewReviewAssignee, NewReviewDetection, NewReviewRedaction};
 pub use workspace_reviews::{NewWorkspaceReview, UpdateWorkspaceReview, WorkspaceReview};
-pub use workspace_thread_comments::{
-    NewWorkspaceThreadComment, UpdateWorkspaceThreadComment, WorkspaceThreadComment,
-};
-pub use workspace_thread_events::{NewWorkspaceThreadEvent, WorkspaceThreadEvent};
-pub use workspace_threads::{NewWorkspaceThread, UpdateWorkspaceThread, WorkspaceThread};
 pub use workspace_webhooks::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
 // Workspace models
 pub use workspaces::{NewWorkspace, UpdateWorkspace, Workspace};

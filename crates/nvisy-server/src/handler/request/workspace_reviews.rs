@@ -1,5 +1,5 @@
-//! Document-review request types: open a review, address one by id, link
-//! artifacts, assign/unassign, and filter the review queue.
+//! Review request types: open a review, rename it, address one by id, post and
+//! edit comments, link artifacts, assign/unassign, and filter the review queue.
 
 use garde::Validate;
 use nvisy_postgres::types::{DocumentReviewFilter, ReviewStatus};
@@ -42,13 +42,24 @@ pub struct WorkspaceReviewRedactionPathParams {
 
 /// Request payload to open a review on a document.
 #[must_use]
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateWorkspaceReview {
-    /// Optional free-text label for the review's purpose/audience (1-255 chars).
+    /// The review's title (1-255 characters).
+    #[garde(length(chars, min = 1, max = 255), custom(validate_non_blank))]
+    pub display_name: String,
+}
+
+/// Request payload to rename a review (set its title).
+#[must_use]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameWorkspaceReview {
+    /// The new title (1-255 characters). Omitting the field leaves the current
+    /// title unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[garde(inner(length(chars, min = 1, max = 255), custom(validate_non_blank)))]
-    pub purpose: Option<String>,
+    pub display_name: Option<String>,
 }
 
 /// Path parameters addressing a reviewer assignment on a review.
@@ -62,6 +73,37 @@ pub struct WorkspaceReviewAssigneePathParams {
     pub account_id: Uuid,
 }
 
+/// Path parameters addressing one comment by its id.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCommentPathParams {
+    /// Unique identifier of the comment.
+    pub comment_id: Uuid,
+}
+
+/// Request payload to post a comment (message) in a review.
+///
+/// `@username` mentions in the body notify those workspace members.
+#[must_use]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateWorkspaceComment {
+    /// The comment text (1-10000 characters).
+    #[garde(length(chars, min = 1, max = 10_000), custom(validate_non_blank))]
+    pub body: String,
+}
+
+/// Request payload to edit a comment's body.
+#[must_use]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateWorkspaceComment {
+    /// The new comment text (1-10000 characters).
+    #[garde(length(chars, min = 1, max = 10_000), custom(validate_non_blank))]
+    pub body: String,
+}
+
 /// Query parameters for listing a workspace's reviews (the review queue).
 ///
 /// Every field is an optional filter; unset fields impose no constraint. Accounts
@@ -71,6 +113,8 @@ pub struct WorkspaceReviewAssigneePathParams {
 pub struct WorkspaceReviewsQuery {
     /// Filter to the reviews of a specific document.
     pub document_id: Option<Uuid>,
+    /// Filter by the review's opening author (account id).
+    pub author: Option<Uuid>,
     /// Filter by the assigned reviewer (account id).
     pub assignee: Option<Uuid>,
     /// Filter by review status.
@@ -84,6 +128,7 @@ impl WorkspaceReviewsQuery {
     pub fn into_filter(self) -> DocumentReviewFilter {
         DocumentReviewFilter {
             document_id: self.document_id,
+            author_account_id: self.author,
             assignee_account_id: self.assignee,
             review_status: self.review_status,
         }

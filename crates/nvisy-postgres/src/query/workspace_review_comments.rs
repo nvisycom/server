@@ -1,6 +1,6 @@
-//! Workspace thread-comment repository: the messages within a thread. Includes
-//! the reply path whose parent-scoped uniqueness makes a redelivered assistant
-//! reply a no-op.
+//! Workspace review-comment repository: the messages within a review's discussion.
+//! Includes the reply path whose parent-scoped uniqueness makes a redelivered
+//! assistant reply a no-op.
 
 use std::future::Future;
 
@@ -9,20 +9,20 @@ use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use super::workspace_thread_events::{StreamBound, TimelineCursor, TimelineSource};
+use super::workspace_review_events::{StreamBound, TimelineCursor, TimelineSource};
 use crate::model::{
-    NewWorkspaceThreadComment, UpdateWorkspaceThreadComment, WorkspaceThreadComment,
+    NewWorkspaceReviewComment, UpdateWorkspaceReviewComment, WorkspaceReviewComment,
 };
 use crate::types::{AccountRefRow, WithAccountRef};
 use crate::{Error, PgConnection, Result, schema};
 
-/// Read and write operations on a thread's comments.
-pub trait WorkspaceThreadCommentRepository {
-    /// Adds a comment (message) to a thread.
+/// Read and write operations on a review's comments.
+pub trait WorkspaceReviewCommentRepository {
+    /// Adds a comment (message) to a review.
     fn create_comment(
         &mut self,
-        new_comment: NewWorkspaceThreadComment,
-    ) -> impl Future<Output = Result<WorkspaceThreadComment>> + Send;
+        new_comment: NewWorkspaceReviewComment,
+    ) -> impl Future<Output = Result<WorkspaceReviewComment>> + Send;
 
     /// Adds a reply (a comment whose `parent_id` is set), returning `Ok(None)`
     /// when a live reply to that same parent already exists.
@@ -34,56 +34,56 @@ pub trait WorkspaceThreadCommentRepository {
     /// `new_comment.parent_id` must be set.
     fn create_reply(
         &mut self,
-        new_comment: NewWorkspaceThreadComment,
-    ) -> impl Future<Output = Result<Option<WorkspaceThreadComment>>> + Send;
+        new_comment: NewWorkspaceReviewComment,
+    ) -> impl Future<Output = Result<Option<WorkspaceReviewComment>>> + Send;
 
     /// Finds a live comment by id within a workspace.
     fn find_comment_in_workspace(
         &mut self,
         workspace_id: Uuid,
         comment_id: Uuid,
-    ) -> impl Future<Output = Result<Option<WorkspaceThreadComment>>> + Send;
+    ) -> impl Future<Output = Result<Option<WorkspaceReviewComment>>> + Send;
 
-    /// Lists a thread's live comments, oldest first, each paired with the author's
+    /// Lists a review's live comments, oldest first, each paired with the author's
     /// account reference.
-    fn list_thread_comments(
+    fn list_review_comments(
         &mut self,
         workspace_id: Uuid,
-        thread_id: Uuid,
-    ) -> impl Future<Output = Result<Vec<WithAccountRef<WorkspaceThreadComment>>>> + Send;
+        review_id: Uuid,
+    ) -> impl Future<Output = Result<Vec<WithAccountRef<WorkspaceReviewComment>>>> + Send;
 
-    /// Lists up to `limit` of a thread's live comments at or after a cursor
+    /// Lists up to `limit` of a review's live comments at or after a cursor
     /// position, oldest first, each with the author's account reference. Backs the
     /// merged, paginated timeline; the caller interleaves these with the events.
-    fn list_thread_comments_after(
+    fn list_review_comments_after(
         &mut self,
         workspace_id: Uuid,
-        thread_id: Uuid,
+        review_id: Uuid,
         after: Option<&TimelineCursor>,
         limit: i64,
-    ) -> impl Future<Output = Result<Vec<WithAccountRef<WorkspaceThreadComment>>>> + Send;
+    ) -> impl Future<Output = Result<Vec<WithAccountRef<WorkspaceReviewComment>>>> + Send;
 
     /// Updates a comment's body.
     fn update_comment_body(
         &mut self,
         comment_id: Uuid,
-        updates: UpdateWorkspaceThreadComment,
-    ) -> impl Future<Output = Result<WorkspaceThreadComment>> + Send;
+        updates: UpdateWorkspaceReviewComment,
+    ) -> impl Future<Output = Result<WorkspaceReviewComment>> + Send;
 
     /// Soft-deletes a comment.
     fn delete_comment(&mut self, comment_id: Uuid) -> impl Future<Output = Result<()>> + Send;
 }
 
-impl WorkspaceThreadCommentRepository for PgConnection {
+impl WorkspaceReviewCommentRepository for PgConnection {
     async fn create_comment(
         &mut self,
-        new_comment: NewWorkspaceThreadComment,
-    ) -> Result<WorkspaceThreadComment> {
-        use schema::workspace_thread_comments;
+        new_comment: NewWorkspaceReviewComment,
+    ) -> Result<WorkspaceReviewComment> {
+        use schema::workspace_review_comments;
 
-        diesel::insert_into(workspace_thread_comments::table)
+        diesel::insert_into(workspace_review_comments::table)
             .values(&new_comment)
-            .returning(WorkspaceThreadComment::as_returning())
+            .returning(WorkspaceReviewComment::as_returning())
             .get_result(self)
             .await
             .map_err(Error::from)
@@ -91,20 +91,20 @@ impl WorkspaceThreadCommentRepository for PgConnection {
 
     async fn create_reply(
         &mut self,
-        new_comment: NewWorkspaceThreadComment,
-    ) -> Result<Option<WorkspaceThreadComment>> {
-        use schema::workspace_thread_comments::{self, dsl};
+        new_comment: NewWorkspaceReviewComment,
+    ) -> Result<Option<WorkspaceReviewComment>> {
+        use schema::workspace_review_comments::{self, dsl};
 
         // `ON CONFLICT (parent_id) WHERE parent_id IS NOT NULL AND deleted_at IS
         // NULL DO NOTHING` targets the partial unique index: a live reply to this
         // parent already exists, so the insert returns no row and we report it as
         // "already replied" rather than posting a duplicate.
-        diesel::insert_into(workspace_thread_comments::table)
+        diesel::insert_into(workspace_review_comments::table)
             .values(&new_comment)
             .on_conflict(dsl::parent_id)
             .filter_target(dsl::parent_id.is_not_null().and(dsl::deleted_at.is_null()))
             .do_nothing()
-            .returning(WorkspaceThreadComment::as_returning())
+            .returning(WorkspaceReviewComment::as_returning())
             .get_result(self)
             .await
             .optional()
@@ -115,35 +115,35 @@ impl WorkspaceThreadCommentRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         comment_id: Uuid,
-    ) -> Result<Option<WorkspaceThreadComment>> {
-        use schema::workspace_thread_comments::{self, dsl};
+    ) -> Result<Option<WorkspaceReviewComment>> {
+        use schema::workspace_review_comments::{self, dsl};
 
-        workspace_thread_comments::table
+        workspace_review_comments::table
             .filter(dsl::id.eq(comment_id))
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
-            .select(WorkspaceThreadComment::as_select())
+            .select(WorkspaceReviewComment::as_select())
             .first(self)
             .await
             .optional()
             .map_err(Error::from)
     }
 
-    async fn list_thread_comments(
+    async fn list_review_comments(
         &mut self,
         workspace_id: Uuid,
-        thread_id: Uuid,
-    ) -> Result<Vec<WithAccountRef<WorkspaceThreadComment>>> {
-        use schema::workspace_thread_comments::dsl;
-        use schema::{accounts, workspace_thread_comments};
+        review_id: Uuid,
+    ) -> Result<Vec<WithAccountRef<WorkspaceReviewComment>>> {
+        use schema::workspace_review_comments::dsl;
+        use schema::{accounts, workspace_review_comments};
 
-        let rows: Vec<(WorkspaceThreadComment, AccountRefRow)> = workspace_thread_comments::table
+        let rows: Vec<(WorkspaceReviewComment, AccountRefRow)> = workspace_review_comments::table
             .inner_join(accounts::table.on(dsl::author_account_id.eq(accounts::id)))
             .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::thread_id.eq(thread_id))
+            .filter(dsl::review_id.eq(review_id))
             .filter(dsl::deleted_at.is_null())
             .select((
-                WorkspaceThreadComment::as_select(),
+                WorkspaceReviewComment::as_select(),
                 (
                     accounts::id,
                     accounts::username,
@@ -163,20 +163,20 @@ impl WorkspaceThreadCommentRepository for PgConnection {
             .collect())
     }
 
-    async fn list_thread_comments_after(
+    async fn list_review_comments_after(
         &mut self,
         workspace_id: Uuid,
-        thread_id: Uuid,
+        review_id: Uuid,
         after: Option<&TimelineCursor>,
         limit: i64,
-    ) -> Result<Vec<WithAccountRef<WorkspaceThreadComment>>> {
-        use schema::workspace_thread_comments::dsl;
-        use schema::{accounts, workspace_thread_comments};
+    ) -> Result<Vec<WithAccountRef<WorkspaceReviewComment>>> {
+        use schema::workspace_review_comments::dsl;
+        use schema::{accounts, workspace_review_comments};
 
-        let mut query = workspace_thread_comments::table
+        let mut query = workspace_review_comments::table
             .inner_join(accounts::table.on(dsl::author_account_id.eq(accounts::id)))
             .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::thread_id.eq(thread_id))
+            .filter(dsl::review_id.eq(review_id))
             .filter(dsl::deleted_at.is_null())
             .into_boxed();
 
@@ -202,9 +202,9 @@ impl WorkspaceThreadCommentRepository for PgConnection {
             }
         }
 
-        let rows: Vec<(WorkspaceThreadComment, AccountRefRow)> = query
+        let rows: Vec<(WorkspaceReviewComment, AccountRefRow)> = query
             .select((
-                WorkspaceThreadComment::as_select(),
+                WorkspaceReviewComment::as_select(),
                 (
                     accounts::id,
                     accounts::username,
@@ -227,40 +227,40 @@ impl WorkspaceThreadCommentRepository for PgConnection {
     async fn update_comment_body(
         &mut self,
         comment_id: Uuid,
-        updates: UpdateWorkspaceThreadComment,
-    ) -> Result<WorkspaceThreadComment> {
-        use schema::workspace_thread_comments::{self, dsl};
+        updates: UpdateWorkspaceReviewComment,
+    ) -> Result<WorkspaceReviewComment> {
+        use schema::workspace_review_comments::{self, dsl};
 
         // An all-`None` changeset (here, no `body`) would make Diesel emit an empty
         // `SET` clause and fail with a query-builder error, so treat it as a no-op
         // and return the current comment unchanged.
         if updates.body.is_none() {
-            return workspace_thread_comments::table
+            return workspace_review_comments::table
                 .filter(dsl::id.eq(comment_id))
                 .filter(dsl::deleted_at.is_null())
-                .select(WorkspaceThreadComment::as_select())
+                .select(WorkspaceReviewComment::as_select())
                 .get_result(self)
                 .await
                 .map_err(Error::from);
         }
 
         diesel::update(
-            workspace_thread_comments::table
+            workspace_review_comments::table
                 .filter(dsl::id.eq(comment_id))
                 .filter(dsl::deleted_at.is_null()),
         )
         .set(&updates)
-        .returning(WorkspaceThreadComment::as_returning())
+        .returning(WorkspaceReviewComment::as_returning())
         .get_result(self)
         .await
         .map_err(Error::from)
     }
 
     async fn delete_comment(&mut self, comment_id: Uuid) -> Result<()> {
-        use schema::workspace_thread_comments::{self, dsl};
+        use schema::workspace_review_comments::{self, dsl};
 
         diesel::update(
-            workspace_thread_comments::table
+            workspace_review_comments::table
                 .filter(dsl::id.eq(comment_id))
                 .filter(dsl::deleted_at.is_null()),
         )

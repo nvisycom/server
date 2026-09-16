@@ -54,19 +54,16 @@ pub enum Permission {
 
     // Review / collaboration permissions
     //
-    // A document thread is the review of its document, so viewing and
-    // participating in a thread are the review permissions; a workspace thread is
-    // a free discussion that rides on the same two.
-    /// Can view threads: workspace discussions and document reviews (with their
-    /// assignee and status).
+    // A review is a named discussion on a document with a sign-off lifecycle;
+    // viewing and participating in one are the review permissions.
+    /// Can view reviews (with their assignees and status) and their discussions.
     ViewReviews,
-    /// Can participate: open a workspace thread, post/edit/delete one's own
-    /// comments, and verify a document review.
+    /// Can participate: open a review, post/edit/delete one's own comments, link
+    /// artifacts, and verify a review.
     Review,
-    /// Can close and reopen workspace discussion threads (document reviews derive
-    /// their status and are not closed this way).
-    ManageThreads,
-    /// Can assign a document's review to a reviewer and unassign it.
+    /// Can rename and delete reviews.
+    ManageReviews,
+    /// Can assign a review to a reviewer and unassign it.
     AssignReviews,
 
     // Reporting permissions
@@ -160,7 +157,7 @@ impl Permission {
             | Self::DeletePipelines
             | Self::RunDetections
             | Self::RunRedactions
-            | Self::ManageThreads
+            | Self::ManageReviews
             | Self::AssignReviews
             | Self::RunConnectionSyncs => WorkspaceRole::Editor,
 

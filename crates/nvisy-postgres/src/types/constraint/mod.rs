@@ -25,9 +25,9 @@ mod detections;
 mod pipeline_references;
 mod pipelines;
 
-// Thread-related constraint modules
-mod workspace_thread_comments;
-mod workspace_threads;
+// Review-related constraint modules
+mod workspace_review_comments;
+mod workspace_reviews;
 
 mod workspace_connection_syncs;
 mod workspace_connections;
@@ -48,8 +48,8 @@ pub use self::workspace_connections::WorkspaceConnectionConstraints;
 pub use self::workspace_invites::WorkspaceInviteConstraints;
 pub use self::workspace_members::WorkspaceMemberConstraints;
 pub use self::workspace_policies::WorkspacePolicyConstraints;
-pub use self::workspace_thread_comments::WorkspaceThreadCommentConstraints;
-pub use self::workspace_threads::WorkspaceThreadConstraints;
+pub use self::workspace_review_comments::WorkspaceReviewCommentConstraints;
+pub use self::workspace_reviews::WorkspaceReviewConstraints;
 pub use self::workspace_webhooks::WorkspaceWebhookConstraints;
 pub use self::workspaces::WorkspaceConstraints;
 
@@ -77,9 +77,9 @@ pub enum ConstraintViolation {
     WorkspaceDocument(WorkspaceDocumentConstraints),
     WorkspaceBlob(WorkspaceBlobConstraints),
 
-    // Comment-related constraints
-    WorkspaceThread(WorkspaceThreadConstraints),
-    WorkspaceThreadComment(WorkspaceThreadCommentConstraints),
+    // Review-related constraints
+    WorkspaceReview(WorkspaceReviewConstraints),
+    WorkspaceReviewComment(WorkspaceReviewCommentConstraints),
 
     // Detection / pipeline-related constraints
     WorkspacePipeline(WorkspacePipelineConstraints),
@@ -138,8 +138,8 @@ impl ConstraintViolation {
             WorkspaceWebhook,
             WorkspaceDocument,
             WorkspaceBlob,
-            WorkspaceThread,
-            WorkspaceThreadComment,
+            WorkspaceReview,
+            WorkspaceReviewComment,
             WorkspacePipeline,
             WorkspaceDetection,
             WorkspacePipelineReference,

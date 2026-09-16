@@ -18,8 +18,8 @@ use nvisy_postgres::types::{
     InviteActivityParams, MemberActivityParams, MemberJoinedParams, NotificationPayload,
     PipelineActivityParams, PolicyActivityParams, ProviderActivityParams, ProviderId,
     RedactionActivityParams, RedactionCreatedParams, RedactionId, ReviewActivityParams,
-    ReviewAssignedParams, ThreadActivityParams, ThreadCommentActivityParams, WebhookActivityParams,
-    WebhookEvent, WebhookId, WorkspaceActivityParams, WorkspaceRole,
+    ReviewAssignedParams, ReviewCommentActivityParams, WebhookActivityParams, WebhookEvent,
+    WebhookId, WorkspaceActivityParams, WorkspaceRole,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -60,6 +60,10 @@ workspace_events! {
     DocumentUpdated         => "document.updated",
     DocumentDeleted         => "document.deleted",
 
+    ReviewOpened            => "review.opened",
+    ReviewRenamed           => "review.renamed",
+    ReviewDeleted           => "review.deleted",
+    ReviewCommentCreated    => "review.comment.created",
     ReviewVerified          => "review.verified",
     ReviewAssigned          => "review.assigned",
     ReviewUnassigned        => "review.unassigned",
@@ -78,12 +82,6 @@ workspace_events! {
     PolicyUpdated           => "policy.updated",
     PolicyDeleted           => "policy.deleted",
 
-    ThreadOpened         => "thread.opened",
-    ThreadClosed         => "thread.closed",
-    ThreadReopened       => "thread.reopened",
-    ThreadRenamed        => "thread.renamed",
-    ThreadDeleted        => "thread.deleted",
-    ThreadCommentCreated => "thread.comment.created",
 }
 
 /// The webhook body for a document event: just the document's display name.
@@ -461,11 +459,145 @@ fn document_activity(document_id: Uuid, document_name: &str) -> DocumentActivity
     }
 }
 
-/// A document's review was verified (the review thread reached `resolved`). Raises no
-/// notification.
+/// A review was opened on a document. Feeds activity + webhook; raises no
+/// notification (a review opens empty, with no mentions).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewOpened {
+    pub review_id: Uuid,
+    pub document_id: Uuid,
+    pub document_name: String,
+}
+
+impl EventKind for ReviewOpened {
+    const TAG: &'static str = "review.opened";
+
+    fn resource_id(&self) -> Uuid {
+        self.review_id
+    }
+
+    fn activity(&self) -> ActivityPayload {
+        ActivityPayload::ReviewOpened(ReviewActivityParams {
+            review_id: self.review_id,
+            document_id: self.document_id,
+            assignee_id: None,
+        })
+    }
+
+    fn webhook(&self) -> Option<WebhookDelivery> {
+        Some(WebhookDelivery {
+            event: WebhookEvent::ReviewOpened,
+            body: webhook_body(&ReviewWebhookBody {
+                display_name: &self.document_name,
+                assignee_id: None,
+            }),
+        })
+    }
+}
+
+/// A review was renamed. Feeds activity + webhook, no notification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewRenamed {
+    pub review_id: Uuid,
+    pub document_id: Uuid,
+    pub document_name: String,
+}
+
+impl EventKind for ReviewRenamed {
+    const TAG: &'static str = "review.renamed";
+
+    fn resource_id(&self) -> Uuid {
+        self.review_id
+    }
+
+    fn activity(&self) -> ActivityPayload {
+        ActivityPayload::ReviewRenamed(ReviewActivityParams {
+            review_id: self.review_id,
+            document_id: self.document_id,
+            assignee_id: None,
+        })
+    }
+
+    fn webhook(&self) -> Option<WebhookDelivery> {
+        Some(WebhookDelivery {
+            event: WebhookEvent::ReviewRenamed,
+            body: webhook_body(&ReviewWebhookBody {
+                display_name: &self.document_name,
+                assignee_id: None,
+            }),
+        })
+    }
+}
+
+/// A review was deleted. Feeds activity only, no webhook and no notification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewDeleted {
+    pub review_id: Uuid,
+    pub document_id: Uuid,
+}
+
+impl EventKind for ReviewDeleted {
+    const TAG: &'static str = "review.deleted";
+
+    fn resource_id(&self) -> Uuid {
+        self.review_id
+    }
+
+    fn activity(&self) -> ActivityPayload {
+        ActivityPayload::ReviewDeleted(ReviewActivityParams {
+            review_id: self.review_id,
+            document_id: self.document_id,
+            assignee_id: None,
+        })
+    }
+}
+
+/// A comment (message) was posted in a review. Notifies each mentioned account
+/// (never the author, even if they @-mention themselves); activity only, no
+/// webhook (the review lifecycle carries the webhook signal).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewCommentCreated {
+    pub comment_id: Uuid,
+    pub review_id: Uuid,
+    /// Id of the comment's author, shown in the mention notification.
+    pub author_id: Uuid,
+    /// Accounts mentioned in the comment body, to notify. Empty when none.
+    pub mentioned: Vec<Uuid>,
+}
+
+impl EventKind for ReviewCommentCreated {
+    const TAG: &'static str = "review.comment.created";
+
+    fn resource_id(&self) -> Uuid {
+        self.comment_id
+    }
+
+    fn activity(&self) -> ActivityPayload {
+        ActivityPayload::ReviewCommentCreated(ReviewCommentActivityParams {
+            comment_id: self.comment_id,
+            review_id: self.review_id,
+        })
+    }
+
+    fn notification(self) -> Vec<Notification> {
+        // One "you were mentioned" notification per mentioned account.
+        self.mentioned
+            .into_iter()
+            .map(|recipient| Notification {
+                target: NotifyTarget::Account(recipient),
+                payload: NotificationPayload::CommentMentioned(CommentMentionedParams {
+                    comment_id: self.comment_id,
+                    review_id: self.review_id,
+                    author_id: self.author_id,
+                }),
+            })
+            .collect()
+    }
+}
+
+/// A review was verified (reached `resolved`). Raises no notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewVerified {
-    pub thread_id: Uuid,
+    pub review_id: Uuid,
     pub document_id: Uuid,
     pub document_name: String,
 }
@@ -474,12 +606,12 @@ impl EventKind for ReviewVerified {
     const TAG: &'static str = "review.verified";
 
     fn resource_id(&self) -> Uuid {
-        self.thread_id
+        self.review_id
     }
 
     fn activity(&self) -> ActivityPayload {
         ActivityPayload::ReviewVerified(ReviewActivityParams {
-            thread_id: self.thread_id,
+            review_id: self.review_id,
             document_id: self.document_id,
             assignee_id: None,
         })
@@ -501,7 +633,7 @@ impl EventKind for ReviewVerified {
 /// themselves.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewAssigned {
-    pub thread_id: Uuid,
+    pub review_id: Uuid,
     pub document_id: Uuid,
     pub document_name: String,
     pub assignee_id: Uuid,
@@ -512,12 +644,12 @@ impl EventKind for ReviewAssigned {
     const TAG: &'static str = "review.assigned";
 
     fn resource_id(&self) -> Uuid {
-        self.thread_id
+        self.review_id
     }
 
     fn activity(&self) -> ActivityPayload {
         ActivityPayload::ReviewAssigned(ReviewActivityParams {
-            thread_id: self.thread_id,
+            review_id: self.review_id,
             document_id: self.document_id,
             assignee_id: Some(self.assignee_id),
         })
@@ -537,7 +669,7 @@ impl EventKind for ReviewAssigned {
         Notification::to_account(
             self.notify,
             NotificationPayload::ReviewAssigned(ReviewAssignedParams {
-                thread_id: self.thread_id,
+                review_id: self.review_id,
                 document_id: self.document_id,
                 document_name: Some(self.document_name),
             }),
@@ -549,7 +681,7 @@ impl EventKind for ReviewAssigned {
 /// removed, so its name is optional. Raises no notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewUnassigned {
-    pub thread_id: Uuid,
+    pub review_id: Uuid,
     pub document_id: Uuid,
     pub document_name: Option<String>,
 }
@@ -558,12 +690,12 @@ impl EventKind for ReviewUnassigned {
     const TAG: &'static str = "review.unassigned";
 
     fn resource_id(&self) -> Uuid {
-        self.thread_id
+        self.review_id
     }
 
     fn activity(&self) -> ActivityPayload {
         ActivityPayload::ReviewUnassigned(ReviewActivityParams {
-            thread_id: self.thread_id,
+            review_id: self.review_id,
             document_id: self.document_id,
             assignee_id: None,
         })
@@ -757,125 +889,4 @@ crud_events! {
     PolicyUpdated => "policy.updated",
     /// A policy was deleted.
     PolicyDeleted => "policy.deleted",
-}
-
-/// A thread was opened with its first message. Feeds activity + webhook,
-/// and notifies each account mentioned in the opening body (never the author,
-/// even if they @-mention themselves).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ThreadOpened {
-    pub thread_id: Uuid,
-    /// Id of the thread's opening comment, referenced by mention notifications.
-    pub opening_comment_id: Uuid,
-    /// Id of the thread's opener, shown in the mention notification.
-    pub author_id: Uuid,
-    /// Accounts mentioned in the opening body, to notify. Empty when none.
-    pub mentioned: Vec<Uuid>,
-}
-
-impl EventKind for ThreadOpened {
-    const TAG: &'static str = "thread.opened";
-
-    fn resource_id(&self) -> Uuid {
-        self.thread_id
-    }
-
-    fn activity(&self) -> ActivityPayload {
-        ActivityPayload::ThreadOpened(ThreadActivityParams {
-            thread_id: self.thread_id,
-        })
-    }
-
-    fn webhook(&self) -> Option<WebhookDelivery> {
-        Some(WebhookDelivery {
-            event: WebhookEvent::ThreadOpened,
-            body: None,
-        })
-    }
-
-    fn notification(self) -> Vec<Notification> {
-        // One "you were mentioned" notification per mentioned account. The
-        // opening message is part of the thread; its mentions notify here.
-        self.mentioned
-            .into_iter()
-            .map(|recipient| Notification {
-                target: NotifyTarget::Account(recipient),
-                payload: NotificationPayload::CommentMentioned(CommentMentionedParams {
-                    comment_id: self.opening_comment_id,
-                    thread_id: self.thread_id,
-                    author_id: self.author_id,
-                }),
-            })
-            .collect()
-    }
-}
-
-// Thread close / reopen / rename: activity + webhook, no notification or extra
-// fields.
-crud_events! {
-    fields { thread_id: Uuid }
-    id = thread_id;
-    activity(this) = ThreadActivityParams { thread_id: this.thread_id };
-    webhook = yes;
-
-    /// A thread was closed.
-    ThreadClosed => "thread.closed",
-    /// A thread was reopened.
-    ThreadReopened => "thread.reopened",
-    /// A thread's title was changed.
-    ThreadRenamed => "thread.renamed",
-}
-
-// Thread deletion: activity only, no webhook.
-crud_events! {
-    fields { thread_id: Uuid }
-    id = thread_id;
-    activity(this) = ThreadActivityParams { thread_id: this.thread_id };
-    webhook = no;
-
-    /// A thread was deleted.
-    ThreadDeleted => "thread.deleted",
-}
-
-/// A comment (message) was posted in a thread. Notifies each mentioned account
-/// (never the author, even if they @-mention themselves); activity only, no
-/// webhook (thread lifecycle carries the webhook signal).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ThreadCommentCreated {
-    pub comment_id: Uuid,
-    pub thread_id: Uuid,
-    /// Id of the comment's author, shown in the mention notification.
-    pub author_id: Uuid,
-    /// Accounts mentioned in the comment body, to notify. Empty when none.
-    pub mentioned: Vec<Uuid>,
-}
-
-impl EventKind for ThreadCommentCreated {
-    const TAG: &'static str = "thread.comment.created";
-
-    fn resource_id(&self) -> Uuid {
-        self.comment_id
-    }
-
-    fn activity(&self) -> ActivityPayload {
-        ActivityPayload::ThreadCommentCreated(ThreadCommentActivityParams {
-            comment_id: self.comment_id,
-            thread_id: self.thread_id,
-        })
-    }
-
-    fn notification(self) -> Vec<Notification> {
-        // One "you were mentioned" notification per mentioned account.
-        self.mentioned
-            .into_iter()
-            .map(|recipient| Notification {
-                target: NotifyTarget::Account(recipient),
-                payload: NotificationPayload::CommentMentioned(CommentMentionedParams {
-                    comment_id: self.comment_id,
-                    thread_id: self.thread_id,
-                    author_id: self.author_id,
-                }),
-            })
-            .collect()
-    }
 }

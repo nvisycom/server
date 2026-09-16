@@ -2,7 +2,7 @@
 
 use nvisy_postgres::types::{
     WorkspaceActivitiesConstraints, WorkspaceConstraints, WorkspaceInviteConstraints,
-    WorkspaceMemberConstraints, WorkspaceThreadCommentConstraints, WorkspaceThreadConstraints,
+    WorkspaceMemberConstraints, WorkspaceReviewCommentConstraints, WorkspaceReviewConstraints,
     WorkspaceWebhookConstraints,
 };
 
@@ -46,23 +46,19 @@ impl From<WorkspaceMemberConstraints> for Error<'static> {
     }
 }
 
-impl From<WorkspaceThreadConstraints> for Error<'static> {
-    fn from(c: WorkspaceThreadConstraints) -> Self {
+impl From<WorkspaceReviewConstraints> for Error<'static> {
+    fn from(c: WorkspaceReviewConstraints) -> Self {
         match c {
-            WorkspaceThreadConstraints::DisplayNameLength => ErrorKind::BadRequest
-                .with_message("Thread title must be between 1 and 255 characters"),
-            WorkspaceThreadConstraints::ClosedConsistent => ErrorKind::InternalServerError
-                .with_message("Thread open/closed state is inconsistent"),
-            WorkspaceThreadConstraints::ReviewStatusFile => ErrorKind::InternalServerError
-                .with_message("Thread file and review-status presence are inconsistent"),
+            WorkspaceReviewConstraints::DisplayNameLength => ErrorKind::BadRequest
+                .with_message("Review title must be between 1 and 255 characters"),
         }
     }
 }
 
-impl From<WorkspaceThreadCommentConstraints> for Error<'static> {
-    fn from(c: WorkspaceThreadCommentConstraints) -> Self {
+impl From<WorkspaceReviewCommentConstraints> for Error<'static> {
+    fn from(c: WorkspaceReviewCommentConstraints) -> Self {
         match c {
-            WorkspaceThreadCommentConstraints::BodyLength => ErrorKind::BadRequest
+            WorkspaceReviewCommentConstraints::BodyLength => ErrorKind::BadRequest
                 .with_message("Comment body must be between 1 and 10000 characters"),
         }
     }

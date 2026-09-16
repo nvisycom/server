@@ -89,18 +89,19 @@ pub struct DocumentActivityParams {
     pub document_name: String,
 }
 
-/// Params of a document-review activity (`review.verified`, `review.assigned`,
-/// `review.unassigned`), where the review is the document's thread.
+/// Params of a review activity (`review.opened`, `review.reopened`,
+/// `review.renamed`, `review.deleted`, `review.verified`, `review.assigned`,
+/// `review.unassigned`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewActivityParams {
-    /// Id of the document's review thread.
-    pub thread_id: Uuid,
+    /// Id of the review.
+    pub review_id: Uuid,
     /// Id of the document under review.
     pub document_id: Uuid,
-    /// Id of the reviewer the review is assigned to; omitted for verification or
-    /// when clearing the assignee.
+    /// Id of the reviewer assigned or unassigned; omitted for the events that carry
+    /// no reviewer.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub assignee_id: Option<Uuid>,
 }
@@ -147,24 +148,15 @@ pub struct PolicyActivityParams {
     pub policy_id: Uuid,
 }
 
-/// Params of a comment-thread activity (`thread.*`).
+/// Params of a review-comment activity (`review.comment.created`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct ThreadActivityParams {
-    /// Id of the thread.
-    pub thread_id: Uuid,
-}
-
-/// Params of a thread-comment activity (`thread.comment.created`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct ThreadCommentActivityParams {
+pub struct ReviewCommentActivityParams {
     /// Id of the comment.
     pub comment_id: Uuid,
-    /// Id of the thread the comment is in.
-    pub thread_id: Uuid,
+    /// Id of the review the comment is in.
+    pub review_id: Uuid,
 }
 
 /// The typed payload of an audit-log activity, tagged by `type` with its params
@@ -260,13 +252,28 @@ pub enum ActivityPayload {
     #[serde(rename = "document.deleted")]
     DocumentDeleted(DocumentActivityParams),
 
-    /// A document's review was verified.
+    /// A review was opened.
+    #[serde(rename = "review.opened")]
+    ReviewOpened(ReviewActivityParams),
+    /// A review was reopened.
+    #[serde(rename = "review.reopened")]
+    ReviewReopened(ReviewActivityParams),
+    /// A review's title was changed.
+    #[serde(rename = "review.renamed")]
+    ReviewRenamed(ReviewActivityParams),
+    /// A review was deleted.
+    #[serde(rename = "review.deleted")]
+    ReviewDeleted(ReviewActivityParams),
+    /// A comment (message) was posted in a review.
+    #[serde(rename = "review.comment.created")]
+    ReviewCommentCreated(ReviewCommentActivityParams),
+    /// A review was verified.
     #[serde(rename = "review.verified")]
     ReviewVerified(ReviewActivityParams),
-    /// A document's review was assigned to a reviewer.
+    /// A review was assigned to a reviewer.
     #[serde(rename = "review.assigned")]
     ReviewAssigned(ReviewActivityParams),
-    /// A document's review assignee was cleared.
+    /// A review's reviewer was unassigned.
     #[serde(rename = "review.unassigned")]
     ReviewUnassigned(ReviewActivityParams),
 
@@ -301,25 +308,6 @@ pub enum ActivityPayload {
     /// A policy was deleted.
     #[serde(rename = "policy.deleted")]
     PolicyDeleted(PolicyActivityParams),
-
-    /// A thread was opened.
-    #[serde(rename = "thread.opened")]
-    ThreadOpened(ThreadActivityParams),
-    /// A thread was closed.
-    #[serde(rename = "thread.closed")]
-    ThreadClosed(ThreadActivityParams),
-    /// A thread was reopened.
-    #[serde(rename = "thread.reopened")]
-    ThreadReopened(ThreadActivityParams),
-    /// A thread's title was changed.
-    #[serde(rename = "thread.renamed")]
-    ThreadRenamed(ThreadActivityParams),
-    /// A thread was deleted.
-    #[serde(rename = "thread.deleted")]
-    ThreadDeleted(ThreadActivityParams),
-    /// A comment (message) was posted in a thread.
-    #[serde(rename = "thread.comment.created")]
-    ThreadCommentCreated(ThreadCommentActivityParams),
 }
 
 impl ActivityPayload {
@@ -353,6 +341,11 @@ impl ActivityPayload {
             ActivityPayload::DocumentCreated(_) => ActivityType::DocumentCreated,
             ActivityPayload::DocumentUpdated(_) => ActivityType::DocumentUpdated,
             ActivityPayload::DocumentDeleted(_) => ActivityType::DocumentDeleted,
+            ActivityPayload::ReviewOpened(_) => ActivityType::ReviewOpened,
+            ActivityPayload::ReviewReopened(_) => ActivityType::ReviewReopened,
+            ActivityPayload::ReviewRenamed(_) => ActivityType::ReviewRenamed,
+            ActivityPayload::ReviewDeleted(_) => ActivityType::ReviewDeleted,
+            ActivityPayload::ReviewCommentCreated(_) => ActivityType::ReviewCommentCreated,
             ActivityPayload::ReviewVerified(_) => ActivityType::ReviewVerified,
             ActivityPayload::ReviewAssigned(_) => ActivityType::ReviewAssigned,
             ActivityPayload::ReviewUnassigned(_) => ActivityType::ReviewUnassigned,
@@ -366,12 +359,6 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(_) => ActivityType::PolicyCreated,
             ActivityPayload::PolicyUpdated(_) => ActivityType::PolicyUpdated,
             ActivityPayload::PolicyDeleted(_) => ActivityType::PolicyDeleted,
-            ActivityPayload::ThreadOpened(_) => ActivityType::ThreadOpened,
-            ActivityPayload::ThreadClosed(_) => ActivityType::ThreadClosed,
-            ActivityPayload::ThreadReopened(_) => ActivityType::ThreadReopened,
-            ActivityPayload::ThreadRenamed(_) => ActivityType::ThreadRenamed,
-            ActivityPayload::ThreadDeleted(_) => ActivityType::ThreadDeleted,
-            ActivityPayload::ThreadCommentCreated(_) => ActivityType::ThreadCommentCreated,
         }
     }
 
@@ -392,8 +379,8 @@ impl ActivityPayload {
             | ActivityPayload::WebhookCreated(_)
             | ActivityPayload::WebhookUpdated(_)
             | ActivityPayload::WebhookDeleted(_)
-            | ActivityPayload::ThreadDeleted(_)
-            | ActivityPayload::ThreadCommentCreated(_) => return None,
+            | ActivityPayload::ReviewDeleted(_)
+            | ActivityPayload::ReviewCommentCreated(_) => return None,
 
             ActivityPayload::MemberAdded(_) => W::MemberAdded,
             ActivityPayload::MemberUpdated(_) => W::MemberUpdated,
@@ -410,6 +397,9 @@ impl ActivityPayload {
             ActivityPayload::DocumentCreated(_) => W::DocumentCreated,
             ActivityPayload::DocumentUpdated(_) => W::DocumentUpdated,
             ActivityPayload::DocumentDeleted(_) => W::DocumentDeleted,
+            ActivityPayload::ReviewOpened(_) => W::ReviewOpened,
+            ActivityPayload::ReviewReopened(_) => W::ReviewReopened,
+            ActivityPayload::ReviewRenamed(_) => W::ReviewRenamed,
             ActivityPayload::ReviewVerified(_) => W::ReviewVerified,
             ActivityPayload::ReviewAssigned(_) => W::ReviewAssigned,
             ActivityPayload::ReviewUnassigned(_) => W::ReviewUnassigned,
@@ -423,10 +413,6 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(_) => W::PolicyCreated,
             ActivityPayload::PolicyUpdated(_) => W::PolicyUpdated,
             ActivityPayload::PolicyDeleted(_) => W::PolicyDeleted,
-            ActivityPayload::ThreadOpened(_) => W::ThreadOpened,
-            ActivityPayload::ThreadClosed(_) => W::ThreadClosed,
-            ActivityPayload::ThreadReopened(_) => W::ThreadReopened,
-            ActivityPayload::ThreadRenamed(_) => W::ThreadRenamed,
         })
     }
 
@@ -477,9 +463,15 @@ impl ActivityPayload {
             | ActivityPayload::DocumentUpdated(p)
             | ActivityPayload::DocumentDeleted(p) => Some(p.document_id.to_string()),
 
-            ActivityPayload::ReviewVerified(p)
+            ActivityPayload::ReviewOpened(p)
+            | ActivityPayload::ReviewReopened(p)
+            | ActivityPayload::ReviewRenamed(p)
+            | ActivityPayload::ReviewDeleted(p)
+            | ActivityPayload::ReviewVerified(p)
             | ActivityPayload::ReviewAssigned(p)
-            | ActivityPayload::ReviewUnassigned(p) => Some(p.thread_id.to_string()),
+            | ActivityPayload::ReviewUnassigned(p) => Some(p.review_id.to_string()),
+
+            ActivityPayload::ReviewCommentCreated(p) => Some(p.comment_id.to_string()),
 
             ActivityPayload::DetectionStarted(p)
             | ActivityPayload::DetectionCompleted(p)
@@ -490,14 +482,6 @@ impl ActivityPayload {
             ActivityPayload::PolicyCreated(p)
             | ActivityPayload::PolicyUpdated(p)
             | ActivityPayload::PolicyDeleted(p) => Some(p.policy_id.to_string()),
-
-            ActivityPayload::ThreadOpened(p)
-            | ActivityPayload::ThreadClosed(p)
-            | ActivityPayload::ThreadReopened(p)
-            | ActivityPayload::ThreadRenamed(p)
-            | ActivityPayload::ThreadDeleted(p) => Some(p.thread_id.to_string()),
-
-            ActivityPayload::ThreadCommentCreated(p) => Some(p.comment_id.to_string()),
         }
     }
 
@@ -540,6 +524,11 @@ impl ActivityPayload {
             | ActivityPayload::MemberAdded(_)
             | ActivityPayload::MemberUpdated(_)
             | ActivityPayload::MemberDeleted(_)
+            | ActivityPayload::ReviewOpened(_)
+            | ActivityPayload::ReviewReopened(_)
+            | ActivityPayload::ReviewRenamed(_)
+            | ActivityPayload::ReviewDeleted(_)
+            | ActivityPayload::ReviewCommentCreated(_)
             | ActivityPayload::ReviewVerified(_)
             | ActivityPayload::ReviewAssigned(_)
             | ActivityPayload::ReviewUnassigned(_)
@@ -552,13 +541,7 @@ impl ActivityPayload {
             | ActivityPayload::RedactionCreated(_)
             | ActivityPayload::PolicyCreated(_)
             | ActivityPayload::PolicyUpdated(_)
-            | ActivityPayload::PolicyDeleted(_)
-            | ActivityPayload::ThreadOpened(_)
-            | ActivityPayload::ThreadClosed(_)
-            | ActivityPayload::ThreadReopened(_)
-            | ActivityPayload::ThreadRenamed(_)
-            | ActivityPayload::ThreadDeleted(_)
-            | ActivityPayload::ThreadCommentCreated(_) => None,
+            | ActivityPayload::PolicyDeleted(_) => None,
         }
     }
 }

@@ -100,14 +100,14 @@ pub struct DetectionFailedParams {
     pub error: Option<String>,
 }
 
-/// Params of a `review.assigned` notification, sent to the reviewer a document's
-/// review was assigned to.
+/// Params of a `review.assigned` notification, sent to the reviewer a review was
+/// assigned to.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewAssignedParams {
-    /// Id of the document's review thread.
-    pub thread_id: Uuid,
+    /// Id of the review.
+    pub review_id: Uuid,
     /// Id of the document to review.
     pub document_id: Uuid,
     /// Display name of the document to review, when it still exists.
@@ -122,8 +122,8 @@ pub struct ReviewAssignedParams {
 pub struct CommentMentionedParams {
     /// Id of the comment the account was mentioned in.
     pub comment_id: Uuid,
-    /// Id of the thread the comment is in.
-    pub thread_id: Uuid,
+    /// Id of the review the comment is in.
+    pub review_id: Uuid,
     /// Id of the account that wrote the comment (the mentioner).
     pub author_id: Uuid,
 }

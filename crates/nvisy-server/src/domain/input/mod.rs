@@ -10,7 +10,6 @@ mod workspace_invites;
 mod workspace_pipelines;
 mod workspace_policies;
 mod workspace_providers;
-mod workspace_threads;
 mod workspace_webhooks;
 
 pub use workspace_connections::*;
@@ -20,5 +19,4 @@ pub use workspace_invites::*;
 pub use workspace_pipelines::*;
 pub use workspace_policies::*;
 pub use workspace_providers::*;
-pub use workspace_threads::*;
 pub use workspace_webhooks::*;

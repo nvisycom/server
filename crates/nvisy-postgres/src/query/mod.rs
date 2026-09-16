@@ -39,10 +39,9 @@ mod workspace_policies;
 mod workspace_policy_versions;
 mod workspace_providers;
 mod workspace_redactions;
+mod workspace_review_comments;
+mod workspace_review_events;
 mod workspace_reviews;
-mod workspace_thread_comments;
-mod workspace_thread_events;
-mod workspace_threads;
 mod workspace_webhooks;
 mod workspaces;
 
@@ -84,11 +83,11 @@ pub use workspace_policies::{PolicyCursor, PolicyWithVersion, WorkspacePolicyRep
 pub use workspace_policy_versions::WorkspacePolicyVersionRepository;
 pub use workspace_providers::{ProviderCursor, WorkspaceProviderRepository};
 pub use workspace_redactions::{RedactionCursor, WorkspaceRedactionRepository};
+pub use workspace_review_comments::WorkspaceReviewCommentRepository;
+pub use workspace_review_events::{TimelineCursor, TimelineSource, WorkspaceReviewEventRepository};
 pub use workspace_reviews::{
-    DocumentReviewCursor, ReviewEventCursor, WithActor, WithReviewers, WorkspaceReviewRepository,
+    AssignmentOutcome, DocumentReviewCursor, ReviewEventCursor, WithActor, WithReviewers,
+    WorkspaceReviewRepository,
 };
-pub use workspace_thread_comments::WorkspaceThreadCommentRepository;
-pub use workspace_thread_events::{TimelineCursor, TimelineSource, WorkspaceThreadEventRepository};
-pub use workspace_threads::{ThreadCursor, WorkspaceThreadRepository};
 pub use workspace_webhooks::{WebhookCursor, WorkspaceWebhookRepository};
 pub use workspaces::WorkspaceRepository;

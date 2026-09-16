@@ -156,7 +156,7 @@ authz_permissions! {
     RunRedactions => Permission::RunRedactions,
     ViewReviews => Permission::ViewReviews,
     Review => Permission::Review,
-    ManageThreads => Permission::ManageThreads,
+    ManageReviews => Permission::ManageReviews,
     AssignReviews => Permission::AssignReviews,
     ViewAnalytics => Permission::ViewAnalytics,
     ViewActivity => Permission::ViewActivity,

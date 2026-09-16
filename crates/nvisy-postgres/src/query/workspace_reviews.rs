@@ -1,28 +1,28 @@
-//! Workspace document-review repository. A review is an optional, purpose-scoped
-//! sign-off effort on a document (0..N per document). It owns a discussion
-//! [`WorkspaceThread`] and references — does not own — the detections and
-//! redactions done for its purpose (via the link tables). A review is created
-//! explicitly (not auto-created by detection/redaction); its status is a manual
-//! reviewer workflow (`needs_review` → `in_review` → `resolved`, reopen). Every
-//! transition records an event on the review's own activity log
-//! ([`WorkspaceReviewEvent`]), distinct from the thread's discussion timeline.
+//! Workspace review repository. A review is a named discussion on a document with
+//! a manual sign-off lifecycle (0..N per document): an author, a title, a stream of
+//! comments and timeline events, and a status (`needs_review` → `in_review` →
+//! `resolved`, reopen). It references — does not own — the detections and
+//! redactions done for it (via the link tables). A review is created explicitly
+//! (not auto-created by detection/redaction). Opening a review records the
+//! `review.opened` event; renaming, linking, assignment, verification, and reopen
+//! each record their own event on the review's one timeline
+//! ([`WorkspaceReviewEvent`]), which the reader interleaves with the comments.
 //!
-//! [`WorkspaceThread`]: crate::model::WorkspaceThread
 //! [`WorkspaceReviewEvent`]: crate::model::WorkspaceReviewEvent
 
 use std::future::Future;
 
+use diesel::dsl::now;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use uuid::Uuid;
 
+use super::workspace_review_events::record_event;
 use crate::model::{
-    NewReviewAssignee, NewReviewDetection, NewReviewRedaction, NewWorkspaceReview,
-    NewWorkspaceReviewEvent, NewWorkspaceThread, WorkspaceReview, WorkspaceReviewEvent,
-    WorkspaceThread,
+    NewReviewAssignee, NewReviewDetection, NewReviewRedaction, NewWorkspaceReview, WorkspaceReview,
+    WorkspaceReviewEvent,
 };
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, DocumentReviewFilter, ReviewEventKind,
@@ -60,20 +60,30 @@ pub struct WithReviewers<T> {
 
 /// Read and write operations on document reviews.
 pub trait WorkspaceReviewRepository {
-    /// Opens a new review on a document: creates its discussion thread and the
-    /// review (at [`ReviewStatus::NeedsReview`]) together, in one transaction, and
-    /// returns the review. `purpose` is optional descriptive metadata. A document
-    /// may have any number of reviews.
+    /// Opens a new review on a document at [`ReviewStatus::NeedsReview`], recording
+    /// the `review.opened` timeline event, in one transaction, and returns the
+    /// review. `display_name` is the review's title. A document may have any number
+    /// of reviews.
     fn create_review(
         &mut self,
-        workspace_id: Uuid,
-        document_id: Uuid,
-        purpose: Option<String>,
-        actor: Uuid,
+        new_review: NewWorkspaceReview,
     ) -> impl Future<Output = Result<WorkspaceReview>> + Send;
 
-    /// Finds a review by id within a workspace.
+    /// Finds a live review by id within a workspace.
     fn find_review(
+        &mut self,
+        workspace_id: Uuid,
+        review_id: Uuid,
+    ) -> impl Future<Output = Result<Option<WorkspaceReview>>> + Send;
+
+    /// Finds a live review by id within a workspace, taking a row lock (`FOR
+    /// UPDATE`) so a concurrent status change serializes behind this read.
+    ///
+    /// Call inside a transaction that then acts on the review's state (e.g. posting
+    /// a comment only while it is not resolved): the lock makes the check and the
+    /// write atomic, closing the read-then-write race the unlocked
+    /// [`find_review`](Self::find_review) leaves open.
+    fn lock_review_in_workspace(
         &mut self,
         workspace_id: Uuid,
         review_id: Uuid,
@@ -95,6 +105,19 @@ pub trait WorkspaceReviewRepository {
         filter: &DocumentReviewFilter,
     ) -> impl Future<Output = Result<CursorPage<WithReviewers<WorkspaceReview>>>> + Send;
 
+    /// Sets a review's title, recording a `review.renamed` timeline event carrying
+    /// the new name, in one transaction.
+    fn rename_review(
+        &mut self,
+        review_id: Uuid,
+        display_name: String,
+        actor: Uuid,
+    ) -> impl Future<Output = Result<WorkspaceReview>> + Send;
+
+    /// Soft-deletes a review and all of its comments (its events are left in place,
+    /// hidden with the review).
+    fn delete_review(&mut self, review_id: Uuid) -> impl Future<Output = Result<()>> + Send;
+
     /// References a detection from a review (idempotent), recording a
     /// `detection.linked` event on first link. Returns the review.
     fn link_detection(
@@ -115,23 +138,26 @@ pub trait WorkspaceReviewRepository {
 
     /// Assigns a reviewer to a review (idempotent). Records an `assigned` event on
     /// first assignment and, when this is the first assignee of a non-resolved
-    /// review, moves it to `in_review`. Returns the review.
+    /// review, moves it to `in_review`. The [`AssignmentOutcome`] reports the review
+    /// and whether anything changed (`false` when the reviewer was already assigned).
     fn add_assignee(
         &mut self,
         review_id: Uuid,
         account_id: Uuid,
         actor: Uuid,
-    ) -> impl Future<Output = Result<WorkspaceReview>> + Send;
+    ) -> impl Future<Output = Result<AssignmentOutcome>> + Send;
 
     /// Removes a reviewer from a review. Records an `unassigned` event when a link
     /// existed and, when this clears the last assignee of a non-resolved review,
-    /// returns it to `needs_review`. Returns the review.
+    /// returns it to `needs_review`. The [`AssignmentOutcome`] reports the review and
+    /// whether a link was actually removed (`false` when the reviewer was not
+    /// assigned).
     fn remove_assignee(
         &mut self,
         review_id: Uuid,
         account_id: Uuid,
         actor: Uuid,
-    ) -> impl Future<Output = Result<WorkspaceReview>> + Send;
+    ) -> impl Future<Output = Result<AssignmentOutcome>> + Send;
 
     /// Lists a review's assignees' account references.
     fn list_review_assignees(
@@ -171,6 +197,17 @@ pub trait WorkspaceReviewRepository {
     ) -> impl Future<Output = Result<CursorPage<WithActor<WorkspaceReviewEvent>>>> + Send;
 }
 
+/// The result of an assignee add/remove: the (possibly status-updated) review and
+/// whether the operation actually changed anything (`false` for an idempotent
+/// no-op — an already-assigned add or a not-assigned remove).
+#[derive(Debug, Clone)]
+pub struct AssignmentOutcome {
+    /// The review after the operation.
+    pub review: WorkspaceReview,
+    /// Whether a link was added or removed (vs an idempotent no-op).
+    pub changed: bool,
+}
+
 /// A review event paired with its actor's account reference (absent when the
 /// account was removed).
 #[derive(Debug, Clone)]
@@ -182,39 +219,27 @@ pub struct WithActor<T> {
 }
 
 impl WorkspaceReviewRepository for PgConnection {
-    async fn create_review(
-        &mut self,
-        workspace_id: Uuid,
-        document_id: Uuid,
-        purpose: Option<String>,
-        actor: Uuid,
-    ) -> Result<WorkspaceReview> {
+    async fn create_review(&mut self, new_review: NewWorkspaceReview) -> Result<WorkspaceReview> {
         self.transaction(async |conn| {
-            let thread = {
-                use schema::workspace_threads;
-                diesel::insert_into(workspace_threads::table)
-                    .values(&NewWorkspaceThread {
-                        workspace_id,
-                        author_account_id: actor,
-                        display_name: None,
-                    })
-                    .returning(WorkspaceThread::as_returning())
-                    .get_result(conn)
-                    .await
-                    .map_err(Error::from)?
-            };
-
-            diesel::insert_into(schema::workspace_reviews::table)
-                .values(&NewWorkspaceReview {
-                    workspace_id,
-                    document_id,
-                    thread_id: thread.id,
-                    purpose,
-                })
+            let review = diesel::insert_into(schema::workspace_reviews::table)
+                .values(&new_review)
                 .returning(WorkspaceReview::as_returning())
-                .get_result(conn)
+                .get_result::<WorkspaceReview>(conn)
                 .await
-                .map_err(Error::from)
+                .map_err(Error::from)?;
+
+            // Record the review's opening as the first timeline event, so the stream
+            // begins with an explicit `review.opened` entry.
+            record_event(
+                conn,
+                &review,
+                ReviewEventKind::Opened,
+                review.author_account_id,
+                None,
+            )
+            .await?;
+
+            Ok(review)
         })
         .await
     }
@@ -229,7 +254,27 @@ impl WorkspaceReviewRepository for PgConnection {
         workspace_reviews::table
             .filter(dsl::id.eq(review_id))
             .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
             .select(WorkspaceReview::as_select())
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)
+    }
+
+    async fn lock_review_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        review_id: Uuid,
+    ) -> Result<Option<WorkspaceReview>> {
+        use schema::workspace_reviews::{self, dsl};
+
+        workspace_reviews::table
+            .filter(dsl::id.eq(review_id))
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspaceReview::as_select())
+            .for_update()
             .first(self)
             .await
             .optional()
@@ -246,6 +291,7 @@ impl WorkspaceReviewRepository for PgConnection {
         let reviews: Vec<WorkspaceReview> = workspace_reviews::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::document_id.eq(document_id))
+            .filter(dsl::deleted_at.is_null())
             .order((dsl::created_at.desc(), dsl::id.desc()))
             .select(WorkspaceReview::as_select())
             .load(self)
@@ -268,9 +314,13 @@ impl WorkspaceReviewRepository for PgConnection {
         let scoped = || {
             let mut query = workspace_reviews::table
                 .filter(dsl::workspace_id.eq(workspace_id))
+                .filter(dsl::deleted_at.is_null())
                 .into_boxed();
             if let Some(document_id) = filter.document_id {
                 query = query.filter(dsl::document_id.eq(document_id));
+            }
+            if let Some(author_account_id) = filter.author_account_id {
+                query = query.filter(dsl::author_account_id.eq(author_account_id));
             }
             if let Some(assignee) = filter.assignee_account_id {
                 use schema::workspace_review_assignees as wra;
@@ -324,6 +374,67 @@ impl WorkspaceReviewRepository for PgConnection {
         }))
     }
 
+    async fn rename_review(
+        &mut self,
+        review_id: Uuid,
+        display_name: String,
+        actor: Uuid,
+    ) -> Result<WorkspaceReview> {
+        self.transaction(async |conn| {
+            use schema::workspace_reviews::{self, dsl};
+
+            let review = diesel::update(
+                workspace_reviews::table
+                    .filter(dsl::id.eq(review_id))
+                    .filter(dsl::deleted_at.is_null()),
+            )
+            .set(dsl::display_name.eq(display_name.clone()))
+            .returning(WorkspaceReview::as_returning())
+            .get_result(conn)
+            .await
+            .map_err(Error::from)?;
+
+            // The new name is the event's target so the timeline shows what it was
+            // renamed to.
+            let target = serde_json::json!({ "displayName": display_name });
+            record_event(conn, &review, ReviewEventKind::Renamed, actor, Some(target)).await?;
+            Ok(review)
+        })
+        .await
+    }
+
+    async fn delete_review(&mut self, review_id: Uuid) -> Result<()> {
+        self.transaction(async |conn| {
+            use schema::{workspace_review_comments, workspace_reviews};
+
+            // Soft-delete the review and its live comments together, so a deleted
+            // review leaves no live messages behind. (The FK cascade only fires on a
+            // hard delete; comments are hidden here by their own `deleted_at`.)
+            diesel::update(
+                workspace_reviews::table
+                    .filter(workspace_reviews::id.eq(review_id))
+                    .filter(workspace_reviews::deleted_at.is_null()),
+            )
+            .set(workspace_reviews::deleted_at.eq(now))
+            .execute(conn)
+            .await
+            .map_err(Error::from)?;
+
+            diesel::update(
+                workspace_review_comments::table
+                    .filter(workspace_review_comments::review_id.eq(review_id))
+                    .filter(workspace_review_comments::deleted_at.is_null()),
+            )
+            .set(workspace_review_comments::deleted_at.eq(now))
+            .execute(conn)
+            .await
+            .map_err(Error::from)?;
+
+            Ok(())
+        })
+        .await
+    }
+
     async fn link_detection(
         &mut self,
         review_id: Uuid,
@@ -345,7 +456,7 @@ impl WorkspaceReviewRepository for PgConnection {
 
             // Record the link only when it is new (idempotent re-link is silent).
             if inserted > 0 {
-                record_review_event(
+                record_event(
                     conn,
                     &review,
                     ReviewEventKind::DetectionLinked,
@@ -379,7 +490,7 @@ impl WorkspaceReviewRepository for PgConnection {
                 .map_err(Error::from)?;
 
             if inserted > 0 {
-                record_review_event(
+                record_event(
                     conn,
                     &review,
                     ReviewEventKind::RedactionLinked,
@@ -398,9 +509,11 @@ impl WorkspaceReviewRepository for PgConnection {
         review_id: Uuid,
         account_id: Uuid,
         actor: Uuid,
-    ) -> Result<WorkspaceReview> {
+    ) -> Result<AssignmentOutcome> {
         self.transaction(async |conn| {
-            let review = load_review(conn, review_id).await?;
+            // Lock the review row so the assignment insert and the status decision
+            // that reads from it serialize against a concurrent assign/remove/verify.
+            let review = lock_review(conn, review_id).await?;
 
             let inserted = diesel::insert_into(schema::workspace_review_assignees::table)
                 .values(&NewReviewAssignee {
@@ -414,10 +527,13 @@ impl WorkspaceReviewRepository for PgConnection {
 
             // Already assigned: idempotent no-op, no event, no status change.
             if inserted == 0 {
-                return Ok(review);
+                return Ok(AssignmentOutcome {
+                    review,
+                    changed: false,
+                });
             }
 
-            record_review_event(
+            record_event(
                 conn,
                 &review,
                 ReviewEventKind::Assigned,
@@ -428,10 +544,15 @@ impl WorkspaceReviewRepository for PgConnection {
 
             // The first assignee of a not-yet-resolved review takes it to
             // `in_review`; a resolved review keeps its status (reopen is explicit).
-            if review.review_status == ReviewStatus::NeedsReview {
-                return update_status(conn, review_id, ReviewStatus::InReview).await;
-            }
-            Ok(review)
+            let review = if review.review_status == ReviewStatus::NeedsReview {
+                update_status(conn, review_id, ReviewStatus::InReview).await?
+            } else {
+                review
+            };
+            Ok(AssignmentOutcome {
+                review,
+                changed: true,
+            })
         })
         .await
     }
@@ -441,11 +562,11 @@ impl WorkspaceReviewRepository for PgConnection {
         review_id: Uuid,
         account_id: Uuid,
         actor: Uuid,
-    ) -> Result<WorkspaceReview> {
+    ) -> Result<AssignmentOutcome> {
         self.transaction(async |conn| {
             use schema::workspace_review_assignees as wra;
 
-            let review = load_review(conn, review_id).await?;
+            let review = lock_review(conn, review_id).await?;
 
             let deleted = diesel::delete(
                 wra::table
@@ -458,10 +579,13 @@ impl WorkspaceReviewRepository for PgConnection {
 
             // Not assigned: nothing to do.
             if deleted == 0 {
-                return Ok(review);
+                return Ok(AssignmentOutcome {
+                    review,
+                    changed: false,
+                });
             }
 
-            record_review_event(
+            record_event(
                 conn,
                 &review,
                 ReviewEventKind::Unassigned,
@@ -472,7 +596,7 @@ impl WorkspaceReviewRepository for PgConnection {
 
             // Clearing the last assignee of an in-review review returns it to
             // `needs_review`; a resolved review keeps its status.
-            if review.review_status == ReviewStatus::InReview {
+            let review = if review.review_status == ReviewStatus::InReview {
                 let remaining: i64 = wra::table
                     .filter(wra::review_id.eq(review_id))
                     .count()
@@ -480,10 +604,17 @@ impl WorkspaceReviewRepository for PgConnection {
                     .await
                     .map_err(Error::from)?;
                 if remaining == 0 {
-                    return update_status(conn, review_id, ReviewStatus::NeedsReview).await;
+                    update_status(conn, review_id, ReviewStatus::NeedsReview).await?
+                } else {
+                    review
                 }
-            }
-            Ok(review)
+            } else {
+                review
+            };
+            Ok(AssignmentOutcome {
+                review,
+                changed: true,
+            })
         })
         .await
     }
@@ -523,7 +654,7 @@ impl WorkspaceReviewRepository for PgConnection {
             .await
             .map_err(Error::from)?;
 
-            record_review_event(conn, &review, ReviewEventKind::Verified, actor, None).await?;
+            record_event(conn, &review, ReviewEventKind::Verified, actor, None).await?;
             Ok(review)
         })
         .await
@@ -549,8 +680,7 @@ impl WorkspaceReviewRepository for PgConnection {
 
             match reopened {
                 Some(review) => {
-                    record_review_event(conn, &review, ReviewEventKind::Reopened, actor, None)
-                        .await?;
+                    record_event(conn, &review, ReviewEventKind::Reopened, actor, None).await?;
                     Ok(review)
                 }
                 None => load_review(conn, review_id).await,
@@ -637,6 +767,21 @@ async fn load_review(conn: &mut PgConnection, review_id: Uuid) -> Result<Workspa
         .map_err(Error::from)
 }
 
+/// Loads a review by id under a row lock (`FOR UPDATE`) or returns `NotFound`, so
+/// a read-decide-write on its status serializes against concurrent mutators. Call
+/// inside a transaction.
+async fn lock_review(conn: &mut PgConnection, review_id: Uuid) -> Result<WorkspaceReview> {
+    use schema::workspace_reviews::{self, dsl};
+
+    workspace_reviews::table
+        .filter(dsl::id.eq(review_id))
+        .select(WorkspaceReview::as_select())
+        .for_update()
+        .first(conn)
+        .await
+        .map_err(Error::from)
+}
+
 /// Sets a review's status and returns the updated row.
 async fn update_status(
     conn: &mut PgConnection,
@@ -696,34 +841,15 @@ async fn attach_assignees(
         .collect())
 }
 
-/// Inserts one review activity event.
-async fn record_review_event(
-    conn: &mut PgConnection,
-    review: &WorkspaceReview,
-    kind: ReviewEventKind,
-    actor: Uuid,
-    target: Option<Value>,
-) -> Result<()> {
-    use schema::workspace_review_events;
-
-    diesel::insert_into(workspace_review_events::table)
-        .values(&NewWorkspaceReviewEvent {
-            workspace_id: review.workspace_id,
-            review_id: review.id,
-            kind,
-            actor_account_id: Some(actor),
-            target,
-        })
-        .execute(conn)
-        .await
-        .map_err(Error::from)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::model::NewAccount;
-    use crate::query::{AccountRepository, WorkspaceReviewRepository, WorkspaceThreadRepository};
+    use crate::model::{
+        NewAccount, NewWorkspaceReview, NewWorkspaceReviewComment, UpdateWorkspaceReviewComment,
+    };
+    use crate::query::{
+        AccountRepository, TimelineCursor, TimelineSource, WorkspaceReviewCommentRepository,
+        WorkspaceReviewEventRepository, WorkspaceReviewRepository,
+    };
     use crate::test_util::TestDatabase;
     use crate::types::{
         CursorPagination, Direction, DocumentReviewFilter, ReviewEventKind, ReviewStatus,
@@ -735,30 +861,26 @@ mod tests {
         let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
-        // A document can have many reviews (0..N), one per purpose.
+        // A document can have many reviews (0..N).
         let public = conn
-            .create_review(
-                seeded.workspace_id,
-                seeded.document_id,
-                Some("Public release".to_owned()),
-                seeded.account_id,
-            )
+            .create_review(NewWorkspaceReview {
+                workspace_id: seeded.workspace_id,
+                document_id: seeded.document_id,
+                author_account_id: seeded.account_id,
+                display_name: "Public release".to_owned(),
+            })
             .await?;
         let legal = conn
-            .create_review(
-                seeded.workspace_id,
-                seeded.document_id,
-                Some("Court filing".to_owned()),
-                seeded.account_id,
-            )
+            .create_review(NewWorkspaceReview {
+                workspace_id: seeded.workspace_id,
+                document_id: seeded.document_id,
+                author_account_id: seeded.account_id,
+                display_name: "Court filing".to_owned(),
+            })
             .await?;
         assert_ne!(public.id, legal.id);
-        assert_ne!(
-            public.thread_id, legal.thread_id,
-            "each review owns its thread"
-        );
         assert_eq!(public.review_status, ReviewStatus::NeedsReview);
-        assert_eq!(public.purpose.as_deref(), Some("Public release"));
+        assert_eq!(public.display_name, "Public release");
 
         // Both are listed for the document.
         let reviews = conn
@@ -769,6 +891,176 @@ mod tests {
         // Found by id within the workspace.
         let found = conn.find_review(seeded.workspace_id, legal.id).await?;
         assert_eq!(found.map(|r| r.id), Some(legal.id));
+
+        // Opening a review records a `review.opened` event as the timeline's start.
+        let kinds: Vec<_> = conn
+            .list_review_events(public.id)
+            .await?
+            .into_iter()
+            .map(|(e, _)| e.kind)
+            .collect();
+        assert_eq!(kinds, vec![ReviewEventKind::Opened]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rename_records_the_new_name() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_pipeline_and_document().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let review = conn
+            .create_review(NewWorkspaceReview::test(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            ))
+            .await?;
+
+        let renamed = conn
+            .rename_review(review.id, "A title".to_owned(), seeded.account_id)
+            .await?;
+        assert_eq!(renamed.display_name, "A title");
+
+        let kinds: Vec<_> = conn
+            .list_review_events(review.id)
+            .await?
+            .into_iter()
+            .map(|(e, _)| e.kind)
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![ReviewEventKind::Opened, ReviewEventKind::Renamed]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn comment_edit_and_delete() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_pipeline_and_document().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let review = conn
+            .create_review(NewWorkspaceReview::test(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            ))
+            .await?;
+
+        let comment = conn
+            .create_comment(NewWorkspaceReviewComment::test(
+                seeded.workspace_id,
+                review.id,
+                seeded.account_id,
+            ))
+            .await?;
+        assert_eq!(comment.review_id, review.id);
+
+        let edited = conn
+            .update_comment_body(
+                comment.id,
+                UpdateWorkspaceReviewComment {
+                    body: Some("Edited.".to_owned()),
+                },
+            )
+            .await?;
+        assert_eq!(edited.body, "Edited.");
+
+        conn.delete_comment(comment.id).await?;
+        assert!(
+            conn.find_comment_in_workspace(seeded.workspace_id, comment.id)
+                .await?
+                .is_none()
+        );
+        // The review still exists after deleting a message.
+        assert!(
+            conn.find_review(seeded.workspace_id, review.id)
+                .await?
+                .is_some()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn delete_review_hides_it_and_its_comments() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_pipeline_and_document().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let review = conn
+            .create_review(NewWorkspaceReview::test(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            ))
+            .await?;
+        conn.create_comment(NewWorkspaceReviewComment::test(
+            seeded.workspace_id,
+            review.id,
+            seeded.account_id,
+        ))
+        .await?;
+
+        conn.delete_review(review.id).await?;
+        assert!(
+            conn.find_review(seeded.workspace_id, review.id)
+                .await?
+                .is_none()
+        );
+        assert!(
+            conn.list_review_comments(seeded.workspace_id, review.id)
+                .await?
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_reply_is_unique_per_triggering_comment() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_pipeline_and_document().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let review = conn
+            .create_review(NewWorkspaceReview::test(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            ))
+            .await?;
+        let trigger = conn
+            .create_comment(NewWorkspaceReviewComment {
+                parent_id: None,
+                workspace_id: seeded.workspace_id,
+                review_id: review.id,
+                author_account_id: seeded.account_id,
+                body: "@assistant help".to_owned(),
+            })
+            .await?;
+
+        let reply = |body: &str| NewWorkspaceReviewComment {
+            workspace_id: seeded.workspace_id,
+            review_id: review.id,
+            author_account_id: seeded.account_id,
+            parent_id: Some(trigger.id),
+            body: body.to_owned(),
+        };
+
+        // The first reply to the triggering comment posts.
+        let first = conn.create_reply(reply("first")).await?;
+        assert!(first.is_some());
+
+        // A second reply to the same comment is rejected by the partial unique index
+        // and reported as "already replied" (None), never a duplicate.
+        let second = conn.create_reply(reply("second")).await?;
+        assert!(second.is_none());
+
+        // After the first reply is soft-deleted, a new reply may be posted again.
+        conn.delete_comment(first.unwrap().id).await?;
+        let third = conn.create_reply(reply("third")).await?;
+        assert!(third.is_some());
         Ok(())
     }
 
@@ -783,25 +1075,29 @@ mod tests {
         let mut conn = db.client.get_connection().await?;
 
         let review = conn
-            .create_review(
+            .create_review(NewWorkspaceReview::test(
                 seeded.workspace_id,
                 seeded.document_id,
-                None,
                 seeded.account_id,
-            )
+            ))
             .await?;
 
-        // First assignee moves needs_review -> in_review.
+        // First assignee moves needs_review -> in_review (a real change).
         let a = conn
             .add_assignee(review.id, seeded.account_id, seeded.account_id)
             .await?;
-        assert_eq!(a.review_status, ReviewStatus::InReview);
+        assert!(a.changed);
+        assert_eq!(a.review.review_status, ReviewStatus::InReview);
 
         // A second assignee is added (still in_review); re-adding the same one is a
-        // no-op (idempotent).
+        // no-op (idempotent), reported as `changed = false`.
         conn.add_assignee(review.id, bob, seeded.account_id).await?;
         let again = conn.add_assignee(review.id, bob, seeded.account_id).await?;
-        assert_eq!(again.review_status, ReviewStatus::InReview);
+        assert!(
+            !again.changed,
+            "re-adding an existing assignee changes nothing"
+        );
+        assert_eq!(again.review.review_status, ReviewStatus::InReview);
         let assignees = conn.list_review_assignees(review.id).await?;
         assert_eq!(assignees.len(), 2, "two distinct assignees");
 
@@ -809,17 +1105,24 @@ mod tests {
         let one_left = conn
             .remove_assignee(review.id, bob, seeded.account_id)
             .await?;
-        assert_eq!(one_left.review_status, ReviewStatus::InReview);
+        assert!(one_left.changed);
+        assert_eq!(one_left.review.review_status, ReviewStatus::InReview);
 
         // Removing the last returns it to needs_review.
         let none_left = conn
             .remove_assignee(review.id, seeded.account_id, seeded.account_id)
             .await?;
-        assert_eq!(none_left.review_status, ReviewStatus::NeedsReview);
+        assert_eq!(none_left.review.review_status, ReviewStatus::NeedsReview);
         assert!(conn.list_review_assignees(review.id).await?.is_empty());
 
-        // The timeline records the assign/unassign activity (oldest first): two
-        // assigns (the idempotent re-add records nothing), then two unassigns.
+        // Removing a not-assigned reviewer is a no-op (changed = false).
+        let noop = conn
+            .remove_assignee(review.id, bob, seeded.account_id)
+            .await?;
+        assert!(!noop.changed, "removing a non-assignee changes nothing");
+
+        // The timeline records opened, then the assign/unassign activity (oldest
+        // first): two assigns (the idempotent re-add records nothing), two unassigns.
         let kinds: Vec<_> = conn
             .cursor_list_review_events(
                 review.id,
@@ -833,6 +1136,7 @@ mod tests {
         assert_eq!(
             kinds,
             vec![
+                ReviewEventKind::Opened,
                 ReviewEventKind::Assigned,
                 ReviewEventKind::Assigned,
                 ReviewEventKind::Unassigned,
@@ -849,12 +1153,11 @@ mod tests {
         let mut conn = db.client.get_connection().await?;
 
         let review = conn
-            .create_review(
+            .create_review(NewWorkspaceReview::test(
                 seeded.workspace_id,
                 seeded.document_id,
-                None,
                 seeded.account_id,
-            )
+            ))
             .await?;
         let resolved = conn.verify_review(review.id, seeded.account_id).await?;
         assert_eq!(resolved.review_status, ReviewStatus::Resolved);
@@ -864,7 +1167,7 @@ mod tests {
         let assigned = conn
             .add_assignee(review.id, seeded.account_id, seeded.account_id)
             .await?;
-        assert_eq!(assigned.review_status, ReviewStatus::Resolved);
+        assert_eq!(assigned.review.review_status, ReviewStatus::Resolved);
         assert_eq!(conn.list_review_assignees(review.id).await?.len(), 1);
         Ok(())
     }
@@ -876,20 +1179,18 @@ mod tests {
         let mut conn = db.client.get_connection().await?;
 
         let a = conn
-            .create_review(
+            .create_review(NewWorkspaceReview::test(
                 seeded.workspace_id,
                 seeded.document_id,
-                None,
                 seeded.account_id,
-            )
+            ))
             .await?;
         let _b = conn
-            .create_review(
+            .create_review(NewWorkspaceReview::test(
                 seeded.workspace_id,
                 seeded.document_id,
-                None,
                 seeded.account_id,
-            )
+            ))
             .await?;
         conn.add_assignee(a.id, seeded.account_id, seeded.account_id)
             .await?;
@@ -912,27 +1213,113 @@ mod tests {
         Ok(())
     }
 
+    /// A merged-timeline page: one entry with its sort key, mirroring how the
+    /// handler interleaves the two streams. `(created_at, source, id)`.
+    type Entry = (jiff::Timestamp, TimelineSource, uuid::Uuid);
+
+    /// Fetches one page of the merged timeline (comments + events) after `cursor`,
+    /// mirroring the handler: pull `limit + 1` from each stream, merge by
+    /// `(created_at, source, id)`, keep `limit`, and return the next cursor.
+    async fn timeline_page(
+        conn: &mut crate::PgConn,
+        workspace_id: uuid::Uuid,
+        review_id: uuid::Uuid,
+        after: Option<&TimelineCursor>,
+        limit: i64,
+    ) -> anyhow::Result<(Vec<Entry>, Option<TimelineCursor>)> {
+        let fetch = limit + 1;
+        let comments = conn
+            .list_review_comments_after(workspace_id, review_id, after, fetch)
+            .await?;
+        let events = conn
+            .list_review_events_after(review_id, after, fetch)
+            .await?;
+
+        let mut merged: Vec<Entry> = Vec::new();
+        merged.extend(
+            comments
+                .iter()
+                .map(|c| (c.item.created_at.into(), TimelineSource::Comment, c.item.id)),
+        );
+        merged.extend(
+            events
+                .iter()
+                .map(|(e, _)| (e.created_at.into(), TimelineSource::Event, e.id)),
+        );
+        merged.sort();
+
+        let next = if i64::try_from(merged.len()).unwrap_or(i64::MAX) > limit {
+            merged.truncate(usize::try_from(limit).unwrap_or(0));
+            merged
+                .last()
+                .map(|&(created_at, source, id)| TimelineCursor {
+                    created_at,
+                    source,
+                    id,
+                })
+        } else {
+            None
+        };
+        Ok((merged, next))
+    }
+
     #[tokio::test]
-    async fn deleting_a_review_leaves_its_thread() -> anyhow::Result<()> {
-        // A review owns a thread; the thread is a plain discussion primitive that
-        // outlives nothing on its own here — we only assert the thread was created
-        // and is findable, confirming the create wired both rows.
+    async fn timeline_pages_comments_and_events_in_one_order() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_pipeline_and_document().await;
         let mut conn = db.client.get_connection().await?;
 
+        // A review with a known set of timeline entries: opening (1 event), two
+        // comments, and a rename (1 event) = 4 entries.
         let review = conn
-            .create_review(
+            .create_review(NewWorkspaceReview::test(
                 seeded.workspace_id,
                 seeded.document_id,
-                None,
                 seeded.account_id,
+            ))
+            .await?;
+        conn.create_comment(NewWorkspaceReviewComment::test(
+            seeded.workspace_id,
+            review.id,
+            seeded.account_id,
+        ))
+        .await?;
+        conn.create_comment(NewWorkspaceReviewComment::test(
+            seeded.workspace_id,
+            review.id,
+            seeded.account_id,
+        ))
+        .await?;
+        conn.rename_review(review.id, "Renamed".to_owned(), seeded.account_id)
+            .await?;
+
+        // The full merged timeline (a big first page) is every entry in order.
+        let (all, _) = timeline_page(&mut conn, seeded.workspace_id, review.id, None, 50).await?;
+        assert_eq!(all.len(), 4);
+        // It is sorted ascending by (created_at, source, id).
+        let mut sorted = all.clone();
+        sorted.sort();
+        assert_eq!(all, sorted);
+
+        // Paging in windows of 2 walks the same order with no gaps or repeats.
+        let mut paged: Vec<Entry> = Vec::new();
+        let mut cursor: Option<TimelineCursor> = None;
+        loop {
+            let (page, next) = timeline_page(
+                &mut conn,
+                seeded.workspace_id,
+                review.id,
+                cursor.as_ref(),
+                2,
             )
             .await?;
-        let thread = conn
-            .find_thread_in_workspace(seeded.workspace_id, review.thread_id)
-            .await?;
-        assert!(thread.is_some(), "the review's discussion thread exists");
+            paged.extend(page);
+            match next {
+                Some(c) => cursor = Some(c),
+                None => break,
+            }
+        }
+        assert_eq!(paged, all);
         Ok(())
     }
 }

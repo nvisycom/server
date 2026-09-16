@@ -1,7 +1,7 @@
-//! Workspace thread-event repository: the immutable timeline entries (the
-//! discussion lifecycle and a file thread's review transitions) that the reader
-//! interleaves with the comments. Also houses the shared `record_event` helper
-//! the thread repository uses to record those events.
+//! Workspace review-event repository: the immutable timeline entries (the review
+//! lifecycle and its sign-off workflow) that the reader interleaves with the
+//! comments. Also houses the shared `record_event` helper the review repository
+//! uses to record those events.
 
 use std::future::Future;
 
@@ -12,16 +12,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::model::{NewWorkspaceThreadEvent, WorkspaceThread, WorkspaceThreadEvent};
-use crate::types::{AccountRefRow, ThreadEventKind};
+use crate::model::{NewWorkspaceReviewEvent, WorkspaceReview, WorkspaceReviewEvent};
+use crate::types::{AccountRefRow, ReviewEventKind};
 use crate::{Error, PgConnection, Result, schema};
 
 /// Which of the two timeline streams an entry came from. Its order is the
 /// tiebreak between an event and a comment that share a `created_at`: an event
-/// sorts before a comment at the same instant. This is what makes a thread's
-/// opening render in the natural order — the `Opened` event and the opening
-/// comment are written in the same transaction (and can share an instant), and
-/// the event is the one that logically comes first.
+/// sorts before a comment at the same instant. This is what makes a review's
+/// opening render in the natural order — the `Opened` event is written first.
 ///
 /// The variant order is significant: it is the derived `Ord` the timeline sorts
 /// by, so `Event` must be declared before `Comment`.
@@ -35,7 +33,7 @@ pub enum TimelineSource {
     Comment,
 }
 
-/// Keyset for the merged thread timeline: comments and events ordered together by
+/// Keyset for the merged review timeline: comments and events ordered together by
 /// `(created_at, source, id)` ascending. `source` breaks a `created_at` tie
 /// between the two streams; `id` breaks a tie within one stream.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,41 +83,41 @@ pub(crate) enum StreamBound {
     FromInstant { created_at: Timestamp },
 }
 
-/// Read operations on a thread's timeline events.
-pub trait WorkspaceThreadEventRepository {
-    /// Lists a thread's timeline events, oldest first, each paired with the
+/// Read operations on a review's timeline events.
+pub trait WorkspaceReviewEventRepository {
+    /// Lists a review's timeline events, oldest first, each paired with the
     /// actor's account reference when the actor still exists.
-    fn list_thread_events(
+    fn list_review_events(
         &mut self,
-        thread_id: Uuid,
-    ) -> impl Future<Output = Result<Vec<(WorkspaceThreadEvent, Option<AccountRefRow>)>>> + Send;
+        review_id: Uuid,
+    ) -> impl Future<Output = Result<Vec<(WorkspaceReviewEvent, Option<AccountRefRow>)>>> + Send;
 
-    /// Lists up to `limit` of a thread's timeline events at or after a cursor
+    /// Lists up to `limit` of a review's timeline events at or after a cursor
     /// position, oldest first, each with its actor's account reference. Backs the
     /// merged, paginated timeline; the caller interleaves these with the comments.
-    fn list_thread_events_after(
+    fn list_review_events_after(
         &mut self,
-        thread_id: Uuid,
+        review_id: Uuid,
         after: Option<&TimelineCursor>,
         limit: i64,
-    ) -> impl Future<Output = Result<Vec<(WorkspaceThreadEvent, Option<AccountRefRow>)>>> + Send;
+    ) -> impl Future<Output = Result<Vec<(WorkspaceReviewEvent, Option<AccountRefRow>)>>> + Send;
 }
 
-impl WorkspaceThreadEventRepository for PgConnection {
-    async fn list_thread_events(
+impl WorkspaceReviewEventRepository for PgConnection {
+    async fn list_review_events(
         &mut self,
-        thread_id: Uuid,
-    ) -> Result<Vec<(WorkspaceThreadEvent, Option<AccountRefRow>)>> {
+        review_id: Uuid,
+    ) -> Result<Vec<(WorkspaceReviewEvent, Option<AccountRefRow>)>> {
         use schema::accounts;
-        use schema::workspace_thread_events::{self, dsl};
+        use schema::workspace_review_events::{self, dsl};
 
         // The actor is nullable (SET NULL on account removal), so left-join it and
         // load the account-ref column group as an `Option`.
-        workspace_thread_events::table
+        workspace_review_events::table
             .left_join(accounts::table.on(dsl::actor_account_id.eq(accounts::id.nullable())))
-            .filter(dsl::thread_id.eq(thread_id))
+            .filter(dsl::review_id.eq(review_id))
             .select((
-                WorkspaceThreadEvent::as_select(),
+                WorkspaceReviewEvent::as_select(),
                 (
                     accounts::id,
                     accounts::username,
@@ -134,18 +132,18 @@ impl WorkspaceThreadEventRepository for PgConnection {
             .map_err(Error::from)
     }
 
-    async fn list_thread_events_after(
+    async fn list_review_events_after(
         &mut self,
-        thread_id: Uuid,
+        review_id: Uuid,
         after: Option<&TimelineCursor>,
         limit: i64,
-    ) -> Result<Vec<(WorkspaceThreadEvent, Option<AccountRefRow>)>> {
+    ) -> Result<Vec<(WorkspaceReviewEvent, Option<AccountRefRow>)>> {
         use schema::accounts;
-        use schema::workspace_thread_events::{self, dsl};
+        use schema::workspace_review_events::{self, dsl};
 
-        let mut query = workspace_thread_events::table
+        let mut query = workspace_review_events::table
             .left_join(accounts::table.on(dsl::actor_account_id.eq(accounts::id.nullable())))
-            .filter(dsl::thread_id.eq(thread_id))
+            .filter(dsl::review_id.eq(review_id))
             .into_boxed();
 
         // Apply the per-stream keyset lower bound for this (event) stream.
@@ -172,7 +170,7 @@ impl WorkspaceThreadEventRepository for PgConnection {
 
         query
             .select((
-                WorkspaceThreadEvent::as_select(),
+                WorkspaceReviewEvent::as_select(),
                 (
                     accounts::id,
                     accounts::username,
@@ -189,21 +187,21 @@ impl WorkspaceThreadEventRepository for PgConnection {
     }
 }
 
-/// Inserts one thread timeline event. Shared by the thread repository, which
+/// Inserts one review timeline event. Shared by the review repository, which
 /// records events as part of its own transactions.
 pub(crate) async fn record_event(
     conn: &mut PgConnection,
-    thread: &WorkspaceThread,
-    kind: ThreadEventKind,
+    review: &WorkspaceReview,
+    kind: ReviewEventKind,
     actor: Uuid,
     target: Option<Value>,
 ) -> Result<()> {
-    use schema::workspace_thread_events;
+    use schema::workspace_review_events;
 
-    diesel::insert_into(workspace_thread_events::table)
-        .values(&NewWorkspaceThreadEvent {
-            workspace_id: thread.workspace_id,
-            thread_id: thread.id,
+    diesel::insert_into(workspace_review_events::table)
+        .values(&NewWorkspaceReviewEvent {
+            workspace_id: review.workspace_id,
+            review_id: review.id,
             kind,
             actor_account_id: Some(actor),
             target,

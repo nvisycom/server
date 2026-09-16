@@ -58,11 +58,21 @@ db_enum! {
         DocumentUpdated = "document.updated",
         /// Document was deleted.
         DocumentDeleted = "document.deleted",
-        /// A document's review was verified.
+        /// A review was opened.
+        ReviewOpened = "review.opened",
+        /// A review was reopened.
+        ReviewReopened = "review.reopened",
+        /// A review's title was changed.
+        ReviewRenamed = "review.renamed",
+        /// A review was deleted.
+        ReviewDeleted = "review.deleted",
+        /// A comment (message) was posted in a review.
+        ReviewCommentCreated = "review.comment.created",
+        /// A review was verified.
         ReviewVerified = "review.verified",
-        /// A document's review was assigned to a reviewer.
+        /// A review was assigned to a reviewer.
         ReviewAssigned = "review.assigned",
-        /// A document's review assignee was cleared.
+        /// A review's reviewer was unassigned.
         ReviewUnassigned = "review.unassigned",
         /// Pipeline was created.
         PipelineCreated = "pipeline.created",
@@ -84,18 +94,6 @@ db_enum! {
         PolicyUpdated = "policy.updated",
         /// Policy was deleted.
         PolicyDeleted = "policy.deleted",
-        /// A thread was opened.
-        ThreadOpened = "thread.opened",
-        /// A thread was closed.
-        ThreadClosed = "thread.closed",
-        /// A thread was reopened.
-        ThreadReopened = "thread.reopened",
-        /// A thread's title was changed.
-        ThreadRenamed = "thread.renamed",
-        /// A thread was deleted.
-        ThreadDeleted = "thread.deleted",
-        /// A comment (message) was posted in a thread.
-        ThreadCommentCreated = "thread.comment.created",
     }
 }
 

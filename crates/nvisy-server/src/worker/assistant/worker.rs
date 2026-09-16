@@ -2,9 +2,9 @@
 //!
 //! Consumes [`AssistantJob`]s from the `AssistantStream` work-queue and, in the
 //! background, answers a comment that addressed the assistant: it reads the
-//! thread's conversation, runs the workspace's language model over it, and posts
+//! review's conversation, runs the workspace's language model over it, and posts
 //! the reply as a comment authored by the reserved assistant account. That
-//! comment flows through the normal comment-created event, so the thread's
+//! comment flows through the normal comment-created event, so the review's
 //! timeline and mention notifications need no special handling here.
 
 use std::num::NonZero;
@@ -12,10 +12,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nvisy_inference::{ChatTurn, InferenceClient, InferenceConfig};
-use nvisy_postgres::model::{NewWorkspaceThreadComment, WorkspaceThread, WorkspaceThreadComment};
+use nvisy_postgres::model::{NewWorkspaceReviewComment, WorkspaceReview, WorkspaceReviewComment};
 use nvisy_postgres::query::{
-    EventOutboxRepository, WorkspaceProviderRepository, WorkspaceThreadCommentRepository,
-    WorkspaceThreadRepository,
+    EventOutboxRepository, WorkspaceProviderRepository, WorkspaceReviewCommentRepository,
+    WorkspaceReviewRepository,
 };
 use nvisy_postgres::types::ProviderType;
 use nvisy_postgres::{ASSISTANT_ACCOUNT_ID, AsyncConnection, PgConn};
@@ -37,9 +37,9 @@ const TRACING_TARGET: &str = "nvisy_server::worker::assistant";
 /// yet receive the pinned document's contents (a later enhancement), so it must
 /// not claim to have read the file.
 const PREAMBLE: &str = "You are the assistant for a document redaction platform. \
-     You are replying inside a comment thread where a user has mentioned you. \
+     You are replying inside a review's discussion where a user has mentioned you. \
      Help the user understand and operate their workspace: redaction policies, \
-     detections, pipelines, and the discussion in this thread. You do not have \
+     detections, pipelines, and the discussion in this review. You do not have \
      access to the contents of any document. Be concise and accurate.";
 
 /// Fallback concurrency when the runtime cannot report available parallelism.
@@ -178,13 +178,13 @@ impl AssistantWorker {
         Ok(())
     }
 
-    /// Runs one assistant job: reads the thread, runs the model, posts the reply.
+    /// Runs one assistant job: reads the review, runs the model, posts the reply.
     ///
     /// Returns [`JobOutcome::Retry`] only for transient errors (no connection, a
     /// failed load or persist), so the reply is eventually posted. Terminal
-    /// conditions — a missing thread/comment, a reply already posted, or no model
+    /// conditions — a missing review/comment, a reply already posted, or no model
     /// provider configured — return [`JobOutcome::Done`]: retrying would not help.
-    #[tracing::instrument(skip_all, fields(thread_id = %job.thread_id, comment_id = %job.comment_id, workspace_id = %job.workspace_id))]
+    #[tracing::instrument(skip_all, fields(review_id = %job.review_id, comment_id = %job.comment_id, workspace_id = %job.workspace_id))]
     async fn run_job(&self, job: AssistantJob) -> JobOutcome {
         match self.reply(&job).await {
             Ok(()) => JobOutcome::Done,
@@ -207,9 +207,9 @@ impl AssistantWorker {
     /// I/O against the provider, so pinning a pool connection to it would starve
     /// the pool under a slow provider. The `chat` call itself carries a timeout.
     async fn reply(&self, job: &AssistantJob) -> std::result::Result<(), ReplyError> {
-        // Load phase: read the thread, the conversation, and the model client on
+        // Load phase: read the review, the conversation, and the model client on
         // one connection, then drop it before inference.
-        let (thread, prompt, history, client) = {
+        let (review, prompt, history, client) = {
             let mut conn = self
                 .infra
                 .postgres
@@ -217,16 +217,16 @@ impl AssistantWorker {
                 .await
                 .map_err(ReplyError::transient)?;
 
-            // The thread must still exist and be live.
-            let thread = conn
-                .find_thread_in_workspace(job.workspace_id, job.thread_id)
+            // The review must still exist and be live.
+            let review = conn
+                .find_review(job.workspace_id, job.review_id)
                 .await
                 .map_err(ReplyError::transient)?
-                .ok_or_else(|| ReplyError::terminal("thread no longer exists"))?;
+                .ok_or_else(|| ReplyError::terminal("review no longer exists"))?;
 
             // Read the conversation oldest-first.
             let comments = conn
-                .list_thread_comments(job.workspace_id, job.thread_id)
+                .list_review_comments(job.workspace_id, job.review_id)
                 .await
                 .map_err(ReplyError::transient)?;
 
@@ -271,7 +271,7 @@ impl AssistantWorker {
                 return Err(ReplyError::terminal("triggering comment no longer exists"));
             }
 
-            (thread, prompt, history, client)
+            (review, prompt, history, client)
             // `conn` is dropped here, back to the pool, before inference runs.
         };
 
@@ -304,7 +304,7 @@ impl AssistantWorker {
             .await
             .map_err(ReplyError::transient)?;
         let posted = self
-            .post_reply(&mut conn, &thread, job.comment_id, answer)
+            .post_reply(&mut conn, &review, job.comment_id, answer)
             .await
             .map_err(ReplyError::transient)?;
         if !posted {
@@ -353,15 +353,15 @@ impl AssistantWorker {
     async fn post_reply(
         &self,
         conn: &mut PgConn,
-        thread: &WorkspaceThread,
+        review: &WorkspaceReview,
         trigger_comment_id: Uuid,
         body: &str,
     ) -> Result<bool> {
         conn.transaction(async |conn| {
             let Some(comment) = conn
-                .create_reply(NewWorkspaceThreadComment {
-                    workspace_id: thread.workspace_id,
-                    thread_id: thread.id,
+                .create_reply(NewWorkspaceReviewComment {
+                    workspace_id: review.workspace_id,
+                    review_id: review.id,
                     author_account_id: ASSISTANT_ACCOUNT_ID,
                     parent_id: Some(trigger_comment_id),
                     body: body.to_owned(),
@@ -375,15 +375,15 @@ impl AssistantWorker {
             // The assistant is the author, so there are no mentions to notify and
             // no @assistant self-trigger (the enqueue path only fires for a human
             // author addressing the assistant).
-            let event = event::WorkspaceEvent::ThreadCommentCreated(event::ThreadCommentCreated {
+            let event = event::WorkspaceEvent::ReviewCommentCreated(event::ReviewCommentCreated {
                 comment_id: comment.id,
-                thread_id: thread.id,
+                review_id: review.id,
                 author_id: ASSISTANT_ACCOUNT_ID,
                 mentioned: Vec::new(),
             });
             let row = event::event_outbox_row(
                 event::EventOrigin {
-                    workspace_id: thread.workspace_id,
+                    workspace_id: review.workspace_id,
                     account_id: ASSISTANT_ACCOUNT_ID,
                     security: &SecurityContext::default(),
                 },
@@ -397,14 +397,14 @@ impl AssistantWorker {
 }
 
 /// Whether the assistant has already replied to `comment_id` (the triggering
-/// message) in this thread — the redelivery-dedup pre-check.
+/// message) in this review — the redelivery-dedup pre-check.
 ///
 /// A reply is the assistant-authored comment whose `parent_id` is the triggering
 /// comment (`post_reply` sets exactly that), so match it directly rather than by
 /// iteration order. The database's partial unique index on `parent_id` is the
 /// airtight guard; this only avoids the wasted inference of an obvious redelivery.
 fn already_replied(
-    comments: &[nvisy_postgres::types::WithAccountRef<WorkspaceThreadComment>],
+    comments: &[nvisy_postgres::types::WithAccountRef<WorkspaceReviewComment>],
     comment_id: Uuid,
 ) -> bool {
     comments.iter().any(|row| {
@@ -414,7 +414,7 @@ fn already_replied(
 
 /// Maps one stored comment to a chat turn: the assistant's own messages are the
 /// assistant role, everyone else's are the user role.
-fn turn_for(comment: &WorkspaceThreadComment) -> ChatTurn {
+fn turn_for(comment: &WorkspaceReviewComment) -> ChatTurn {
     if comment.author_account_id == ASSISTANT_ACCOUNT_ID {
         ChatTurn::assistant(comment.body.clone())
     } else {
