@@ -172,7 +172,6 @@ mod tests {
         let comment = conn
             .create_comment(NewWorkspaceReviewComment {
                 parent_id: None,
-                workspace_id: seeded.workspace_id,
                 review_id: review.id,
                 author_account_id: seeded.account_id,
                 body: "@assistant help".to_owned(),

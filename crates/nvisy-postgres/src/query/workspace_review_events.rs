@@ -200,7 +200,6 @@ pub(crate) async fn record_event(
 
     diesel::insert_into(workspace_review_events::table)
         .values(&NewWorkspaceReviewEvent {
-            workspace_id: review.workspace_id,
             review_id: review.id,
             kind,
             actor_account_id: Some(actor),

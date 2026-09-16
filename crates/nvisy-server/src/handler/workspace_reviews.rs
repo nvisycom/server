@@ -461,7 +461,7 @@ async fn list_review_timeline(
     // Fetch a bounded window from each stream (fetch = limit + 1, so a full window
     // from either stream can still signal that more rows exist after the merge).
     let comments = conn
-        .list_review_comments_after(workspace.id, path_params.review_id, after, fetch)
+        .list_review_comments_after(path_params.review_id, after, fetch)
         .await?;
     let events = conn
         .list_review_events_after(path_params.review_id, after, fetch)

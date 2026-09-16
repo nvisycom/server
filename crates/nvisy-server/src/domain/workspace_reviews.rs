@@ -290,7 +290,6 @@ impl WorkspaceReviewService {
 
                 let comment = conn
                     .create_comment(NewWorkspaceReviewComment {
-                        workspace_id,
                         review_id: review.id,
                         author_account_id: author_id,
                         parent_id: None,

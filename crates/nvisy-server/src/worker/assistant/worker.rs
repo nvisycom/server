@@ -226,7 +226,7 @@ impl AssistantWorker {
 
             // Read the conversation oldest-first.
             let comments = conn
-                .list_review_comments(job.workspace_id, job.review_id)
+                .list_review_comments(job.review_id)
                 .await
                 .map_err(ReplyError::transient)?;
 
@@ -360,7 +360,6 @@ impl AssistantWorker {
         conn.transaction(async |conn| {
             let Some(comment) = conn
                 .create_reply(NewWorkspaceReviewComment {
-                    workspace_id: review.workspace_id,
                     review_id: review.id,
                     author_account_id: ASSISTANT_ACCOUNT_ID,
                     parent_id: Some(trigger_comment_id),

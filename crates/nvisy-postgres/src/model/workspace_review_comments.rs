@@ -15,9 +15,7 @@ pub struct WorkspaceReviewComment {
     pub id: Uuid,
     /// For a reply, the comment it answers; `None` for an ordinary message.
     pub parent_id: Option<Uuid>,
-    /// Workspace this comment belongs to (denormalized).
-    pub workspace_id: Uuid,
-    /// Review this message belongs to.
+    /// Review this message belongs to (its workspace is the review's).
     pub review_id: Uuid,
     /// Account that wrote the message.
     pub author_account_id: Uuid,
@@ -41,8 +39,6 @@ pub struct NewWorkspaceReviewComment {
     /// database's partial unique index on this column makes at most one live reply
     /// exist per parent.
     pub parent_id: Option<Uuid>,
-    /// Workspace ID (required).
-    pub workspace_id: Uuid,
     /// Review ID (required).
     pub review_id: Uuid,
     /// Author account ID (required).
@@ -54,10 +50,9 @@ pub struct NewWorkspaceReviewComment {
 impl NewWorkspaceReviewComment {
     /// A minimal message in `review_id`, for tests.
     #[cfg(any(feature = "test_util", test))]
-    pub fn test(workspace_id: Uuid, review_id: Uuid, author_account_id: Uuid) -> Self {
+    pub fn test(review_id: Uuid, author_account_id: Uuid) -> Self {
         Self {
             parent_id: None,
-            workspace_id,
             review_id,
             author_account_id,
             body: "A test comment.".to_owned(),

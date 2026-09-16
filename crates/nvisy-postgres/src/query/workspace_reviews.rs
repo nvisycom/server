@@ -938,7 +938,6 @@ mod tests {
 
         let comment = conn
             .create_comment(NewWorkspaceReviewComment::test(
-                seeded.workspace_id,
                 review.id,
                 seeded.account_id,
             ))
@@ -984,7 +983,6 @@ mod tests {
             ))
             .await?;
         conn.create_comment(NewWorkspaceReviewComment::test(
-            seeded.workspace_id,
             review.id,
             seeded.account_id,
         ))
@@ -996,11 +994,7 @@ mod tests {
                 .await?
                 .is_none()
         );
-        assert!(
-            conn.list_review_comments(seeded.workspace_id, review.id)
-                .await?
-                .is_empty()
-        );
+        assert!(conn.list_review_comments(review.id).await?.is_empty());
         Ok(())
     }
 
@@ -1020,7 +1014,6 @@ mod tests {
         let trigger = conn
             .create_comment(NewWorkspaceReviewComment {
                 parent_id: None,
-                workspace_id: seeded.workspace_id,
                 review_id: review.id,
                 author_account_id: seeded.account_id,
                 body: "@assistant help".to_owned(),
@@ -1028,7 +1021,6 @@ mod tests {
             .await?;
 
         let reply = |body: &str| NewWorkspaceReviewComment {
-            workspace_id: seeded.workspace_id,
             review_id: review.id,
             author_account_id: seeded.account_id,
             parent_id: Some(trigger.id),
@@ -1209,14 +1201,13 @@ mod tests {
     /// `(created_at, source, id)`, keep `limit`, and return the next cursor.
     async fn timeline_page(
         conn: &mut crate::PgConn,
-        workspace_id: uuid::Uuid,
         review_id: uuid::Uuid,
         after: Option<&TimelineCursor>,
         limit: i64,
     ) -> anyhow::Result<(Vec<Entry>, Option<TimelineCursor>)> {
         let fetch = limit + 1;
         let comments = conn
-            .list_review_comments_after(workspace_id, review_id, after, fetch)
+            .list_review_comments_after(review_id, after, fetch)
             .await?;
         let events = conn
             .list_review_events_after(review_id, after, fetch)
@@ -1266,13 +1257,11 @@ mod tests {
             ))
             .await?;
         conn.create_comment(NewWorkspaceReviewComment::test(
-            seeded.workspace_id,
             review.id,
             seeded.account_id,
         ))
         .await?;
         conn.create_comment(NewWorkspaceReviewComment::test(
-            seeded.workspace_id,
             review.id,
             seeded.account_id,
         ))
@@ -1281,7 +1270,7 @@ mod tests {
             .await?;
 
         // The full merged timeline (a big first page) is every entry in order.
-        let (all, _) = timeline_page(&mut conn, seeded.workspace_id, review.id, None, 50).await?;
+        let (all, _) = timeline_page(&mut conn, review.id, None, 50).await?;
         assert_eq!(all.len(), 4);
         // It is sorted ascending by (created_at, source, id).
         let mut sorted = all.clone();
@@ -1292,14 +1281,7 @@ mod tests {
         let mut paged: Vec<Entry> = Vec::new();
         let mut cursor: Option<TimelineCursor> = None;
         loop {
-            let (page, next) = timeline_page(
-                &mut conn,
-                seeded.workspace_id,
-                review.id,
-                cursor.as_ref(),
-                2,
-            )
-            .await?;
+            let (page, next) = timeline_page(&mut conn, review.id, cursor.as_ref(), 2).await?;
             paged.extend(page);
             match next {
                 Some(c) => cursor = Some(c),

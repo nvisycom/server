@@ -553,7 +553,6 @@ diesel::table! {
     workspace_review_comments (id) {
         id -> Uuid,
         parent_id -> Nullable<Uuid>,
-        workspace_id -> Uuid,
         review_id -> Uuid,
         author_account_id -> Uuid,
         body -> Text,
@@ -579,7 +578,6 @@ diesel::table! {
 
     workspace_review_events (id) {
         id -> Uuid,
-        workspace_id -> Uuid,
         review_id -> Uuid,
         kind -> ReviewEventKind,
         actor_account_id -> Nullable<Uuid>,
@@ -710,12 +708,10 @@ diesel::joinable!(workspace_review_assignees -> accounts (account_id));
 diesel::joinable!(workspace_review_assignees -> workspace_reviews (review_id));
 diesel::joinable!(workspace_review_comments -> accounts (author_account_id));
 diesel::joinable!(workspace_review_comments -> workspace_reviews (review_id));
-diesel::joinable!(workspace_review_comments -> workspaces (workspace_id));
 diesel::joinable!(workspace_review_detections -> workspace_detections (detection_id));
 diesel::joinable!(workspace_review_detections -> workspace_reviews (review_id));
 diesel::joinable!(workspace_review_events -> accounts (actor_account_id));
 diesel::joinable!(workspace_review_events -> workspace_reviews (review_id));
-diesel::joinable!(workspace_review_events -> workspaces (workspace_id));
 diesel::joinable!(workspace_review_redactions -> workspace_redactions (redaction_id));
 diesel::joinable!(workspace_review_redactions -> workspace_reviews (review_id));
 diesel::joinable!(workspace_reviews -> accounts (author_account_id));

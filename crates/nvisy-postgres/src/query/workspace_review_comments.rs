@@ -45,10 +45,9 @@ pub trait WorkspaceReviewCommentRepository {
     ) -> impl Future<Output = Result<Option<WorkspaceReviewComment>>> + Send;
 
     /// Lists a review's live comments, oldest first, each paired with the author's
-    /// account reference.
+    /// account reference. `review_id` scopes to one review (and so one workspace).
     fn list_review_comments(
         &mut self,
-        workspace_id: Uuid,
         review_id: Uuid,
     ) -> impl Future<Output = Result<Vec<WithAccountRef<WorkspaceReviewComment>>>> + Send;
 
@@ -57,7 +56,6 @@ pub trait WorkspaceReviewCommentRepository {
     /// merged, paginated timeline; the caller interleaves these with the events.
     fn list_review_comments_after(
         &mut self,
-        workspace_id: Uuid,
         review_id: Uuid,
         after: Option<&TimelineCursor>,
         limit: i64,
@@ -117,10 +115,14 @@ impl WorkspaceReviewCommentRepository for PgConnection {
         comment_id: Uuid,
     ) -> Result<Option<WorkspaceReviewComment>> {
         use schema::workspace_review_comments::{self, dsl};
+        use schema::workspace_reviews;
 
+        // The comment carries no workspace scope of its own; scope it through its
+        // review (comment -> review -> workspace).
         workspace_review_comments::table
+            .inner_join(workspace_reviews::table.on(dsl::review_id.eq(workspace_reviews::id)))
             .filter(dsl::id.eq(comment_id))
-            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(workspace_reviews::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceReviewComment::as_select())
             .first(self)
@@ -131,7 +133,6 @@ impl WorkspaceReviewCommentRepository for PgConnection {
 
     async fn list_review_comments(
         &mut self,
-        workspace_id: Uuid,
         review_id: Uuid,
     ) -> Result<Vec<WithAccountRef<WorkspaceReviewComment>>> {
         use schema::workspace_review_comments::dsl;
@@ -139,7 +140,6 @@ impl WorkspaceReviewCommentRepository for PgConnection {
 
         let rows: Vec<(WorkspaceReviewComment, AccountRefRow)> = workspace_review_comments::table
             .inner_join(accounts::table.on(dsl::author_account_id.eq(accounts::id)))
-            .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::review_id.eq(review_id))
             .filter(dsl::deleted_at.is_null())
             .select((
@@ -165,7 +165,6 @@ impl WorkspaceReviewCommentRepository for PgConnection {
 
     async fn list_review_comments_after(
         &mut self,
-        workspace_id: Uuid,
         review_id: Uuid,
         after: Option<&TimelineCursor>,
         limit: i64,
@@ -175,7 +174,6 @@ impl WorkspaceReviewCommentRepository for PgConnection {
 
         let mut query = workspace_review_comments::table
             .inner_join(accounts::table.on(dsl::author_account_id.eq(accounts::id)))
-            .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::review_id.eq(review_id))
             .filter(dsl::deleted_at.is_null())
             .into_boxed();

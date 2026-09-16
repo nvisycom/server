@@ -103,10 +103,9 @@ CREATE TABLE workspace_review_comments (
     -- an orphan reply promoted to a root message.
     parent_id           UUID        DEFAULT NULL REFERENCES workspace_review_comments (id) ON DELETE CASCADE,
 
-    -- References. Denormalized workspace scope for fast per-workspace queries, and
-    -- the review this message belongs to; deleting the review removes its comments
-    -- (CASCADE), so deleting a review takes its messages.
-    workspace_id        UUID        NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+    -- The review this message belongs to; deleting the review removes its comments
+    -- (CASCADE), so deleting a review takes its messages. Workspace scope is the
+    -- review's (comment -> review -> workspace), not duplicated here.
     review_id           UUID        NOT NULL REFERENCES workspace_reviews (id) ON DELETE CASCADE,
 
     -- The message author. If their account is removed, their comments go with it.
@@ -142,7 +141,6 @@ SELECT setup_updated_at('workspace_review_comments');
 COMMENT ON TABLE workspace_review_comments IS 'One message within a review''s discussion.';
 COMMENT ON COLUMN workspace_review_comments.id IS 'Unique comment identifier';
 COMMENT ON COLUMN workspace_review_comments.parent_id IS 'For a reply, the comment it answers; NULL otherwise (one live reply per parent)';
-COMMENT ON COLUMN workspace_review_comments.workspace_id IS 'Denormalized workspace scope';
 COMMENT ON COLUMN workspace_review_comments.review_id IS 'Review this message belongs to';
 COMMENT ON COLUMN workspace_review_comments.author_account_id IS 'Account that wrote the message';
 COMMENT ON COLUMN workspace_review_comments.body IS 'Message text (1-10000 chars)';
@@ -231,9 +229,9 @@ CREATE TABLE workspace_review_events (
     -- Primary identifier
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-    -- References. Denormalized workspace scope (matching the sibling tables) and
-    -- the review this event belongs to.
-    workspace_id        UUID        NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+    -- The review this event belongs to; deleting the review removes its events.
+    -- Workspace scope is the review's (event -> review -> workspace), not
+    -- duplicated here.
     review_id           UUID        NOT NULL REFERENCES workspace_reviews (id) ON DELETE CASCADE,
 
     -- What happened.
@@ -256,11 +254,10 @@ CREATE TABLE workspace_review_events (
 CREATE INDEX workspace_review_events_review_idx
     ON workspace_review_events (review_id, created_at);
 
-COMMENT ON TABLE workspace_review_events IS 'An immutable non-message entry in a review timeline: the discussion lifecycle (opened/closed/reopened/renamed) and the sign-off workflow (detection/redaction linked, assigned/unassigned, verified).';
+COMMENT ON TABLE workspace_review_events IS 'An immutable non-message entry in a review timeline: the lifecycle (opened, renamed, verified, reopened) and the sign-off workflow (detection/redaction linked, assigned/unassigned).';
 COMMENT ON COLUMN workspace_review_events.id IS 'Unique event identifier';
-COMMENT ON COLUMN workspace_review_events.workspace_id IS 'Denormalized workspace scope';
 COMMENT ON COLUMN workspace_review_events.review_id IS 'Review this event belongs to';
-COMMENT ON COLUMN workspace_review_events.kind IS 'What happened (review.opened/closed/reopened/renamed, detection/redaction.linked, assigned/unassigned, verified)';
+COMMENT ON COLUMN workspace_review_events.kind IS 'What happened (review.opened/renamed, detection/redaction.linked, assigned/unassigned, verified, reopened)';
 COMMENT ON COLUMN workspace_review_events.actor_account_id IS 'Account that performed the action; null if that account was removed';
 COMMENT ON COLUMN workspace_review_events.target IS 'Event-specific detail (the new name, a linked id, an assignee); NULL when none';
 COMMENT ON COLUMN workspace_review_events.created_at IS 'Timestamp when the event happened';
