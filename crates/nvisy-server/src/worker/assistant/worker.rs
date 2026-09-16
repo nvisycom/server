@@ -377,6 +377,19 @@ impl AssistantWorker {
                 return Ok(false);
             }
 
+            // Revalidate the trigger inside the transaction: inference ran without
+            // the connection, so the parent may have been soft-deleted meanwhile.
+            // The reply's FK permits a soft-deleted parent, so without this check a
+            // live reply would land under a deleted comment and surface in the
+            // timeline. `find_comment_in_workspace` filters `deleted_at IS NULL`.
+            if conn
+                .find_comment_in_workspace(review.workspace_id, trigger_comment_id)
+                .await?
+                .is_none()
+            {
+                return Ok(false);
+            }
+
             let Some(comment) = conn
                 .create_reply(NewWorkspaceReviewComment {
                     review_id: review.id,

@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use nvisy_postgres::query::WorkspaceRepository;
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use crate::response::Result;
 use crate::service::Infra;
@@ -76,22 +77,40 @@ impl WorkspacePurgeWorker {
                 break;
             }
 
-            // Release the references the workspace's entities hold and expire the
-            // freed blobs, so the reaper reclaims their bytes (even blobs kept
-            // indefinitely). Idempotent across ticks.
-            conn.release_and_expire_workspace_blobs(workspace_id)
-                .await?;
-
-            // Hard-delete only once every blob is gone, so the cascade never strands
-            // an object; otherwise leave the workspace for a later tick.
-            if conn.workspace_blobs_reclaimed(workspace_id).await? {
-                conn.purge_workspace(workspace_id).await?;
-                tracing::info!(
+            // Advance one workspace, logging and skipping on error so a single bad
+            // workspace never aborts the rest of the batch; the failed one is simply
+            // retried on a later tick (every step is idempotent).
+            if let Err(err) = Self::purge_one(&mut conn, workspace_id).await {
+                tracing::error!(
                     target: TRACING_TARGET,
                     %workspace_id,
-                    "Purged workspace past its grace window",
+                    error = %err,
+                    "Failed to advance workspace purge",
                 );
             }
+        }
+        Ok(())
+    }
+
+    /// Advances a single workspace through the purge: release the references its
+    /// entities hold and expire the freed blobs, then hard-delete it once its
+    /// blobs have been reclaimed. Idempotent, so a workspace whose blobs are not
+    /// yet reclaimed is left for a later tick.
+    async fn purge_one(conn: &mut nvisy_postgres::PgConn, workspace_id: Uuid) -> Result<()> {
+        // Release the references the workspace's entities hold and expire the freed
+        // blobs, so the reaper reclaims their bytes (even blobs kept indefinitely).
+        conn.release_and_expire_workspace_blobs(workspace_id)
+            .await?;
+
+        // Hard-delete only once every blob is gone, so the cascade never strands an
+        // object; otherwise leave the workspace for a later tick.
+        if conn.workspace_blobs_reclaimed(workspace_id).await? {
+            conn.purge_workspace(workspace_id).await?;
+            tracing::info!(
+                target: TRACING_TARGET,
+                %workspace_id,
+                "Purged workspace past its grace window",
+            );
         }
         Ok(())
     }

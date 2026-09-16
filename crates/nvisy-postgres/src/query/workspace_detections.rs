@@ -477,6 +477,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         let claimed = diesel::update(
             workspace_detections::table
                 .filter(dsl::id.eq(detection_id))
+                .filter(dsl::deleted_at.is_null())
                 .filter(
                     dsl::status.eq(DetectionStatus::Pending).or(dsl::status
                         .eq(DetectionStatus::Executing)
@@ -545,10 +546,13 @@ impl WorkspaceDetectionRepository for PgConnection {
         // Guard on the claim we hold: same detection, still `Executing`, and the
         // exact `claimed_at` our claim stamped. A worker that re-claimed a stale
         // detection renews `claimed_at`, so a lost claim matches no row and
-        // returns false.
+        // returns false. The `deleted_at IS NULL` guard keeps a finalize that
+        // raced a workspace purge from re-attaching blob pointers to the freed,
+        // soft-deleted row (which later purge passes skip), stranding the blobs.
         let rows_affected = diesel::update(
             workspace_detections::table
                 .filter(dsl::id.eq(detection_id))
+                .filter(dsl::deleted_at.is_null())
                 .filter(dsl::status.eq(DetectionStatus::Executing))
                 .filter(dsl::claimed_at.eq(claimed_at)),
         )
@@ -574,11 +578,13 @@ impl WorkspaceDetectionRepository for PgConnection {
         updates.completed_at = Some(Some(jiff::Timestamp::now().into()));
         let claimed_at = jiff_diesel::Timestamp::from(claimed_at);
 
-        // Same claim guard as the complete finalize: only our still-live claim
-        // (detection `Executing`, `claimed_at` unchanged) may fail the detection.
+        // Same claim guard as the complete finalize, including `deleted_at IS
+        // NULL`: only our still-live claim (detection `Executing`, `claimed_at`
+        // unchanged, not purged) may fail the detection.
         let rows_affected = diesel::update(
             workspace_detections::table
                 .filter(dsl::id.eq(detection_id))
+                .filter(dsl::deleted_at.is_null())
                 .filter(dsl::status.eq(DetectionStatus::Executing))
                 .filter(dsl::claimed_at.eq(claimed_at)),
         )
@@ -603,10 +609,12 @@ impl WorkspaceDetectionRepository for PgConnection {
         updates.completed_at = Some(Some(jiff::Timestamp::now().into()));
 
         // Guard on `Pending`: once a worker claims the detection (moving it to
-        // `Executing`), this matches no row and the worker owns the outcome.
+        // `Executing`), this matches no row and the worker owns the outcome. The
+        // `deleted_at IS NULL` guard leaves a purged row to the reaper.
         let rows_affected = diesel::update(
             workspace_detections::table
                 .filter(dsl::id.eq(detection_id))
+                .filter(dsl::deleted_at.is_null())
                 .filter(dsl::status.eq(DetectionStatus::Pending)),
         )
         .set(&updates)

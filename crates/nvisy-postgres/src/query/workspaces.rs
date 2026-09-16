@@ -156,18 +156,23 @@ impl WorkspaceRepository for PgConnection {
         grace: std::time::Duration,
         limit: i64,
     ) -> Result<Vec<Uuid>> {
+        use diesel::sql_types::{BigInt, Nullable, Timestamptz};
         use schema::workspaces::{self, dsl};
 
         // A workspace is due for purge once it has been soft-deleted for at least
-        // the grace window. The cutoff is computed here and compared against
-        // `deleted_at` so the window is a plain timestamp predicate.
-        let cutoff = jiff::Timestamp::now()
-            - jiff::Span::try_from(grace)
-                .map_err(|err| Error::unexpected(format!("invalid purge grace duration: {err}")))?;
+        // the grace window. Compute the cutoff DB-side as `now() - grace` so it
+        // shares the clock `delete_workspace` stamped `deleted_at` with; an
+        // app-clock cutoff compared against a DB-clock timestamp would drift under
+        // clock skew. Typed nullable to match the `deleted_at` column.
+        let grace_secs = i64::try_from(grace.as_secs())
+            .map_err(|err| Error::unexpected(format!("purge grace duration too large: {err}")))?;
+        let cutoff = diesel::dsl::sql::<Nullable<Timestamptz>>("now() - (")
+            .bind::<BigInt, _>(grace_secs)
+            .sql(" * interval '1 second')");
 
         workspaces::table
             .filter(dsl::deleted_at.is_not_null())
-            .filter(dsl::deleted_at.le(jiff_diesel::Timestamp::from(cutoff)))
+            .filter(dsl::deleted_at.le(cutoff))
             .order(dsl::deleted_at.asc())
             .limit(limit)
             .select(dsl::id)
