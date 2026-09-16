@@ -36,6 +36,7 @@ use crate::service::{
     AuthKeys, AuthKeysConfig, CryptoConfig, CryptoService, EngineConfig, FileConnectorsConfig,
     HealthConfig, IntegrationConfig, OidcConfig, ServiceState,
 };
+use crate::worker::purge::PurgeConfig;
 
 /// A matching Ed25519 keypair (PKCS#8 PEM), used to sign and verify session
 /// tokens in tests. Ephemeral in spirit — a fixed test-only pair is fine because
@@ -118,6 +119,7 @@ impl TestApp {
             engine: EngineConfig::default(),
             health: HealthConfig::default(),
             integration: IntegrationConfig::default(),
+            purge: PurgeConfig::default(),
             file_service: FileConnectorsConfig::default(),
             oidc: OidcConfig::default(),
             upload: UploadConfig::default(),

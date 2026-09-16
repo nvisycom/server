@@ -43,8 +43,9 @@ async fn run() -> anyhow::Result<()> {
 
     cli.log();
 
-    // Initialize application state
-    let state = cli.service_state().await?;
+    // Initialize application state. Boxed: the state-init future carries the full
+    // aggregated config, large enough to trip the large-future lint on the stack.
+    let state = Box::pin(cli.service_state()).await?;
 
     // Build router
     let router = create_router(state.clone(), &cli.middleware);

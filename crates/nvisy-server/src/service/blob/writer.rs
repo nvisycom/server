@@ -144,9 +144,9 @@ impl ArtifactWriter {
     ///
     /// The review audit is the post-redaction [`Audit`]: the detection's analysis
     /// with the reviewer's edits applied and the redaction outcome recorded per
-    /// entity. It shares the audit-logs retention scope with the detection audit;
-    /// the audit *row* (not a distinct blob kind) distinguishes it — a review
-    /// audit sets `redaction_id` and `derived_from`.
+    /// entity. It shares the audit-logs retention scope with the detection's base
+    /// analysis; it is the blob a redaction points at via `review_audit_blob_id`,
+    /// distinct from the detection's `audit_blob_id`.
     ///
     /// # Errors
     ///

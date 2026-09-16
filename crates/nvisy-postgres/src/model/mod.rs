@@ -10,7 +10,6 @@ mod accounts;
 mod pipeline_references;
 mod workspace_activities;
 mod workspace_assistant_jobs;
-mod workspace_audits;
 mod workspace_blobs;
 mod workspace_connection_schedule;
 mod workspace_connection_syncs;
@@ -47,7 +46,6 @@ pub use accounts::{Account, NewAccount, UpdateAccount};
 pub use pipeline_references::PipelinePolicy;
 pub use workspace_activities::{NewWorkspaceActivity, WorkspaceActivity};
 pub use workspace_assistant_jobs::{NewWorkspaceAssistantJob, WorkspaceAssistantJob};
-pub use workspace_audits::{NewWorkspaceAudit, WorkspaceAudit};
 pub use workspace_blobs::{Blob, NewBlob};
 pub use workspace_connection_schedule::{
     NewWorkspaceConnectionSchedule, WorkspaceConnectionSchedule,

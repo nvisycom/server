@@ -8,12 +8,12 @@
 //! a blob is reclaimed once it is both unreferenced and past its window. Each
 //! tick runs three stages:
 //!
-//! - **Referrer cleanup**: machine byproducts — audit rows and detection
+//! - **Referrer cleanup**: machine byproducts — audits and detection
 //!   intermediates — hold a reference for their whole life, so their blobs never
 //!   reach `ref_count = 0` on their own. This stage expires those referrers by
-//!   their blob's retention window (deleting the audit row, nulling the
-//!   intermediate pointer) and drops the reference, so an expired byproduct blob
-//!   becomes reclaimable by the Expire sweep.
+//!   their blob's retention window by nulling the blob pointer (keeping the audit
+//!   and detection rows, which are ledger records) and drops the reference, so an
+//!   expired byproduct blob becomes reclaimable by the Expire sweep.
 //! - **Expire**: unreferenced blobs whose retention window has elapsed
 //!   (`ref_count = 0 AND expires_at < now()`, from the per-blob retention rule).
 //!   Each is claimed ([`purged_at`], committed before any object delete, so it

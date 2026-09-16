@@ -10,7 +10,7 @@
 //!
 //! Bytes are content-addressed: each `stage_*` method writes the (encrypted)
 //! object and returns a [`NewBlob`] describing it, which the caller resolves
-//! through [`find_or_create_blob`] (directly or via [`create_audit`] /
+//! through [`find_or_create_blob`] (directly or via
 //! [`create_workspace_document`]) so identical content is stored once and shared.
 //!
 //! The crypto-free GC counterpart lives with its only caller, the reaper
@@ -20,7 +20,6 @@
 //! [`ExternalObjectStore`]: crate::service::ExternalObjectStore
 //! [`NewBlob`]: nvisy_postgres::model::NewBlob
 //! [`find_or_create_blob`]: nvisy_postgres::query::WorkspaceBlobRepository::find_or_create_blob
-//! [`create_audit`]: nvisy_postgres::query::WorkspaceAuditRepository::create_audit
 //! [`create_workspace_document`]: nvisy_postgres::query::WorkspaceDocumentRepository::create_workspace_document
 
 mod reader;

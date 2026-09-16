@@ -374,7 +374,8 @@ impl Importer {
         // If the imported content deduplicated onto an existing blob, the document
         // points at that blob's stored object and the object staged for it here is
         // orphaned. Reclaim it best-effort.
-        if let Some(blob) = conn.find_blob_by_id(document.blob_id).await?
+        if let Some(blob_id) = document.blob_id
+            && let Some(blob) = conn.find_blob_by_id(blob_id).await?
             && blob.storage_path != file_key.to_string()
             && let Err(err) = self.infra.blobs.delete(file_key).await
         {

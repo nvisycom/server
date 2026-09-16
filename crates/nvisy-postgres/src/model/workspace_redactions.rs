@@ -10,11 +10,10 @@ use crate::schema::workspace_redactions;
 ///
 /// A detection can be redacted many times — each redact request may carry a
 /// different set of reviewer edits — so each redaction is its own row. Its review
-/// audit (the engine's audit after the reviewer edits were applied) is a
-/// [`WorkspaceAudit`] row pointing back via `redaction_id`; the redacted output is
-/// a [`WorkspaceDocument`] of kind `redacted`.
+/// audit (the engine's findings after the reviewer edits were applied) is the blob
+/// pointed at by `review_audit_blob_id`; the redacted output is a
+/// [`WorkspaceDocument`] of kind `redacted`.
 ///
-/// [`WorkspaceAudit`]: crate::model::WorkspaceAudit
 /// [`WorkspaceDocument`]: crate::model::WorkspaceDocument
 #[derive(Debug, Clone, PartialEq, Queryable, Selectable)]
 #[diesel(table_name = workspace_redactions)]
@@ -29,8 +28,14 @@ pub struct WorkspaceRedaction {
     /// Redacted document (`kind = redacted`) this redaction produced. `None` only
     /// if the document was later hard-deleted.
     pub output_document_id: Option<Uuid>,
+    /// Review-analysis (findings after reviewer edits) blob. `None` once the bytes
+    /// are reclaimed on retention (the row is kept). A blob reference.
+    pub review_audit_blob_id: Option<Uuid>,
     /// When the redaction was created.
     pub created_at: Timestamp,
+    /// When the redaction was soft-deleted; `None` means live (the row is kept as
+    /// a ledger record even after its bytes are reclaimed).
+    pub deleted_at: Option<Timestamp>,
 }
 
 /// Data for creating a new workspace redaction.
@@ -45,6 +50,8 @@ pub struct NewWorkspaceRedaction {
     pub account_id: Uuid,
     /// Redacted output document this redaction produced.
     pub output_document_id: Option<Uuid>,
+    /// Review-analysis (findings after reviewer edits) blob this redaction produced.
+    pub review_audit_blob_id: Option<Uuid>,
 }
 
 impl NewWorkspaceRedaction {
@@ -56,6 +63,7 @@ impl NewWorkspaceRedaction {
             detection_id,
             account_id,
             output_document_id: None,
+            review_audit_blob_id: None,
         }
     }
 }

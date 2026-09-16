@@ -498,7 +498,7 @@ impl WorkspaceDocumentRepository for PgConnection {
         // reconcile sweep re-invokes this for an already-deleted row, and must not
         // move `deleted_at` forward or drop the blob reference twice.
         self.transaction(async |conn| {
-            let deleted: Vec<Uuid> = diesel::update(
+            let deleted: Vec<Option<Uuid>> = diesel::update(
                 workspace_documents::table
                     .filter(workspace_documents::id.eq(document_id))
                     .filter(workspace_documents::deleted_at.is_null()),
@@ -510,9 +510,11 @@ impl WorkspaceDocumentRepository for PgConnection {
             .map_err(Error::from)?;
 
             // Only drop the blob reference if this call is the one that
-            // transitioned the row (a second, concurrent delete returns nothing).
-            for blob_id in &deleted {
-                conn.decrement_ref(*blob_id).await?;
+            // transitioned the row (a second, concurrent delete returns nothing),
+            // and only when the row still holds a blob (its bytes may already have
+            // been reclaimed, nulling the pointer).
+            for blob_id in deleted.into_iter().flatten() {
+                conn.decrement_ref(blob_id).await?;
             }
 
             diesel::delete(
@@ -660,8 +662,12 @@ impl WorkspaceDocumentRepository for PgConnection {
         .map_err(Error::from)?;
 
         // Drop each deleted document's blob reference so a blob with no more live
-        // references becomes reclaimable once its retention passes.
-        let blob_ids: Vec<Uuid> = deleted.iter().map(|document| document.blob_id).collect();
+        // references becomes reclaimable once its retention passes. A document whose
+        // bytes were already reclaimed has a null pointer and no reference to drop.
+        let blob_ids: Vec<Uuid> = deleted
+            .iter()
+            .filter_map(|document| document.blob_id)
+            .collect();
         for blob_id in blob_ids {
             self.decrement_ref(blob_id).await?;
         }
@@ -701,7 +707,7 @@ mod tests {
             )
             .await?;
         let blob = conn
-            .find_blob_by_id(document.blob_id)
+            .find_blob_by_id(document.blob_id.expect("document has a blob"))
             .await?
             .expect("blob present");
         assert_eq!(blob.ref_count, 1);
@@ -733,7 +739,7 @@ mod tests {
                 .is_none()
         );
         let after = conn
-            .find_blob_by_id(document.blob_id)
+            .find_blob_by_id(document.blob_id.expect("document has a blob"))
             .await?
             .expect("blob still present");
         assert_eq!(after.ref_count, 0, "soft-delete drops the blob reference");
@@ -741,7 +747,7 @@ mod tests {
         // Idempotent: a repeat delete does not drop the reference again.
         conn.delete_workspace_document(document.id).await?;
         let floored = conn
-            .find_blob_by_id(document.blob_id)
+            .find_blob_by_id(document.blob_id.expect("document has a blob"))
             .await?
             .expect("blob present");
         assert_eq!(floored.ref_count, 0);
@@ -774,7 +780,7 @@ mod tests {
             "identical content shares one blob"
         );
         assert_eq!(
-            conn.find_blob_by_id(first.blob_id)
+            conn.find_blob_by_id(first.blob_id.expect("document has a blob"))
                 .await?
                 .expect("blob present")
                 .ref_count,
@@ -784,7 +790,7 @@ mod tests {
         // Deleting one document leaves the shared blob live for the other.
         conn.delete_workspace_document(first.id).await?;
         assert_eq!(
-            conn.find_blob_by_id(first.blob_id)
+            conn.find_blob_by_id(first.blob_id.expect("document has a blob"))
                 .await?
                 .expect("blob present")
                 .ref_count,
@@ -825,14 +831,14 @@ mod tests {
         // The deleted document's blob reference was dropped; the untouched one's
         // stays.
         assert_eq!(
-            conn.find_blob_by_id(one.blob_id)
+            conn.find_blob_by_id(one.blob_id.expect("document has a blob"))
                 .await?
                 .expect("blob present")
                 .ref_count,
             0
         );
         assert_eq!(
-            conn.find_blob_by_id(two.blob_id)
+            conn.find_blob_by_id(two.blob_id.expect("document has a blob"))
                 .await?
                 .expect("blob present")
                 .ref_count,

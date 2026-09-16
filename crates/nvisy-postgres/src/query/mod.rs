@@ -18,11 +18,11 @@ mod account_identities;
 mod account_notifications;
 mod accounts;
 mod analytics;
+mod blob_pointers;
 mod pipeline_references;
 mod search;
 mod workspace_activities;
 mod workspace_assistant_jobs;
-mod workspace_audits;
 mod workspace_blobs;
 mod workspace_connection_schedule;
 mod workspace_connection_syncs;
@@ -55,10 +55,13 @@ pub use analytics::{
     AnalyticsSnapshot, DetectionDayPoint, DetectionDurations, DetectionStatusCount, StorageByKind,
     UsageByModel, WorkspaceAnalyticsRepository,
 };
+pub use blob_pointers::{
+    clear_expired_detection_audits, clear_expired_detection_intermediates,
+    clear_expired_review_audits,
+};
 pub use pipeline_references::PipelineReferenceRepository;
 pub use workspace_activities::{ActivityCursor, ActivityFilter, WorkspaceActivityRepository};
 pub use workspace_assistant_jobs::AssistantJobOutboxRepository;
-pub use workspace_audits::WorkspaceAuditRepository;
 pub use workspace_blobs::{ReclaimableBlob, WorkspaceBlobRepository};
 pub use workspace_connection_schedule::WorkspaceConnectionScheduleRepository;
 pub use workspace_connection_syncs::{ConnectionSyncCursor, WorkspaceConnectionSyncRepository};

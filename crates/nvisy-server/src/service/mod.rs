@@ -52,6 +52,7 @@ use crate::worker::assistant::{AssistantOutboxDrainer, AssistantWorker};
 use crate::worker::detection::{DetectionOutboxDrainer, DetectionWorker};
 use crate::worker::event::EventOutboxDrainer;
 use crate::worker::integration::ConnectionSyncWorker;
+use crate::worker::purge::{PurgeConfig, WorkspacePurgeWorker};
 use crate::worker::reaper::BlobReaper;
 use crate::worker::webhook::WebhookDeliveryWorker;
 use crate::worker::{Coordinator, WorkerSet, ensure_streams};
@@ -135,6 +136,11 @@ pub struct ServiceState {
 
     // Session-cookie policy (the `Secure` attribute) for browser clients.
     pub cookie: CookieConfig,
+
+    // Workspace-purge policy (the soft-delete grace window), consumed by the
+    // purge worker at spawn. Not an extractor, so it is skipped.
+    #[from_ref(skip)]
+    pub purge_config: PurgeConfig,
 }
 
 impl ServiceState {
@@ -250,6 +256,7 @@ impl ServiceState {
             user_agent_parser,
             upload: args.upload,
             cookie: args.cookie,
+            purge_config: args.purge,
         };
 
         Ok(service_state)
@@ -280,6 +287,10 @@ impl ServiceState {
             self.connection_sync.clone(),
         ));
         workers.spawn(BlobReaper::new(self.infra.clone()));
+        workers.spawn(WorkspacePurgeWorker::new(
+            self.infra.clone(),
+            self.purge_config.clone(),
+        ));
         workers.spawn(EventOutboxDrainer::new(self.infra.clone()));
         workers.spawn(DetectionOutboxDrainer::new(
             self.infra.clone(),

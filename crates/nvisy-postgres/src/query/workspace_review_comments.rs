@@ -257,9 +257,14 @@ impl WorkspaceReviewCommentRepository for PgConnection {
     async fn delete_comment(&mut self, comment_id: Uuid) -> Result<()> {
         use schema::workspace_review_comments::{self, dsl};
 
+        // Soft-delete the comment and its live direct reply together: a reply's
+        // `parent_id` FK cascades only on a hard delete, so a soft-delete would
+        // otherwise leave the reply live and orphaned (rendered as a root message).
+        // Replies never nest (a reply's parent is always a top-level comment), so a
+        // single level is exhaustive.
         diesel::update(
             workspace_review_comments::table
-                .filter(dsl::id.eq(comment_id))
+                .filter(dsl::id.eq(comment_id).or(dsl::parent_id.eq(comment_id)))
                 .filter(dsl::deleted_at.is_null()),
         )
         .set(dsl::deleted_at.eq(now))

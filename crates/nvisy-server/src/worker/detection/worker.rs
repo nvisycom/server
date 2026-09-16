@@ -14,12 +14,11 @@ use std::time::Duration;
 use elide_pipeline::primitive::RasterMode;
 use elide_pipeline::provider::{CodecParams, DocumentContext, RequestContext};
 use nvisy_postgres::model::{
-    NewBlob, NewWorkspaceAudit, UpdateWorkspaceDetection, WorkspaceDetection, WorkspacePipeline,
+    NewBlob, UpdateWorkspaceDetection, WorkspaceDetection, WorkspacePipeline,
 };
 use nvisy_postgres::query::{
-    DetectionPolicyVersionRepository, EventOutboxRepository, WorkspaceAuditRepository,
-    WorkspaceBlobRepository, WorkspaceDetectionRepository, WorkspaceDocumentRepository,
-    WorkspaceRepository,
+    DetectionPolicyVersionRepository, EventOutboxRepository, WorkspaceBlobRepository,
+    WorkspaceDetectionRepository, WorkspaceDocumentRepository, WorkspaceRepository,
 };
 use nvisy_postgres::types::{
     DetectionStatus, Json, RasterPolicy, RetentionOverride, WorkspaceSettings,
@@ -406,7 +405,9 @@ impl DetectionWorker {
                 .await?
                 .ok_or_else(|| ErrorKind::NotFound.with_message("Input document not found"))?;
             let blob = conn
-                .find_blob_by_id(document.blob_id)
+                .find_blob_by_id(document.blob_id.ok_or_else(|| {
+                    ErrorKind::NotFound.with_message("Input document content not found")
+                })?)
                 .await?
                 .ok_or_else(|| {
                     ErrorKind::NotFound.with_message("Input document content not found")
@@ -569,20 +570,15 @@ impl DetectionWorker {
         let detection_id = detection.id;
         let finalized = conn
             .transaction(async |conn| {
-                // The base audit resolves (shares or inserts) its blob and records
-                // the reference in this same transaction.
-                let audit = conn
-                    .create_audit(
-                        NewWorkspaceAudit::base(Uuid::nil(), detection_id),
-                        audit_blob,
-                    )
-                    .await?;
+                // The base analysis is a blob-ref on the detection: resolving
+                // (sharing or inserting) its blob records the detection's reference,
+                // and `audit_blob_id` is set on the detection at finalize below.
+                let audit_resolved = conn.find_or_create_blob(audit_blob).await?;
                 // Pin the exact policy versions this analysis consumed, so the
                 // detection is reproducible against them regardless of later edits.
                 conn.record_detection_policy_versions(detection_id, &policy_version_ids)
                     .await?;
-                // The intermediate is a blob-ref on the detection; resolving the
-                // blob records the detection's reference to it.
+                // The intermediate is likewise a blob-ref on the detection.
                 let resolved_blob = match intermediates_blob {
                     Some(blob) => Some(conn.find_or_create_blob(blob).await?),
                     None => None,
@@ -597,6 +593,7 @@ impl DetectionWorker {
                         claim_token,
                         UpdateWorkspaceDetection {
                             intermediate_blob_id: Some(intermediate_blob_id),
+                            audit_blob_id: Some(Some(audit_resolved.id)),
                             metadata,
                             ..Default::default()
                         },
@@ -612,18 +609,16 @@ impl DetectionWorker {
                 // The resolved storage paths, so an object staged for content that
                 // deduplicated onto an existing blob can be reclaimed after commit.
                 let intermediate_path = resolved_blob.map(|blob| blob.storage_path);
-                Ok::<_, PgError>((audit.blob_id, intermediate_path))
+                Ok::<_, PgError>((audit_resolved.storage_path, intermediate_path))
             })
             .await;
 
         match finalized {
-            Ok((audit_blob_id, intermediate_path)) => {
+            Ok((audit_path, intermediate_path)) => {
                 // A base audit or intermediate whose content deduplicated onto an
                 // existing blob is pointed at that blob's stored object, orphaning
                 // the object staged for it. Reclaim the redundant staged objects.
-                if let Ok(Some(blob)) = conn.find_blob_by_id(audit_blob_id).await
-                    && blob.storage_path != staged_audit.storage_path
-                {
+                if audit_path != staged_audit.storage_path {
                     self.discard_staged(&staged_audit).await;
                 }
                 if let Some(staged) = &staged_intermediates

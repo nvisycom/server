@@ -4,8 +4,8 @@ use std::str::FromStr;
 
 use elide_pipeline::{ArtifactSet, Audit, Engine};
 use nvisy_postgres::PgConn;
-use nvisy_postgres::model::{Blob, WorkspaceDetection};
-use nvisy_postgres::query::{WorkspaceAuditRepository, WorkspaceBlobRepository};
+use nvisy_postgres::model::{Blob, WorkspaceDetection, WorkspaceRedaction};
+use nvisy_postgres::query::WorkspaceBlobRepository;
 use nvisy_s3::{AuditKey, IntermediateKey};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
@@ -54,13 +54,16 @@ impl ArtifactReader {
         conn: &mut PgConn,
         detection: &WorkspaceDetection,
     ) -> Result<Blob> {
-        let audit = conn
-            .find_base_audit(detection.id)
-            .await?
-            .ok_or_else(|| ErrorKind::Conflict.with_message("Detection has no analysis yet"))?;
+        // The base analysis is the detection's `audit_blob_id`. A NULL pointer is
+        // two distinct cases the status disambiguates: on a completed detection the
+        // bytes were reclaimed on retention (404), otherwise the analysis has not
+        // been produced yet (409).
+        if detection.audit_blob_id.is_none() && !detection.status.is_complete() {
+            return Err(ErrorKind::Conflict.with_message("Detection has no analysis yet"));
+        }
         self.blob_or_gone(
             conn,
-            audit.blob_id,
+            detection.audit_blob_id,
             "The analysis for this detection has been deleted",
         )
         .await
@@ -140,13 +143,10 @@ impl ArtifactReader {
         conn: &mut PgConn,
         detection: &WorkspaceDetection,
     ) -> Result<Blob> {
-        let blob_id = detection.intermediate_blob_id.ok_or_else(|| {
-            ErrorKind::NotFound.with_message("Detection has no enrichment intermediates")
-        })?;
         self.blob_or_gone(
             conn,
-            blob_id,
-            "The intermediates for this detection have been deleted",
+            detection.intermediate_blob_id,
+            "The intermediates for this detection are not available",
         )
         .await
     }
@@ -211,38 +211,40 @@ impl ArtifactReader {
     ///
     /// The connection-bound step of loading a review audit; pair with
     /// [`load_audit`] to release the connection before the object-store
-    /// round-trip. Errors if the redaction has no review audit (409) or its blob
-    /// has since been reclaimed (404).
+    /// round-trip. A redaction always produces a review audit, so a NULL pointer
+    /// means its blob has since been reclaimed (404).
     ///
     /// [`load_audit`]: Self::load_audit
     ///
     /// # Errors
     ///
-    /// - `Conflict` if the redaction has no review audit.
     /// - `NotFound` if the review audit's blob has been reclaimed.
-    /// - A database error if either lookup fails.
-    pub async fn resolve_review_blob(&self, conn: &mut PgConn, redaction_id: Uuid) -> Result<Blob> {
-        let audit = conn
-            .find_redaction_audit(redaction_id)
-            .await?
-            .ok_or_else(|| ErrorKind::Conflict.with_message("Redaction has no review audit"))?;
+    /// - A database error if the lookup fails.
+    pub async fn resolve_review_blob(
+        &self,
+        conn: &mut PgConn,
+        redaction: &WorkspaceRedaction,
+    ) -> Result<Blob> {
         self.blob_or_gone(
             conn,
-            audit.blob_id,
+            redaction.review_audit_blob_id,
             "The review audit for this redaction has been deleted",
         )
         .await
     }
 
-    /// Fetches a blob by id, mapping a reclaimed (absent) blob to a 404 with
-    /// `gone_message`. Shared by the audit/intermediate/review resolvers, which
-    /// differ in that message.
+    /// Fetches a blob by its optional id, mapping a reclaimed blob to a 404 with
+    /// `gone_message`. A `None` id is the reclaimed case too: once the bytes pass
+    /// retention the referrer's pointer is nulled (the row is kept), so an absent
+    /// pointer and an absent blob row are the same "gone" outcome. Shared by the
+    /// audit/intermediate/review resolvers, which differ only in that message.
     async fn blob_or_gone(
         &self,
         conn: &mut PgConn,
-        blob_id: Uuid,
+        blob_id: Option<Uuid>,
         gone_message: &'static str,
     ) -> Result<Blob> {
+        let blob_id = blob_id.ok_or_else(|| ErrorKind::NotFound.with_message(gone_message))?;
         conn.find_blob_by_id(blob_id)
             .await?
             .ok_or_else(|| ErrorKind::NotFound.with_message(gone_message))
