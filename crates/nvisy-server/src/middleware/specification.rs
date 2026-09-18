@@ -245,11 +245,12 @@ fn collapse_in_object(map: &mut serde_json::Map<String, Value>) {
 #[allow(clippy::too_many_lines)]
 fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
     api.title("Nvisy API")
-        .summary("Document processing and annotation platform")
+        .summary("Document detection and redaction platform")
         .description(
-            "Nvisy provides intelligent document processing, annotation, and analysis \
-            capabilities. This API enables document upload, OCR processing, embedding \
-            generation, and semantic search across your document collections.",
+            "Nvisy provides intelligent detection of sensitive content in documents, \
+            redaction pipelines, and reviewer workflows. This API enables document \
+            upload, detection analysis, redaction, and collaborative review across \
+            your workspaces.",
         )
         .version(env!("CARGO_PKG_VERSION"))
         .tos("https://nvisy.com/legal/terms-of-service")
@@ -260,13 +261,18 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             ..Contact::default()
         })
         .license(License {
-            name: "Proprietary".to_owned(),
-            url: Some("https://nvisy.com/license".to_owned()),
+            name: "Apache-2.0".to_owned(),
+            url: Some("https://www.apache.org/licenses/LICENSE-2.0".to_owned()),
             ..License::default()
         })
         .tag(Tag {
             name: "Health".into(),
             description: Some("Service health checks".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Capabilities".into(),
+            description: Some("Read-only reference data describing this deployment".into()),
             ..Default::default()
         })
         .tag(Tag {
@@ -277,6 +283,11 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
         .tag(Tag {
             name: "Identities".into(),
             description: Some("Account sign-in methods: password and linked providers".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Avatars".into(),
+            description: Some("Public avatar image serving".into()),
             ..Default::default()
         })
         .tag(Tag {
@@ -295,8 +306,13 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             ..Default::default()
         })
         .tag(Tag {
-            name: "Files".into(),
-            description: Some("File upload, download, and management".into()),
+            name: "Documents".into(),
+            description: Some("Document upload, download, and management".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Analytics".into(),
+            description: Some("Aggregate metrics over a workspace's documents".into()),
             ..Default::default()
         })
         .tag(Tag {
@@ -325,6 +341,11 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             ..Default::default()
         })
         .tag(Tag {
+            name: "Providers".into(),
+            description: Some("Inference-provider configuration".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
             name: "Pipelines".into(),
             description: Some("Redaction pipeline configuration".into()),
             ..Default::default()
@@ -337,6 +358,11 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
         .tag(Tag {
             name: "Redactions".into(),
             description: Some("Redactions produced from a detection, with reviewer edits".into()),
+            ..Default::default()
+        })
+        .tag(Tag {
+            name: "Reviews".into(),
+            description: Some("Document reviews, the review queue, and their discussion".into()),
             ..Default::default()
         })
         .tag(Tag {

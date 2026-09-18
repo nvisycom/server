@@ -58,7 +58,10 @@ pub struct RenameWorkspaceReview {
     /// The new title (1-255 characters). Omitting the field leaves the current
     /// title unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    // schemars ignores `garde(inner(..))` on an `Option`, so restate the bounds for
+    // the generated schema; garde still enforces them at runtime.
     #[garde(inner(length(chars, min = 1, max = 255), custom(validate_non_blank)))]
+    #[schemars(length(min = 1, max = 255))]
     pub display_name: Option<String>,
 }
 
