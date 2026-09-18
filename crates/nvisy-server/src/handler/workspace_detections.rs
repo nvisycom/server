@@ -841,17 +841,14 @@ pub fn routes() -> ApiRouter<ServiceState> {
 
     ApiRouter::new()
         .api_route(
-            "/workspaces/{workspaceId}/pipelines/detections",
-            get_with(list_workspace_detections, list_workspace_detections_docs),
-        )
-        .api_route(
             "/workspaces/{workspaceId}/pipelines/{pipelineId}/detections",
             post_with(create_detection, create_detection_docs)
                 .get_with(list_pipeline_detections, list_pipeline_detections_docs),
         )
         .api_route(
             "/workspaces/{workspaceId}/detections",
-            post_with(create_adhoc_detection, create_adhoc_detection_docs),
+            post_with(create_adhoc_detection, create_adhoc_detection_docs)
+                .get_with(list_workspace_detections, list_workspace_detections_docs),
         )
         .api_route(
             "/workspaces/{workspaceId}/detections/{detectionId}",
@@ -865,5 +862,5 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/workspaces/{workspaceId}/detections/{detectionId}/redactions",
             post_with(redact_detection, redact_detection_docs),
         )
-        .with_path_items(|item| item.tag("WorkspaceDetections"))
+        .with_path_items(|item| item.tag("Detections"))
 }

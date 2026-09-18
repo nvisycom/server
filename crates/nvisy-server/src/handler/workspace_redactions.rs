@@ -21,6 +21,7 @@ use crate::extract::{Authorized, Json, Path, Query, markers};
 use crate::handler::ServiceState;
 use crate::handler::request::{
     CursorPagination, WorkspaceDetectionPathParams, WorkspaceRedactionPathParams,
+    WorkspaceRedactionsQuery,
 };
 use crate::handler::response::{WorkspaceRedactionResult, WorkspaceRedactionsPage};
 use crate::handler::utility::resolve_account_ref;
@@ -84,6 +85,64 @@ fn list_detection_redactions_docs(op: TransformOperation) -> TransformOperation 
             "Returns a detection's redactions, most recent first, cursor-paginated. Each \
              redaction is one redact pass with its own reviewer edits, output document, and \
              review audit.",
+        )
+        .response::<200, Json<WorkspaceRedactionsPage>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
+/// Lists all redactions across the workspace, most recent first, cursor-paginated.
+///
+/// Aggregates redactions from every detection in the workspace, with optional
+/// detection and document filters — the document-scoped view a document's
+/// redactions tab renders from, without fanning out one request per detection.
+/// Requires `ViewDetections`.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
+    )
+)]
+async fn list_workspace_redactions(
+    State(pg_client): State<PgClient>,
+    authz: Authorized<markers::ViewDetections>,
+    Query(pagination): Query<CursorPagination>,
+    Query(query): Query<WorkspaceRedactionsQuery>,
+) -> Result<(StatusCode, Json<WorkspaceRedactionsPage>)> {
+    tracing::debug!(target: TRACING_TARGET, "Listing workspace redactions");
+
+    let workspace = authz.workspace;
+
+    let mut conn = pg_client.get_connection().await?;
+    let page = conn
+        .cursor_list_workspace_redactions(workspace.id, pagination.into_cursor(), &query.into())
+        .await?;
+
+    // Resolve the requesting account per row. Redactions are few per workspace
+    // (one per manual redact request), so a per-row lookup is acceptable here.
+    let mut items = Vec::with_capacity(page.items.len());
+    for redaction in page.items {
+        let requested_by = resolve_account_ref(&mut conn, redaction.account_id).await?;
+        items.push(WorkspaceRedactionResult::from_model(
+            &redaction,
+            workspace.id,
+            workspace.handle.clone(),
+            requested_by,
+        ));
+    }
+    let response = WorkspaceRedactionsPage::new(items, page.total, page.next_cursor);
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+fn list_workspace_redactions_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List workspace redactions")
+        .description(
+            "Returns all redactions across the workspace, most recent first, cursor-paginated, \
+             with optional detection and document filters. Each redaction is one redact pass \
+             with its own reviewer edits, output document, and review audit.",
         )
         .response::<200, Json<WorkspaceRedactionsPage>>()
         .response::<401, Json<ErrorResponse>>()
@@ -161,6 +220,10 @@ async fn find_redaction(
 /// Builds the redaction routes.
 pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
+        .api_route(
+            "/workspaces/{workspaceId}/redactions",
+            get_with(list_workspace_redactions, list_workspace_redactions_docs),
+        )
         .api_route(
             "/workspaces/{workspaceId}/detections/{detectionId}/redactions",
             get_with(list_detection_redactions, list_detection_redactions_docs),

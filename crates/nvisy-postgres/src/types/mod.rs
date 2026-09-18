@@ -27,6 +27,7 @@ pub use enums::{
 };
 pub use filtering::{
     DetectionFilter, DocumentFilter, DocumentReviewFilter, InviteFilter, MemberFilter,
+    RedactionFilter,
 };
 pub use handle::{HANDLE_MAX_LENGTH, HANDLE_MIN_LENGTH, Handle, HandleError};
 pub use json::{
