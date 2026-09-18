@@ -24,7 +24,7 @@ use crate::handler::request::{
     WorkspaceRedactionsQuery,
 };
 use crate::handler::response::{WorkspaceRedactionResult, WorkspaceRedactionsPage};
-use crate::handler::utility::resolve_account_ref;
+use crate::handler::utility::{resolve_account_ref, resolve_account_refs};
 use crate::response::{ErrorKind, ErrorResponse, Result};
 use crate::service::{ArtifactReader, EngineService};
 
@@ -120,13 +120,19 @@ async fn list_workspace_redactions(
         .cursor_list_workspace_redactions(workspace.id, pagination.into_cursor(), &query.into())
         .await?;
 
-    // Resolve the requesting account per row. Redactions are few per workspace
-    // (one per manual redact request), so a per-row lookup is acceptable here.
+    // Resolve the requesting accounts in one query keyed by id: this listing spans
+    // every detection in the workspace, so a per-row lookup would be an N+1. A row
+    // whose account is missing is a server-side inconsistency (as elsewhere).
+    let account_ids: Vec<Uuid> = page.items.iter().map(|r| r.account_id).collect();
+    let accounts = resolve_account_refs(&mut conn, &account_ids).await?;
     let mut items = Vec::with_capacity(page.items.len());
-    for redaction in page.items {
-        let requested_by = resolve_account_ref(&mut conn, redaction.account_id).await?;
+    for redaction in &page.items {
+        let requested_by = accounts
+            .get(&redaction.account_id)
+            .cloned()
+            .ok_or_else(|| ErrorKind::InternalServerError.with_message("account not found"))?;
         items.push(WorkspaceRedactionResult::from_model(
-            &redaction,
+            redaction,
             workspace.id,
             workspace.handle.clone(),
             requested_by,

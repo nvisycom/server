@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceRedaction, WorkspaceRedaction};
-use crate::types::{CursorPage, CursorPagination, keyset};
+use crate::types::{CursorPage, CursorPagination, RedactionFilter, keyset};
 use crate::{Error, PgConnection, Result, schema};
 
 /// Keyset for paginating a detection's redactions: newest first by `created_at`,
@@ -65,7 +65,7 @@ pub trait WorkspaceRedactionRepository {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination<RedactionCursor>,
-        filter: &crate::types::RedactionFilter,
+        filter: &RedactionFilter,
     ) -> impl Future<Output = Result<CursorPage<WorkspaceRedaction>>> + Send;
 }
 
@@ -169,7 +169,7 @@ impl WorkspaceRedactionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         pagination: CursorPagination<RedactionCursor>,
-        filter: &crate::types::RedactionFilter,
+        filter: &RedactionFilter,
     ) -> Result<CursorPage<WorkspaceRedaction>> {
         use schema::workspace_detections::dsl as detections;
         use schema::workspace_redactions::dsl as redactions;
