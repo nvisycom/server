@@ -220,7 +220,13 @@ impl<T> CursorPage<T> {
 /// value — nothing here assumes a timestamp. `direction` is a [`Direction`];
 /// `after` is typically `pagination.after_key().map(|k| (k.field.into(), k.id))`.
 ///
+/// Exported for peer repository crates (e.g. `nvisy-cloud-postgres`) that build
+/// their own keyset queries; it expands to Diesel query-builder calls, so the
+/// call site needs `diesel::prelude::*` in scope. `Direction` is referenced by
+/// its absolute path, so no import of it is required.
+///
 /// [`Direction`]: crate::types::Direction
+#[macro_export]
 macro_rules! keyset {
     ($query:expr, $sort:expr, $id:expr, $direction:expr, $after:expr) => {{
         use $crate::types::Direction;
