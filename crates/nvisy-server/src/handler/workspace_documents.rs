@@ -800,5 +800,5 @@ pub fn routes(max_file_body_bytes: usize) -> ApiRouter<ServiceState> {
             "/workspaces/{workspaceId}/documents/{documentId}/content",
             get_with(download_document, download_document_docs),
         )
-        .with_path_items(|item| item.tag("WorkspaceDocuments"))
+        .with_path_items(|item| item.tag("Documents"))
 }

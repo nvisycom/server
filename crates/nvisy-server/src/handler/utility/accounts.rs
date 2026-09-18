@@ -4,6 +4,8 @@
 //! public username (display), so handlers resolve the reference from the account
 //! id they already hold.
 
+use std::collections::HashMap;
+
 use nvisy_postgres::PgConn;
 use nvisy_postgres::query::AccountRepository;
 use uuid::Uuid;
@@ -28,6 +30,38 @@ pub async fn resolve_account_ref(conn: &mut PgConn, account_id: Uuid) -> Result<
             )
         })
         .ok_or_else(|| ErrorKind::InternalServerError.with_message("account not found"))
+}
+
+/// Resolves public references for many accounts in one query, returning a lookup
+/// keyed by account id. Avoids the per-row N+1 of [`resolve_account_ref`] when a
+/// listing renders several rows that each name an account.
+///
+/// Distinct ids are loaded once; an id with no live account is simply absent from
+/// the map, leaving the missing-account decision to the caller (mirroring
+/// [`resolve_account_ref`], which treats it as a server-side inconsistency).
+///
+/// # Errors
+///
+/// A database error if the account lookup fails.
+pub async fn resolve_account_refs(
+    conn: &mut PgConn,
+    account_ids: &[Uuid],
+) -> Result<HashMap<Uuid, AccountRef>> {
+    let accounts = conn.find_accounts_by_ids(account_ids).await?;
+    Ok(accounts
+        .into_iter()
+        .map(|account| {
+            (
+                account.id,
+                AccountRef::new(
+                    account.id,
+                    account.username,
+                    account.display_name,
+                    account.avatar_url,
+                ),
+            )
+        })
+        .collect())
 }
 
 /// Builds the list of user-specific inputs a password is checked against for

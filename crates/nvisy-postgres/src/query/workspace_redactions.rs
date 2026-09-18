@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceRedaction, WorkspaceRedaction};
-use crate::types::{CursorPage, CursorPagination, keyset};
+use crate::types::{CursorPage, CursorPagination, RedactionFilter, keyset};
 use crate::{Error, PgConnection, Result, schema};
 
 /// Keyset for paginating a detection's redactions: newest first by `created_at`,
@@ -53,6 +53,19 @@ pub trait WorkspaceRedactionRepository {
         &mut self,
         detection_id: Uuid,
         pagination: CursorPagination<RedactionCursor>,
+    ) -> impl Future<Output = Result<CursorPage<WorkspaceRedaction>>> + Send;
+
+    /// Lists a workspace's redactions with cursor pagination, newest first,
+    /// narrowed by an optional detection and document.
+    ///
+    /// Redactions carry no workspace column; the scope (and the `document_id`
+    /// filter) is applied through the redaction's detection, so an ad-hoc
+    /// detection (no pipeline) or one whose pipeline was deleted still resolves.
+    fn cursor_list_workspace_redactions(
+        &mut self,
+        workspace_id: Uuid,
+        pagination: CursorPagination<RedactionCursor>,
+        filter: &RedactionFilter,
     ) -> impl Future<Output = Result<CursorPage<WorkspaceRedaction>>> + Send;
 }
 
@@ -135,6 +148,73 @@ impl WorkspaceRedactionRepository for PgConnection {
             scoped,
             dsl::created_at,
             dsl::id,
+            pagination.direction,
+            after
+        )
+        .select(WorkspaceRedaction::as_select())
+        .limit(pagination.fetch_limit())
+        .load(self)
+        .await
+        .map_err(Error::from)?;
+
+        Ok(CursorPage::new(items, total, pagination.limit, |row| {
+            RedactionCursor {
+                created_at: row.created_at.into(),
+                id: row.id,
+            }
+        }))
+    }
+
+    async fn cursor_list_workspace_redactions(
+        &mut self,
+        workspace_id: Uuid,
+        pagination: CursorPagination<RedactionCursor>,
+        filter: &RedactionFilter,
+    ) -> Result<CursorPage<WorkspaceRedaction>> {
+        use schema::workspace_detections::dsl as detections;
+        use schema::workspace_redactions::dsl as redactions;
+        use schema::{workspace_detections, workspace_redactions};
+
+        // One scoped builder for both the count and the page, so a future filter
+        // cannot be added to one and forgotten on the other. Redactions carry no
+        // workspace column, so scope (and the document filter) run through the
+        // detection: `redactions ⋈ detections` on `workspace_id`, and on the
+        // detection's `input_document_id` when a document is given.
+        let scoped = || {
+            let mut query = workspace_redactions::table
+                .inner_join(workspace_detections::table)
+                .filter(detections::workspace_id.eq(workspace_id))
+                .filter(detections::deleted_at.is_null())
+                .filter(redactions::deleted_at.is_null())
+                .into_boxed();
+            if let Some(detection_id) = filter.detection_id {
+                query = query.filter(redactions::detection_id.eq(detection_id));
+            }
+            if let Some(document_id) = filter.document_id {
+                query = query.filter(detections::input_document_id.eq(document_id));
+            }
+            query
+        };
+
+        let total = if pagination.include_count {
+            Some(
+                scoped()
+                    .count()
+                    .get_result::<i64>(self)
+                    .await
+                    .map_err(Error::from)?,
+            )
+        } else {
+            None
+        };
+
+        let after = pagination
+            .after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let items: Vec<WorkspaceRedaction> = keyset!(
+            scoped(),
+            redactions::created_at,
+            redactions::id,
             pagination.direction,
             after
         )
@@ -271,6 +351,111 @@ mod tests {
             .cursor_list_detection_redactions(Uuid::now_v7(), CursorPagination::new(50))
             .await?;
         assert!(empty.items.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cursor_list_workspace_redactions_scopes_and_filters() -> anyhow::Result<()> {
+        use crate::model::{NewBlob, NewWorkspaceDocument};
+        use crate::query::WorkspaceDocumentRepository;
+        use crate::types::RedactionFilter;
+
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_pipeline_and_document().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // Two detections in the same workspace over two different documents, each
+        // with its own redaction. The second document is created here; the first is
+        // the seeded one.
+        let doc_a = seeded.document_id;
+        let doc_b = conn
+            .create_workspace_document(
+                NewWorkspaceDocument::test(seeded.workspace_id, seeded.account_id, Uuid::nil()),
+                NewBlob::test(seeded.workspace_id),
+            )
+            .await?
+            .id;
+        let detection_a = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.workspace_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                doc_a,
+            ))
+            .await?
+            .id;
+        let detection_b = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.workspace_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                doc_b,
+            ))
+            .await?
+            .id;
+        let redaction_a = conn
+            .create_redaction(NewWorkspaceRedaction::test(detection_a, seeded.account_id))
+            .await?;
+        let redaction_b = conn
+            .create_redaction(NewWorkspaceRedaction::test(detection_b, seeded.account_id))
+            .await?;
+
+        // Unfiltered: the workspace's listing returns both.
+        let all = conn
+            .cursor_list_workspace_redactions(
+                seeded.workspace_id,
+                CursorPagination::new(50),
+                &RedactionFilter::default(),
+            )
+            .await?;
+        let mut ids = all.items.iter().map(|r| r.id).collect::<Vec<_>>();
+        ids.sort();
+        let mut want = vec![redaction_a.id, redaction_b.id];
+        want.sort();
+        assert_eq!(ids, want, "both redactions are listed for the workspace");
+
+        // Filter by document: only that document's detection's redaction.
+        let by_doc = conn
+            .cursor_list_workspace_redactions(
+                seeded.workspace_id,
+                CursorPagination::new(50),
+                &RedactionFilter {
+                    document_id: Some(doc_a),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert_eq!(
+            by_doc.items.iter().map(|r| r.id).collect::<Vec<_>>(),
+            vec![redaction_a.id],
+            "the document filter scopes through the detection"
+        );
+
+        // Filter by detection: only that detection's redaction.
+        let by_detection = conn
+            .cursor_list_workspace_redactions(
+                seeded.workspace_id,
+                CursorPagination::new(50),
+                &RedactionFilter {
+                    detection_id: Some(detection_b),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert_eq!(
+            by_detection.items.iter().map(|r| r.id).collect::<Vec<_>>(),
+            vec![redaction_b.id]
+        );
+
+        // A different workspace sees none of them.
+        let other = conn
+            .cursor_list_workspace_redactions(
+                Uuid::now_v7(),
+                CursorPagination::new(50),
+                &RedactionFilter::default(),
+            )
+            .await?;
+        assert!(other.items.is_empty());
         Ok(())
     }
 }

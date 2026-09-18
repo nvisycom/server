@@ -21,9 +21,10 @@ use crate::extract::{Authorized, Json, Path, Query, markers};
 use crate::handler::ServiceState;
 use crate::handler::request::{
     CursorPagination, WorkspaceDetectionPathParams, WorkspaceRedactionPathParams,
+    WorkspaceRedactionsQuery,
 };
 use crate::handler::response::{WorkspaceRedactionResult, WorkspaceRedactionsPage};
-use crate::handler::utility::resolve_account_ref;
+use crate::handler::utility::{resolve_account_ref, resolve_account_refs};
 use crate::response::{ErrorKind, ErrorResponse, Result};
 use crate::service::{ArtifactReader, EngineService};
 
@@ -84,6 +85,70 @@ fn list_detection_redactions_docs(op: TransformOperation) -> TransformOperation 
             "Returns a detection's redactions, most recent first, cursor-paginated. Each \
              redaction is one redact pass with its own reviewer edits, output document, and \
              review audit.",
+        )
+        .response::<200, Json<WorkspaceRedactionsPage>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
+/// Lists all redactions across the workspace, most recent first, cursor-paginated.
+///
+/// Aggregates redactions from every detection in the workspace, with optional
+/// detection and document filters — the document-scoped view a document's
+/// redactions tab renders from, without fanning out one request per detection.
+/// Requires `ViewDetections`.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
+    )
+)]
+async fn list_workspace_redactions(
+    State(pg_client): State<PgClient>,
+    authz: Authorized<markers::ViewDetections>,
+    Query(pagination): Query<CursorPagination>,
+    Query(query): Query<WorkspaceRedactionsQuery>,
+) -> Result<(StatusCode, Json<WorkspaceRedactionsPage>)> {
+    tracing::debug!(target: TRACING_TARGET, "Listing workspace redactions");
+
+    let workspace = authz.workspace;
+
+    let mut conn = pg_client.get_connection().await?;
+    let page = conn
+        .cursor_list_workspace_redactions(workspace.id, pagination.into_cursor(), &query.into())
+        .await?;
+
+    // Resolve the requesting accounts in one query keyed by id: this listing spans
+    // every detection in the workspace, so a per-row lookup would be an N+1. A row
+    // whose account is missing is a server-side inconsistency (as elsewhere).
+    let account_ids: Vec<Uuid> = page.items.iter().map(|r| r.account_id).collect();
+    let accounts = resolve_account_refs(&mut conn, &account_ids).await?;
+    let mut items = Vec::with_capacity(page.items.len());
+    for redaction in &page.items {
+        let requested_by = accounts
+            .get(&redaction.account_id)
+            .cloned()
+            .ok_or_else(|| ErrorKind::InternalServerError.with_message("account not found"))?;
+        items.push(WorkspaceRedactionResult::from_model(
+            redaction,
+            workspace.id,
+            workspace.handle.clone(),
+            requested_by,
+        ));
+    }
+    let response = WorkspaceRedactionsPage::new(items, page.total, page.next_cursor);
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+fn list_workspace_redactions_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List workspace redactions")
+        .description(
+            "Returns all redactions across the workspace, most recent first, cursor-paginated, \
+             with optional detection and document filters. Each redaction is one redact pass \
+             with its own reviewer edits, output document, and review audit.",
         )
         .response::<200, Json<WorkspaceRedactionsPage>>()
         .response::<401, Json<ErrorResponse>>()
@@ -161,6 +226,10 @@ async fn find_redaction(
 /// Builds the redaction routes.
 pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()
+        .api_route(
+            "/workspaces/{workspaceId}/redactions",
+            get_with(list_workspace_redactions, list_workspace_redactions_docs),
+        )
         .api_route(
             "/workspaces/{workspaceId}/detections/{detectionId}/redactions",
             get_with(list_detection_redactions, list_detection_redactions_docs),
