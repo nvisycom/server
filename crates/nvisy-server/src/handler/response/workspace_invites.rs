@@ -30,9 +30,16 @@ pub struct WorkspaceInvite {
     /// Role the invitee will have if they accept.
     pub invited_role: WorkspaceRole,
     /// Current status of the invitation.
+    ///
+    /// For a single-use open code, `accepted` means the code has been consumed;
+    /// `pending` (and unexpired) means it is still active.
     pub invite_status: InviteStatus,
     /// When the invitation expires.
     pub expires_at: Timestamp,
+    /// When the invitee responded (accepted or declined), if they have. For a
+    /// consumed single-use code, this is when it was used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub responded_at: Option<Timestamp>,
     /// When the invitation was created.
     pub created_at: Timestamp,
     /// When the invitation was last updated.
@@ -56,6 +63,7 @@ impl WorkspaceInvite {
             invited_role: invite.invited_role,
             invite_status: invite.invite_status,
             expires_at: invite.expires_at.into(),
+            responded_at: invite.responded_at.map(Into::into),
             created_at: invite.created_at.into(),
             updated_at: invite.updated_at.into(),
         }
@@ -93,36 +101,38 @@ impl Default for WorkspaceInviteSent {
     }
 }
 
-/// Response containing a generated shareable invite code.
+/// Response for a freshly generated shareable invite code: the full invite plus
+/// its raw, show-once code.
+///
+/// The `inviteCode` is a single-use bearer secret returned **only here**, never
+/// from the list or any other endpoint — treat it like the webhook signing
+/// secret and store it at once. The flattened invite fields (notably `inviteId`
+/// and `inviteStatus`) let a client correlate this code to its listing row and
+/// track its lifecycle: once redeemed the code is consumed, and the row's
+/// `inviteStatus` becomes `accepted` (with `respondedAt` set) — so a client can
+/// tell an active code from a spent one without ever re-fetching the secret.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceInviteCode {
-    /// The generated invite code that can be shared.
+    /// The generated invite code to share. Shown once and never returned again.
     pub invite_code: String,
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
-    /// URL-safe workspace handle. Display-only.
-    pub workspace_handle: Handle,
-    /// Role assigned when someone joins via this code.
-    pub role: WorkspaceRole,
-    /// When the invite code expires.
-    pub expires_at: Timestamp,
+    /// The invite this code redeems, in the same shape the listing returns.
+    #[serde(flatten)]
+    pub invite: WorkspaceInvite,
 }
 
 impl WorkspaceInviteCode {
-    /// Creates a new invite code response from a workspace invite.
+    /// Creates an invite-code response from a freshly created open invite,
+    /// pairing its show-once token with the full invite summary.
     pub fn from_invite(
-        invite: &model::WorkspaceInvite,
+        invite: model::WorkspaceInvite,
         workspace_id: Uuid,
         workspace_handle: Handle,
     ) -> Self {
         Self {
             invite_code: invite.invite_token.clone(),
-            workspace_id,
-            workspace_handle,
-            role: invite.invited_role,
-            expires_at: invite.expires_at.into(),
+            invite: WorkspaceInvite::from_model(invite, workspace_id, workspace_handle),
         }
     }
 }
