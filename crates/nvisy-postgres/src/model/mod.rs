@@ -36,7 +36,6 @@ mod workspace_reviews;
 mod workspace_webhooks;
 mod workspaces;
 
-// Account models
 pub use account_api_tokens::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
 pub use account_identities::{AccountIdentity, NewAccountIdentity};
 pub use account_notifications::{
@@ -59,7 +58,6 @@ pub use workspace_connections::{
 pub use workspace_detection_jobs::{NewWorkspaceDetectionJob, WorkspaceDetectionJob};
 pub use workspace_detection_policy_versions::DetectionPolicyVersion;
 pub use workspace_detection_usage::{NewWorkspaceDetectionUsage, WorkspaceDetectionUsage};
-// Detection / pipeline models
 pub use workspace_detections::{
     NewWorkspaceDetection, UpdateWorkspaceDetection, WorkspaceDetection,
 };
@@ -81,5 +79,4 @@ pub use workspace_review_events::{NewWorkspaceReviewEvent, WorkspaceReviewEvent}
 pub use workspace_review_links::{NewReviewAssignee, NewReviewDetection, NewReviewRedaction};
 pub use workspace_reviews::{NewWorkspaceReview, UpdateWorkspaceReview, WorkspaceReview};
 pub use workspace_webhooks::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
-// Workspace models
 pub use workspaces::{NewWorkspace, UpdateWorkspace, Workspace};
