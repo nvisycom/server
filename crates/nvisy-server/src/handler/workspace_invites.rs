@@ -262,7 +262,7 @@ async fn generate_invite_code(
     Ok((
         StatusCode::CREATED,
         Json(WorkspaceInviteCode::from_invite(
-            &invite,
+            invite,
             workspace.id,
             workspace.handle,
         )),
@@ -273,7 +273,10 @@ fn generate_invite_code_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Generate invite code")
         .description(
             "Creates a shareable, single-use invite code that lets one person join the \
-             workspace. The code is consumed on first acceptance and expires if unused.",
+             workspace. The code is consumed on first acceptance and expires if unused. \
+             The response carries the raw code (shown once, never returned again) alongside \
+             the full invite — including its `inviteId` and `inviteStatus`, so a client can \
+             correlate the code to its listing row and tell an active code from a consumed one.",
         )
         .response::<201, Json<WorkspaceInviteCode>>()
         .response::<400, Json<ErrorResponse>>()
