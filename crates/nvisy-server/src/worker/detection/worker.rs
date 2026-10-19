@@ -517,11 +517,11 @@ impl DetectionWorker {
             )
             .await?;
 
-        // Record inference usage: per-model token rows into the usage table (the
-        // usage aggregation surface) and the full per-recognizer report into
-        // metadata for drill-down. Absent for a purely deterministic detection.
-        // The report is layered onto the detection's existing metadata so tags and
-        // any recorded error survive the write.
+        // Record inference usage: one call row (and its meter rows) per model call
+        // into the usage tables (the aggregation surface) and the full per-call
+        // report into metadata for drill-down. Absent for a purely deterministic
+        // detection. The report is layered onto the detection's existing metadata
+        // so tags and any recorded error survive the write.
         let usage = extract_detection_usage(detection.id, audit);
         let metadata = usage.as_ref().map(|u| {
             let mut current = detection.metadata.or_default();
@@ -584,8 +584,8 @@ impl DetectionWorker {
                     None => None,
                 };
                 let intermediate_blob_id = resolved_blob.as_ref().map(|blob| blob.id);
-                if let Some(usage) = &usage {
-                    conn.record_detection_usage(&usage.per_model).await?;
+                if let Some(usage) = usage {
+                    conn.record_detection_usage(usage.calls).await?;
                 }
                 let finalized = conn
                     .finalize_detection(

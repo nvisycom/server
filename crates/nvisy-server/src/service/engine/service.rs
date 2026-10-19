@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use derive_more::Deref;
 use elide_pipeline::file::Document;
 use elide_pipeline::governance::policy::Policy;
-use elide_pipeline::provider::{ProviderConfig, RequestContext};
+use elide_pipeline::provider::{Deployment, Provider, RequestContext};
 use elide_pipeline::{
     Analyzed, Engine, Error as EngineError, ErrorKind as EngineErrorKind, Result as EngineResult,
 };
@@ -40,12 +40,12 @@ impl EngineService {
     /// - A configuration error if a `config_path` is set but the provider config
     ///   file cannot be read or parsed.
     pub async fn from_config(config: EngineConfig) -> Result<Self> {
-        let provider_config = match config.config_path {
+        let deployment = match config.config_path {
             Some(path) => config::load(&path).await?,
-            None => ProviderConfig::default(),
+            None => Deployment::default(),
         };
 
-        let engine = Engine::new(provider_config.build());
+        let engine = Engine::new(Provider::new(deployment));
         Ok(Self { engine })
     }
 
@@ -160,7 +160,7 @@ impl EngineService {
             }
             let mut matched = false;
             for format in registry.iter() {
-                if format.modality() == token {
+                if super::format_modality(format.id().as_str()) == Some(token.as_str()) {
                     matched = true;
                     for ext in format.extensions() {
                         push_unique(&mut out, &mut seen, ext.as_ref());

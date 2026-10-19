@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::domain::input::{ListDocumentsInput, UpdateDocumentInput};
 use crate::handler::utility::DocumentHash;
+use crate::service::format_modality;
 
 /// Request to update document metadata.
 #[must_use]
@@ -96,7 +97,7 @@ registry_token!(
 registry_token!(
     /// A modality filter token (`text`, `tabular`, `image`, `audio`).
     ModalityToken => "A supported document modality.",
-    |format| std::iter::once(format.modality().to_owned())
+    |format| format_modality(format.id().as_str()).map(ToOwned::to_owned)
 );
 
 /// Query parameters for listing documents.

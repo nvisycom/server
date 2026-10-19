@@ -78,6 +78,10 @@ pub mod sql_types {
     pub struct SyncTriggerType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "usage_meter"))]
+    pub struct UsageMeter;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "webhook_event"))]
     pub struct WebhookEvent;
 
@@ -265,6 +269,32 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
+
+    workspace_detection_call (id) {
+        id -> Uuid,
+        detection_id -> Uuid,
+        model -> Text,
+        version -> Nullable<Text>,
+        outcome -> Text,
+        duration_ms -> Int8,
+        output_count -> Nullable<Int8>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::UsageMeter;
+
+    workspace_detection_call_meter (id) {
+        id -> Uuid,
+        call_id -> Uuid,
+        meter -> UsageMeter,
+        amount -> Numeric,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
     use super::sql_types::OutboxStatus;
 
     workspace_detection_jobs (id) {
@@ -285,21 +315,6 @@ diesel::table! {
     workspace_detection_policy_versions (detection_id, policy_version_id) {
         detection_id -> Uuid,
         policy_version_id -> Uuid,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-
-    workspace_detection_usage (id) {
-        id -> Uuid,
-        detection_id -> Uuid,
-        model -> Text,
-        version -> Nullable<Text>,
-        input_tokens -> Nullable<Int8>,
-        output_tokens -> Nullable<Int8>,
-        total_tokens -> Nullable<Int8>,
-        duration_ms -> Int8,
     }
 }
 
@@ -658,10 +673,11 @@ diesel::joinable!(workspace_connection_syncs -> accounts (account_id));
 diesel::joinable!(workspace_connection_syncs -> workspace_connections (connection_id));
 diesel::joinable!(workspace_connections -> accounts (account_id));
 diesel::joinable!(workspace_connections -> workspaces (workspace_id));
+diesel::joinable!(workspace_detection_call -> workspace_detections (detection_id));
+diesel::joinable!(workspace_detection_call_meter -> workspace_detection_call (call_id));
 diesel::joinable!(workspace_detection_jobs -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detection_policy_versions -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detection_policy_versions -> workspace_policy_versions (policy_version_id));
-diesel::joinable!(workspace_detection_usage -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detections -> accounts (account_id));
 diesel::joinable!(workspace_detections -> workspace_documents (input_document_id));
 diesel::joinable!(workspace_detections -> workspace_pipelines (pipeline_id));
@@ -717,9 +733,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_connection_schedule,
     workspace_connection_syncs,
     workspace_connections,
+    workspace_detection_call,
+    workspace_detection_call_meter,
     workspace_detection_jobs,
     workspace_detection_policy_versions,
-    workspace_detection_usage,
     workspace_detections,
     workspace_document_exports,
     workspace_document_imports,

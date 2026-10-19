@@ -6,13 +6,13 @@
 //! pipeline's definition carries detection intent, not this infrastructure
 //! config.
 //!
-//! The file deserializes straight into the engine's own [`ProviderConfig`], whose
+//! The file deserializes straight into the engine's own [`Deployment`], whose
 //! `recognizers`/`enrichers` shape the file mirrors, so no server-side mirror
 //! types are needed.
 
 use std::path::{Path, PathBuf};
 
-use elide_pipeline::provider::ProviderConfig;
+use elide_pipeline::provider::Deployment;
 
 use crate::{Error, Result};
 
@@ -30,17 +30,20 @@ pub struct EngineConfig {
     pub config_path: Option<PathBuf>,
 }
 
-/// Reads and parses the engine [`ProviderConfig`] from a TOML file.
-pub(super) async fn load(path: &Path) -> Result<ProviderConfig> {
+/// Reads and parses the engine [`Deployment`] from a TOML file.
+pub(super) async fn load(path: &Path) -> Result<Deployment> {
     let text = tokio::fs::read_to_string(path).await.map_err(|e| {
         Error::internal("engine", "Failed to read engine config file").with_source(e)
     })?;
     parse(&text)
 }
 
-/// Parses the engine [`ProviderConfig`] from TOML text.
-pub(super) fn parse(text: &str) -> Result<ProviderConfig> {
-    toml::from_str(text)
+/// Parses the engine [`Deployment`] from TOML text.
+///
+/// Uses [`Deployment::from_toml`], which validates the component lineups and
+/// expands `${VAR}` references — the plain serde path skips that validation.
+pub(super) fn parse(text: &str) -> Result<Deployment> {
+    Deployment::from_toml(text)
         .map_err(|e| Error::internal("engine", "Failed to parse engine config file").with_source(e))
 }
 
@@ -53,9 +56,9 @@ mod tests {
     fn example_config_parses() {
         let text = include_str!("../../../../../docker/engine.example.toml");
         let config = parse(text).expect("example engine config parses");
-        assert_eq!(config.recognizers.ner.len(), 1);
-        assert_eq!(config.recognizers.llm.len(), 1);
-        assert_eq!(config.enrichers.ocr.len(), 1);
-        assert_eq!(config.enrichers.stt.len(), 1);
+        assert_eq!(config.recognizers().ner.len(), 1);
+        assert_eq!(config.recognizers().llm.len(), 1);
+        assert_eq!(config.enrichers().ocr.len(), 1);
+        assert_eq!(config.enrichers().stt.len(), 1);
     }
 }
