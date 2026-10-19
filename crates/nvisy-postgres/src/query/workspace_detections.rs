@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{
-    NewWorkspaceDetection, NewWorkspaceDetectionUsage, UpdateWorkspaceDetection,
-    WorkspaceDetection, WorkspacePipeline,
+    DetectionCallRecord, NewWorkspaceDetection, NewWorkspaceDetectionCall,
+    NewWorkspaceDetectionCallMeter, UpdateWorkspaceDetection, WorkspaceDetection,
+    WorkspacePipeline,
 };
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, DetectionFilter, DetectionStatus, keyset,
@@ -180,12 +181,13 @@ pub trait WorkspaceDetectionRepository {
         updates: UpdateWorkspaceDetection,
     ) -> impl Future<Output = Result<bool>> + Send;
 
-    /// Records a detection's per-model inference usage. A no-op for an empty slice
-    /// (a deterministic detection spends no tokens). Inserted once, at analyze
-    /// time.
+    /// Records a detection's inference usage: one call row per model call, with
+    /// the meters each spent. A no-op for an empty slice (a deterministic
+    /// detection makes no model calls). Written once, at analyze time, inside the
+    /// caller's finalize transaction.
     fn record_detection_usage(
         &mut self,
-        usage: &[NewWorkspaceDetectionUsage],
+        calls: Vec<DetectionCallRecord>,
     ) -> impl Future<Output = Result<()>> + Send;
 }
 
@@ -625,18 +627,51 @@ impl WorkspaceDetectionRepository for PgConnection {
         Ok(rows_affected == 1)
     }
 
-    async fn record_detection_usage(&mut self, usage: &[NewWorkspaceDetectionUsage]) -> Result<()> {
-        use schema::workspace_detection_usage;
+    async fn record_detection_usage(&mut self, calls: Vec<DetectionCallRecord>) -> Result<()> {
+        use schema::{workspace_detection_call, workspace_detection_call_meter};
 
-        if usage.is_empty() {
+        if calls.is_empty() {
             return Ok(());
         }
 
-        diesel::insert_into(workspace_detection_usage::table)
-            .values(usage)
+        // Two bulk inserts, not a per-call loop: each call already carries its own
+        // id (assigned at record construction), so every meter row can reference
+        // its call without reading a generated key back. Flatten the records into
+        // the call rows and the meter rows up front, then insert the calls and
+        // their meters in one statement each. The caller runs this inside the
+        // finalize transaction, so both inserts commit with the rest of finalize.
+        let mut meter_rows: Vec<NewWorkspaceDetectionCallMeter> = Vec::new();
+        let call_rows: Vec<NewWorkspaceDetectionCall> = calls
+            .into_iter()
+            .map(|DetectionCallRecord { call, meters }| {
+                let call_id = call.id;
+                meter_rows.extend(meters.into_iter().map(|(meter, amount)| {
+                    NewWorkspaceDetectionCallMeter {
+                        call_id,
+                        meter,
+                        amount,
+                    }
+                }));
+                call
+            })
+            .collect();
+
+        // Calls first so the meters' `call_id` foreign key resolves.
+        diesel::insert_into(workspace_detection_call::table)
+            .values(&call_rows)
             .execute(self)
             .await
             .map_err(Error::from)?;
+
+        // A detection may make calls that billed nothing (e.g. failures), so the
+        // meter set can be empty even when there are calls.
+        if !meter_rows.is_empty() {
+            diesel::insert_into(workspace_detection_call_meter::table)
+                .values(&meter_rows)
+                .execute(self)
+                .await
+                .map_err(Error::from)?;
+        }
 
         Ok(())
     }
@@ -1038,12 +1073,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn record_detection_usage_is_a_noop_for_an_empty_slice() -> anyhow::Result<()> {
+    async fn record_detection_usage_is_a_noop_for_no_calls() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let mut conn = db.client.get_connection().await?;
 
-        // An empty usage slice writes nothing and does not error.
-        conn.record_detection_usage(&[]).await?;
+        // No calls writes nothing and does not error.
+        conn.record_detection_usage(Vec::new()).await?;
         Ok(())
     }
 

@@ -14,9 +14,9 @@ mod workspace_blobs;
 mod workspace_connection_schedule;
 mod workspace_connection_syncs;
 mod workspace_connections;
+mod workspace_detection_call;
 mod workspace_detection_jobs;
 mod workspace_detection_policy_versions;
-mod workspace_detection_usage;
 mod workspace_detections;
 mod workspace_document_exports;
 mod workspace_document_imports;
@@ -55,9 +55,11 @@ pub use workspace_connection_syncs::{
 pub use workspace_connections::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
+pub use workspace_detection_call::{
+    DetectionCallRecord, NewWorkspaceDetectionCall, NewWorkspaceDetectionCallMeter,
+};
 pub use workspace_detection_jobs::{NewWorkspaceDetectionJob, WorkspaceDetectionJob};
 pub use workspace_detection_policy_versions::DetectionPolicyVersion;
-pub use workspace_detection_usage::{NewWorkspaceDetectionUsage, WorkspaceDetectionUsage};
 pub use workspace_detections::{
     NewWorkspaceDetection, UpdateWorkspaceDetection, WorkspaceDetection,
 };

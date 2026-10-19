@@ -2,13 +2,14 @@
 //! detections, for the analytics endpoint.
 //!
 //! Two entry points, each reading a consistent snapshot in one read-only
-//! transaction: `snapshot` (storage, detection health, token usage) and
+//! transaction: `snapshot` (storage, detection health, inference usage) and
 //! `detections_by_day` (the daily time series). Both compose several grouped
 //! aggregates from private `load_*` helpers. Rows come back sparse (one per group
 //! that has data, never zero-filled here) — the handler maps them onto the full
 //! set of enum values, filling absent groups with zero, so the response is stable
 //! regardless of what data exists.
 
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 
 use bigdecimal::BigDecimal;
@@ -17,7 +18,7 @@ use diesel::sql_types::Timestamptz;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
-use crate::types::{DetectionStatus, DocumentKind};
+use crate::types::{DetectionStatus, DocumentKind, UsageMeter};
 use crate::{Error, PgConnection, Result, schema};
 
 /// Per-day detection counts and durations, as loaded from the grouped detection
@@ -36,22 +37,19 @@ struct DetectionDayCounts {
     p95_ms: Option<i64>,
 }
 
-/// Per-day token totals, as loaded from the grouped usage query.
-#[derive(Debug, Clone, Queryable)]
-struct DetectionDayTokens {
+/// One `(day, meter)` summed amount, as loaded from the grouped usage query.
+///
+/// Loaded by name (`sql_query`) because the grouping mixes a `date_trunc` day
+/// expression with a typed enum column, which the typed query builder's
+/// group-by machinery cannot express together.
+#[derive(Debug, Clone, QueryableByName)]
+struct DetectionDayMeter {
+    #[diesel(sql_type = Timestamptz)]
     day: jiff_diesel::Timestamp,
-    input: Option<BigDecimal>,
-    output: Option<BigDecimal>,
-    total: Option<BigDecimal>,
-}
-
-/// A day's token totals converted to `i64`, keyed by day while merging the
-/// detection and usage series.
-#[derive(Debug, Clone, Copy, Default)]
-struct DayTokens {
-    input: Option<i64>,
-    output: Option<i64>,
-    total: Option<i64>,
+    #[diesel(sql_type = crate::schema::sql_types::UsageMeter)]
+    meter: UsageMeter,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Numeric>)]
+    amount: Option<BigDecimal>,
 }
 
 /// One day of detection activity for a workspace. Only days with at least one
@@ -71,37 +69,44 @@ pub struct DetectionDayPoint {
     pub avg_ms: Option<i64>,
     /// 95th-percentile duration (milliseconds) of detections completed this day; null if none.
     pub p95_ms: Option<i64>,
-    /// Input/prompt tokens across models used by this day's detections; null if none.
-    pub input_tokens: Option<i64>,
-    /// Output/completion tokens across models used by this day's detections; null if none.
-    pub output_tokens: Option<i64>,
-    /// Reported total tokens across models used by this day's detections; null if none.
-    pub total_tokens: Option<i64>,
+    /// Summed amount per meter across this day's detections; empty on a day with
+    /// no metered usage. A value may be fractional (seconds), hence `f64`.
+    pub meters: HashMap<UsageMeter, f64>,
 }
 
-/// Per-model token totals as loaded; each `SUM(bigint)` is `numeric`, so it
-/// arrives as `BigDecimal` and is narrowed to `i64` when building [`UsageByModel`].
+/// One `(model, meter)` summed amount as loaded; `SUM(numeric)` arrives as
+/// `BigDecimal` and is narrowed to `f64` (a meter may be fractional seconds).
 #[derive(Debug, Clone, Queryable)]
-struct UsageByModelRow {
+struct UsageMeterRow {
     model: String,
-    input_tokens: Option<BigDecimal>,
-    output_tokens: Option<BigDecimal>,
-    total_tokens: Option<BigDecimal>,
+    meter: UsageMeter,
+    amount: Option<BigDecimal>,
 }
 
-/// Inference token totals for one model across a workspace's detections. Each
-/// field is independently nullable because a provider may report only some of
-/// them (a `total` that is not `input + output`, or no breakdown at all).
+/// One model's call and error counts across a workspace's detections, as loaded.
+/// The error count is a `SUM(CASE …)` so it arrives as `numeric` (`BigDecimal`).
+#[derive(Debug, Clone, Queryable)]
+struct UsageCallRow {
+    model: String,
+    calls: i64,
+    errors: Option<BigDecimal>,
+}
+
+/// Inference usage for one model across a workspace's detections: how much of
+/// each billing meter it spent, and how many calls it made (and how many failed).
+///
+/// `meters` carries only the meters this model actually reported; a value may be
+/// fractional (seconds), hence `f64`.
 #[derive(Debug, Clone)]
 pub struct UsageByModel {
     /// The model these totals are for.
     pub model: String,
-    /// Summed input/prompt tokens, or `None` if no detection reported them for this model.
-    pub input_tokens: Option<i64>,
-    /// Summed output/completion tokens, or `None` if none reported.
-    pub output_tokens: Option<i64>,
-    /// Summed reported totals, or `None` if none reported.
-    pub total_tokens: Option<i64>,
+    /// Summed amount per meter the model reported.
+    pub meters: HashMap<UsageMeter, f64>,
+    /// How many calls to this model the workspace's detections made.
+    pub calls: i64,
+    /// How many of those calls failed (outcome other than `ok`).
+    pub errors: i64,
 }
 
 /// Live-document count and byte total for one document `kind`, as loaded.
@@ -144,8 +149,8 @@ pub struct DetectionDurations {
     pub p95_ms: Option<i64>,
 }
 
-/// A workspace's point-in-time analytics: storage, detection health, and token
-/// usage read together so the parts agree. Produced by
+/// A workspace's point-in-time analytics: storage, detection health, and
+/// inference usage read together so the parts agree. Produced by
 /// [`snapshot`](WorkspaceAnalyticsRepository::snapshot).
 #[derive(Debug, Clone)]
 pub struct AnalyticsSnapshot {
@@ -155,15 +160,15 @@ pub struct AnalyticsSnapshot {
     pub detections: Vec<DetectionStatusCount>,
     /// Completed-detection duration summary.
     pub durations: DetectionDurations,
-    /// Inference token totals, one per model used.
+    /// Inference usage, one entry per model used.
     pub usage: Vec<UsageByModel>,
 }
 
 /// Read-only aggregate queries backing the workspace analytics endpoint.
 pub trait WorkspaceAnalyticsRepository {
     /// A workspace's point-in-time analytics — storage by kind, detection counts
-    /// by status, completed-detection durations, and per-model token usage — read
-    /// in one read-only, repeatable-read transaction so the parts reflect a single
+    /// by status, completed-detection durations, and per-model inference usage —
+    /// read in one read-only, repeatable-read transaction so the parts reflect a single
     /// snapshot. Each breakdown lists only the groups that have data; the caller
     /// zero-fills the rest.
     fn snapshot(
@@ -178,8 +183,8 @@ pub trait WorkspaceAnalyticsRepository {
     /// bucketed by `date_trunc('day', started_at)`; detections are scoped through
     /// their live pipeline. The caller is responsible for bounding the window.
     ///
-    /// Detection counts, durations, and token totals are read in one transaction
-    /// so the two grouped statements observe the same snapshot.
+    /// Detection counts, durations, and per-meter totals are read in one
+    /// transaction so the two grouped statements observe the same snapshot.
     fn detections_by_day(
         &mut self,
         workspace_id: Uuid,
@@ -192,8 +197,8 @@ impl WorkspaceAnalyticsRepository for PgConnection {
     async fn snapshot(&mut self, workspace_id: Uuid) -> Result<AnalyticsSnapshot> {
         // The four reads run in one read-only, repeatable-read transaction so the
         // snapshot is internally consistent: a detection cannot appear in the
-        // status counts while its tokens are missing from the usage totals because
-        // a write landed between two of the reads.
+        // status counts while its metered usage is missing from the usage totals
+        // because a write landed between two of the reads.
         self.build_transaction()
             .read_only()
             .repeatable_read()
@@ -221,41 +226,39 @@ impl WorkspaceAnalyticsRepository for PgConnection {
         let from = jiff_diesel::Timestamp::from(from);
         let to = jiff_diesel::Timestamp::from(to);
 
-        // Read the detection counts/durations and the token totals in one
+        // Read the detection counts/durations and the per-meter totals in one
         // read-only, repeatable-read transaction so both grouped statements
         // observe the same snapshot; otherwise a detection written between them
         // could show in one series but not the other.
-        let (detection_rows, token_rows): (Vec<DetectionDayCounts>, Vec<DetectionDayTokens>) = self
+        let (detection_rows, meter_rows): (Vec<DetectionDayCounts>, Vec<DetectionDayMeter>) = self
             .build_transaction()
             .read_only()
             .repeatable_read()
             .run(async |conn| {
                 let detection_rows =
                     load_detection_day_counts(conn, workspace_id, from, to).await?;
-                let token_rows = load_detection_day_tokens(conn, workspace_id, from, to).await?;
-                Ok::<_, Error>((detection_rows, token_rows))
+                let meter_rows = load_detection_day_meters(conn, workspace_id, from, to).await?;
+                Ok::<_, Error>((detection_rows, meter_rows))
             })
             .await?;
 
-        // Merge the two per-day results by day.
+        // Merge the two per-day results by day: fold the (day, meter) rows into a
+        // per-day meter map, then attach it to each detection day.
         let to_i64 = |v: Option<BigDecimal>| v.and_then(|b| b.to_i64());
-        let mut tokens: BTreeMap<jiff::Timestamp, DayTokens> = BTreeMap::new();
-        for row in token_rows {
-            tokens.insert(
-                row.day.into(),
-                DayTokens {
-                    input: to_i64(row.input),
-                    output: to_i64(row.output),
-                    total: to_i64(row.total),
-                },
-            );
+        let mut meters: BTreeMap<jiff::Timestamp, HashMap<UsageMeter, f64>> = BTreeMap::new();
+        for row in meter_rows {
+            if let Some(amount) = row.amount.as_ref().and_then(BigDecimal::to_f64) {
+                meters
+                    .entry(row.day.into())
+                    .or_default()
+                    .insert(row.meter, amount);
+            }
         }
 
         let points = detection_rows
             .into_iter()
             .map(|row| {
                 let day: jiff::Timestamp = row.day.into();
-                let t = tokens.remove(&day).unwrap_or_default();
                 DetectionDayPoint {
                     day,
                     detections: row.detections,
@@ -263,9 +266,7 @@ impl WorkspaceAnalyticsRepository for PgConnection {
                     failed: to_i64(row.failed).unwrap_or(0),
                     avg_ms: row.avg_ms,
                     p95_ms: row.p95_ms,
-                    input_tokens: t.input,
-                    output_tokens: t.output,
-                    total_tokens: t.total,
+                    meters: meters.remove(&day).unwrap_or_default(),
                 }
             })
             .collect();
@@ -370,43 +371,71 @@ async fn load_detection_durations(
     Ok(DetectionDurations { avg_ms, p95_ms })
 }
 
-/// Inference token totals per model across the workspace's detections, scoped
-/// through the live pipeline. Only models actually used appear. Kept per-model
-/// rather than summed to one total, since a detection may mix models.
+/// Inference usage per model across the workspace's detections — summed per
+/// meter, plus call and error counts — scoped through the live pipeline. Only
+/// models actually used appear. Kept per-model rather than summed to one total,
+/// since a detection may mix models.
 async fn load_usage_by_model(
     conn: &mut PgConnection,
     workspace_id: Uuid,
 ) -> Result<Vec<UsageByModel>> {
     use bigdecimal::ToPrimitive;
-    use diesel::dsl::sum;
-    use schema::workspace_detection_usage::dsl as usage;
+    use diesel::dsl::{case_when, count_star, sum};
+    use diesel::sql_types::BigInt;
+    use schema::workspace_detection_call::dsl as call;
+    use schema::workspace_detection_call_meter::dsl as meter;
     use schema::workspace_detections::dsl as detections;
-    use schema::{workspace_detection_usage, workspace_detections};
+    use schema::{workspace_detection_call, workspace_detection_call_meter, workspace_detections};
 
-    let rows: Vec<UsageByModelRow> = workspace_detection_usage::table
-        .inner_join(workspace_detections::table.on(detections::id.eq(usage::detection_id)))
+    // Two reads merged by model rather than one join: joining calls to their
+    // meters fans each call out by its meter count, which would inflate the
+    // call/error counts. So sum meters grouped by (model, meter) in one query and
+    // count calls grouped by model in another.
+    let meter_rows: Vec<UsageMeterRow> = workspace_detection_call_meter::table
+        .inner_join(workspace_detection_call::table.on(call::id.eq(meter::call_id)))
+        .inner_join(workspace_detections::table.on(detections::id.eq(call::detection_id)))
         .filter(detections::workspace_id.eq(workspace_id))
-        .group_by(usage::model)
-        .select((
-            usage::model,
-            sum(usage::input_tokens),
-            sum(usage::output_tokens),
-            sum(usage::total_tokens),
-        ))
+        .group_by((call::model, meter::meter))
+        .select((call::model, meter::meter, sum(meter::amount)))
         .load(conn)
         .await
         .map_err(Error::from)?;
 
-    let to_i64 = |v: Option<BigDecimal>| v.and_then(|b| b.to_i64());
-    Ok(rows
-        .into_iter()
-        .map(|row| UsageByModel {
-            model: row.model,
-            input_tokens: to_i64(row.input_tokens),
-            output_tokens: to_i64(row.output_tokens),
-            total_tokens: to_i64(row.total_tokens),
-        })
-        .collect())
+    // Errors as `SUM(CASE WHEN outcome <> 'ok' THEN 1 ELSE 0 END)` (this diesel
+    // has no filtered count), alongside the total call count.
+    let error_count = sum(case_when::<_, _, BigInt>(call::outcome.ne("ok"), 1i64).otherwise(0i64));
+    let call_rows: Vec<UsageCallRow> = workspace_detection_call::table
+        .inner_join(workspace_detections::table.on(detections::id.eq(call::detection_id)))
+        .filter(detections::workspace_id.eq(workspace_id))
+        .group_by(call::model)
+        .select((call::model, count_star(), error_count))
+        .load(conn)
+        .await
+        .map_err(Error::from)?;
+
+    // Merge both by model, preserving model order from the call query (every model
+    // that has meters also has at least one call row).
+    let mut by_model: BTreeMap<String, UsageByModel> = BTreeMap::new();
+    for row in call_rows {
+        by_model.insert(
+            row.model.clone(),
+            UsageByModel {
+                model: row.model,
+                meters: HashMap::new(),
+                calls: row.calls,
+                errors: row.errors.and_then(|b| b.to_i64()).unwrap_or(0),
+            },
+        );
+    }
+    for row in meter_rows {
+        if let Some(amount) = row.amount.as_ref().and_then(BigDecimal::to_f64)
+            && let Some(entry) = by_model.get_mut(&row.model)
+        {
+            entry.meters.insert(row.meter, amount);
+        }
+    }
+
+    Ok(by_model.into_values().collect())
 }
 
 /// The day bucket a detection's start falls in. Shared by both daily queries so
@@ -419,8 +448,8 @@ fn detection_day() -> diesel::expression::SqlLiteral<Timestamptz> {
 }
 
 /// Per-day detection counts and durations over `[from, to)`, scoped through the
-/// live pipeline. Sparse: only days that have a detection. Shared with the token
-/// query so both observe the same snapshot inside one transaction.
+/// live pipeline. Sparse: only days that have a detection. Shared with the
+/// per-meter query so both observe the same snapshot inside one transaction.
 async fn load_detection_day_counts(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -479,49 +508,38 @@ async fn load_detection_day_counts(
         .map_err(Error::from)
 }
 
-/// Per-day inference token totals over `[from, to)`, scoped through the live
-/// pipeline. Usage is per-model-per-detection, so each token field is summed per
-/// detection first (a correlated subquery) before day-grouping, otherwise a
-/// detection's multiple model rows would multiply the day totals. Sparse: only
-/// days with a detection (token sums are null on days with no usage).
-async fn load_detection_day_tokens(
+/// Per-day inference usage over `[from, to)`, as `(day, meter, summed amount)`
+/// rows, scoped through the live pipeline. Each meter row belongs to exactly one
+/// call and so one detection and day, so summing `amount` over the join never
+/// double-counts — no per-detection dedup is needed (unlike detection counts).
+/// Only days with metered usage appear; the caller gap-fills the window.
+async fn load_detection_day_meters(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     from: jiff_diesel::Timestamp,
     to: jiff_diesel::Timestamp,
-) -> Result<Vec<DetectionDayTokens>> {
-    use diesel::dsl::sum;
-    use schema::workspace_detection_usage::dsl as usage;
-    use schema::workspace_detections::dsl as detections;
-    use schema::{workspace_detection_usage, workspace_detections};
+) -> Result<Vec<DetectionDayMeter>> {
+    use diesel::sql_types::{Timestamptz, Uuid as SqlUuid};
 
-    let per_detection_input = workspace_detection_usage::table
-        .filter(usage::detection_id.eq(detections::id))
-        .select(sum(usage::input_tokens))
-        .single_value();
-    let per_detection_output = workspace_detection_usage::table
-        .filter(usage::detection_id.eq(detections::id))
-        .select(sum(usage::output_tokens))
-        .single_value();
-    let per_detection_total = workspace_detection_usage::table
-        .filter(usage::detection_id.eq(detections::id))
-        .select(sum(usage::total_tokens))
-        .single_value();
-
-    workspace_detections::table
-        .filter(detections::workspace_id.eq(workspace_id))
-        .filter(detections::started_at.ge(from))
-        .filter(detections::started_at.lt(to))
-        .group_by(detection_day())
-        .select((
-            detection_day(),
-            sum(per_detection_input),
-            sum(per_detection_output),
-            sum(per_detection_total),
-        ))
-        .load(conn)
-        .await
-        .map_err(Error::from)
+    // Raw SQL because the day expression and the meter enum column are grouped
+    // together, which the typed builder's group-by cannot express. The join and
+    // window mirror `load_detection_day_counts`; `[from, to)` is half-open.
+    diesel::sql_query(
+        "SELECT date_trunc('day', d.started_at) AS day, \
+                m.meter AS meter, \
+                SUM(m.amount) AS amount \
+         FROM workspace_detection_call_meter m \
+         JOIN workspace_detection_call c ON c.id = m.call_id \
+         JOIN workspace_detections d ON d.id = c.detection_id \
+         WHERE d.workspace_id = $1 AND d.started_at >= $2 AND d.started_at < $3 \
+         GROUP BY day, m.meter",
+    )
+    .bind::<SqlUuid, _>(workspace_id)
+    .bind::<Timestamptz, _>(from)
+    .bind::<Timestamptz, _>(to)
+    .load(conn)
+    .await
+    .map_err(Error::from)
 }
 
 #[cfg(test)]
@@ -531,12 +549,32 @@ mod tests {
     use super::*;
     use crate::PgConn;
     use crate::model::{
-        NewBlob, NewWorkspaceDetection, NewWorkspaceDetectionUsage, NewWorkspaceDocument,
+        DetectionCallRecord, NewBlob, NewWorkspaceDetection, NewWorkspaceDetectionCall,
+        NewWorkspaceDocument,
     };
     use crate::query::{
         WorkspaceAnalyticsRepository, WorkspaceDetectionRepository, WorkspaceDocumentRepository,
     };
     use crate::test_util::{TestDatabase, backdate};
+
+    /// A successful token-billed model call on `detection_id`, reporting the given
+    /// input/output/total token meters.
+    fn token_call(
+        detection_id: Uuid,
+        model: &str,
+        input: u64,
+        output: u64,
+        total: u64,
+    ) -> DetectionCallRecord {
+        DetectionCallRecord {
+            call: NewWorkspaceDetectionCall::test(detection_id, model),
+            meters: vec![
+                (UsageMeter::TokensInput, BigDecimal::from(input)),
+                (UsageMeter::TokensOutput, BigDecimal::from(output)),
+                (UsageMeter::TokensTotal, BigDecimal::from(total)),
+            ],
+        }
+    }
 
     /// Inserts a `Complete` detection that started `started_ago` in the past and
     /// finished `duration` later, returning its id — for the duration and
@@ -602,10 +640,11 @@ mod tests {
             ))
             .await?;
 
-        // Usage: two models on the completed detection.
-        conn.record_detection_usage(&[
-            NewWorkspaceDetectionUsage::test(complete, "gpt-4o", 100, 20),
-            NewWorkspaceDetectionUsage::test(complete, "claude", 200, 40),
+        // Usage: two model calls on the completed detection, each with token
+        // meters.
+        conn.record_detection_usage(vec![
+            token_call(complete, "gpt-4o", 100, 20, 120),
+            token_call(complete, "claude", 200, 40, 240),
         ])
         .await?;
 
@@ -642,14 +681,16 @@ mod tests {
         // Durations: a completed detection exists, so the summary is populated.
         assert_eq!(snapshot.durations.avg_ms, Some(10_000));
 
-        // Usage: two models, tokens summed per model.
+        // Usage: two models, token meters summed per model, one call each.
         let gpt = snapshot
             .usage
             .iter()
             .find(|u| u.model == "gpt-4o")
             .expect("gpt-4o usage present");
-        assert_eq!(gpt.input_tokens, Some(100));
-        assert_eq!(gpt.total_tokens, Some(120));
+        assert_eq!(gpt.meters.get(&UsageMeter::TokensInput), Some(&100.0));
+        assert_eq!(gpt.meters.get(&UsageMeter::TokensTotal), Some(&120.0));
+        assert_eq!(gpt.calls, 1);
+        assert_eq!(gpt.errors, 0);
         assert!(snapshot.usage.iter().any(|u| u.model == "claude"));
         Ok(())
     }
@@ -725,7 +766,7 @@ mod tests {
             Span::new().seconds(5),
         )
         .await?;
-        conn.record_detection_usage(&[NewWorkspaceDetectionUsage::test(recent, "gpt-4o", 50, 10)])
+        conn.record_detection_usage(vec![token_call(recent, "gpt-4o", 50, 10, 60)])
             .await?;
 
         // A window covering only the last two days excludes the 3-day-old one.
@@ -738,8 +779,12 @@ mod tests {
         // One bucket (the two recent detections share a UTC day), 2 detections.
         let total: i64 = points.iter().map(|p| p.detections).sum();
         assert_eq!(total, 2, "the 3-day-old detection is outside the window");
-        // Tokens from the usage row are merged onto that day.
-        assert!(points.iter().any(|p| p.input_tokens == Some(50)));
+        // The token meter from the call is merged onto that day.
+        assert!(
+            points
+                .iter()
+                .any(|p| p.meters.get(&UsageMeter::TokensInput) == Some(&50.0))
+        );
         Ok(())
     }
 }

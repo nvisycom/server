@@ -38,7 +38,9 @@ pub use crate::service::blob::{ArtifactReader, ArtifactWriter};
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
 pub use crate::service::emitter::{NotificationEmitter, UnreadCountEvent, WebhookEmitter};
-pub use crate::service::engine::{EngineConfig, EngineService, UnknownFormatToken};
+pub use crate::service::engine::{
+    EngineConfig, EngineService, UnknownFormatToken, format_modality,
+};
 pub use crate::service::health::{HealthConfig, HealthReading, HealthService};
 pub use crate::service::infra::Infra;
 pub use crate::service::integration::{

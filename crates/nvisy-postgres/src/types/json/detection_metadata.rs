@@ -17,10 +17,11 @@ pub struct DetectionMetadata {
     /// Failure reason recorded when the detection failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// The engine's full per-recognizer usage report (durations, per-model token
-    /// counts), stored opaquely for drill-down. Per-model token totals for
-    /// aggregation live in the `workspace_detection_usage` table; this keeps the
-    /// detail. Absent when the detection produced no usage.
+    /// The engine's full per-call usage report (outcomes, durations, and the
+    /// billing units each call spent), stored opaquely for drill-down. The
+    /// structured per-call and per-meter rows for aggregation live in the
+    /// `workspace_detection_call` / `workspace_detection_call_meter` tables; this
+    /// keeps the raw detail. Absent when the detection made no model calls.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "Option<serde_json::Value>"))]
     pub usage: Option<serde_json::Value>,

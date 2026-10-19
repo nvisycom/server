@@ -19,6 +19,21 @@ CREATE TYPE PIPELINE_TRIGGER_TYPE AS ENUM (
 
 COMMENT ON TYPE PIPELINE_TRIGGER_TYPE IS 'How a detection was initiated: by a user or by the system.';
 
+-- The billing unit a model call metered. A call reports an open set of these
+-- (tokens for LLMs, seconds for speech-to-text, pages/images for OCR, …); each
+-- is one row keyed by this type, read together with its amount (never bare).
+CREATE TYPE USAGE_METER AS ENUM (
+    'tokens_input',     -- Input/prompt tokens (token-billed models)
+    'tokens_output',    -- Output/completion tokens
+    'tokens_total',     -- Total tokens as reported (not necessarily input + output)
+    'seconds',          -- Seconds of media processed (speech-to-text)
+    'pages',            -- Pages processed (document OCR, per page)
+    'images',           -- Images processed (vision/OCR, per image)
+    'characters'        -- Characters processed (per-character services)
+);
+
+COMMENT ON TYPE USAGE_METER IS 'The billing unit a model call metered: token counts, media seconds, pages, images, or characters.';
+
 -- Detections table: one analysis pass of a file through a pipeline.
 CREATE TABLE workspace_detections (
     -- Primary identifier
@@ -65,9 +80,10 @@ CREATE TABLE workspace_detections (
     retention_override JSONB                DEFAULT NULL,
 
     -- Non-encrypted metadata for filtering and display. The engine's full
-    -- per-recognizer usage report (durations, per-model token counts) is kept
-    -- here under `usage` for drill-down; per-model token totals for usage
-    -- aggregation live in the workspace_detection_usage table below.
+    -- per-call usage report (outcomes, durations, and the units each call spent)
+    -- is kept here under `usage` for opaque drill-down; the structured per-call
+    -- and per-meter rows for aggregation live in the workspace_detection_call and
+    -- workspace_detection_call_meter tables below.
     metadata        JSONB                   NOT NULL DEFAULT '{}',
     CONSTRAINT workspace_detections_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
 
@@ -149,69 +165,99 @@ COMMENT ON COLUMN workspace_detections.trigger_type IS 'How the detection was in
 COMMENT ON COLUMN workspace_detections.status IS 'Current detection status';
 COMMENT ON COLUMN workspace_detections.idempotency_key IS 'Detect idempotency key (dedupes retries)';
 COMMENT ON COLUMN workspace_detections.retention_override IS 'Retention override the detection ran under, snapshotted at create; read on redact so output retention reflects the run, not a since-edited pipeline. NULL falls back to the workspace baseline';
-COMMENT ON COLUMN workspace_detections.metadata IS 'Non-encrypted metadata for filtering/display; holds the full per-recognizer usage report under `usage`';
+COMMENT ON COLUMN workspace_detections.metadata IS 'Non-encrypted metadata for filtering/display; holds the full per-call usage report under `usage`';
 COMMENT ON COLUMN workspace_detections.claimed_at IS 'Detection lease: when a worker last claimed this detection';
 COMMENT ON COLUMN workspace_detections.started_at IS 'When the detection started';
 COMMENT ON COLUMN workspace_detections.completed_at IS 'When the detection completed; NULL while in flight';
 COMMENT ON COLUMN workspace_detections.deleted_at IS 'Soft-deletion timestamp; NULL means live. The row is kept as a ledger record; only its blob bytes are reclaimed';
 
--- Per-model inference usage for a detection: one row per distinct model a
--- detection's recognizers used. Token counts are aggregated across the
--- recognizers that shared a model, letting usage analytics report tokens broken
--- down by model (a detection's summed tokens cannot, since it may mix models).
--- The full per-recognizer report is kept on the detection (metadata.usage) for
--- drill-down; this table is the aggregation surface.
-CREATE TABLE workspace_detection_usage (
+-- Inference usage for a detection, at the grain the engine reports it: one row
+-- per model *call*. A detection's recognizers may call the same model more than
+-- once (and the same model may be called with different outcomes), so calls are
+-- NOT collapsed by model here — each call keeps its own outcome and duration.
+-- Per-model and per-meter rollups are produced by aggregating these at read
+-- time. The full per-recognizer report is also kept on the detection
+-- (metadata.usage) for opaque drill-down.
+CREATE TABLE workspace_detection_call (
     -- Primary identifier
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-    -- The detection this usage belongs to; usage is deleted with its detection.
+    -- The detection this call belongs to; calls are deleted with their detection.
     detection_id    UUID                    NOT NULL REFERENCES workspace_detections (id) ON DELETE CASCADE,
 
-    -- The model and its optional version. Identity is (detection, model,
-    -- version): a detection may use the same model at more than one version, and
-    -- each is its own row (uniqueness enforced by an index below that normalizes
-    -- a NULL version).
+    -- The model called and its optional version. Not unique per detection: the
+    -- same (model, version) may be called several times, each its own row.
     model           TEXT                    NOT NULL,
     version         TEXT                    DEFAULT NULL,
-    CONSTRAINT workspace_detection_usage_model_length CHECK (length(model) BETWEEN 1 AND 255),
-    CONSTRAINT workspace_detection_usage_version_length CHECK (version IS NULL OR length(version) BETWEEN 1 AND 255),
+    CONSTRAINT workspace_detection_call_model_length CHECK (length(model) BETWEEN 1 AND 255),
+    CONSTRAINT workspace_detection_call_version_length CHECK (version IS NULL OR length(version) BETWEEN 1 AND 255),
 
-    -- Token counts as the provider reported them. Each is independently nullable:
-    -- `total` is NOT necessarily input + output (a provider may report only a
-    -- total, or a total that also counts cached/reasoning tokens), so all three
-    -- are carried faithfully and never derived from one another.
-    input_tokens    BIGINT                  DEFAULT NULL,
-    output_tokens   BIGINT                  DEFAULT NULL,
-    total_tokens    BIGINT                  DEFAULT NULL,
-    CONSTRAINT workspace_detection_usage_input_non_negative CHECK (input_tokens IS NULL OR input_tokens >= 0),
-    CONSTRAINT workspace_detection_usage_output_non_negative CHECK (output_tokens IS NULL OR output_tokens >= 0),
-    CONSTRAINT workspace_detection_usage_total_non_negative CHECK (total_tokens IS NULL OR total_tokens >= 0),
+    -- How the call ended: 'ok', or the engine's error-kind label. An open set, so
+    -- stored as text rather than an enum.
+    outcome         TEXT                    NOT NULL,
+    CONSTRAINT workspace_detection_call_outcome_length CHECK (length(outcome) BETWEEN 1 AND 64),
 
-    -- Wall-clock time this model's recognizers spent, in milliseconds.
-    duration_ms     BIGINT                  NOT NULL DEFAULT 0,
-    CONSTRAINT workspace_detection_usage_duration_non_negative CHECK (duration_ms >= 0)
+    -- This call's wall-clock time (the model round-trip), in milliseconds.
+    -- Distinct from the detection's total duration, which spans every call plus
+    -- decode and enrichment.
+    duration_ms     BIGINT                  NOT NULL,
+    CONSTRAINT workspace_detection_call_duration_non_negative CHECK (duration_ms >= 0),
+
+    -- What the call produced (entities, segments, …), when the response reports a
+    -- count; NULL on failure or a response with no meaningful count.
+    output_count    BIGINT                  DEFAULT NULL,
+    CONSTRAINT workspace_detection_call_output_count_non_negative CHECK (output_count IS NULL OR output_count >= 0)
 );
 
--- One row per (detection, model, version); a NULL version is normalized so two
--- unversioned rows for the same model collide instead of both being inserted.
--- Leads with detection_id, so it also serves per-detection drill-down lookups.
-CREATE UNIQUE INDEX workspace_detection_usage_detection_model_version_key
-    ON workspace_detection_usage (detection_id, model, COALESCE(version, ''));
+-- Per-detection drill-down and the join key for the meter rollups.
+CREATE INDEX workspace_detection_call_detection_idx
+    ON workspace_detection_call (detection_id);
 
 -- Usage rollups by model across detections.
-CREATE INDEX workspace_detection_usage_model_idx
-    ON workspace_detection_usage (model);
+CREATE INDEX workspace_detection_call_model_idx
+    ON workspace_detection_call (model);
 
-COMMENT ON TABLE workspace_detection_usage IS 'Per-model inference token usage for a detection.';
-COMMENT ON COLUMN workspace_detection_usage.id IS 'Unique usage row identifier';
-COMMENT ON COLUMN workspace_detection_usage.detection_id IS 'Detection this usage belongs to';
-COMMENT ON COLUMN workspace_detection_usage.model IS 'Model identifier the recognizers used';
-COMMENT ON COLUMN workspace_detection_usage.version IS 'Model version, if the provider reported one';
-COMMENT ON COLUMN workspace_detection_usage.input_tokens IS 'Input/prompt tokens for this model; NULL if not reported';
-COMMENT ON COLUMN workspace_detection_usage.output_tokens IS 'Output/completion tokens for this model; NULL if not reported';
-COMMENT ON COLUMN workspace_detection_usage.total_tokens IS 'Total tokens as reported (not necessarily input + output); NULL if not reported';
-COMMENT ON COLUMN workspace_detection_usage.duration_ms IS 'Wall-clock time this model spent, in milliseconds';
+COMMENT ON TABLE workspace_detection_call IS 'One model call made during a detection, with its outcome and duration.';
+COMMENT ON COLUMN workspace_detection_call.id IS 'Unique call row identifier';
+COMMENT ON COLUMN workspace_detection_call.detection_id IS 'Detection this call belongs to';
+COMMENT ON COLUMN workspace_detection_call.model IS 'Model identifier the call used';
+COMMENT ON COLUMN workspace_detection_call.version IS 'Model version, if the provider reported one';
+COMMENT ON COLUMN workspace_detection_call.outcome IS 'How the call ended: ok, or the engine error-kind label';
+COMMENT ON COLUMN workspace_detection_call.duration_ms IS 'This call''s wall-clock round-trip, in milliseconds';
+COMMENT ON COLUMN workspace_detection_call.output_count IS 'Items the call produced, if the response reported a count; NULL otherwise';
+
+-- The billing meters a call spent: one row per (call, meter). A call that billed
+-- nothing (e.g. a failed call) has no rows here. `amount` is NUMERIC because a
+-- meter may be fractional (seconds) or an integer count (tokens, pages, …); it
+-- is only meaningful read together with `meter`.
+CREATE TABLE workspace_detection_call_meter (
+    -- Primary identifier
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- The call this meter belongs to; meters are deleted with their call.
+    call_id         UUID                    NOT NULL REFERENCES workspace_detection_call (id) ON DELETE CASCADE,
+
+    -- Which unit was metered, and how much. The amount is non-negative and read
+    -- only in the context of the meter (1500 means tokens or seconds or pages
+    -- depending on this column).
+    meter           USAGE_METER             NOT NULL,
+    amount          NUMERIC                 NOT NULL,
+    CONSTRAINT workspace_detection_call_meter_amount_non_negative CHECK (amount >= 0)
+);
+
+-- One amount per meter per call; a call reports each unit at most once.
+CREATE UNIQUE INDEX workspace_detection_call_meter_call_meter_key
+    ON workspace_detection_call_meter (call_id, meter);
+
+-- Cross-detection rollups grouped by meter.
+CREATE INDEX workspace_detection_call_meter_meter_idx
+    ON workspace_detection_call_meter (meter);
+
+COMMENT ON TABLE workspace_detection_call_meter IS 'A billing meter (tokens, seconds, pages, …) a model call spent.';
+COMMENT ON COLUMN workspace_detection_call_meter.id IS 'Unique meter row identifier';
+COMMENT ON COLUMN workspace_detection_call_meter.call_id IS 'Call this meter belongs to';
+COMMENT ON COLUMN workspace_detection_call_meter.meter IS 'Which unit was metered';
+COMMENT ON COLUMN workspace_detection_call_meter.amount IS 'How much of the unit was spent; read only together with meter';
 
 -- Detection-job outbox: the transactional-outbox queue for detection analysis.
 -- Creating a detection inserts one row here in the same transaction as the

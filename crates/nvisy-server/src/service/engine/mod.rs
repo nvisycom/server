@@ -10,8 +10,10 @@
 
 mod config;
 mod error;
+mod modality;
 mod service;
 
 pub use config::EngineConfig;
 pub use error::UnknownFormatToken;
+pub use modality::format_modality;
 pub use service::EngineService;

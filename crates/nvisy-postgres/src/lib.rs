@@ -52,6 +52,7 @@ pub mod test_util;
 // the generated module rather than hand-editing it.
 #[allow(clippy::wildcard_imports)]
 mod schema;
+mod schema_ext;
 
 pub use diesel_async::{AsyncConnection, AsyncPgConnection as PgConnection};
 pub use jiff_diesel::Timestamp as JiffTimestamp;

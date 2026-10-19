@@ -1,12 +1,15 @@
 //! Detection worker helpers: usage extraction, policy resolution for a run, and
 //! the shared failure path.
 
+use bigdecimal::BigDecimal;
 use elide_pipeline::governance::policy::Policy;
-use nvisy_postgres::model::{NewWorkspaceDetectionUsage, UpdateWorkspaceDetection};
+use nvisy_postgres::model::{
+    DetectionCallRecord, NewWorkspaceDetectionCall, UpdateWorkspaceDetection,
+};
 use nvisy_postgres::query::{
     PipelineReferenceRepository, WorkspaceDetectionRepository, WorkspacePolicyRepository,
 };
-use nvisy_postgres::types::{DetectionMetadata, DetectionStatus, Json};
+use nvisy_postgres::types::{DetectionMetadata, DetectionStatus, Json, UsageMeter};
 use uuid::Uuid;
 
 use crate::extract::SecurityContext;
@@ -18,90 +21,102 @@ use crate::worker::detection::broadcast_status;
 /// Tracing target for detection worker helpers.
 const TRACING_TARGET: &str = "nvisy_server::worker::detection";
 
-/// A detection's inference usage, extracted from the engine's [`Audit`]: the
-/// per-model token rows for the usage table and the full report as JSON for the
-/// metadata blob. Absent when the detection used no model-based recognizers.
+/// A detection's inference usage, extracted from the engine's [`Audit`]: one
+/// call record per model call (each with the meters it spent), plus the full
+/// report as JSON for the metadata blob. Absent when the detection made no model
+/// calls.
 ///
 /// [`Audit`]: elide_pipeline::Audit
 pub(crate) struct DetectionUsage {
-    /// One row per distinct model, tokens summed across the recognizers that
-    /// shared it. Empty when no recognizer used a model.
-    pub per_model: Vec<NewWorkspaceDetectionUsage>,
-    /// The full per-recognizer usage report, serialized for
-    /// `DetectionMetadata.usage`.
+    /// One record per model call, at the grain the engine reports — calls are not
+    /// collapsed by model. Empty when the detection made no model calls.
+    pub calls: Vec<DetectionCallRecord>,
+    /// The full per-call usage report, serialized for `DetectionMetadata.usage`.
     pub report: serde_json::Value,
 }
 
 /// Extracts a detection's inference usage from the analysis, or `None` when the
-/// report is empty (a purely deterministic detection spends no tokens).
+/// report is empty (a purely deterministic detection makes no model calls).
 ///
-/// Recognizers are grouped by `(model, version)` and their token counts summed —
-/// `input`, `output`, and `total` independently, since a provider may report a
-/// `total` that is not `input + output` (cached/reasoning tokens). Durations are
-/// summed into milliseconds. The whole report is also kept as JSON for drill-down.
+/// One call record is produced per engine usage entry — the same model called
+/// several times keeps a record per call, each with its own outcome and
+/// duration. Each call's billing units become meter rows: a token-billed call
+/// yields up to three (`input`/`output`/`total`, carried independently since a
+/// provider may report a `total` that is not their sum), while audio-seconds,
+/// pages, images, and characters each become one. The whole report is also kept
+/// as JSON for drill-down.
 pub(crate) fn extract_detection_usage(
     detection_id: Uuid,
     analyzed: &elide_pipeline::Audit,
 ) -> Option<DetectionUsage> {
-    use std::collections::BTreeMap;
-
-    /// Running per-model totals; each token field stays `None` until a recognizer
-    /// reports it, so "not reported" is preserved rather than coerced to 0.
-    #[derive(Default)]
-    struct Acc {
-        input: Option<u64>,
-        output: Option<u64>,
-        total: Option<u64>,
-        duration_ms: u128,
-    }
-
-    /// Adds an optional reported count into a running optional sum.
-    fn add(acc: &mut Option<u64>, reported: Option<u64>) {
-        if let Some(v) = reported {
-            *acc = Some(acc.unwrap_or(0).saturating_add(v));
-        }
-    }
-
     let usage = &analyzed.usage;
     if usage.is_empty() {
         return None;
     }
 
-    let mut by_model: BTreeMap<(String, Option<String>), Acc> = BTreeMap::new();
-    for entry in &usage.entries {
-        let Some(model) = &entry.model else { continue };
-        let key = (
-            model.model.to_string(),
-            model.version.as_ref().map(ToString::to_string),
-        );
-        let acc = by_model.entry(key).or_default();
-        add(&mut acc.input, model.tokens.input);
-        add(&mut acc.output, model.tokens.output);
-        add(&mut acc.total, model.tokens.total);
-        acc.duration_ms = acc.duration_ms.saturating_add(entry.duration.as_millis());
-    }
-
-    let per_model = by_model
-        .into_iter()
-        .map(|((model, version), acc)| NewWorkspaceDetectionUsage {
-            detection_id,
-            model,
-            version,
-            input_tokens: acc.input.map(to_i64),
-            output_tokens: acc.output.map(to_i64),
-            total_tokens: acc.total.map(to_i64),
-            duration_ms: acc.duration_ms.try_into().unwrap_or(i64::MAX),
+    let calls = usage
+        .iter()
+        .map(|entry| {
+            let model = &entry.model;
+            let call = NewWorkspaceDetectionCall {
+                id: Uuid::now_v7(),
+                detection_id,
+                model: model.model.to_string(),
+                version: model.version.as_ref().map(ToString::to_string),
+                outcome: entry.outcome.label().to_owned(),
+                duration_ms: entry.duration.as_millis().try_into().unwrap_or(i64::MAX),
+                output_count: entry.output_count.map(count_to_i64),
+            };
+            DetectionCallRecord {
+                call,
+                meters: call_meters(model),
+            }
         })
         .collect();
 
     let report = serde_json::to_value(usage).unwrap_or(serde_json::Value::Null);
 
-    Some(DetectionUsage { per_model, report })
+    Some(DetectionUsage { calls, report })
 }
 
-/// Clamps an upstream `u64` token count into the `i64` column; token counts are
-/// well within range in practice, so saturating beats wrapping if one ever isn't.
-fn to_i64(value: u64) -> i64 {
+/// Flattens a model call's billing units into `(meter, amount)` rows. A token
+/// meter fans out into its reported `input`/`output`/`total` components; the
+/// others map one-to-one. A unit the call did not report contributes no row.
+fn call_meters(model: &elide_pipeline::usage::ModelUsage) -> Vec<(UsageMeter, BigDecimal)> {
+    let units = &model.units;
+    let mut meters = Vec::new();
+    if let Some(tokens) = units.tokens() {
+        if let Some(input) = tokens.input {
+            meters.push((UsageMeter::TokensInput, BigDecimal::from(input)));
+        }
+        if let Some(output) = tokens.output {
+            meters.push((UsageMeter::TokensOutput, BigDecimal::from(output)));
+        }
+        if let Some(total) = tokens.total {
+            meters.push((UsageMeter::TokensTotal, BigDecimal::from(total)));
+        }
+    }
+    if let Some(seconds) = units.seconds() {
+        // Seconds are fractional; a non-finite value is dropped rather than stored.
+        if let Ok(amount) = BigDecimal::try_from(seconds) {
+            meters.push((UsageMeter::Seconds, amount));
+        }
+    }
+    if let Some(pages) = units.pages() {
+        meters.push((UsageMeter::Pages, BigDecimal::from(pages)));
+    }
+    if let Some(images) = units.images() {
+        meters.push((UsageMeter::Images, BigDecimal::from(images)));
+    }
+    if let Some(characters) = units.characters() {
+        meters.push((UsageMeter::Characters, BigDecimal::from(characters)));
+    }
+    meters
+}
+
+/// Clamps an upstream `u64` count into the `i64` column; counts are well within
+/// range in practice, so saturating beats wrapping if one ever isn't.
+fn count_to_i64(value: u64) -> i64 {
     value.try_into().unwrap_or(i64::MAX)
 }
 

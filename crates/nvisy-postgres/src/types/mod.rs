@@ -23,7 +23,7 @@ pub use enums::{
     ActivityType, ApiTokenType, ConnectionType, DetectionStatus, DocumentKind, IdentityProvider,
     InviteStatus, NotificationEvent, OutboxStatus, PipelineStatus, PipelineTriggerType, PolicyKind,
     ProviderType, ReviewEventKind, ReviewStatus, SyncDeletionPolicy, SyncMode, SyncStatus,
-    SyncTriggerType, WebhookEvent, WebhookStatus, WorkspaceRole,
+    SyncTriggerType, UsageMeter, WebhookEvent, WebhookStatus, WorkspaceRole,
 };
 pub use filtering::{
     DetectionFilter, DocumentFilter, DocumentReviewFilter, InviteFilter, MemberFilter,

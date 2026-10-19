@@ -43,7 +43,7 @@ async fn get_analytics(
 fn get_analytics_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Workspace analytics")
         .description(
-            "Returns aggregate analytics for a workspace: stored-file totals with a per-kind breakdown, detection health (status mix, error rate, and durations), and inference token usage (workspace totals plus a per-model breakdown). Breakdowns list every kind/status, zero-filled, in a stable order.",
+            "Returns aggregate analytics for a workspace: stored-file totals with a per-kind breakdown, detection health (status mix, error rate, and durations), and inference usage metered per unit (tokens, media seconds, pages, images, characters) as workspace totals plus a per-model breakdown with call and error counts. Breakdowns list every kind/status, zero-filled, in a stable order.",
         )
         .response::<200, Json<WorkspaceAnalytics>>()
         .response::<401, Json<ErrorResponse>>()

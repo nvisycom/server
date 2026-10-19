@@ -120,7 +120,6 @@ humantime = { workspace = true, features = [], optional = true }
 csv = { workspace = true, features = [] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
-toml = { workspace = true, features = ["parse"] }
 bytes = { workspace = true, features = [] }
 http-body = { workspace = true, features = [] }
 garde = { workspace = true, features = [] }
@@ -139,6 +138,7 @@ uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
 time = { workspace = true, features = [] }
 ipnet = { workspace = true, features = [] }
+bigdecimal = { workspace = true, features = [] }
 
 # Image processing
 image = { workspace = true }
