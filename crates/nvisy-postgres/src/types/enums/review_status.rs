@@ -13,7 +13,8 @@ db_enum! {
     /// `Resolved`, and reopening a resolved review returns it to `NeedsReview`.
     /// Assigning or unassigning a resolved review leaves it `Resolved`.
     pub enum ReviewStatus: Default = NeedsReview, "crate::schema::sql_types::ReviewStatus" {
-        /// Open with no assignee; awaiting a reviewer to pick it up.
+        /// Open and not yet signed off: either awaiting a reviewer to pick it up,
+        /// or reopened after being resolved (an assignee from before may remain).
         NeedsReview = "needs_review",
         /// At least one reviewer is assigned and the review is in progress.
         InReview = "in_review",
