@@ -161,10 +161,9 @@ mod tests {
 
         conn.record_detection_policy_versions(detection.id, &[])
             .await?;
-        assert!(
-            conn.list_detection_policy_versions(detection.id)
-                .await?
-                .is_empty()
+        assert_eq!(
+            conn.list_detection_policy_versions(detection.id).await?,
+            Vec::<uuid::Uuid>::new()
         );
         Ok(())
     }

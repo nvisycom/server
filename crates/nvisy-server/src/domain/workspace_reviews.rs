@@ -768,9 +768,12 @@ mod tests {
 
     #[test]
     fn no_mentions_yields_empty() {
-        assert!(parse_mentions("just a plain comment, no pings").is_empty());
-        assert!(parse_mentions("").is_empty());
-        assert!(parse_mentions("look @ this").is_empty());
+        assert_eq!(
+            parse_mentions("just a plain comment, no pings"),
+            Vec::<String>::new()
+        );
+        assert_eq!(parse_mentions(""), Vec::<String>::new());
+        assert_eq!(parse_mentions("look @ this"), Vec::<String>::new());
     }
 
     #[test]
@@ -781,7 +784,7 @@ mod tests {
 
     #[test]
     fn non_ascii_letter_before_at_is_not_a_boundary() {
-        assert!(parse_mentions("café@bob").is_empty());
+        assert_eq!(parse_mentions("café@bob"), Vec::<String>::new());
         assert_eq!(parse_mentions("café @bob"), vec!["bob".to_owned()]);
     }
 }

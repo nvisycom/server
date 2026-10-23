@@ -216,7 +216,7 @@ mod tests {
         );
 
         // An empty input is a no-op, not a full-table scan.
-        assert!(conn.find_schedules(&[]).await?.is_empty());
+        assert_eq!(conn.find_schedules(&[]).await?, vec![]);
         Ok(())
     }
 }

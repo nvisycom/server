@@ -390,7 +390,7 @@ mod tests {
         // Database defaults are applied.
         assert_eq!(invite.invite_status, InviteStatus::Pending);
         assert_eq!(invite.invited_role, WorkspaceRole::Reviewer);
-        assert!(!invite.invite_token.trim().is_empty());
+        assert_ne!(invite.invite_token.trim(), "");
         assert!(jiff::Timestamp::from(invite.expires_at) > jiff::Timestamp::now());
 
         // Found by its token.

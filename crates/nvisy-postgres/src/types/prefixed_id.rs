@@ -23,6 +23,10 @@ pub enum PrefixedIdError {
 /// presentation encoding only, so these types convert to and from [`Uuid`] at
 /// the handler edge and are never used as a Diesel SQL type. Each invocation
 /// produces its own type, so ids of different resources cannot be interchanged.
+///
+/// The `$prefix` is a full resource word (`connection`, not `conn`), so it reads
+/// correctly both as the `<prefix>_<uuid>` wire format and as the schema
+/// description (`Opaque connection identifier …`).
 macro_rules! prefixed_id {
     ($(#[$meta:meta])* $name:ident, $prefix:literal) => {
         $(#[$meta])*
@@ -127,18 +131,18 @@ macro_rules! prefixed_id {
 }
 
 prefixed_id! {
-    /// Opaque identifier for a workspace connection (`conn_<uuid>`).
-    ConnectionId, "conn"
+    /// Opaque identifier for a workspace connection (`connection_<uuid>`).
+    ConnectionId, "connection"
 }
 
 prefixed_id! {
-    /// Opaque identifier for a workspace inference provider (`prov_<uuid>`).
-    ProviderId, "prov"
+    /// Opaque identifier for a workspace inference provider (`provider_<uuid>`).
+    ProviderId, "provider"
 }
 
 prefixed_id! {
-    /// Opaque identifier for a workspace webhook (`whk_<uuid>`).
-    WebhookId, "whk"
+    /// Opaque identifier for a workspace webhook (`webhook_<uuid>`).
+    WebhookId, "webhook"
 }
 
 prefixed_id! {
@@ -160,7 +164,7 @@ mod tests {
         let uuid = Uuid::from_u128(0x0123_4567_89ab_cdef_0123_4567_89ab_cdef);
         let id = ConnectionId::from_uuid(uuid);
         let rendered = id.to_string();
-        assert!(rendered.starts_with("conn_"));
+        assert!(rendered.starts_with("connection_"));
         assert_eq!(ConnectionId::parse(&rendered).unwrap(), id);
         assert_eq!(id.as_uuid(), uuid);
     }
@@ -169,17 +173,17 @@ mod tests {
     fn rejects_wrong_prefix() {
         let uuid = Uuid::from_u128(1);
         let webhook = WebhookId::from_uuid(uuid).to_string();
-        // A whk_ id must not parse as a ConnectionId.
+        // A webhook_ id must not parse as a ConnectionId.
         assert_eq!(
             ConnectionId::parse(&webhook),
-            Err(PrefixedIdError::Prefix("conn"))
+            Err(PrefixedIdError::Prefix("connection"))
         );
     }
 
     #[test]
     fn rejects_malformed_uuid() {
         assert_eq!(
-            ConnectionId::parse("conn_not-a-uuid"),
+            ConnectionId::parse("connection_not-a-uuid"),
             Err(PrefixedIdError::Uuid)
         );
     }
@@ -189,7 +193,7 @@ mod tests {
         let bare = Uuid::from_u128(1).to_string();
         assert_eq!(
             ConnectionId::parse(&bare),
-            Err(PrefixedIdError::Prefix("conn"))
+            Err(PrefixedIdError::Prefix("connection"))
         );
     }
 
@@ -197,13 +201,13 @@ mod tests {
     fn provider_id_uses_its_own_prefix() {
         let uuid = Uuid::from_u128(2);
         let id = ProviderId::from_uuid(uuid);
-        assert!(id.to_string().starts_with("prov_"));
+        assert!(id.to_string().starts_with("provider_"));
         assert_eq!(ProviderId::parse(&id.to_string()).unwrap(), id);
-        // A prov_ id and a conn_ id do not cross-parse.
+        // A provider_ id and a connection_ id do not cross-parse.
         let conn = ConnectionId::from_uuid(uuid).to_string();
         assert_eq!(
             ProviderId::parse(&conn),
-            Err(PrefixedIdError::Prefix("prov"))
+            Err(PrefixedIdError::Prefix("provider"))
         );
     }
 }

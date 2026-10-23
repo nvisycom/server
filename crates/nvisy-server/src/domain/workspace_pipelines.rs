@@ -298,7 +298,7 @@ mod tests {
 
         let created = service.create(origin, create_request(Vec::new())).await?;
         assert_eq!(created.pipeline.display_name, "Test pipeline");
-        assert!(created.policy_ids.is_empty());
+        assert_eq!(created.policy_ids, Vec::<Uuid>::new());
         Ok(())
     }
 
@@ -319,7 +319,7 @@ mod tests {
             .find(seeded.workspace_id, created.pipeline.id)
             .await?;
         assert_eq!(found.item.id, created.pipeline.id);
-        assert!(ids.is_empty());
+        assert_eq!(ids, Vec::<Uuid>::new());
         Ok(())
     }
 

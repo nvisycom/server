@@ -716,7 +716,7 @@ mod tests {
 
         // A connection that never completed a sync is simply absent.
         let (_a, _w, never) = seed_connection(&db).await?;
-        assert!(conn.last_successful_sync_at(&[never]).await?.is_empty());
+        assert_eq!(conn.last_successful_sync_at(&[never]).await?, vec![]);
         Ok(())
     }
 

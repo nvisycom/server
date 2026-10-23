@@ -27,10 +27,15 @@ on:
       - ".github/workflows/build.yml"
   workflow_dispatch:
 
+# Every job only reads the repo (checkout, build, lint, test); none writes back
+# via GITHUB_TOKEN, so grant read-only contents at workflow scope.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  RUST_TOOLCHAIN: "1.95.0"
+  RUST_TOOLCHAIN: "1.99.1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

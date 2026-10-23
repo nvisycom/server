@@ -994,7 +994,7 @@ mod tests {
                 .await?
                 .is_none()
         );
-        assert!(conn.list_review_comments(review.id).await?.is_empty());
+        assert_eq!(conn.list_review_comments(review.id).await?, vec![]);
         Ok(())
     }
 
@@ -1140,7 +1140,7 @@ mod tests {
             .remove_assignee(review.id, seeded.account_id, seeded.account_id)
             .await?;
         assert_eq!(none_left.review.review_status, ReviewStatus::NeedsReview);
-        assert!(conn.list_review_assignees(review.id).await?.is_empty());
+        assert_eq!(conn.list_review_assignees(review.id).await?, vec![]);
 
         // Removing a not-assigned reviewer is a no-op (changed = false).
         let noop = conn

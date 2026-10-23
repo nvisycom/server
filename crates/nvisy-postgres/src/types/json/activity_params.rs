@@ -558,10 +558,10 @@ mod tests {
             connection_id,
             connection_name: "Prod S3".to_owned(),
         });
-        // `object_id` carries the client-facing prefixed id (`conn_…`), matching
-        // how the REST API exposes the same connection.
+        // `object_id` carries the client-facing prefixed id (`connection_…`),
+        // matching how the REST API exposes the same connection.
         assert_eq!(p.object_id(), Some(connection_id.to_string()));
-        assert!(p.object_id().unwrap().starts_with("conn_"));
+        assert!(p.object_id().unwrap().starts_with("connection_"));
         assert_eq!(p.object_label(), Some("Prod S3".to_owned()));
     }
 
@@ -641,7 +641,7 @@ mod tests {
             provider_name: "OpenAI GPT-4".to_owned(),
         });
         assert_eq!(p.object_id(), Some(provider_id.to_string()));
-        assert!(p.object_id().unwrap().starts_with("prov_"));
+        assert!(p.object_id().unwrap().starts_with("provider_"));
         assert_eq!(p.object_label(), Some("OpenAI GPT-4".to_owned()));
     }
 

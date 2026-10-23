@@ -213,7 +213,10 @@ mod tests {
         // Replacing with an empty set clears all references.
         conn.replace_workspace_pipeline_policies(workspace_id, pipeline_id, &[])
             .await?;
-        assert!(conn.list_pipeline_policy_ids(pipeline_id).await?.is_empty());
+        assert_eq!(
+            conn.list_pipeline_policy_ids(pipeline_id).await?,
+            Vec::<Uuid>::new()
+        );
         Ok(())
     }
 
