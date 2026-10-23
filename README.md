@@ -63,34 +63,26 @@ docs path. For self-hosted deployments, see [`docker/`](docker/) for compose
 files and infrastructure requirements, and [`.env.example`](.env.example) for
 configuration.
 
-## Commands
-
-| Command | What it does |
-| --- | --- |
-| `make run` | Run the server (starts Postgres, NATS, and RustFS first) |
-| `make ci` | Run all CI checks locally (check, fmt, clippy, test, docs) |
-| `make fmt` | Fix code formatting (nightly rustfmt) |
-| `make security` | Run security checks (`cargo deny`) |
-| `make generate-migrations` | Apply migrations and regenerate `schema.rs` |
-| `make reset-docker` | Reset the dev containers (`down -v`, then `up -d`) |
+Run `make help` to list the available commands.
 
 ## Documentation
 
-See [`docs/`](docs/) for the details:
+[`docs/`](docs/) covers the architecture, one document per concern.
 
-- [Architecture](docs/ARCHITECTURE.md): the crates, the detect/redact pipeline, and how they fit together.
-- [Intelligence](docs/INTELLIGENCE.md): detection capabilities and the redaction engine.
-- [Providers](docs/PROVIDERS.md): inference and object-store provider design.
-- [Security](docs/SECURITY.md): the encryption, authentication, and isolation model.
+| Document                            | Subject                                                               |
+| ----------------------------------- | --------------------------------------------------------------------- |
+| [Architecture](docs/ARCHITECTURE.md) | The crates, the detect/redact pipeline, and how they fit together.    |
+| [Intelligence](docs/INTELLIGENCE.md) | Detection capabilities and the in-process redaction engine.           |
+| [Providers](docs/PROVIDERS.md)       | Inference and object-store provider design.                           |
+| [Security](docs/SECURITY.md)         | The encryption, authentication, and isolation model.                  |
 
-## Contributing
+API documentation lives at [docs.nvisy.com](https://docs.nvisy.com).
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines, and
-[CHANGELOG.md](CHANGELOG.md) for release notes.
+## Project
 
-## License
-
-Apache 2.0 License, see [LICENSE.txt](LICENSE.txt).
+- **Changelog**: [CHANGELOG.md](CHANGELOG.md) for release notes and version history
+- **Contributing**: [CONTRIBUTING.md](CONTRIBUTING.md)
+- **License**: Apache 2.0, see [LICENSE.txt](LICENSE.txt)
 
 ## Support
 

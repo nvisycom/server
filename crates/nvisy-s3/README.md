@@ -10,3 +10,22 @@ the AWS S3 SDK, so it works against AWS S3 or any S3-compatible server (`RustFS`
 
 Objects are encrypted by the caller before they reach the store, so the store
 only ever holds ciphertext.
+
+## Documentation
+
+See [`docs/`](../../docs/) for architecture, security, and API documentation.
+
+## Changelog
+
+See [CHANGELOG.md](../../CHANGELOG.md) for release notes and version history.
+
+## License
+
+Apache 2.0 License, see [LICENSE.txt](../../LICENSE.txt)
+
+## Support
+
+- **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
+- **Issues**: [GitHub Issues](https://github.com/nvisycom/server/issues)
+- **Email**: [support@nvisy.com](mailto:support@nvisy.com)
+- **API Status**: [nvisy.openstatus.dev](https://nvisy.openstatus.dev)
