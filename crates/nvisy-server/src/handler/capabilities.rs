@@ -15,6 +15,7 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use elide_pipeline::entity::LabelCatalog;
+use nvisy_core::net::EndpointPolicy;
 use nvisy_file_service::FileService;
 use nvisy_file_service::provider::FileServiceProvider;
 use nvisy_postgres::types::IdentityProvider;
@@ -99,6 +100,38 @@ impl FileProviders {
     }
 }
 
+/// What inference providers this deployment can connect to.
+///
+/// Inference providers carry their own credentials, so creating one is always
+/// available. A local-only backend such as Ollama is different: it is reached at
+/// a loopback URL, which only a self-hosted deployment's endpoint policy admits —
+/// a cloud deployment rejects a loopback endpoint at connection time — so
+/// `ollama` reports whether this deployment can use it at all.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InferenceCapabilities {
+    /// Whether inference providers can be created. Currently always `true` — they
+    /// carry their own credentials, so nothing gates them server-side.
+    pub available: bool,
+    /// Whether a local Ollama backend can be used, for both the `@assistant`
+    /// reviewer and LLM-driven detection. `true` only on a self-hosted
+    /// (`permissive`) deployment, whose endpoint policy admits a loopback URL;
+    /// a cloud (`strict`) deployment reports `false`.
+    pub ollama: bool,
+}
+
+impl InferenceCapabilities {
+    /// Builds the inference availability report from the deployment's endpoint
+    /// policy. Ollama lives at a loopback URL, which only a self-hosted
+    /// (permissive) deployment's endpoint policy admits.
+    fn from_policy(endpoint_policy: EndpointPolicy) -> Self {
+        Self {
+            available: true,
+            ollama: matches!(endpoint_policy, EndpointPolicy::Permissive),
+        }
+    }
+}
+
 /// Which connector families and providers this deployment can create.
 ///
 /// Lets a client render the connect UI without probing: a file-service provider
@@ -114,20 +147,20 @@ pub struct ConnectorCapabilities {
     /// they carry their own credentials, so nothing gates them server-side — but
     /// clients should read the field rather than assume it.
     pub object_stores: bool,
-    /// Whether inference connections can be created. Currently always `true`, for
-    /// the same reason as object stores.
-    pub inference: bool,
+    /// Which inference providers this deployment can connect to.
+    pub inference: InferenceCapabilities,
 }
 
 /// Reports which connectors this deployment can create.
 async fn list_connectors(
     State(file_service): State<FileService>,
+    State(endpoint_policy): State<EndpointPolicy>,
     _: AuthState,
 ) -> Json<ConnectorCapabilities> {
     Json(ConnectorCapabilities {
         file_services: FileProviders::from_service(&file_service),
         object_stores: true,
-        inference: true,
+        inference: InferenceCapabilities::from_policy(endpoint_policy),
     })
 }
 
@@ -137,7 +170,9 @@ fn list_connectors_docs(op: TransformOperation) -> TransformOperation {
             "Returns which connector families and providers this deployment can create: each \
              OAuth file-service provider is available only when its app is configured on the \
              server, while object-store and inference connections carry their own credentials \
-             and are always available. Use it to render the connect UI without probing.",
+             and are always available. The inference section also reports whether a local Ollama \
+             backend can be used (self-hosted deployments only). Use it to render the connect UI \
+             without probing.",
         )
         .response::<200, Json<ConnectorCapabilities>>()
         .response::<401, Json<ErrorResponse>>()
@@ -225,6 +260,14 @@ mod tests {
     fn builtin_labels_include_email_address() {
         let catalog = LabelCatalog::with_builtins();
         assert!(catalog.iter().any(|label| label.id() == "email_address"));
+    }
+
+    #[test]
+    fn ollama_is_available_only_on_a_self_hosted_deployment() {
+        // A self-hosted (permissive) deployment admits a loopback Ollama URL; a
+        // cloud (strict) one rejects it at connection time, so it reports false.
+        assert!(InferenceCapabilities::from_policy(EndpointPolicy::Permissive).ollama);
+        assert!(!InferenceCapabilities::from_policy(EndpointPolicy::Strict).ollama);
     }
 
     #[test]
