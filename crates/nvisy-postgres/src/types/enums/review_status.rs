@@ -1,21 +1,23 @@
-//! Review status enumeration: the derived state of a file thread's review.
+//! Review status enumeration: the lifecycle state of a document review.
 
 use super::db_enum;
 
 db_enum! {
-    /// The review state of a file thread (a file thread is the review of its
-    /// file). `None` on the thread means a workspace thread, which has no review.
+    /// The lifecycle state of a review (a reviewer-opened discussion thread on a
+    /// document).
     ///
-    /// Corresponds to the `REVIEW_STATUS` `PostgreSQL` enum. It is derived from the
-    /// review's events, never set by a user: a detection makes it `NeedsReview`, a
-    /// redaction `InReview`, and verification `Resolved`; a later detection reopens
-    /// it to `NeedsReview`.
+    /// Corresponds to the `REVIEW_STATUS` `PostgreSQL` enum. The state is driven by
+    /// assignment and explicit sign-off, not derived from linked artifacts: a review
+    /// opens at `NeedsReview`; gaining its first assignee moves it to `InReview`, and
+    /// removing the last assignee returns it to `NeedsReview`; verifying it sets
+    /// `Resolved`, and reopening a resolved review returns it to `NeedsReview`.
+    /// Assigning or unassigning a resolved review leaves it `Resolved`.
     pub enum ReviewStatus: Default = NeedsReview, "crate::schema::sql_types::ReviewStatus" {
-        /// A detection exists; no redaction has been reviewed yet.
+        /// Open with no assignee; awaiting a reviewer to pick it up.
         NeedsReview = "needs_review",
-        /// A redaction (review pass) exists but has not been verified.
+        /// At least one reviewer is assigned and the review is in progress.
         InReview = "in_review",
-        /// The review has been verified (approved).
+        /// A reviewer has verified (signed off on) the review.
         Resolved = "resolved",
     }
 }
