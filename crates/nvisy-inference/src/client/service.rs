@@ -14,9 +14,8 @@ use std::sync::Arc;
 use async_stream::stream;
 use futures::StreamExt;
 use rig::agent::{Agent, MultiTurnStreamItem};
-use rig::completion::message::Text;
-use rig::completion::{Chat, Message, Prompt};
-use rig::streaming::{StreamedAssistantContent, StreamingChat};
+use rig::completion::Message;
+use rig::streaming::{Item, StreamEvent};
 
 use super::{ChatTurn, TokenStream};
 use crate::error::{Error, Result};
@@ -43,8 +42,10 @@ impl InferenceClient {
     /// A `Prompt` error if the completion request fails at runtime.
     #[tracing::instrument(name = "inference.prompt", skip_all)]
     pub async fn prompt(&self, prompt: &str) -> Result<String> {
-        Prompt::prompt(&*self.0, prompt.to_owned())
+        self.0
+            .prompt(prompt.to_owned())
             .await
+            .map(|response| response.output())
             .map_err(|err| Error::Prompt(err.to_string()))
     }
 
@@ -58,8 +59,10 @@ impl InferenceClient {
     #[tracing::instrument(name = "inference.chat", skip_all, fields(history_len = history.len()))]
     pub async fn chat(&self, prompt: &str, history: Vec<ChatTurn>) -> Result<String> {
         let mut history = to_messages(history);
-        Chat::chat(&*self.0, prompt.to_owned(), &mut history)
+        self.0
+            .chat(prompt.to_owned(), &mut history)
             .await
+            .map(|response| response.output())
             .map_err(|err| Error::Prompt(err.to_string()))
     }
 
@@ -81,15 +84,15 @@ impl InferenceClient {
         let prompt = prompt.to_owned();
         let history = to_messages(history);
         let inner = stream! {
-            let stream = StreamingChat::stream_chat(&*agent, prompt, history).await;
+            let stream = agent.prompt(prompt).history(history).stream();
             for await item in stream {
                 // Map rig's multi-turn stream down to bare text deltas: non-text
                 // items (tool calls, reasoning, the final-response marker) carry
                 // no user-visible text and are dropped.
                 match item {
-                    Ok(MultiTurnStreamItem::StreamAssistantItem(
-                        StreamedAssistantContent::Text(Text { text, .. }),
-                    )) => yield Ok(text),
+                    Ok(MultiTurnStreamItem::StreamAssistantItem(Item::Event(
+                        StreamEvent::Text { text, .. },
+                    ))) => yield Ok(text),
                     Ok(_) => {}
                     // An error is terminal: yield it and stop, per TokenStream's
                     // contract, rather than polling the rig stream again.

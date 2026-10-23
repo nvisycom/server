@@ -128,17 +128,17 @@ impl LlmConfig {
     pub async fn validate(&self) -> Result<()> {
         match self {
             Self::OpenAi(p) => {
-                OpenAiProvider::connect(&p.api_key, p.base_url.as_deref())?
+                OpenAiProvider::connect(&p.api_key, p.base_url.as_deref())
                     .verify()
                     .await
             }
             Self::Ollama(p) => {
-                OllamaProvider::connect(&OllamaCredentials, Some(&p.base_url))?
+                OllamaProvider::connect(&OllamaCredentials, Some(&p.base_url))
                     .verify()
                     .await
             }
             Self::Anthropic(p) => {
-                AnthropicProvider::connect(&p.api_key, p.base_url.as_deref())?
+                AnthropicProvider::connect(&p.api_key, p.base_url.as_deref())
                     .verify()
                     .await
             }
@@ -154,19 +154,19 @@ impl LlmConfig {
     ///
     /// # Errors
     ///
-    /// A `Build` error if the client cannot be constructed from the config (e.g.
-    /// an invalid base URL).
+    /// Returns a `Result` for a stable call-site seam; building a provider client
+    /// from a validated config does not currently fail.
     pub fn connect(&self, model: Option<&str>) -> Result<InferenceClient> {
         let model = model.or_else(|| self.default_model()).unwrap_or_default();
         let client = match self {
             Self::OpenAi(p) => {
-                OpenAiProvider::connect(&p.api_key, p.base_url.as_deref())?.model(model)
+                OpenAiProvider::connect(&p.api_key, p.base_url.as_deref()).model(model)
             }
             Self::Ollama(p) => {
-                OllamaProvider::connect(&OllamaCredentials, Some(&p.base_url))?.model(model)
+                OllamaProvider::connect(&OllamaCredentials, Some(&p.base_url)).model(model)
             }
             Self::Anthropic(p) => {
-                AnthropicProvider::connect(&p.api_key, p.base_url.as_deref())?.model(model)
+                AnthropicProvider::connect(&p.api_key, p.base_url.as_deref()).model(model)
             }
         };
         Ok(client)

@@ -3,30 +3,36 @@
 //! Ollama is typically self-hosted and unauthenticated, so it carries no
 //! credentials — only a server base URL.
 
-use derive_more::Deref;
-use rig::client::Nothing;
-use rig::providers::ollama;
+use rig::DynModel;
+use rig::operation::Completion;
+use rig::providers::ollama::{self, OllamaConfig};
 
 use super::{Client, OllamaCredentials};
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 /// Ollama-backed inference client.
-#[derive(Deref)]
-pub struct OllamaProvider(ollama::Client);
+pub struct OllamaProvider(ollama::Ollama);
 
 impl Client for OllamaProvider {
     type Credentials = OllamaCredentials;
 
     const ID: &str = "ollama";
 
-    fn connect(_credentials: &Self::Credentials, base_url: Option<&str>) -> Result<Self> {
-        let mut builder = ollama::Client::builder().api_key(Nothing);
+    fn connect(_credentials: &Self::Credentials, base_url: Option<&str>) -> Self {
+        let mut config = OllamaConfig::new();
         if let Some(base) = base_url {
-            builder = builder.base_url(base);
+            config = config.with_base_url(base);
         }
-        let client = builder
-            .build()
-            .map_err(|err| Error::Build(err.to_string()))?;
-        Ok(Self(client))
+        Self(config.client())
+    }
+
+    /// Ollama is an unauthenticated local daemon, so there is no credential to
+    /// check; verification is a no-op.
+    fn verify(&self) -> impl Future<Output = Result<()>> + Send {
+        std::future::ready(Ok(()))
+    }
+
+    fn completion_model(&self, model: &str) -> DynModel<Completion> {
+        self.0.completion(model).into()
     }
 }
