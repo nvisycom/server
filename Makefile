@@ -21,6 +21,14 @@ define log
 printf "[%s] [MAKE] [$(MAKECMDGOALS)] $(1)\n" "$$(date '+%Y-%m-%d %H:%M:%S')"
 endef
 
+.DEFAULT_GOAL := help
+
+.PHONY: help
+help: ## Lists the available commands.
+	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+		| sort \
+		| awk 'BEGIN {FS = ":.*?## "} {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
+
 .PHONY: Install-tools
 install-tools: # Installs tools required for the repo.
 	@$(call log,Checking Diesel CLI...)

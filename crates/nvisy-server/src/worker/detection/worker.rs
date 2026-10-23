@@ -34,8 +34,8 @@ use super::support::{
     FailDetection, FailOutcome, extract_detection_usage, fail_detection, resolve_policies,
     resolve_policies_by_ids,
 };
+use crate::domain::input::PipelineDefinitionInput;
 use crate::extract::SecurityContext;
-use crate::handler::request::PipelineDefinition;
 use crate::response::{ErrorKind, Result};
 use crate::service::{ArtifactWriter, EngineService, Infra, event};
 use crate::worker::Worker;
@@ -418,14 +418,14 @@ impl DetectionWorker {
             // the per-request scope and its own defaults.
             let definition = match pipeline {
                 Some(pipeline) => {
-                    PipelineDefinition::from_parts(pipeline.definition.clone(), Vec::new())
+                    PipelineDefinitionInput::from_parts(pipeline.definition.clone(), Vec::new())
                         .map_err(|err| {
                             ErrorKind::InternalServerError
                                 .with_message("Failed to decode pipeline definition")
                                 .with_context(err.to_string())
                         })?
                 }
-                None => PipelineDefinition::default(),
+                None => PipelineDefinitionInput::default(),
             };
 
             // Parse the workspace settings once; both raster mode and retention
@@ -687,7 +687,7 @@ fn raster_mode_of(settings: &WorkspaceSettings) -> RasterMode {
 /// No key is set: the server does not yet drive keyed operators
 /// (`HmacHash`/`Encrypt`), whose `KeyConfig` would be supplied here.
 fn request_context(
-    definition: &PipelineDefinition,
+    definition: &PipelineDefinitionInput,
     document_context: Option<DocumentContext>,
     raster_mode: RasterMode,
 ) -> RequestContext {

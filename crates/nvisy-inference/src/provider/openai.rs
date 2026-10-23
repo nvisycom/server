@@ -2,15 +2,15 @@
 //!
 //! Works with `OpenAI` and any OpenAI-compatible endpoint (Azure `OpenAI`, a proxy).
 
-use derive_more::Deref;
-use rig::providers::openai;
+use rig::DynModel;
+use rig::operation::Completion;
+use rig::providers::openai::{self, OpenAIConfig};
 
-use super::Client;
-use crate::error::{Error, Result};
+use super::{Client, map_verify};
+use crate::error::Result;
 
 /// OpenAI-backed inference client.
-#[derive(Deref)]
-pub struct OpenAiProvider(openai::Client);
+pub struct OpenAiProvider(openai::OpenAI);
 
 impl Client for OpenAiProvider {
     /// The `OpenAI` API key.
@@ -18,14 +18,19 @@ impl Client for OpenAiProvider {
 
     const ID: &str = "openai";
 
-    fn connect(api_key: &Self::Credentials, base_url: Option<&str>) -> Result<Self> {
-        let mut builder = openai::Client::builder().api_key(api_key);
+    fn connect(api_key: &Self::Credentials, base_url: Option<&str>) -> Self {
+        let mut config = OpenAIConfig::new(api_key);
         if let Some(base) = base_url {
-            builder = builder.base_url(base);
+            config = config.with_base_url(base);
         }
-        let client = builder
-            .build()
-            .map_err(|err| Error::Build(err.to_string()))?;
-        Ok(Self(client))
+        Self(config.client())
+    }
+
+    async fn verify(&self) -> Result<()> {
+        map_verify(self.0.verify().await)
+    }
+
+    fn completion_model(&self, model: &str) -> DynModel<Completion> {
+        self.0.completion(model).into()
     }
 }

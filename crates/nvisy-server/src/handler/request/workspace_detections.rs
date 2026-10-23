@@ -112,7 +112,7 @@ pub struct CreateAdhocWorkspaceDetection {
     /// The document to analyze.
     pub document_id: Uuid,
     /// The policies to run against, by id. At least one is required.
-    #[garde(length(min = 1, max = 64))]
+    #[garde(length(min = 1, max = 128))]
     pub policy_ids: Vec<Uuid>,
     /// Per-document scope (languages, jurisdictions, document labels).
     #[serde(default, skip_serializing_if = "Option::is_none")]

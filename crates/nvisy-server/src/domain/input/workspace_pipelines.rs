@@ -13,6 +13,11 @@ use uuid::Uuid;
 /// the NER/LLM lineups), so it is not represented here. Stored as JSON in the
 /// pipeline's `definition` column, with the policy references split out into the
 /// `workspace_pipeline_policies` join table.
+///
+/// This is the single type that serializes to and deserializes from the stored
+/// column (via `into_parts` / `from_parts`), so the write and read formats cannot
+/// drift. The handler's `PipelineDefinition` is the wire shape and converts to and
+/// from this type in memory.
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct PipelineDefinitionInput {
     /// Optional pipeline-wide scope a document may override at detect time.
@@ -172,5 +177,64 @@ impl UpdatePipelineInput {
             ..Default::default()
         };
         Ok((model, references))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handler::request::PipelineDefinition;
+
+    /// A scope that serializes to a non-empty object, built from the engine's own
+    /// wire form so the fixture is realistic rather than hand-assembled.
+    fn non_empty_scope() -> DocumentContext {
+        serde_json::from_value(serde_json::json!({ "countries": ["US"] }))
+            .expect("fixture scope should decode")
+    }
+
+    /// The stored JSON of a definition's scope, for comparing round-trips
+    /// (`DocumentContext` is not `PartialEq`, so compare the wire form).
+    fn scope_json(definition: &PipelineDefinitionInput) -> serde_json::Value {
+        serde_json::to_value(&definition.default_scope).expect("scope should encode")
+    }
+
+    #[test]
+    fn definition_with_scope_round_trips_through_storage() {
+        // The bug this guards against: a definition carrying a `default_scope`
+        // must survive the store/load split. Policy ids ride the join table, not
+        // the JSON, so they come back only via the `from_parts` argument.
+        let policy_ids = vec![Uuid::now_v7()];
+        let original = PipelineDefinitionInput {
+            default_scope: Some(non_empty_scope()),
+            policy_ids: policy_ids.clone(),
+        };
+        let original_scope = scope_json(&original);
+
+        let (config, split_ids) = original.into_parts().expect("encode");
+        assert_eq!(split_ids, policy_ids);
+        // Policy ids are stripped from the stored JSON; the scope stays.
+        assert!(config.get("policy_ids").is_none());
+        assert!(config.get("default_scope").is_some());
+
+        let restored = PipelineDefinitionInput::from_parts(config, split_ids).expect("decode");
+        assert_eq!(scope_json(&restored), original_scope);
+        assert_eq!(restored.policy_ids, policy_ids);
+    }
+
+    #[test]
+    fn wire_and_storage_types_convert_losslessly() {
+        // The handler wire type and this storage type must stay interconvertible,
+        // so a definition read from storage renders identically on the API.
+        let policy_ids = vec![Uuid::now_v7()];
+        let input = PipelineDefinitionInput {
+            default_scope: Some(non_empty_scope()),
+            policy_ids: policy_ids.clone(),
+        };
+        let input_scope = scope_json(&input);
+
+        let wire: PipelineDefinition = input.into();
+        let back: PipelineDefinitionInput = wire.into();
+        assert_eq!(scope_json(&back), input_scope);
+        assert_eq!(back.policy_ids, policy_ids);
     }
 }

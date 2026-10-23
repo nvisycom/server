@@ -28,8 +28,8 @@ schema = ["dep:schemars"]
 futures = { workspace = true, features = [] }
 async-stream = { workspace = true, features = [] }
 
-# LLM framework: provider clients + the classic Agent runtime
-rig = { workspace = true, features = [] }
+# LLM framework
+rig = { workspace = true, features = ["reqwest"] }
 
 # Observability
 tracing = { workspace = true, features = [] }
@@ -40,7 +40,6 @@ schemars = { workspace = true, features = [], optional = true }
 
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
-derive_more = { workspace = true, features = ["deref"] }
 
 [dev-dependencies]
 serde_json = { workspace = true, features = [] }

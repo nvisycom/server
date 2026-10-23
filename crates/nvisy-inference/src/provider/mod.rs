@@ -4,13 +4,13 @@ mod anthropic;
 mod ollama;
 mod openai;
 
-use std::ops::Deref;
-
 pub use anthropic::AnthropicProvider;
 pub use ollama::OllamaProvider;
 pub use openai::OpenAiProvider;
-use rig::client::verify::{VerifyClient, VerifyError};
-use rig::client::{AgentClientExt, CompletionClient};
+use rig::DynModel;
+use rig::agent::AgentBuilder;
+use rig::error::ProviderError;
+use rig::operation::Completion;
 
 use crate::client::InferenceClient;
 use crate::error::{Error, Result};
@@ -18,15 +18,10 @@ use crate::error::{Error, Result};
 /// An inference provider that builds a verifiable, prompt-capable client from
 /// typed credentials.
 ///
-/// Each provider is a newtype wrapping its rig client, which derefs to that
-/// client. [`verify`](Client::verify) checks its credentials, and
-/// [`model`](Client::model) turns it into a provider-agnostic `InferenceClient`.
-pub(crate) trait Client:
-    Deref<Target: Sized + VerifyClient + CompletionClient<CompletionModel: 'static>>
-    + Send
-    + Sync
-    + 'static
-{
+/// Each provider is a newtype wrapping its rig client. [`verify`](Client::verify)
+/// checks its credentials, and [`model`](Client::model) turns it into a
+/// provider-agnostic `InferenceClient`.
+pub(crate) trait Client: Send + Sync + 'static {
     /// The credential this provider connects with. A single-secret provider uses
     /// `str` (the API key); a keyless one (Ollama) uses a unit type.
     type Credentials: Send + Sync + ?Sized;
@@ -35,7 +30,7 @@ pub(crate) trait Client:
     const ID: &str;
 
     /// Build a client from credentials and an optional base-URL override.
-    fn connect(credentials: &Self::Credentials, base_url: Option<&str>) -> Result<Self>
+    fn connect(credentials: &Self::Credentials, base_url: Option<&str>) -> Self
     where
         Self: Sized;
 
@@ -43,22 +38,28 @@ pub(crate) trait Client:
     ///
     /// Succeeds when the provider accepts the credentials; maps an authentication
     /// rejection or any other failure to [`Error::Verify`].
-    fn verify(&self) -> impl Future<Output = Result<()>> + Send {
-        async move {
-            match (**self).verify().await {
-                Ok(()) => Ok(()),
-                Err(VerifyError::InvalidAuthentication) => {
-                    Err(Error::Verify("invalid authentication".to_owned()))
-                }
-                Err(err) => Err(Error::Verify(err.to_string())),
-            }
-        }
-    }
+    fn verify(&self) -> impl Future<Output = Result<()>> + Send;
+
+    /// The rig completion model this provider serves `model` with, erased for
+    /// the agent builder.
+    fn completion_model(&self, model: &str) -> DynModel<Completion>;
 
     /// Turn this provider client into a provider-agnostic [`InferenceClient`]
     /// bound to `model`.
     fn model(&self, model: &str) -> InferenceClient {
-        InferenceClient::new(AgentClientExt::agent(&**self, model).build())
+        InferenceClient::new(AgentBuilder::new(self.completion_model(model)).build())
+    }
+}
+
+/// Maps a provider verification result to [`Error::Verify`], naming an
+/// authentication rejection distinctly.
+fn map_verify(result: std::result::Result<(), ProviderError>) -> Result<()> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(ProviderError::InvalidAuthentication(_)) => {
+            Err(Error::Verify("invalid authentication".to_owned()))
+        }
+        Err(err) => Err(Error::Verify(err.to_string())),
     }
 }
 

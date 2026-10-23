@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{AccountRef, Page};
+use crate::domain::input::PipelineDefinitionInput;
 use crate::handler::request::PipelineDefinition;
 
 /// `WorkspacePipeline` response.
@@ -60,7 +61,8 @@ impl WorkspacePipeline {
         policy_ids: Vec<Uuid>,
     ) -> serde_json::Result<Self> {
         let retention = pipeline.metadata.or_default().retention;
-        let definition = PipelineDefinition::from_parts(pipeline.definition, policy_ids)?;
+        let definition =
+            PipelineDefinitionInput::from_parts(pipeline.definition, policy_ids)?.into();
         Ok(Self {
             id: pipeline.id,
             workspace_id,
