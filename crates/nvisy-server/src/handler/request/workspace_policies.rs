@@ -156,7 +156,7 @@ impl From<CreateWorkspacePolicy> for CreatePolicyInput {
     }
 }
 
-/// A one-shot (labels) body must name at least one label and no more than 64.
+/// A one-shot (labels) body must name at least one label and no more than 128.
 // reason: signature is fixed by garde's custom validator interface.
 #[allow(clippy::trivially_copy_pass_by_ref)]
 fn validate_body(body: &PolicyBody, _: &()) -> garde::Result {
@@ -164,8 +164,8 @@ fn validate_body(body: &PolicyBody, _: &()) -> garde::Result {
         if labels.is_empty() {
             return Err(garde::Error::new("at least one label is required"));
         }
-        if labels.len() > 64 {
-            return Err(garde::Error::new("at most 64 labels are allowed"));
+        if labels.len() > 128 {
+            return Err(garde::Error::new("at most 128 labels are allowed"));
         }
         let catalog = LabelCatalog::with_builtins();
         let unknown: Vec<&str> = labels

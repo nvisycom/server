@@ -46,7 +46,7 @@ pub struct PipelineDefinition {
     /// Stored relationally in the `workspace_pipeline_policies` join table, not the JSON
     /// definition; surfaced here so the API exposes one coherent object.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[garde(length(max = 64))]
+    #[garde(length(max = 128))]
     pub policy_ids: Vec<Uuid>,
 }
 
