@@ -4,7 +4,7 @@ Thank you for your interest in contributing to Nvisy Server.
 
 ## Requirements
 
-- Rust 1.95+ (nightly for formatting)
+- Rust 1.99+ (nightly for formatting)
 - PostgreSQL 18+
 - NATS 2.10+ (with JetStream)
 - An S3-compatible blob store (RustFS by default; the dev compose file provides it)

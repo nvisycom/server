@@ -37,12 +37,12 @@ credential encryption.
 - **AI-powered detection**: LLM- and pattern-driven PII/entity recognition, governed by configurable redaction policies.
 - **Reviewer edits**: suppress a false positive, retag a detection, or add one the analysis missed, then re-redact, as many times as needed.
 - **Workspace isolation**: multi-tenant workspaces with HKDF-derived, per-workspace credential encryption.
-- **Real-time collaboration**: WebSocket and NATS pub/sub for live status and document editing.
+- **Live status**: server-sent event streams for detection progress and notifications, fed by NATS pub/sub.
 - **Interactive docs**: auto-generated OpenAPI served through a Scalar UI.
 
 ## Requirements
 
-- **Rust + Cargo**: 1.95+, Edition 2024
+- **Rust + Cargo**: 1.99+, Edition 2024
 - **PostgreSQL** 18+, **NATS** 2.10+ (JetStream), and an **S3-compatible blob store** (RustFS by default). The dev compose file provides all three.
 
 ## Quick start

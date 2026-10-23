@@ -2,33 +2,38 @@
 
 ## System Design
 
-The Nvisy platform consists of two components: the **server** (this
-repository) and the **runtime**. The server is the API gateway: it handles
-authentication, authorization, workspace management, document storage,
-credential encryption, and API serving. The runtime handles detection,
-redaction, format processing, and policy evaluation. The two communicate over
-NATS.
+The server is a single deployable: the API gateway and the processing engine
+in one process. It handles authentication, authorization, workspace
+management, document storage, credential encryption, and API serving, and it
+embeds `elide-pipeline` from
+[Elide Runtime](https://github.com/nvisycom/elide-runtime), the stateless
+detect/redact library built on the [Elide](https://github.com/nvisycom/elide)
+toolkit, for detection, redaction, and format processing.
 
-This separation keeps the security boundary (auth, encryption, tenant
-isolation) in the server, and the processing logic (ML inference, OCR,
-redaction) in the runtime. The server never processes document content
-directly; it stores, routes, and protects it.
+The library owns no persistence and no HTTP layer, so the security boundary
+(auth, encryption, tenant isolation) stays in the server. Model inference (NER,
+OCR, speech-to-text, LLMs) runs in external inference services the engine
+calls; the server configures them and stores their credentials. NATS carries
+background work queues and status broadcasts between the server's own
+components. See [Intelligence](./INTELLIGENCE.md) for how detection and
+redaction run.
 
 ## Crate Structure
 
 The Rust workspace contains these crates, each with a single responsibility:
 
-| Crate            | Role                                                       |
-| ---------------- | ---------------------------------------------------------- |
-| `nvisy-cli`      | Server entry point and CLI configuration                   |
-| `nvisy-core`     | Shared types, error handling, encryption utilities         |
-| `nvisy-nats`     | NATS client for messaging, job queues, and KV state        |
-| `nvisy-s3`       | First-party blob storage over an S3-compatible backend     |
-| `nvisy-object`   | Client for external tenant object stores (import/export)   |
-| `nvisy-inference`| LLM inference provider configuration and clients           |
-| `nvisy-postgres` | PostgreSQL ORM layer using Diesel with async support       |
-| `nvisy-server`   | HTTP API handlers, middleware, authentication              |
-| `nvisy-webhook`  | Webhook delivery for external event notification           |
+| Crate                | Role                                                   |
+| -------------------- | ------------------------------------------------------ |
+| `nvisy-cli`          | Server entry point and CLI configuration               |
+| `nvisy-core`         | Shared types, error handling, encryption utilities     |
+| `nvisy-nats`         | NATS client for messaging, job queues, and KV state    |
+| `nvisy-s3`           | First-party blob storage over an S3-compatible backend |
+| `nvisy-object-store` | Providers for external object stores (S3, Azure, GCS)  |
+| `nvisy-file-service` | OAuth-based cloud file services (Google Drive, ...)    |
+| `nvisy-inference`    | LLM inference provider configuration and clients       |
+| `nvisy-postgres`     | PostgreSQL ORM layer using Diesel with async support   |
+| `nvisy-server`       | HTTP API handlers, middleware, authentication          |
+| `nvisy-webhook`      | Webhook delivery for external event notification       |
 
 ## Technology Stack
 
@@ -66,40 +71,45 @@ binary object in the S3-compatible blob store, with metadata (type, size, hash,
 version chain) tracked in PostgreSQL. Documents support versioning through
 parent-child chains, allowing the original and redacted versions to coexist.
 
-When a redaction job is requested, the server decrypts the document, passes it
-to the runtime over NATS, and stores the redacted result as a new version. The
-server never interprets document content; it manages storage, access control,
-and the encrypted-at-rest guarantee.
+Detection analyzes a document in a background worker; redaction applies the
+findings and stores the redacted file as a new document. All content processing
+goes through the embedded engine; the rest of the server manages storage,
+access control, and the encrypted-at-rest guarantee.
 
 ### Job Orchestration
 
-The server dispatches processing jobs to the runtime over NATS JetStream. Each
-job carries the document reference, the workspace's detection policies, and
-any review decisions. The runtime processes the job and returns results through
-NATS. The server records the outcome, stores artifacts, and emits webhook
-events.
+Detection runs off the request thread. A request creates the detection and
+enqueues its job in the same transaction (a transactional outbox); a drainer
+relays pending jobs to a NATS JetStream work-queue, and the detection worker
+consumes them, runs the engine, stores the encrypted audit, and records the
+outcome. Each terminal transition is broadcast on a core-NATS status subject,
+streamed to watchers over SSE, and emitted as a webhook event.
 
-Each job carries a request-scoped deadline. If the runtime does not return
-results within the deadline, the job is marked as timed out and the caller is
-notified. This prevents long-running redaction jobs from blocking resources
-indefinitely.
+A worker claims a detection with a lease before analyzing it. A redelivered
+job whose worker is still making progress is ignored; a detection whose worker
+died is re-claimed and re-analyzed once the lease expires, so a detection is
+never analyzed twice concurrently.
+
+Redaction is synchronous: the request applies a completed detection's findings,
+with any reviewer edits, and returns the redacted document.
 
 ### Credential Management
 
-Provider credentials (API keys, connection strings, storage access keys) are
-encrypted at rest using workspace-derived keys. At processing time, the server
-decrypts credentials and passes them to the runtime over NATS. The runtime
-uses these credentials to establish sessions with external systems. Credentials
-are never exposed through the API.
+Connection and inference-provider credentials (API keys, connection strings,
+storage access keys) are encrypted at rest using workspace-derived keys. The
+server decrypts them only at the point of use: when a connection sync imports or
+exports files, or when the engine calls a provider. Credentials are never
+exposed through the API.
 
-### Studio Sessions
+### Reviews
 
-Studio provides an interactive editing environment for reviewing and refining
-redaction results. Users can accept, reject, or modify detected entities
-before finalizing the redacted document. Studio sessions use WebSocket
-connections backed by NATS pub/sub for real-time collaboration. The server
-manages session state and access control; the runtime handles the actual
-redaction operations.
+Reviewers can edit a detection before redacting it: suppress a false positive,
+retag a detection, or add one the analysis missed. The stored analysis is never
+modified; edits are layered onto a working copy at redaction time, so a
+detection can be redacted many times. A review is a named discussion on a
+document, with comments and a manual sign-off lifecycle, that references the
+detections and redactions done for it. Live status (detection progress, unread
+notification counts) is delivered over SSE.
 
 ## Data Model
 
@@ -121,7 +131,7 @@ scoped accordingly.
   configuration. Encryption uses workspace-derived keys so that a compromise of
   one workspace cannot expose another's credentials.
 
-- **Annotations:** Metadata attached to documents by users or by the runtime's
+- **Annotations:** Metadata attached to documents by users or by the engine's
   detection results. Annotations describe detected entities, their locations,
   triggering rules, and confidence levels. They serve both review workflows
   and audit reporting. Annotations support cursor-based pagination and
@@ -263,8 +273,7 @@ standard monitoring systems (Prometheus, OpenTelemetry).
 ### Distributed Tracing
 
 Each piece of content carries a trace identifier through every stage of the
-pipeline: upload, dispatch to runtime, detection, redaction, and result
-storage. All tracing events use explicit, hierarchical target names following
+pipeline: upload, queued detection, redaction, and result storage. All tracing events use explicit, hierarchical target names following
 the convention `<crate>::<module>::<submodule>` (e.g.,
 `nvisy_server::handler::contexts`). This enables precise per-module log
 filtering in production without relying on log levels alone.

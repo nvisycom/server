@@ -32,6 +32,10 @@ where
 {
     type Rejection = Error<'static>;
 
+    // reason: `FromRequestParts::from_request_parts` is an `async fn` in the trait; this
+    // extractor reads a header with no await, but the sibling extractors all keep the
+    // `async fn` form, so match them rather than diverge to a bare `impl Future`.
+    #[allow(clippy::unused_async_trait_impl)]
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let Some(value) = parts.headers.get(&IDEMPOTENCY_HEADER) else {
             return Ok(Self(None));

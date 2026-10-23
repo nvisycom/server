@@ -242,6 +242,7 @@ impl PgClient {
 
     /// Gets the database configuration used by this client.
     #[inline]
+    #[must_use]
     pub fn config(&self) -> &PgConfig {
         &self.inner.config
     }

@@ -2,52 +2,72 @@
 
 ## Overview
 
-The server does not perform detection or redaction directly. Intelligence
-capabilities live in the
-[Nvisy Runtime](https://github.com/nvisycom/runtime). The server's role is to
-store detection policies, dispatch processing jobs to the runtime over NATS,
-and record the results.
+Detection and redaction run in-process. The server embeds `elide-pipeline`
+from [Elide Runtime](https://github.com/nvisycom/elide-runtime), the stateless
+detect/redact library built on the [Elide](https://github.com/nvisycom/elide)
+toolkit, and wraps it as the engine service (`service/engine`). The server's
+role is to store detection policies and provider credentials, drive the engine
+per request, and record the results.
 
-For the full detection catalog (deterministic patterns, ML/NLP models, computer
-vision, audio detection, orchestration, and conflict resolution), see the
-runtime's [Detection](https://github.com/nvisycom/runtime/blob/main/docs/DETECTION.md)
+The engine is configured once at startup with the deployment's NER/LLM
+recognizer lineups and OCR/STT enricher backends. Deduplication and calibration
+are engine-owned defaults, not configured here.
+
+For the detection catalog (deterministic patterns, model-backed recognizers,
+OCR/STT enrichers, and conflict resolution), see the Elide and Elide Runtime
 documentation.
 
 ## What the Server Manages
 
 ### Detection Policies
 
-The server stores and versions detection policies per workspace. A policy is a
-named, versioned collection of rules specifying what to detect and how to
-handle it. When dispatching a job to the runtime, the server includes the
-workspace's active policy.
+The server stores and versions detection policies per workspace. A policy is
+the engine's structured governance document: what to detect and how to redact
+it. It carries no sensitive content, so it is stored as plaintext JSONB on its
+version row. A detection runs the policies of a pipeline, or an explicit
+ad-hoc policy list.
 
-Policies can extend prebuilt regulation packs (HIPAA, GDPR, PCI-DSS, CCPA)
-with workspace-specific additions. The server tracks policy versions so that
-audit trails reference the exact rules that governed each redaction decision.
+Policies can extend prebuilt regulation templates (HIPAA, GDPR, PCI-DSS, CCPA)
+with workspace-specific additions. A detection pins the policy versions it ran
+with, so audit trails reference the exact rules that governed each redaction
+decision.
 
-### Results and Annotations
+### Inference Providers
 
-After the runtime processes a document, the server stores the detection
-results: a structured set of annotations describing each detected entity, its
-location, the triggering rule or model, and the confidence level. These
-annotations are served through the API for review workflows and audit
-reporting.
+Model-backed recognizers call inference providers configured per workspace
+(language models, named-entity-recognition models). Provider config is
+encrypted with workspace-derived keys and never exposed through the API.
 
-### Review Decisions
+### Detection Results
 
-The server accepts review decisions (accept, reject, modify) against
-individual annotations and passes them back to the runtime for a final
-redaction pass. Each review action carries the reviewer identity and timestamp
-for the audit trail.
+A completed detection stores an encrypted audit: each detected entity, its
+location, the recognizer that found it, and its confidence. Results are served
+through the API for review workflows and audit reporting. The stored analysis
+is immutable.
 
-## Job Dispatch
+### Reviewer Edits
 
-When a redaction job is requested, the server:
+Before redacting, a reviewer can suppress a false positive, retag a detection,
+or add one the analysis missed. The edits are layered onto a working copy of
+the detection's analysis when the redaction runs, so a detection can be
+redacted many times.
 
-1. Decrypts the document and provider credentials
-2. Resolves the workspace's active detection policy
-3. Dispatches the job to the runtime over NATS JetStream
-4. Receives results (annotations, redacted document) from the runtime
-5. Stores the redacted document as a new version and records annotations
-6. Emits webhook events for processing lifecycle subscribers
+## Processing Flow
+
+Detection is asynchronous:
+
+1. A request creates the detection and enqueues its job in the same
+   transaction (a transactional outbox)
+2. The outbox drainer relays pending jobs to the detection NATS JetStream
+   work-queue
+3. The detection worker consumes the job and runs the policies against the
+   document through the engine
+4. The worker stores the encrypted audit and marks the detection `Complete`
+   (or `Failed`)
+5. Each terminal transition is broadcast on the detection's core-NATS status
+   subject, streamed to watchers over SSE, and emitted as a webhook event
+
+Redaction is synchronous: a request against a completed detection applies its
+findings, with any reviewer edits, using the policy versions the detection
+pinned. The redacted file is stored as a new document (kind `redacted`), along
+with the redaction's own review audit.

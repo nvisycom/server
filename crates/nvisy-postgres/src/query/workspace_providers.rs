@@ -418,7 +418,7 @@ mod tests {
                 &["anthropic".to_owned()],
             )
             .await?;
-        assert!(none.items.is_empty());
+        assert_eq!(none.items, vec![]);
         Ok(())
     }
 }

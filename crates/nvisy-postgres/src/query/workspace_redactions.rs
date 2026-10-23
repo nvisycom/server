@@ -350,7 +350,7 @@ mod tests {
         let empty = conn
             .cursor_list_detection_redactions(Uuid::now_v7(), CursorPagination::new(50))
             .await?;
-        assert!(empty.items.is_empty());
+        assert_eq!(empty.items, vec![]);
         Ok(())
     }
 
@@ -455,7 +455,7 @@ mod tests {
                 &RedactionFilter::default(),
             )
             .await?;
-        assert!(other.items.is_empty());
+        assert_eq!(other.items, vec![]);
         Ok(())
     }
 }
