@@ -588,7 +588,7 @@ async fn link_detection(
         .link_detection(
             workspace.id,
             path_params.review_id,
-            path_params.detection_id,
+            path_params.detection_id.as_uuid(),
             authz.account_id,
         )
         .await?;
@@ -631,7 +631,7 @@ async fn link_redaction(
         .link_redaction(
             workspace.id,
             path_params.review_id,
-            path_params.redaction_id,
+            path_params.redaction_id.as_uuid(),
             authz.account_id,
         )
         .await?;

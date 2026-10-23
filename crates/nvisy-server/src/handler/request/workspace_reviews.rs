@@ -2,7 +2,7 @@
 //! edit comments, link artifacts, assign/unassign, and filter the review queue.
 
 use garde::Validate;
-use nvisy_postgres::types::{DocumentReviewFilter, ReviewStatus};
+use nvisy_postgres::types::{DetectionId, DocumentReviewFilter, RedactionId, ReviewStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -25,8 +25,8 @@ pub struct WorkspaceReviewPathParams {
 pub struct WorkspaceReviewDetectionPathParams {
     /// Unique identifier of the review.
     pub review_id: Uuid,
-    /// Unique identifier of the detection to reference.
-    pub detection_id: Uuid,
+    /// Opaque identifier of the detection to reference.
+    pub detection_id: DetectionId,
 }
 
 /// Path parameters addressing a review-to-redaction link.
@@ -36,8 +36,8 @@ pub struct WorkspaceReviewDetectionPathParams {
 pub struct WorkspaceReviewRedactionPathParams {
     /// Unique identifier of the review.
     pub review_id: Uuid,
-    /// Unique identifier of the redaction to reference.
-    pub redaction_id: Uuid,
+    /// Opaque identifier of the redaction to reference.
+    pub redaction_id: RedactionId,
 }
 
 /// Request payload to open a review on a document.
