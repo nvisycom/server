@@ -1,6 +1,6 @@
 //! Redaction request types.
 
-use nvisy_postgres::types::RedactionFilter;
+use nvisy_postgres::types::{DetectionId, RedactionFilter};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -14,7 +14,7 @@ use uuid::Uuid;
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceRedactionsQuery {
     /// Filter to the redactions produced from a specific detection.
-    pub detection_id: Option<Uuid>,
+    pub detection_id: Option<DetectionId>,
     /// Filter to the redactions of detections analyzing a specific document.
     pub document_id: Option<Uuid>,
 }
@@ -22,7 +22,7 @@ pub struct WorkspaceRedactionsQuery {
 impl From<WorkspaceRedactionsQuery> for RedactionFilter {
     fn from(query: WorkspaceRedactionsQuery) -> Self {
         RedactionFilter {
-            detection_id: query.detection_id,
+            detection_id: query.detection_id.map(|id| id.as_uuid()),
             document_id: query.document_id,
         }
     }
