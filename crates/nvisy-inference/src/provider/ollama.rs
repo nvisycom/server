@@ -7,7 +7,7 @@ use rig::DynModel;
 use rig::operation::Completion;
 use rig::providers::ollama::{self, OllamaConfig};
 
-use super::{Client, OllamaCredentials};
+use super::{Client, OllamaCredentials, map_verify};
 use crate::error::Result;
 
 /// Ollama-backed inference client.
@@ -26,10 +26,12 @@ impl Client for OllamaProvider {
         Self(config.client())
     }
 
-    /// Ollama is an unauthenticated local daemon, so there is no credential to
-    /// check; verification is a no-op.
-    fn verify(&self) -> impl Future<Output = Result<()>> + Send {
-        std::future::ready(Ok(()))
+    /// Ollama is unauthenticated, so there is no credential to check, but the
+    /// daemon still has to be reachable at the configured base URL. Probe it by
+    /// listing models (`GET /api/tags`); an unreachable server or a wrong URL
+    /// fails here rather than at the first inference request.
+    async fn verify(&self) -> Result<()> {
+        map_verify(self.0.list_models().await.map(|_| ()))
     }
 
     fn completion_model(&self, model: &str) -> DynModel<Completion> {
