@@ -18,8 +18,9 @@ use crate::domain::input::{CreatePipelineInput, PipelineDefinitionInput, UpdateP
 /// Holds what a pipeline author decides — the default scope and the policies to
 /// apply. Recognition is entirely server-wide: the built-in pattern set plus the
 /// deployment's NER/LLM lineups and enrichment backends live in the engine
-/// config, not here. Stored as JSON in the pipeline's `definition` column but
-/// validated against this schema at the API boundary.
+/// config, not here. This is the API wire shape (camelCase, schema-validated at
+/// the boundary); persistence is the domain `PipelineDefinitionInput`'s job,
+/// which this converts to and from.
 ///
 /// The label catalog is not part of this: the policies own the label vocabulary,
 /// and the engine derives the detection catalog from them at run time.
@@ -31,7 +32,7 @@ use crate::domain::input::{CreatePipelineInput, PipelineDefinitionInput, UpdateP
 ///   time.
 #[must_use]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
 pub struct PipelineDefinition {
     /// Optional pipeline-wide scope (languages, jurisdictions, document labels).
@@ -49,31 +50,18 @@ pub struct PipelineDefinition {
     pub policy_ids: Vec<Uuid>,
 }
 
-impl PipelineDefinition {
-    /// Rebuilds a definition from stored config JSON and the reference ids read
-    /// back from the join table.
-    ///
-    /// Decoding failure is surfaced rather than swallowed: a stored config that
-    /// does not match the schema is a server-side data error, not an empty
-    /// config to return silently.
-    ///
-    /// # Errors
-    ///
-    /// A deserialization error if `config` does not decode to a
-    /// [`PipelineDefinition`].
-    pub fn from_parts(
-        config: serde_json::Value,
-        policy_ids: Vec<Uuid>,
-    ) -> serde_json::Result<Self> {
-        let mut definition: Self = serde_json::from_value(config)?;
-        definition.policy_ids = policy_ids;
-        Ok(definition)
-    }
-}
-
 impl From<PipelineDefinition> for PipelineDefinitionInput {
     fn from(definition: PipelineDefinition) -> Self {
         PipelineDefinitionInput {
+            default_scope: definition.default_scope,
+            policy_ids: definition.policy_ids,
+        }
+    }
+}
+
+impl From<PipelineDefinitionInput> for PipelineDefinition {
+    fn from(definition: PipelineDefinitionInput) -> Self {
+        PipelineDefinition {
             default_scope: definition.default_scope,
             policy_ids: definition.policy_ids,
         }
