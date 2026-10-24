@@ -7,7 +7,7 @@ use nvisy_postgres::model::{
     WorkspaceReviewEvent as ReviewEventModel,
 };
 use nvisy_postgres::query::{TimelineCursor, TimelineSource};
-use nvisy_postgres::types::{ReviewEventKind, ReviewStatus};
+use nvisy_postgres::types::{DetectionId, RedactionId, ReviewEventKind, ReviewStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -28,10 +28,10 @@ pub struct WorkspaceReview {
     pub document_id: Uuid,
     /// The detection the review is currently reviewing, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub detection_id: Option<Uuid>,
+    pub detection_id: Option<DetectionId>,
     /// The approved redaction output, set once the review is approved.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub redaction_id: Option<Uuid>,
+    pub redaction_id: Option<RedactionId>,
     /// The review's title.
     pub display_name: String,
     /// Account that opened the review.
@@ -61,8 +61,8 @@ impl WorkspaceReview {
         Self {
             id: review.id,
             document_id: review.document_id,
-            detection_id: review.detection_id,
-            redaction_id: review.redaction_id,
+            detection_id: review.detection_id.map(DetectionId::from_uuid),
+            redaction_id: review.redaction_id.map(RedactionId::from_uuid),
             display_name: review.display_name.clone(),
             author,
             review_status: review.review_status,

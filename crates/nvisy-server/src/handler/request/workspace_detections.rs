@@ -150,10 +150,11 @@ impl From<CreateAdhocWorkspaceDetection> for CreateAdhocDetectionInput {
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
 pub struct EditWorkspaceDetection {
-    /// The `editSetRev` the client last read for this detection. The write is applied
-    /// only if it still matches, so a concurrent edit is not silently overwritten; a
-    /// stale value is rejected with 409. Defaults to 0 (a detection with no edits yet).
-    #[serde(default)]
+    /// The `editSetRev` the client last read for this detection. Required, so the
+    /// guard is honest: the write is applied only if it still matches (a concurrent
+    /// edit is not silently overwritten, and a caller cannot skip the check by
+    /// omitting the field); a stale value is rejected with 409. A never-edited
+    /// detection is at rev 0.
     pub edit_set_rev: i32,
     /// The reviewer edits to persist, grouped by modality. Omit to clear the
     /// detection's stored edits.
