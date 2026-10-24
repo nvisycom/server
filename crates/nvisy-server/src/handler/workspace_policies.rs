@@ -18,8 +18,8 @@ use nvisy_postgres::PgClient;
 use crate::domain;
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{
-    CreateWorkspacePolicy, CursorPagination, UpdateWorkspacePolicy, WorkspacePoliciesQuery,
-    WorkspacePolicyPathParams,
+    CreateWorkspacePolicy, CursorPagination, PromoteWorkspacePolicy, UpdateWorkspacePolicy,
+    WorkspacePoliciesQuery, WorkspacePolicyPathParams,
 };
 use crate::handler::response::{PoliciesPage, WorkspacePolicy, WorkspacePolicySummary};
 use crate::handler::utility::resolve_account_ref;
@@ -33,7 +33,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::policies";
 ///
 /// The request body carries a structured policy definition; its name and
 /// description drive the stored record unless overridden. A labels body creates
-/// (or reuses) a one-shot policy. Requires `ManagePolicies` permission.
+/// (or reuses) a derived policy. Requires `ManagePolicies` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -69,7 +69,7 @@ async fn create_policy(
     let response =
         WorkspacePolicy::from_model(policy, version, workspace.id, workspace.handle, creator)?;
 
-    // A one-shot body reuses an identical live policy (200) rather than minting a
+    // A derived body reuses an identical live policy (200) rather than minting a
     // duplicate; everything else creates a new policy (201).
     let status = if created {
         StatusCode::CREATED
@@ -83,7 +83,7 @@ fn create_policy_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Create policy")
         .description(
             "Creates a structured redaction policy for the workspace. A labels body \
-             creates (or reuses) a one-shot policy and returns 200 when an identical \
+             creates (or reuses) a derived policy and returns 200 when an identical \
              one already exists; a template or inline body always creates a new \
              policy and returns 201.",
         )
@@ -140,7 +140,7 @@ fn list_policies_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List policies")
         .description(
             "Returns the workspace's policies. The optional `kind` query parameter \
-             narrows to a single kind (`authored` or `oneshot`).",
+             narrows to a single kind (`authored` or `derived`).",
         )
         .response::<200, Json<PoliciesPage>>()
         .response::<401, Json<ErrorResponse>>()
@@ -191,7 +191,7 @@ fn read_policy_docs(op: TransformOperation) -> TransformOperation {
 /// Updates a workspace policy.
 ///
 /// All fields are optional; replacing the definition replaces the whole policy
-/// body. One-shot policies are immutable, so editing one is rejected. Requires
+/// body. Derived policies are immutable, so editing one is rejected. Requires
 /// `ManagePolicies` permission.
 #[tracing::instrument(
     skip_all,
@@ -235,6 +235,67 @@ async fn update_policy(
 fn update_policy_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update policy")
         .description("Updates policy fields. Replacing the definition replaces the whole body.")
+        .response::<200, Json<WorkspacePolicy>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
+/// Promotes a derived policy to an authored one.
+///
+/// A derived (ad-hoc) policy is immutable and content-addressed; promoting it
+/// clears its content hash and makes it an editable, reusable authored policy
+/// selectable for detections, keeping its id and current definition. Rejected for
+/// an already-authored policy. Requires `ManagePolicies` permission.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
+        policy_id = %path_params.policy_id,
+    )
+)]
+async fn promote_policy(
+    State(policies): State<domain::WorkspacePolicyService>,
+    authz: Authorized<markers::ManagePolicies>,
+    Path(path_params): Path<WorkspacePolicyPathParams>,
+    security: SecurityContext,
+    ValidateJson(request): ValidateJson<PromoteWorkspacePolicy>,
+) -> Result<(StatusCode, Json<WorkspacePolicy>)> {
+    tracing::debug!(target: TRACING_TARGET, "Promoting workspace policy");
+
+    let workspace = authz.workspace;
+    let origin = event::EventOrigin {
+        workspace_id: workspace.id,
+        account_id: authz.account_id,
+        security: &security,
+    };
+
+    let (found, version) = policies
+        .promote(origin, path_params.policy_id, request.display_name)
+        .await?;
+
+    let response = WorkspacePolicy::from_model(
+        found.item,
+        version,
+        workspace.id,
+        workspace.handle,
+        found.account.into(),
+    )?;
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+fn promote_policy_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Promote policy")
+        .description(
+            "Promotes a derived (ad-hoc) policy to an authored one: clears its \
+             content hash and makes it an editable, reusable policy selectable for \
+             detections, keeping its id and current definition. A `displayName` is required and \
+             replaces the policy's generated hash name. Returns 400 if the policy is \
+             already authored.",
+        )
         .response::<200, Json<WorkspacePolicy>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
@@ -295,6 +356,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
             get_with(read_policy, read_policy_docs)
                 .patch_with(update_policy, update_policy_docs)
                 .delete_with(delete_policy, delete_policy_docs),
+        )
+        .api_route(
+            "/workspaces/{workspaceId}/policies/{policyId}/promote",
+            post_with(promote_policy, promote_policy_docs),
         )
         .with_path_items(|item| item.tag("Policies"))
 }

@@ -19,7 +19,6 @@ mod account_notifications;
 mod accounts;
 mod analytics;
 mod blob_pointers;
-mod pipeline_references;
 mod search;
 mod workspace_activities;
 mod workspace_assistant_jobs;
@@ -34,7 +33,6 @@ mod workspace_documents;
 mod workspace_event_outbox;
 mod workspace_invites;
 mod workspace_members;
-mod workspace_pipelines;
 mod workspace_policies;
 mod workspace_policy_versions;
 mod workspace_providers;
@@ -59,7 +57,6 @@ pub use blob_pointers::{
     clear_expired_detection_audits, clear_expired_detection_intermediates,
     clear_expired_review_audits,
 };
-pub use pipeline_references::PipelineReferenceRepository;
 pub use workspace_activities::{ActivityCursor, ActivityFilter, WorkspaceActivityRepository};
 pub use workspace_assistant_jobs::AssistantJobOutboxRepository;
 pub use workspace_blobs::{ReclaimableBlob, WorkspaceBlobRepository};
@@ -71,7 +68,8 @@ pub use workspace_connections::{
 pub use workspace_detection_jobs::DetectionJobOutboxRepository;
 pub use workspace_detection_policy_versions::DetectionPolicyVersionRepository;
 pub use workspace_detections::{
-    DetectionCursor, DetectionDocuments, DetectionListRow, WorkspaceDetectionRepository,
+    DetectionCursor, DetectionDocuments, DetectionListRow, EditWriteOutcome,
+    WorkspaceDetectionRepository,
 };
 pub use workspace_documents::{
     DocumentCursor, DocumentWithBlob, ImportedDocumentRef, WorkspaceDocumentRepository,
@@ -81,7 +79,6 @@ pub use workspace_invites::{InviteCursor, WorkspaceInviteRepository};
 pub use workspace_members::{
     AccountWorkspaceCursor, WorkspaceMemberCursor, WorkspaceMemberRepository,
 };
-pub use workspace_pipelines::{PipelineCursor, WorkspacePipelineRepository};
 pub use workspace_policies::{PolicyCursor, PolicyWithVersion, WorkspacePolicyRepository};
 pub use workspace_policy_versions::WorkspacePolicyVersionRepository;
 pub use workspace_providers::{ProviderCursor, WorkspaceProviderRepository};
@@ -89,8 +86,8 @@ pub use workspace_redactions::{RedactionCursor, WorkspaceRedactionRepository};
 pub use workspace_review_comments::WorkspaceReviewCommentRepository;
 pub use workspace_review_events::{TimelineCursor, TimelineSource, WorkspaceReviewEventRepository};
 pub use workspace_reviews::{
-    AssignmentOutcome, DocumentReviewCursor, ReviewEventCursor, WithActor, WithReviewers,
-    WorkspaceReviewRepository,
+    ApprovalOutcome, AssignmentOutcome, DocumentReviewCursor, ReviewEventCursor, WithActor,
+    WithReviewers, WorkspaceReviewRepository,
 };
 pub use workspace_webhooks::{WebhookCursor, WorkspaceWebhookRepository};
 pub use workspaces::WorkspaceRepository;

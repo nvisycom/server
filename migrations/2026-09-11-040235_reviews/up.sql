@@ -1,33 +1,38 @@
--- Document reviews: a discussion on a document, with a manual sign-off workflow.
+-- Document reviews: a discussion on a document, with an explicit approval workflow.
 --
 -- A review is the unit of collaboration on a document: a named discussion (an
--- author, a title, a stream of comments and timeline events) with a sign-off
--- lifecycle (needs_review → in_review → resolved) layered on top. A document has
--- 0..N reviews — none when someone works alone, one or more when a formal sign-off
--- is wanted, each for a distinct audience. A review references — does not own — the
--- detections and redactions done for it, via the link tables here, and its activity
--- (comments, status changes, links, assignment, verification) is one timeline in
--- workspace_review_events.
+-- author, a title, a stream of comments and timeline events) with a decision-driven
+-- approval lifecycle layered on top. A document has 0..N reviews — none when someone
+-- works alone, at most one open at a time when a formal sign-off is wanted. A review
+-- is anchored to its document, points at the detection it is currently reviewing and
+-- at the redaction it approves (direct columns, not link tables), and its activity
+-- (comments, status changes, detection/redaction repoints, assignment, approvals) is
+-- one timeline in workspace_review_events.
 --
 -- This subsystem sits on top of documents, detections, and redactions (all
 -- introduced by earlier migrations).
 
--- The state of a review. A manual reviewer workflow: a review opens at
--- `needs_review`, moves to `in_review` when a reviewer takes it (the first
--- assignee), and `resolved` when verified. Reopening or removing the last assignee
--- returns it to `needs_review`.
+-- The state of a review. A decision-driven approval workflow: a review opens at
+-- `draft`, moves to `in_review` on submit, and `approved` once enough reviewers
+-- approve. A reviewer can request changes (`changes_requested`), the author
+-- resubmits, and a partially-approved review (`partially_approved`, reachable only
+-- when a workspace requires two or more approvals) awaits the remaining approvals.
+-- The state is set by reviewer decisions, not by assignment.
 CREATE TYPE REVIEW_STATUS AS ENUM (
-    'needs_review', -- Opened, awaiting a reviewer
-    'in_review',    -- A reviewer has taken it (assigned/started)
-    'resolved'      -- Verified
+    'draft',              -- Opened, edits being assembled; submit sends it for review
+    'in_review',          -- Submitted, awaiting a decision
+    'changes_requested',  -- A reviewer pushed back; resubmit returns it to in_review
+    'partially_approved', -- Some but not all required approvals in (min_approvals >= 2)
+    'approved'            -- Signed off; the approved redaction is the output
 );
 
-COMMENT ON TYPE REVIEW_STATUS IS 'The state of a review: needs_review, in_review, or resolved.';
+COMMENT ON TYPE REVIEW_STATUS IS 'The state of a review: draft, in_review, changes_requested, partially_approved, or approved.';
 
--- Reviews: a named discussion on a document with a sign-off lifecycle. A document
--- has 0..N reviews (each for a distinct audience). A review carries its state and
--- references (does not own) its assignees and the detections and redactions done
--- for it via the link tables below; its comments and timeline events belong to it.
+-- Reviews: a named discussion on a document with an approval lifecycle. A document
+-- has 0..N reviews, which may run concurrently (one per audience). A review is
+-- anchored to its document and carries its state, the detection it is currently
+-- reviewing, and the redaction it approves as direct columns; its assignees (whose
+-- approvals drive sign-off), comments, and timeline events belong to it.
 CREATE TABLE workspace_reviews (
     -- Primary identifier
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -39,6 +44,14 @@ CREATE TABLE workspace_reviews (
     workspace_id        UUID        NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     document_id         UUID        NOT NULL,
 
+    -- The detection the review is currently working from, and the redaction it has
+    -- approved as its output. Both are nullable: a draft review may have no detection
+    -- yet, and redaction_id is set only on approval. Re-detecting the document
+    -- repoints detection_id (recorded as a review.redetected event). ON DELETE SET
+    -- NULL keeps the review when a referenced detection or redaction is hard-deleted.
+    detection_id        UUID        DEFAULT NULL REFERENCES workspace_detections (id) ON DELETE SET NULL,
+    redaction_id        UUID        DEFAULT NULL REFERENCES workspace_redactions (id) ON DELETE SET NULL,
+
     -- The account that opened the review. If it is removed, the review goes too.
     author_account_id   UUID        NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
@@ -47,11 +60,11 @@ CREATE TABLE workspace_reviews (
     display_name        TEXT        NOT NULL,
     CONSTRAINT workspace_reviews_display_name_length CHECK (length(trim(display_name)) BETWEEN 1 AND 255),
 
-    -- The review state, and the whole lifecycle: a review opens at `needs_review`,
-    -- moves to `in_review` when a reviewer takes it, and `resolved` when verified
-    -- (resolved is "done" — there is no separate open/closed discussion flag).
-    -- Assignees live in the workspace_review_assignees link table (0..N reviewers).
-    review_status       REVIEW_STATUS NOT NULL DEFAULT 'needs_review',
+    -- The review state, and the whole lifecycle: a review opens at `draft`, moves to
+    -- `in_review` on submit, through `changes_requested` / `partially_approved`, and
+    -- `approved` once enough reviewers approve. State is set by explicit reviewer
+    -- decisions; approvals are the assignees' stamped `approved_at` values.
+    review_status       REVIEW_STATUS NOT NULL DEFAULT 'draft',
 
     -- Lifecycle timestamps
     created_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
@@ -60,7 +73,7 @@ CREATE TABLE workspace_reviews (
     CONSTRAINT workspace_reviews_updated_after_created CHECK (updated_at >= created_at),
     CONSTRAINT workspace_reviews_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
 
-    -- A document may have many reviews, so document_id is deliberately not unique.
+    -- A document may have many concurrent reviews, one per audience.
     CONSTRAINT workspace_reviews_document_fkey FOREIGN KEY (workspace_id, document_id)
         REFERENCES workspace_documents (workspace_id, id) ON DELETE CASCADE
 );
@@ -71,7 +84,7 @@ CREATE INDEX workspace_reviews_document_idx
     WHERE deleted_at IS NULL;
 
 -- The review queue: a workspace's reviews by status, newest first (backs the
--- status-filtered listing and the "needs review" queue).
+-- status-filtered listing and the review queue).
 CREATE INDEX workspace_reviews_workspace_idx
     ON workspace_reviews (workspace_id, review_status, created_at DESC)
     WHERE deleted_at IS NULL;
@@ -79,13 +92,15 @@ CREATE INDEX workspace_reviews_workspace_idx
 -- Keep updated_at current on every row modification.
 SELECT setup_updated_at('workspace_reviews');
 
-COMMENT ON TABLE workspace_reviews IS 'A named discussion on a document with a manual sign-off lifecycle (0..N per document). References the detections/redactions done for it via link tables; owns its comments and timeline.';
+COMMENT ON TABLE workspace_reviews IS 'A named discussion on a document with an approval lifecycle (0..N per document, concurrent per audience). Anchored to its document; points at the detection it reviews and the redaction it approves; owns its comments and timeline.';
 COMMENT ON COLUMN workspace_reviews.id IS 'Unique review identifier';
 COMMENT ON COLUMN workspace_reviews.workspace_id IS 'Denormalized workspace scope';
-COMMENT ON COLUMN workspace_reviews.document_id IS 'Document under review (a document may have many reviews)';
+COMMENT ON COLUMN workspace_reviews.document_id IS 'Document under review (a document may have many concurrent reviews, one per audience)';
+COMMENT ON COLUMN workspace_reviews.detection_id IS 'The detection currently under review; NULL before a detection is linked';
+COMMENT ON COLUMN workspace_reviews.redaction_id IS 'The approved redaction output; NULL until approved';
 COMMENT ON COLUMN workspace_reviews.author_account_id IS 'Account that opened the review';
 COMMENT ON COLUMN workspace_reviews.display_name IS 'Human-readable title (1-255 chars)';
-COMMENT ON COLUMN workspace_reviews.review_status IS 'Review state and lifecycle (needs_review/in_review/resolved)';
+COMMENT ON COLUMN workspace_reviews.review_status IS 'Review state and lifecycle (draft/in_review/changes_requested/partially_approved/approved)';
 COMMENT ON COLUMN workspace_reviews.created_at IS 'Timestamp when the review was opened';
 COMMENT ON COLUMN workspace_reviews.updated_at IS 'Timestamp of the last update';
 COMMENT ON COLUMN workspace_reviews.deleted_at IS 'Soft-deletion timestamp; NULL means live';
@@ -148,13 +163,20 @@ COMMENT ON COLUMN workspace_review_comments.created_at IS 'Timestamp when the co
 COMMENT ON COLUMN workspace_review_comments.updated_at IS 'Timestamp of the last edit';
 COMMENT ON COLUMN workspace_review_comments.deleted_at IS 'Soft-deletion timestamp; NULL means live';
 
--- Review assignees: the reviewers responsible for a review (0..N). A review with
--- no assignees is unassigned; the first assignee moves it to `in_review` and
--- removing the last returns it to `needs_review` (handled in the query layer).
+-- Review assignees: the reviewers responsible for a review (0..N), and their
+-- approvals. Assignment is metadata (who is responsible) and does not change the
+-- review's status. A reviewer approves by stamping `approved_at` on their own row;
+-- the review reaches `approved` once the count of stamped rows meets the workspace's
+-- min_approvals. Requesting changes or reopening clears every `approved_at` (a
+-- pushback invalidates accumulated approvals), so a stamp always means "approved the
+-- state as it stands now."
 CREATE TABLE workspace_review_assignees (
-    review_id  UUID NOT NULL REFERENCES workspace_reviews (id) ON DELETE CASCADE,
-    account_id UUID NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    review_id   UUID NOT NULL REFERENCES workspace_reviews (id) ON DELETE CASCADE,
+    account_id  UUID NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    -- When this reviewer approved the review in its current state; NULL means
+    -- assigned but not yet approved.
+    approved_at TIMESTAMPTZ DEFAULT NULL,
     PRIMARY KEY (review_id, account_id)
 );
 
@@ -162,64 +184,30 @@ CREATE TABLE workspace_review_assignees (
 CREATE INDEX workspace_review_assignees_account_idx
     ON workspace_review_assignees (account_id);
 
-COMMENT ON TABLE workspace_review_assignees IS 'The reviewers assigned to a review (many-to-many); a review may have 0..N assignees.';
+COMMENT ON TABLE workspace_review_assignees IS 'The reviewers assigned to a review (many-to-many, 0..N) and their approvals (approved_at). Approval is reached when the count of stamped rows meets the workspace min_approvals.';
 COMMENT ON COLUMN workspace_review_assignees.review_id IS 'The review';
 COMMENT ON COLUMN workspace_review_assignees.account_id IS 'The assigned reviewer';
+COMMENT ON COLUMN workspace_review_assignees.approved_at IS 'When this reviewer approved the current state; NULL means not yet approved. Cleared on request-changes/reopen';
 COMMENT ON COLUMN workspace_review_assignees.created_at IS 'When the reviewer was assigned';
 
--- Review ← detection links: the detections a review references. Many-to-many — a
--- shared detection's findings can feed redactions across several reviews, so a
--- detection may be referenced by more than one review.
-CREATE TABLE workspace_review_detections (
-    review_id    UUID NOT NULL REFERENCES workspace_reviews (id) ON DELETE CASCADE,
-    detection_id UUID NOT NULL REFERENCES workspace_detections (id) ON DELETE CASCADE,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    PRIMARY KEY (review_id, detection_id)
-);
-
--- Reverse lookup: which reviews reference a given detection.
-CREATE INDEX workspace_review_detections_detection_idx
-    ON workspace_review_detections (detection_id);
-
-COMMENT ON TABLE workspace_review_detections IS 'Links a review to the detections it references (many-to-many).';
-COMMENT ON COLUMN workspace_review_detections.review_id IS 'The referencing review';
-COMMENT ON COLUMN workspace_review_detections.detection_id IS 'The referenced detection';
-COMMENT ON COLUMN workspace_review_detections.created_at IS 'When the link was made';
-
--- Review ← redaction links: the redaction passes a review references. Many-to-many
--- for the same reason as detections.
-CREATE TABLE workspace_review_redactions (
-    review_id    UUID NOT NULL REFERENCES workspace_reviews (id) ON DELETE CASCADE,
-    redaction_id UUID NOT NULL REFERENCES workspace_redactions (id) ON DELETE CASCADE,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    PRIMARY KEY (review_id, redaction_id)
-);
-
--- Reverse lookup: which reviews reference a given redaction.
-CREATE INDEX workspace_review_redactions_redaction_idx
-    ON workspace_review_redactions (redaction_id);
-
-COMMENT ON TABLE workspace_review_redactions IS 'Links a review to the redactions it references (many-to-many).';
-COMMENT ON COLUMN workspace_review_redactions.review_id IS 'The referencing review';
-COMMENT ON COLUMN workspace_review_redactions.redaction_id IS 'The referenced redaction';
-COMMENT ON COLUMN workspace_review_redactions.created_at IS 'When the link was made';
-
 -- Kind of a review timeline event (a non-message entry in a review's stream): the
--- lifecycle (opened, renamed, verified/resolved, reopened) and the sign-off
--- workflow (detections/redactions linked, assignment changes). Comments are the
--- message entries; these are everything else in the one timeline.
+-- lifecycle (opened, renamed, submitted, changes requested, approved, reopened) and
+-- the surrounding workflow (detection repoints, assignment changes). The approved
+-- event's target carries the output redaction id.
+-- Comments are the message entries; these are everything else in the one timeline.
 CREATE TYPE REVIEW_EVENT_KIND AS ENUM (
-    'review.opened',    -- The review was opened
-    'review.renamed',   -- The review's display name was changed
-    'detection.linked', -- A detection was referenced by the review
-    'redaction.linked', -- A redaction was referenced by the review
-    'assigned',         -- The review was assigned to a reviewer
-    'unassigned',       -- A reviewer was unassigned
-    'verified',         -- The review was verified (resolved)
-    'reopened'          -- A resolved review was reopened (back to needs_review)
+    'review.opened',            -- The review was opened (target holds the initial detection id, if any)
+    'review.renamed',           -- The review's display name was changed
+    'review.redetected',        -- The review was repointed at a newer detection (target holds it)
+    'review.assigned',          -- The review was assigned to a reviewer
+    'review.unassigned',        -- A reviewer was unassigned
+    'review.submitted',         -- The review was submitted (or resubmitted) for review
+    'review.changes_requested', -- A reviewer requested changes
+    'review.approved',          -- A reviewer approved (its target holds the output redaction id)
+    'review.reopened'           -- An approved review was reopened (back to in_review)
 );
 
-COMMENT ON TYPE REVIEW_EVENT_KIND IS 'The kind of a non-message entry in a review timeline: the lifecycle (opened, renamed, verified, reopened) and the sign-off workflow (detection/redaction linked, assigned/unassigned).';
+COMMENT ON TYPE REVIEW_EVENT_KIND IS 'The kind of a non-message entry in a review timeline: the lifecycle (opened, renamed, submitted, changes_requested, approved, reopened) and the workflow (detection linked, assigned/unassigned).';
 
 -- Review timeline events: the non-message entries in a review's stream. Immutable —
 -- an event is a fact that happened, so there is no update or soft-delete; deleting
@@ -257,7 +245,7 @@ CREATE INDEX workspace_review_events_review_idx
 COMMENT ON TABLE workspace_review_events IS 'An immutable non-message entry in a review timeline: the lifecycle (opened, renamed, verified, reopened) and the sign-off workflow (detection/redaction linked, assigned/unassigned).';
 COMMENT ON COLUMN workspace_review_events.id IS 'Unique event identifier';
 COMMENT ON COLUMN workspace_review_events.review_id IS 'Review this event belongs to';
-COMMENT ON COLUMN workspace_review_events.kind IS 'What happened (review.opened/renamed, detection/redaction.linked, assigned/unassigned, verified, reopened)';
+COMMENT ON COLUMN workspace_review_events.kind IS 'What happened (review.opened/renamed/redetected, review.assigned/unassigned, review.submitted/changes_requested/approved/reopened)';
 COMMENT ON COLUMN workspace_review_events.actor_account_id IS 'Account that performed the action; null if that account was removed';
 COMMENT ON COLUMN workspace_review_events.target IS 'Event-specific detail (the new name, a linked id, an assignee); NULL when none';
 COMMENT ON COLUMN workspace_review_events.created_at IS 'Timestamp when the event happened';
@@ -271,7 +259,9 @@ ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.opened';
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.renamed';
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.deleted';
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.comment.created';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.verified';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.submitted';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.changes_requested';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.approved';
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.reopened';
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.assigned';
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.unassigned';
@@ -279,7 +269,9 @@ ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'review.unassigned';
 -- Webhooks carry the review lifecycle (message-level noise is left off).
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'review.opened';
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'review.renamed';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'review.verified';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'review.submitted';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'review.changes_requested';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'review.approved';
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'review.reopened';
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'review.assigned';
 ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'review.unassigned';

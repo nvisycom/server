@@ -1,32 +1,11 @@
-//! Pipeline-related constraint violation error handlers.
+//! Detection-, connection-, and policy-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
     WorkspaceConnectionConstraints, WorkspaceConnectionSyncConstraints,
-    WorkspaceDetectionConstraints, WorkspacePipelineConstraints,
-    WorkspacePipelineReferenceConstraints, WorkspacePolicyConstraints,
+    WorkspaceDetectionConstraints, WorkspacePolicyConstraints,
 };
 
 use super::{Error, ErrorKind};
-
-impl From<WorkspacePipelineConstraints> for Error<'static> {
-    fn from(c: WorkspacePipelineConstraints) -> Self {
-        match c {
-            WorkspacePipelineConstraints::NameLength => ErrorKind::BadRequest
-                .with_message("Pipeline name must be between 2 and 128 characters long"),
-            WorkspacePipelineConstraints::DescriptionLength => ErrorKind::BadRequest
-                .with_message("Pipeline description must be at most 500 characters long"),
-            WorkspacePipelineConstraints::DefinitionSize => {
-                ErrorKind::BadRequest.with_message("Pipeline definition size exceeds maximum limit")
-            }
-            WorkspacePipelineConstraints::MetadataSize => {
-                ErrorKind::BadRequest.with_message("Pipeline metadata size exceeds maximum limit")
-            }
-            WorkspacePipelineConstraints::WorkspaceIdIdUnique => {
-                ErrorKind::Conflict.with_message("A pipeline with this identifier already exists")
-            }
-        }
-    }
-}
 
 impl From<WorkspaceDetectionConstraints> for Error<'static> {
     fn from(c: WorkspaceDetectionConstraints) -> Self {
@@ -39,15 +18,6 @@ impl From<WorkspaceDetectionConstraints> for Error<'static> {
             }
             WorkspaceDetectionConstraints::IdempotencyUnique => ErrorKind::Conflict
                 .with_message("A detection with this idempotency key already exists"),
-        }
-    }
-}
-
-impl From<WorkspacePipelineReferenceConstraints> for Error<'static> {
-    fn from(c: WorkspacePipelineReferenceConstraints) -> Self {
-        match c {
-            WorkspacePipelineReferenceConstraints::PolicyReference => ErrorKind::BadRequest
-                .with_message("Referenced policy does not exist in this workspace"),
         }
     }
 }

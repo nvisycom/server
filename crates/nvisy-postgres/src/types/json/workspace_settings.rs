@@ -31,6 +31,44 @@ pub enum RasterPolicy {
     Never,
 }
 
+/// A workspace's review approval policy: who may approve and how many approvals a
+/// review needs before it is signed off.
+///
+/// The defaults reproduce the minimal behaviour — a single approver, the author
+/// allowed — so a workspace that configures nothing behaves as if reviews are a
+/// plain single sign-off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ReviewSettings {
+    /// Whether the author of a review may cast an approval on it. `false` gives
+    /// lightweight separation-of-duties (someone other than the author must approve).
+    pub author_can_approve: bool,
+    /// How many distinct reviewers must approve before a review reaches `approved`.
+    /// `1` is a single sign-off; `2` or more is a multi-party rule, which makes the
+    /// `partially_approved` state reachable. Clamped to at least 1 when read.
+    pub min_approvals: u32,
+}
+
+impl Default for ReviewSettings {
+    fn default() -> Self {
+        Self {
+            author_can_approve: true,
+            min_approvals: 1,
+        }
+    }
+}
+
+impl ReviewSettings {
+    /// The number of distinct approvals a review needs, always at least 1 (a stored
+    /// `0` would otherwise approve a review with no approvals at all).
+    #[must_use]
+    pub fn required_approvals(&self) -> u32 {
+        self.min_approvals.max(1)
+    }
+}
+
 /// Typed workspace settings, the JSON stored in the `workspaces.settings` column.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -42,6 +80,8 @@ pub struct WorkspaceSettings {
     pub raster: RasterPolicy,
     /// Data-retention rules for the workspace.
     pub retention: RetentionSettings,
+    /// The review approval policy (who may approve, how many approvals are needed).
+    pub review: ReviewSettings,
     /// A soft per-file upload cap in bytes: an upload larger than this is
     /// rejected for this workspace. `None` imposes no workspace-specific cap.
     ///

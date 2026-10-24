@@ -1,6 +1,6 @@
--- Detections: one analysis pass of a file through a pipeline, its per-model
--- usage, and the transactional outbox that queues each analysis. A detection
--- can produce many redactions (see the redactions migration).
+-- Detections: one analysis pass of a document against a set of policies, its
+-- per-model usage, and the transactional outbox that queues each analysis. A
+-- detection can produce many redactions (see the redactions migration).
 
 CREATE TYPE DETECTION_STATUS AS ENUM (
     'pending',      -- Enqueued for detection; no worker has picked it up yet
@@ -10,14 +10,6 @@ CREATE TYPE DETECTION_STATUS AS ENUM (
 );
 
 COMMENT ON TYPE DETECTION_STATUS IS 'Execution status of a detection: pending, executing, complete, or failed.';
-
--- How a detection was initiated.
-CREATE TYPE PIPELINE_TRIGGER_TYPE AS ENUM (
-    'user',         -- Started directly by a user
-    'system'        -- Started automatically (e.g. a file upload auto-redacted)
-);
-
-COMMENT ON TYPE PIPELINE_TRIGGER_TYPE IS 'How a detection was initiated: by a user or by the system.';
 
 -- The billing unit a model call metered. A call reports an open set of these
 -- (tokens for LLMs, seconds for speech-to-text, pages/images for OCR, …); each
@@ -34,16 +26,14 @@ CREATE TYPE USAGE_METER AS ENUM (
 
 COMMENT ON TYPE USAGE_METER IS 'The billing unit a model call metered: token counts, media seconds, pages, images, or characters.';
 
--- Detections table: one analysis pass of a file through a pipeline.
+-- Detections table: one analysis pass of a document against a set of policies.
 CREATE TABLE workspace_detections (
     -- Primary identifier
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-    -- References. A detection is workspace-scoped directly: an ad-hoc detection
-    -- carries no pipeline, and deleting a pipeline detaches (SET NULL) its
-    -- detections rather than erasing the workspace's analysis history.
+    -- References. A detection is workspace-scoped directly and names the policies it
+    -- runs against through the workspace_detection_policy_versions join (below).
     workspace_id    UUID                    NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    pipeline_id     UUID                    DEFAULT NULL REFERENCES workspace_pipelines (id) ON DELETE SET NULL,
     account_id      UUID                    NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     -- What a detection relates to. The input is the source document (required);
@@ -64,7 +54,6 @@ CREATE TABLE workspace_detections (
     audit_blob_id         UUID              DEFAULT NULL REFERENCES workspace_blobs (id) ON DELETE SET NULL,
 
     -- Detection attributes
-    trigger_type    PIPELINE_TRIGGER_TYPE   NOT NULL DEFAULT 'user',
     status          DETECTION_STATUS        NOT NULL DEFAULT 'pending',
 
     -- Idempotency key from the initiating detect request; a repeat replays the
@@ -73,10 +62,9 @@ CREATE TABLE workspace_detections (
     CONSTRAINT workspace_detections_idempotency_key_length CHECK (idempotency_key IS NULL OR length(idempotency_key) BETWEEN 1 AND 255),
 
     -- The effective retention override this detection ran under, snapshotted at
-    -- create time (from its pipeline, or supplied directly for an ad-hoc
-    -- detection). Redaction reads it from here, so re-redacting stamps output
-    -- retention from what the detection ran with rather than a since-edited
-    -- pipeline. Null falls back to the workspace retention baseline.
+    -- create time from the detect request. Redaction reads it from here, so
+    -- re-redacting stamps output retention from what the detection ran with. Null
+    -- falls back to the workspace retention baseline.
     retention_override JSONB                DEFAULT NULL,
 
     -- Non-encrypted metadata for filtering and display. The engine's full
@@ -86,6 +74,19 @@ CREATE TABLE workspace_detections (
     -- workspace_detection_call_meter tables below.
     metadata        JSONB                   NOT NULL DEFAULT '{}',
     CONSTRAINT workspace_detections_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
+
+    -- Accumulated reviewer edits (the engine's EditSet: suppress/retag/add) layered
+    -- over the detection's immutable base analysis at redact time. Persisted here, not
+    -- per redact request, so manual corrections survive between redactions and a solo
+    -- user keeps their work without opening a review. NULL means no edits yet.
+    edit_set        JSONB                   DEFAULT NULL,
+    CONSTRAINT workspace_detections_edit_set_size CHECK (edit_set IS NULL OR length(edit_set::TEXT) <= 262144),
+
+    -- Optimistic-concurrency version for edit_set, bumped on every edit write. An
+    -- edit PATCH names the revision it read, and the write proceeds only if it still
+    -- matches, so two reviewers editing the same detection cannot silently overwrite
+    -- each other (a stale PATCH is rejected as a conflict).
+    edit_set_rev    INTEGER                 NOT NULL DEFAULT 0,
 
     -- Detection lease: when a worker last claimed this detection. A redelivered
     -- job whose claim is still fresh is skipped (no double-analyze); a stale claim
@@ -104,16 +105,10 @@ CREATE TABLE workspace_detections (
     CONSTRAINT workspace_detections_deleted_after_started CHECK (deleted_at IS NULL OR deleted_at >= started_at)
 );
 
--- A workspace's detections, newest first (the workspace detection list,
--- including ad-hoc detections with no pipeline).
+-- A workspace's detections, newest first (the workspace detection list).
 CREATE INDEX workspace_detections_workspace_idx
     ON workspace_detections (workspace_id, started_at DESC)
     WHERE deleted_at IS NULL;
-
--- A pipeline's detections, newest first (the per-pipeline detection list).
-CREATE INDEX workspace_detections_pipeline_idx
-    ON workspace_detections (pipeline_id, started_at DESC)
-    WHERE pipeline_id IS NOT NULL AND deleted_at IS NULL;
 
 -- Detections triggered by an account, newest first.
 CREATE INDEX workspace_detections_account_idx
@@ -142,9 +137,8 @@ CREATE INDEX workspace_detections_audit_blob_idx
     WHERE audit_blob_id IS NOT NULL;
 
 -- Idempotent detect: at most one live detection per (workspace, idempotency key),
--- so a retry replays the existing detection whether or not it names a pipeline.
--- Partial on live rows: a soft-deleted detection does not block a fresh run under
--- the same key.
+-- so a retry replays the existing detection. Partial on live rows: a soft-deleted
+-- detection does not block a fresh run under the same key.
 CREATE UNIQUE INDEX workspace_detections_idempotency_idx
     ON workspace_detections (workspace_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL AND deleted_at IS NULL;
@@ -153,19 +147,19 @@ CREATE UNIQUE INDEX workspace_detections_idempotency_idx
 -- the document is soft-deleted, so the record of what it analyzed survives; a
 -- reference to a soft-deleted document resolves to "gone" at read time.
 
-COMMENT ON TABLE workspace_detections IS 'Detections: one analysis pass of a document through a pipeline.';
+COMMENT ON TABLE workspace_detections IS 'Detections: one analysis pass of a document against a set of policies.';
 COMMENT ON COLUMN workspace_detections.id IS 'Unique detection identifier';
 COMMENT ON COLUMN workspace_detections.workspace_id IS 'Owning workspace';
-COMMENT ON COLUMN workspace_detections.pipeline_id IS 'Pipeline whose config drove the detection; NULL for an ad-hoc detection or after its pipeline was deleted';
 COMMENT ON COLUMN workspace_detections.account_id IS 'Account that triggered the detection';
 COMMENT ON COLUMN workspace_detections.input_document_id IS 'Source document the detection analyzes';
 COMMENT ON COLUMN workspace_detections.intermediate_blob_id IS 'Enrichment intermediate blob (OCR layout, transcript) served to the client; NULL if no enricher ran';
 COMMENT ON COLUMN workspace_detections.audit_blob_id IS 'Base analysis (findings set) blob; NULL before analysis commits and once the bytes are reclaimed on retention (the row is kept)';
-COMMENT ON COLUMN workspace_detections.trigger_type IS 'How the detection was initiated';
 COMMENT ON COLUMN workspace_detections.status IS 'Current detection status';
 COMMENT ON COLUMN workspace_detections.idempotency_key IS 'Detect idempotency key (dedupes retries)';
 COMMENT ON COLUMN workspace_detections.retention_override IS 'Retention override the detection ran under, snapshotted at create; read on redact so output retention reflects the run, not a since-edited pipeline. NULL falls back to the workspace baseline';
 COMMENT ON COLUMN workspace_detections.metadata IS 'Non-encrypted metadata for filtering/display; holds the full per-call usage report under `usage`';
+COMMENT ON COLUMN workspace_detections.edit_set IS 'Accumulated reviewer edits (EditSet) applied over the base analysis at redact time; persists across redactions. NULL means none';
+COMMENT ON COLUMN workspace_detections.edit_set_rev IS 'Optimistic-concurrency version of edit_set, bumped on each edit write; an edit PATCH must name the revision it read';
 COMMENT ON COLUMN workspace_detections.claimed_at IS 'Detection lease: when a worker last claimed this detection';
 COMMENT ON COLUMN workspace_detections.started_at IS 'When the detection started';
 COMMENT ON COLUMN workspace_detections.completed_at IS 'When the detection completed; NULL while in flight';
@@ -352,13 +346,13 @@ COMMENT ON COLUMN workspace_detection_policy_versions.policy_version_id IS 'Poli
 
 -- Detection run events feed the activity log, webhooks, and (for terminal
 -- completion/failure) in-app notifications.
-ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.detection.started';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.detection.completed';
-ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.detection.failed';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'detection.started';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'detection.completed';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'detection.failed';
 
-ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.started';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.completed';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.failed';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'detection.started';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'detection.completed';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'detection.failed';
 
-ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.completed';
-ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'pipeline.detection.failed';
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'detection.completed';
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'detection.failed';

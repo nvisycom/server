@@ -2,8 +2,6 @@
 -- Objects are dropped in reverse order of creation (children reference reviews).
 
 DROP TABLE IF EXISTS workspace_review_events;
-DROP TABLE IF EXISTS workspace_review_redactions;
-DROP TABLE IF EXISTS workspace_review_detections;
 DROP TABLE IF EXISTS workspace_review_assignees;
 DROP TABLE IF EXISTS workspace_review_comments;
 DROP TABLE IF EXISTS workspace_reviews;

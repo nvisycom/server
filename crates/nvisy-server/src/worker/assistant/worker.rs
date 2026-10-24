@@ -39,7 +39,7 @@ const TRACING_TARGET: &str = "nvisy_server::worker::assistant";
 const PREAMBLE: &str = "You are the assistant for a document redaction platform. \
      You are replying inside a review's discussion where a user has mentioned you. \
      Help the user understand and operate their workspace: redaction policies, \
-     detections, pipelines, and the discussion in this review. You do not have \
+     detections, and the discussion in this review. You do not have \
      access to the contents of any document. Be concise and accurate.";
 
 /// Fallback concurrency when the runtime cannot report available parallelism.
@@ -365,7 +365,7 @@ impl AssistantWorker {
             // Lock the review and re-check its status inside the transaction: the
             // review may have resolved while the model ran, and the row lock
             // serializes against a concurrent verify so a reply can never land on a
-            // resolved review (mirrors the human create_comment guard).
+            // approved review (mirrors the human create_comment guard).
             let Some(locked) = conn
                 .lock_review_in_workspace(review.workspace_id, review.id)
                 .await?
@@ -373,7 +373,7 @@ impl AssistantWorker {
                 // The review was deleted while the model ran; nothing to post to.
                 return Ok(false);
             };
-            if locked.review_status == ReviewStatus::Resolved {
+            if locked.review_status == ReviewStatus::Approved {
                 return Ok(false);
             }
 

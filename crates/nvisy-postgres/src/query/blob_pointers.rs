@@ -111,13 +111,12 @@ mod tests {
         use crate::schema::workspace_detections::{self, dsl};
 
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.workspace_id,
-                seeded.pipeline_id,
                 seeded.account_id,
                 seeded.document_id,
             ))
@@ -145,7 +144,7 @@ mod tests {
 
         // The detection row survives (a ledger record); its pointer is nulled and
         // the blob reference dropped so the reaper can reclaim the bytes.
-        let (kept, _) = conn
+        let kept = conn
             .find_workspace_detection_by_id(seeded.workspace_id, detection.id)
             .await?
             .expect("detection row survives");
@@ -157,13 +156,12 @@ mod tests {
     #[tokio::test]
     async fn clearing_a_review_audit_keeps_the_row_and_nulls_the_pointer() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.workspace_id,
-                seeded.pipeline_id,
                 seeded.account_id,
                 seeded.document_id,
             ))

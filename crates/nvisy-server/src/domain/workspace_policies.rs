@@ -1,8 +1,8 @@
-//! Workspace policy domain logic: create (authored or one-shot), read, list,
-//! update, and delete.
+//! Workspace policy domain logic: create (authored or derived), read, list,
+//! update, promote (derived → authored), and delete.
 //!
-//! Holds the policy rules — one-shot content-addressing, the authored/one-shot
-//! split, and one-shot immutability — in one place, factored out of the handler
+//! Holds the policy rules — derived content-addressing, the authored/derived
+//! split, and derived-policy immutability — in one place, factored out of the handler
 //! so they can be reasoned about (and tested) independently of the HTTP flow.
 
 use elide_pipeline::governance::policy::Policy;
@@ -45,8 +45,8 @@ impl WorkspacePolicyService {
     /// Creates a policy from a create request.
     ///
     /// A labels body is content-addressed: it mints — or reuses an identical live
-    /// one — a one-shot policy with a hash-derived name (`created` is false on
-    /// reuse). A template or inline body is a permanent authored policy the caller
+    /// one — a derived policy with a hash-derived name (`created` is false on
+    /// reuse). A template or inline body is an editable authored policy the caller
     /// names. The policy, its first version, and the creation event commit
     /// together.
     ///
@@ -60,16 +60,16 @@ impl WorkspacePolicyService {
         input: CreatePolicyInput,
     ) -> Result<ResolvedPolicy> {
         let mut conn = self.postgres.get_connection().await?;
-        match input.body.oneshot_content_hash() {
+        match input.body.derived_content_hash() {
             Some(content_hash) => {
-                self.create_oneshot(&mut conn, origin, input.body, content_hash)
+                self.create_derived(&mut conn, origin, input.body, content_hash)
                     .await
             }
             None => self.create_authored(&mut conn, origin, input).await,
         }
     }
 
-    /// Creates an authored (template or inline) policy: a new permanent row with
+    /// Creates an authored (template or inline) policy: a new editable row with
     /// its first version and a creation event, in one transaction.
     async fn create_authored(
         &self,
@@ -118,18 +118,18 @@ impl WorkspacePolicyService {
         })
     }
 
-    /// Creates or reuses a one-shot policy from a labels body, content-addressed by
-    /// `content_hash`: an identical live one-shot is reused rather than duplicated,
-    /// and a fresh one is created with a hash-derived name plus a creation event,
-    /// all in one transaction.
-    async fn create_oneshot(
+    /// Creates or reuses a derived policy from a labels body, content-addressed by
+    /// `content_hash`: an identical live derived policy is reused rather than
+    /// duplicated, and a fresh one is created with a neutral hash-based name (see
+    /// [`derived_display_name`]) plus a creation event, all in one transaction.
+    async fn create_derived(
         &self,
         conn: &mut PgConn,
         origin: event::EventOrigin<'_>,
         body: PolicyBodyInput,
         content_hash: Vec<u8>,
     ) -> Result<ResolvedPolicy> {
-        let display_name = oneshot_display_name(&content_hash);
+        let display_name = derived_display_name(&content_hash);
 
         let definition = body.into_definition(&display_name);
         let definition_json = definition_to_json(&definition)?;
@@ -139,7 +139,7 @@ impl WorkspacePolicyService {
             account_id: origin.account_id,
             display_name,
             description: None,
-            kind: PolicyKind::Oneshot,
+            kind: PolicyKind::Derived,
             content_hash: Some(content_hash.clone()),
             metadata: None,
         };
@@ -147,7 +147,7 @@ impl WorkspacePolicyService {
         let resolved = conn
             .transaction(async |conn| {
                 let resolved = conn
-                    .find_or_create_oneshot_policy(new_policy, content_hash, definition_json, None)
+                    .find_or_create_derived_policy(new_policy, content_hash, definition_json, None)
                     .await?;
                 if resolved.created {
                     conn.emit_event(
@@ -163,7 +163,7 @@ impl WorkspacePolicyService {
             .await?;
 
         if resolved.created {
-            tracing::info!(target: TRACING_TARGET, policy_id = %resolved.policy.policy.id, "One-shot policy created");
+            tracing::info!(target: TRACING_TARGET, policy_id = %resolved.policy.policy.id, "Derived policy created");
         }
 
         Ok(ResolvedPolicy {
@@ -213,7 +213,7 @@ impl WorkspacePolicyService {
     /// creator.
     ///
     /// A definition change mints a new version; a label-only change mutates the
-    /// logical row in place. The write and its event commit together. A one-shot
+    /// logical row in place. The write and its event commit together. A derived policy
     /// policy is immutable — content-addressed and reused by identity — so any edit
     /// to one is rejected; to change it, create a new policy.
     ///
@@ -221,7 +221,7 @@ impl WorkspacePolicyService {
     ///
     /// - `NotFound` if the policy does not exist in the workspace or has no current
     ///   version.
-    /// - `BadRequest` if the policy is a one-shot (immutable).
+    /// - `BadRequest` if the policy is a derived policy (immutable).
     /// - `InternalServerError` if the stored definition is malformed or the new
     ///   definition cannot be serialized.
     /// - A database error if the query fails.
@@ -236,9 +236,10 @@ impl WorkspacePolicyService {
             .await?
             .item;
 
-        if existing.kind == PolicyKind::Oneshot {
-            return Err(ErrorKind::BadRequest
-                .with_message("One-shot policies are immutable; create a new policy instead"));
+        if existing.kind == PolicyKind::Derived {
+            return Err(ErrorKind::BadRequest.with_message(
+                "Derived policies are immutable; promote it or create a new policy instead",
+            ));
         }
 
         let current = current_version(&mut conn, origin.workspace_id, &existing).await?;
@@ -288,6 +289,74 @@ impl WorkspacePolicyService {
         .await?;
 
         tracing::info!(target: TRACING_TARGET, "Policy updated");
+        self.find(workspace_id, policy_id).await
+    }
+
+    /// Promotes a derived policy to an authored one, returning it with its current
+    /// version and creator.
+    ///
+    /// A derived (ad-hoc) policy is immutable and content-addressed. Promotion
+    /// clears its content hash and flips its kind to authored, after which it edits
+    /// and is selectable for detections like any authored policy. The policy keeps
+    /// its id and current definition version.
+    ///
+    /// A derived policy's stored name is a neutral hash token, so promotion
+    /// **requires** a caller-supplied `display_name` — the title a human will see.
+    /// The server never synthesizes a name (that would bake unlocalizable prose into
+    /// stored data, and the UI, in the user's language, is the right place to name
+    /// it). The required title also replaces the hash name, so a later ad-hoc redact
+    /// for the same labels can mint a fresh derived policy with that hash name without
+    /// colliding on the display-name unique index. Promotion is rejected when nothing
+    /// would change: an already-authored policy returns `BadRequest`. The write and
+    /// its event commit together.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the policy does not exist in the workspace or has no current
+    ///   version.
+    /// - `BadRequest` if the policy is already authored.
+    /// - A database error if the query fails.
+    pub async fn promote(
+        &self,
+        origin: event::EventOrigin<'_>,
+        policy_id: Uuid,
+        display_name: String,
+    ) -> Result<(WithAccountRef<WorkspacePolicy>, WorkspacePolicyVersion)> {
+        let mut conn = self.postgres.get_connection().await?;
+        let existing = find_policy(&mut conn, origin.workspace_id, policy_id)
+            .await?
+            .item;
+
+        if existing.kind == PolicyKind::Authored {
+            return Err(ErrorKind::BadRequest.with_message("Only a derived policy can be promoted"));
+        }
+
+        let workspace_id = origin.workspace_id;
+        conn.transaction(async |conn| {
+            // Flip to authored and clear the dedup hash together: the
+            // `(kind = 'derived') = (content_hash IS NOT NULL)` check constraint
+            // requires an authored row to carry no hash. The caller's title replaces
+            // the neutral hash name, freeing it for a future derived policy.
+            conn.update_workspace_policy(
+                policy_id,
+                model::UpdateWorkspacePolicy {
+                    kind: Some(PolicyKind::Authored),
+                    content_hash: Some(None),
+                    display_name: Some(display_name),
+                    ..Default::default()
+                },
+            )
+            .await?;
+            conn.emit_event(
+                origin,
+                event::WorkspaceEvent::PolicyUpdated(event::PolicyUpdated { policy_id }),
+            )
+            .await?;
+            Ok::<(), Error>(())
+        })
+        .await?;
+
+        tracing::info!(target: TRACING_TARGET, policy_id = %policy_id, "Policy promoted");
         self.find(workspace_id, policy_id).await
     }
 
@@ -360,13 +429,22 @@ async fn current_version(
         .ok_or_else(|| Error::not_found("policy_version"))
 }
 
-/// The display name for a one-shot policy, e.g. `Quick redaction 1f0a3c8b9d2e`.
+/// The stored name for a derived policy, e.g. `1f0a3c8b9d2e4a5b6c7d8e9f`.
 ///
-/// Derived from the content hash (distinct hashes give distinct names), so it
-/// never violates the per-workspace display-name uniqueness invariant while dedup
-/// keeps one row per distinct content.
-fn oneshot_display_name(content_hash: &[u8]) -> String {
-    format!("Quick redaction {}", hex_prefix(content_hash, 6))
+/// A derived policy is identified by its label set, not a human-authored title, so
+/// its name is a neutral, locale-free token taken from the content hash (distinct
+/// hashes give distinct names). This satisfies the non-empty, per-workspace-unique
+/// `display_name` invariant without putting any translatable prose in the database:
+/// a client renders a human, localized label for a derived policy from its `kind`
+/// and the label set carried in the response, and a policy gets a real title only
+/// when it is promoted (or edited after promotion).
+///
+/// The name's uniqueness is incidental — identical derived policies are already
+/// collapsed by the content-hash dedup index before a name could collide — so the
+/// hex prefix exists only to satisfy the shared name index; it is taken long enough
+/// that distinct label sets never collide in practice.
+fn derived_display_name(content_hash: &[u8]) -> String {
+    hex_prefix(content_hash, 12)
 }
 
 /// Lowercase hex of the first `bytes` bytes of `content_hash`.
@@ -410,7 +488,7 @@ mod tests {
         }
     }
 
-    fn oneshot_request(labels: &[&str]) -> CreatePolicyInput {
+    fn derived_request(labels: &[&str]) -> CreatePolicyInput {
         CreatePolicyInput {
             display_name: None,
             description: None,
@@ -442,7 +520,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn one_shot_dedups_identical_content() -> anyhow::Result<()> {
+    async fn derived_dedups_identical_content() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
         let service = WorkspacePolicyService::new(db.client.clone());
@@ -454,14 +532,14 @@ mod tests {
         };
 
         let first = service
-            .create(origin(), oneshot_request(&["person_name"]))
+            .create(origin(), derived_request(&["person_name"]))
             .await?;
         assert!(first.created);
-        assert_eq!(first.policy.kind, PolicyKind::Oneshot);
+        assert_eq!(first.policy.kind, PolicyKind::Derived);
 
         // The same labels reuse the row rather than minting a second one.
         let second = service
-            .create(origin(), oneshot_request(&["person_name"]))
+            .create(origin(), derived_request(&["person_name"]))
             .await?;
         assert!(!second.created);
         assert_eq!(second.policy.id, first.policy.id);
@@ -470,7 +548,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn editing_a_one_shot_is_rejected() -> anyhow::Result<()> {
+    async fn editing_a_derived_policy_is_rejected() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
         let service = WorkspacePolicyService::new(db.client.clone());
@@ -481,12 +559,12 @@ mod tests {
             security: &security,
         };
 
-        let oneshot = service
-            .create(origin(), oneshot_request(&["person_name"]))
+        let derived = service
+            .create(origin(), derived_request(&["person_name"]))
             .await?;
-        let policy_id = oneshot.policy.id;
+        let policy_id = derived.policy.id;
 
-        // A label-only edit is rejected: a one-shot is immutable.
+        // A label-only edit is rejected: a derived policy is immutable.
         let label_edit = UpdatePolicyInput {
             display_name: Some("Renamed".to_owned()),
             description: None,
@@ -495,7 +573,7 @@ mod tests {
         let err = service
             .update(origin(), policy_id, label_edit)
             .await
-            .expect_err("a one-shot rejects a label edit");
+            .expect_err("a derived policy rejects a label edit");
         assert_eq!(err.kind(), ErrorKind::BadRequest);
 
         // A definition edit is rejected too.
@@ -513,12 +591,12 @@ mod tests {
         let err = service
             .update(origin(), policy_id, definition_edit)
             .await
-            .expect_err("a one-shot rejects a definition edit");
+            .expect_err("a derived policy rejects a definition edit");
         assert_eq!(err.kind(), ErrorKind::BadRequest);
 
-        // The one-shot is unchanged.
+        // The derived policy is unchanged.
         let (found, _) = service.find(seeded.workspace_id, policy_id).await?;
-        assert_eq!(found.item.kind, PolicyKind::Oneshot);
+        assert_eq!(found.item.kind, PolicyKind::Derived);
         assert!(found.item.content_hash.is_some());
         Ok(())
     }
@@ -553,6 +631,100 @@ mod tests {
         let (updated, version) = service.update(origin(), created.policy.id, request).await?;
         assert_eq!(updated.item.kind, PolicyKind::Authored);
         assert_eq!(version.version_number, 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn promoting_a_derived_policy_makes_it_authored_and_editable() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let service = WorkspacePolicyService::new(db.client.clone());
+        let security = security();
+        let origin = || event::EventOrigin {
+            workspace_id: seeded.workspace_id,
+            account_id: seeded.account_id,
+            security: &security,
+        };
+
+        let derived = service
+            .create(origin(), derived_request(&["person_name"]))
+            .await?;
+        let policy_id = derived.policy.id;
+        assert_eq!(derived.policy.kind, PolicyKind::Derived);
+        assert!(derived.policy.content_hash.is_some());
+
+        // Promotion flips the kind to authored, clears the dedup hash, and applies
+        // the required title, keeping the id and current version.
+        let (promoted, version) = service
+            .promote(origin(), policy_id, "Audit redaction".to_owned())
+            .await?;
+        assert_eq!(promoted.item.id, policy_id);
+        assert_eq!(promoted.item.kind, PolicyKind::Authored);
+        assert!(promoted.item.content_hash.is_none());
+        assert_eq!(promoted.item.display_name, "Audit redaction");
+        assert_eq!(version.version_number, 1);
+
+        // Once authored, it edits like any authored policy.
+        let edit = UpdatePolicyInput {
+            display_name: Some("Promoted policy".to_owned()),
+            description: None,
+            definition: None,
+        };
+        let (edited, _) = service.update(origin(), policy_id, edit).await?;
+        assert_eq!(edited.item.display_name, "Promoted policy");
+
+        // Promoting an already-authored policy is rejected.
+        let err = service
+            .promote(origin(), policy_id, "Again".to_owned())
+            .await
+            .expect_err("an authored policy cannot be promoted");
+        assert_eq!(err.kind(), ErrorKind::BadRequest);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn promoting_frees_the_derived_name_for_the_same_labels() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let service = WorkspacePolicyService::new(db.client.clone());
+        let security = security();
+        let origin = || event::EventOrigin {
+            workspace_id: seeded.workspace_id,
+            account_id: seeded.account_id,
+            security: &security,
+        };
+
+        // A derived policy for a label set carries a neutral hash name.
+        let derived = service
+            .create(origin(), derived_request(&["person_name"]))
+            .await?;
+        let first_id = derived.policy.id;
+        let hash_name = derived.policy.display_name.clone();
+
+        // Promotion requires a title, which replaces the hash name and frees the slot.
+        let (promoted, _) = service
+            .promote(origin(), first_id, "Audit redaction".to_owned())
+            .await?;
+        assert_eq!(promoted.item.kind, PolicyKind::Authored);
+        assert_eq!(promoted.item.display_name, "Audit redaction");
+        assert_ne!(promoted.item.display_name, hash_name);
+
+        // Re-creating a derived policy for the same labels succeeds (mints a fresh
+        // row reclaiming the vacated hash name), not a unique-index deadlock.
+        let recreated = service
+            .create(origin(), derived_request(&["person_name"]))
+            .await?;
+        assert!(recreated.created, "a fresh derived policy is minted");
+        assert_ne!(recreated.policy.id, first_id);
+        assert_eq!(recreated.policy.kind, PolicyKind::Derived);
+        assert_eq!(recreated.policy.display_name, hash_name);
+
+        // That recreated policy promotes too, with its own distinct required title.
+        let (second_promoted, _) = service
+            .promote(origin(), recreated.policy.id, "Court filing".to_owned())
+            .await?;
+        assert_eq!(second_promoted.item.kind, PolicyKind::Authored);
+        assert_eq!(second_promoted.item.display_name, "Court filing");
         Ok(())
     }
 }

@@ -1,8 +1,8 @@
-//! Pipeline detection worker.
+//! Detection worker.
 //!
 //! Consumes [`DetectionJob`]s from the `DetectionStream` work-queue and runs a
 //! detection's analysis in the background: builds the document, analyzes it with
-//! the pipeline's policies, stores the encrypted audit, and marks the detection
+//! the detection's policies, stores the encrypted audit, and marks the detection
 //! `Complete` (or `Failed`). Each terminal transition is broadcast on the
 //! detection's core-NATS status subject (for SSE watchers) and emitted as a
 //! webhook event.
@@ -13,9 +13,7 @@ use std::time::Duration;
 
 use elide_pipeline::primitive::RasterMode;
 use elide_pipeline::provider::{CodecParams, DocumentContext, RequestContext};
-use nvisy_postgres::model::{
-    NewBlob, UpdateWorkspaceDetection, WorkspaceDetection, WorkspacePipeline,
-};
+use nvisy_postgres::model::{NewBlob, UpdateWorkspaceDetection, WorkspaceDetection};
 use nvisy_postgres::query::{
     DetectionPolicyVersionRepository, EventOutboxRepository, WorkspaceBlobRepository,
     WorkspaceDetectionRepository, WorkspaceDocumentRepository, WorkspaceRepository,
@@ -31,10 +29,8 @@ use uuid::Uuid;
 
 use super::job::{DetectionJob, DetectionStream, broadcast_status};
 use super::support::{
-    FailDetection, FailOutcome, extract_detection_usage, fail_detection, resolve_policies,
-    resolve_policies_by_ids,
+    FailDetection, FailOutcome, extract_detection_usage, fail_detection, resolve_policies_by_ids,
 };
-use crate::domain::input::PipelineDefinitionInput;
 use crate::extract::SecurityContext;
 use crate::response::{ErrorKind, Result};
 use crate::service::{ArtifactWriter, EngineService, Infra, event};
@@ -50,7 +46,7 @@ const TRACING_TARGET: &str = "nvisy_server::worker::detection";
 /// re-analyzed.
 const DETECTION_LEASE: Duration = Duration::from_mins(30);
 
-/// Background worker that runs pipeline detection off the request thread.
+/// Background worker that runs detection off the request thread.
 ///
 /// Cheaply cloneable (every field is `Arc`-backed); a clone is handed to each
 /// spawned per-job task so jobs run concurrently against the shared services.
@@ -227,11 +223,11 @@ impl DetectionWorker {
             }
         };
 
-        let (detection, pipeline) = match conn
+        let detection = match conn
             .find_workspace_detection_by_id(job.workspace_id, job.detection_id)
             .await
         {
-            Ok(Some(pair)) => pair,
+            Ok(Some(detection)) => detection,
             Ok(None) => {
                 tracing::warn!(target: TRACING_TARGET, "Detection job for a missing detection; dropping");
                 return JobOutcome::Done;
@@ -281,10 +277,7 @@ impl DetectionWorker {
         // pool. It is re-acquired below only if the detection fails.
         drop(conn);
 
-        if let Err(err) = self
-            .detect(&job, &claimed, pipeline.as_ref(), claim_token)
-            .await
-        {
+        if let Err(err) = self.detect(&job, &claimed, claim_token).await {
             tracing::warn!(target: TRACING_TARGET, error = %err, "Detection failed");
             let mut conn = match self.infra.postgres.get_connection().await {
                 Ok(conn) => conn,
@@ -302,10 +295,6 @@ impl DetectionWorker {
                 FailDetection {
                     workspace_id: job.workspace_id,
                     detection_id: detection.id,
-                    // The detection's own `pipeline_id` is durable across a
-                    // pipeline soft-delete, whereas the `pipeline` lookup excludes
-                    // a soft-deleted row and would drop the id from the event.
-                    pipeline_id: detection.pipeline_id,
                     triggered_by: detection.account_id,
                     reason: &err.to_string(),
                     metadata: detection.metadata.or_default(),
@@ -389,7 +378,6 @@ impl DetectionWorker {
         &self,
         job: &DetectionJob,
         detection: &WorkspaceDetection,
-        pipeline: Option<&WorkspacePipeline>,
         claim_token: jiff::Timestamp,
     ) -> Result<()> {
         // Phase 1: read the inputs under a connection, then drop it.
@@ -413,41 +401,15 @@ impl DetectionWorker {
                     ErrorKind::NotFound.with_message("Input document content not found")
                 })?;
 
-            // A pipeline detection takes its default scope from the pipeline
-            // definition; an ad-hoc detection has none, so the engine falls back to
-            // the per-request scope and its own defaults.
-            let definition = match pipeline {
-                Some(pipeline) => {
-                    PipelineDefinitionInput::from_parts(pipeline.definition.clone(), Vec::new())
-                        .map_err(|err| {
-                            ErrorKind::InternalServerError
-                                .with_message("Failed to decode pipeline definition")
-                                .with_context(err.to_string())
-                        })?
-                }
-                None => PipelineDefinitionInput::default(),
-            };
-
             // Parse the workspace settings once; both raster mode and retention
             // read it.
             let settings = workspace.settings.or_default();
-            let request =
-                request_context(&definition, job.scope.clone(), raster_mode_of(&settings));
+            let request = request_context(job.scope.clone(), raster_mode_of(&settings));
 
-            // Resolve the policies the analysis runs against, keyed off the
-            // detection's own `pipeline_id` (stable across a pipeline soft-delete,
-            // which nulls nothing) rather than the live pipeline row: a pipeline
-            // detection resolves from the pipeline's references — still reachable
-            // through the join rows a soft-delete leaves in place — and an ad-hoc
-            // detection from the ids named on the job.
-            let resolved = match detection.pipeline_id {
-                Some(pipeline_id) => {
-                    resolve_policies(&mut conn, job.workspace_id, pipeline_id).await?
-                }
-                None => {
-                    resolve_policies_by_ids(&mut conn, job.workspace_id, &job.policy_ids).await?
-                }
-            };
+            // Resolve the policies the analysis runs against from the ids named on the
+            // job (the detect request's policy list).
+            let resolved =
+                resolve_policies_by_ids(&mut conn, job.workspace_id, &job.policy_ids).await?;
             if resolved.is_empty() {
                 return Err(ErrorKind::BadRequest.with_message("Detection has no policies"));
             }
@@ -545,8 +507,6 @@ impl DetectionWorker {
         let completed_event =
             event::WorkspaceEvent::DetectionCompleted(event::DetectionCompleted {
                 detection_id: detection.id,
-                // Durable across a pipeline soft-delete; see the fail path.
-                pipeline_id: detection.pipeline_id,
                 input_document_name: Some(document.display_name.clone()),
                 notify: detection.account_id,
             });
@@ -672,29 +632,24 @@ fn raster_mode_of(settings: &WorkspaceSettings) -> RasterMode {
     }
 }
 
-/// Builds the [`RequestContext`] for one detect run from a pipeline's intent.
+/// Builds the [`RequestContext`] for one detect run.
 ///
 /// Recognition is entirely engine-owned (the built-in pattern set plus the
-/// deployment's NER/LLM lineups always run). The document context is the
-/// request's own, falling back to the pipeline default. `raster_mode` is the
-/// workspace's page-rasterisation policy (always render vs. auto), carried in the
-/// codec params since it is server-derived, not caller-set. The engine records
-/// the context and codec params on the audit so redaction re-decodes and
-/// re-compiles against exactly what detection used. Deduplication and calibration
-/// are engine-owned defaults; the label catalog is derived from the run's
-/// policies at detect time.
+/// deployment's NER/LLM lineups always run). The document context is the detect
+/// request's own. `raster_mode` is the workspace's page-rasterisation policy (always
+/// render vs. auto), carried in the codec params since it is server-derived, not
+/// caller-set. The engine records the context and codec params on the audit so
+/// redaction re-decodes and re-compiles against exactly what detection used.
+/// Deduplication and calibration are engine-owned defaults; the label catalog is
+/// derived from the run's policies at detect time.
 ///
 /// No key is set: the server does not yet drive keyed operators
 /// (`HmacHash`/`Encrypt`), whose `KeyConfig` would be supplied here.
 fn request_context(
-    definition: &PipelineDefinitionInput,
     document_context: Option<DocumentContext>,
     raster_mode: RasterMode,
 ) -> RequestContext {
-    let context = document_context
-        .or_else(|| definition.default_scope.clone())
-        .unwrap_or_default();
     RequestContext::new()
-        .with_context(context)
+        .with_context(document_context.unwrap_or_default())
         .with_codec(CodecParams::new().with_raster_mode(raster_mode))
 }

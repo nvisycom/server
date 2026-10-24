@@ -28,10 +28,8 @@ pub mod workspace_role;
 // Document-related enumerations
 pub mod document_kind;
 
-// Detection / pipeline-related enumerations
+// Detection-related enumerations
 pub mod detection_status;
-pub mod pipeline_status;
-pub mod pipeline_trigger_type;
 pub mod policy_kind;
 
 pub mod review_event_kind;
@@ -47,8 +45,6 @@ pub use identity_provider::IdentityProvider;
 pub use invite_status::InviteStatus;
 pub use notification_event::NotificationEvent;
 pub use outbox_status::OutboxStatus;
-pub use pipeline_status::PipelineStatus;
-pub use pipeline_trigger_type::PipelineTriggerType;
 pub use policy_kind::PolicyKind;
 pub use provider_type::ProviderType;
 pub use review_event_kind::ReviewEventKind;

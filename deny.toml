@@ -42,6 +42,17 @@ ignore = [
     # Remove once `little_exif` moves off the affected `quick-xml`.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    # Timing variability in `crypto-bigint`'s constant-time operations, patched
+    # in >= 0.7.6. The workspace's own 0.7.x copy is updated to 0.7.6; this
+    # ignore covers the remaining 0.5.5 copy, which has no patched release on the
+    # 0.5.x line. It is pulled transitively by `aws-sigv4` (through the AWS SDK)
+    # and by `elliptic-curve` / `p256` / `p384` (through `openidconnect`), none of
+    # which have moved to the 0.7.x line, so there is no workspace-level fix. Our
+    # exposure is limited: the AWS path signs our own outbound requests, and the
+    # openidconnect path verifies provider-issued OIDC tokens with public keys —
+    # neither operates on attacker-chosen secrets on a shared host. Remove once
+    # those dependencies move to `crypto-bigint` >= 0.7.6.
+    "RUSTSEC-2026-0387",
 ]
 
 [licenses]

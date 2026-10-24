@@ -20,10 +20,8 @@ mod workspaces;
 mod documents;
 mod workspace_blobs;
 
-// Detection / pipeline-related constraint modules
+// Detection-related constraint modules
 mod detections;
-mod pipeline_references;
-mod pipelines;
 
 // Review-related constraint modules
 mod workspace_review_comments;
@@ -39,8 +37,6 @@ pub use self::account_notifications::AccountNotificationConstraints;
 pub use self::accounts::AccountConstraints;
 pub use self::detections::WorkspaceDetectionConstraints;
 pub use self::documents::WorkspaceDocumentConstraints;
-pub use self::pipeline_references::WorkspacePipelineReferenceConstraints;
-pub use self::pipelines::WorkspacePipelineConstraints;
 pub use self::workspace_activities::WorkspaceActivitiesConstraints;
 pub use self::workspace_blobs::WorkspaceBlobConstraints;
 pub use self::workspace_connection_syncs::WorkspaceConnectionSyncConstraints;
@@ -81,10 +77,8 @@ pub enum ConstraintViolation {
     WorkspaceReview(WorkspaceReviewConstraints),
     WorkspaceReviewComment(WorkspaceReviewCommentConstraints),
 
-    // Detection / pipeline-related constraints
-    WorkspacePipeline(WorkspacePipelineConstraints),
+    // Detection-related constraints
     WorkspaceDetection(WorkspaceDetectionConstraints),
-    WorkspacePipelineReference(WorkspacePipelineReferenceConstraints),
     WorkspaceConnection(WorkspaceConnectionConstraints),
     WorkspaceConnectionSync(WorkspaceConnectionSyncConstraints),
     WorkspacePolicy(WorkspacePolicyConstraints),
@@ -140,9 +134,7 @@ impl ConstraintViolation {
             WorkspaceBlob,
             WorkspaceReview,
             WorkspaceReviewComment,
-            WorkspacePipeline,
             WorkspaceDetection,
-            WorkspacePipelineReference,
             WorkspaceConnection,
             WorkspaceConnectionSync,
             WorkspacePolicy,

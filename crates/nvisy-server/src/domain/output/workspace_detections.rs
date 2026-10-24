@@ -8,8 +8,7 @@ use uuid::Uuid;
 /// renders it from without follow-up lookups.
 ///
 /// The triggering account is carried as an id; the handler resolves it to a public
-/// reference when building the response. The owning pipeline is named by the
-/// detection row's own `pipeline_id`.
+/// reference when building the response.
 pub struct CreatedDetection {
     /// The detection row.
     pub detection: WorkspaceDetectionModel,

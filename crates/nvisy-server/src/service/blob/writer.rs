@@ -218,7 +218,7 @@ impl ArtifactWriter {
     ///
     /// The intermediates carry document content, so they are encrypted at rest and
     /// governed by their own retention scope, resolved here (workspace baseline,
-    /// pipeline override if set).
+    /// detection override if set).
     ///
     /// # Errors
     ///

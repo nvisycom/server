@@ -1,9 +1,10 @@
 //! Review domain logic: opening a review, its discussion (comments, mentions, the
-//! assistant), renaming, deletion, referencing detections and redactions,
-//! assignment, verification, reopen, and the review queue.
+//! assistant), renaming, deletion, pointing at the detection under review, the
+//! approval lifecycle (submit, request changes, approve, reopen), assignment, and
+//! the review queue.
 //!
-//! A review is a named discussion on a document with a manual sign-off lifecycle.
-//! Its discussion and its sign-off workflow share one aggregate — mention
+//! A review is a named discussion on a document with an explicit approval lifecycle.
+//! Its discussion and its approval workflow share one aggregate — mention
 //! resolution, the assistant enqueue, the timeline, and the status all belong to
 //! the same review — so one service owns them. It holds the assistant queue to wake
 //! the reply drainer when a comment addresses the assistant.
@@ -18,10 +19,12 @@ use nvisy_postgres::model::{
 use nvisy_postgres::query::{
     AssistantJobOutboxRepository, DocumentReviewCursor, ReviewEventCursor, WithActor,
     WithReviewers, WorkspaceDetectionRepository, WorkspaceDocumentRepository,
-    WorkspaceMemberRepository, WorkspaceRedactionRepository, WorkspaceReviewCommentRepository,
-    WorkspaceReviewRepository,
+    WorkspaceMemberRepository, WorkspaceRedactionRepository, WorkspaceRepository,
+    WorkspaceReviewCommentRepository, WorkspaceReviewRepository,
 };
-use nvisy_postgres::types::{CursorPage, CursorPagination, DocumentReviewFilter, Handle};
+use nvisy_postgres::types::{
+    CursorPage, CursorPagination, DocumentReviewFilter, Handle, ReviewSettings, ReviewStatus,
+};
 use nvisy_postgres::{ASSISTANT_ACCOUNT_ID, ASSISTANT_HANDLE, AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
@@ -58,17 +61,23 @@ impl WorkspaceReviewService {
         }
     }
 
-    /// Opens a new review on a document with the given title, recording the
-    /// `review.opened` event.
+    /// Opens a new review on a document with the given title, optionally against the
+    /// detection it will review, recording the `review.opened` event (and
+    /// the detection id in the opened event's target when a detection is given).
+    ///
+    /// A document may have many concurrent reviews (one per audience).
     ///
     /// # Errors
     ///
-    /// - `NotFound` if the document does not exist in the workspace.
+    /// - `NotFound` if the document, or the given detection, does not exist in the
+    ///   workspace.
+    /// - `BadRequest` if the detection is for a different document than the review.
     /// - A database error if the query fails.
     pub async fn open(
         &self,
         origin: event::EventOrigin<'_>,
         document_id: Uuid,
+        detection_id: Option<Uuid>,
         display_name: String,
     ) -> Result<WorkspaceReview> {
         let mut conn = self.postgres.get_connection().await?;
@@ -78,12 +87,25 @@ impl WorkspaceReviewService {
             .await?
             .ok_or_else(|| Error::not_found("document"))?;
 
+        // A detection the review opens against must analyze the review's document.
+        if let Some(detection_id) = detection_id {
+            let detection = conn
+                .find_workspace_detection_by_id(workspace_id, detection_id)
+                .await?
+                .ok_or_else(|| Error::not_found("workspace_detection"))?;
+            if detection.input_document_id != document_id {
+                return Err(ErrorKind::BadRequest
+                    .with_message("Detection is for a different document than this review"));
+            }
+        }
+
         let review = conn
             .transaction(async |conn| {
                 let review = conn
                     .create_review(NewWorkspaceReview {
                         workspace_id,
                         document_id,
+                        detection_id,
                         author_account_id: origin.account_id,
                         display_name,
                     })
@@ -248,13 +270,13 @@ impl WorkspaceReviewService {
 
     /// Posts a comment in a review, records its event, and — if the assistant was
     /// addressed — queues the reply job, all in one transaction. Rejects a comment
-    /// on a resolved review with a Conflict. Wakes the drainer after commit when a
+    /// on an approved review with a Conflict. Wakes the drainer after commit when a
     /// job was queued.
     ///
     /// # Errors
     ///
     /// - `NotFound` if the review does not exist in the workspace.
-    /// - `Conflict` if the review is resolved.
+    /// - `Conflict` if the review is approved.
     /// - `InternalServerError` if the queued assistant job cannot be encoded.
     /// - A database error if the query fails.
     pub async fn create_comment(
@@ -263,8 +285,6 @@ impl WorkspaceReviewService {
         review_id: Uuid,
         body: String,
     ) -> Result<WorkspaceReviewComment> {
-        use nvisy_postgres::types::ReviewStatus;
-
         let mut conn = self.postgres.get_connection().await?;
         let workspace_id = origin.workspace_id;
         let author_id = origin.account_id;
@@ -276,15 +296,15 @@ impl WorkspaceReviewService {
         let (comment, queued_assistant) = conn
             .transaction(async |conn| {
                 // Lock the review and re-check its status inside the transaction: the
-                // row lock serializes against a concurrent verify so a comment can
-                // never land on a review after it resolves.
+                // row lock serializes against a concurrent approve so a comment can
+                // never land on a review after it is signed off.
                 let locked = conn
                     .lock_review_in_workspace(workspace_id, review.id)
                     .await?
                     .ok_or_else(|| Error::not_found("workspace_review"))?;
-                if locked.review_status == ReviewStatus::Resolved {
+                if locked.review_status == ReviewStatus::Approved {
                     return Err(ErrorKind::Conflict.with_message(
-                        "This review is resolved; reopen it before posting a comment",
+                        "This review is approved; reopen it before posting a comment",
                     ));
                 }
 
@@ -384,14 +404,16 @@ impl WorkspaceReviewService {
         Ok(())
     }
 
-    /// References a detection from a review.
+    /// Points a review at the detection it is currently reviewing (its subject). Used
+    /// on open and whenever the document is re-detected. Idempotent when the review
+    /// already points at the detection.
     ///
     /// # Errors
     ///
     /// - `NotFound` if the review or the detection does not exist in the workspace.
     /// - `BadRequest` if the detection is for a different document than the review.
     /// - A database error if the query fails.
-    pub async fn link_detection(
+    pub async fn point_detection(
         &self,
         workspace_id: Uuid,
         review_id: Uuid,
@@ -400,124 +422,280 @@ impl WorkspaceReviewService {
     ) -> Result<WorkspaceReview> {
         let mut conn = self.postgres.get_connection().await?;
         let review = find_review(&mut conn, workspace_id, review_id).await?;
-        let (detection, _) = conn
+        let detection = conn
             .find_workspace_detection_by_id(workspace_id, detection_id)
             .await?
             .ok_or_else(|| Error::not_found("workspace_detection"))?;
 
-        // A review references only its own document's work: the detection must
-        // analyze the review's document.
+        // A review's subject is always its own document's detection.
         if detection.input_document_id != review.document_id {
             return Err(ErrorKind::BadRequest
                 .with_message("Detection is for a different document than this review"));
         }
 
-        let review = conn.link_detection(review_id, detection_id, actor).await?;
-        tracing::info!(target: TRACING_TARGET, "Detection linked to review");
+        let review = conn.point_detection(review_id, detection_id, actor).await?;
+        tracing::info!(target: TRACING_TARGET, "Review pointed at detection");
         Ok(review)
     }
 
-    /// References a redaction from a review.
-    ///
-    /// # Errors
-    ///
-    /// - `NotFound` if the review or the redaction does not exist in the workspace.
-    /// - `BadRequest` if the redaction is for a different document than the review.
-    /// - A database error if the query fails.
-    pub async fn link_redaction(
-        &self,
-        workspace_id: Uuid,
-        review_id: Uuid,
-        redaction_id: Uuid,
-        actor: Uuid,
-    ) -> Result<WorkspaceReview> {
-        let mut conn = self.postgres.get_connection().await?;
-        let review = find_review(&mut conn, workspace_id, review_id).await?;
-        let redaction = conn
-            .find_redaction_in_workspace(workspace_id, redaction_id)
-            .await?
-            .ok_or_else(|| Error::not_found("workspace_redaction"))?;
-        // A redaction's document is its detection's input document; it must be the
-        // review's document.
-        let (detection, _) = conn
-            .find_workspace_detection_by_id(workspace_id, redaction.detection_id)
-            .await?
-            .ok_or_else(|| Error::not_found("workspace_detection"))?;
-        if detection.input_document_id != review.document_id {
-            return Err(ErrorKind::BadRequest
-                .with_message("Redaction is for a different document than this review"));
-        }
-
-        let review = conn.link_redaction(review_id, redaction_id, actor).await?;
-        tracing::info!(target: TRACING_TARGET, "Redaction linked to review");
-        Ok(review)
-    }
-
-    /// Verifies a review, moving it to `resolved`, and raises the review-verified
-    /// event.
+    /// Submits (or resubmits) a review for review, moving it to `in_review` and
+    /// raising the review-submitted event. Allowed from `draft` or
+    /// `changes_requested`.
     ///
     /// # Errors
     ///
     /// - `NotFound` if the review does not exist in the workspace.
-    /// - `Conflict` if the review is already resolved.
+    /// - `Conflict` if the review is not in a state that can be submitted.
     /// - A database error if the query fails.
-    pub async fn verify(
+    pub async fn submit(
         &self,
         origin: event::EventOrigin<'_>,
         review_id: Uuid,
     ) -> Result<WorkspaceReview> {
-        use nvisy_postgres::types::ReviewStatus;
-
         let mut conn = self.postgres.get_connection().await?;
         let review = find_review(&mut conn, origin.workspace_id, review_id).await?;
-        if review.review_status == ReviewStatus::Resolved {
-            return Err(ErrorKind::Conflict.with_message("This review is already resolved"));
+        if !matches!(
+            review.review_status,
+            ReviewStatus::Draft | ReviewStatus::ChangesRequested
+        ) {
+            return Err(ErrorKind::Conflict
+                .with_message("Only a draft or changes-requested review can be submitted"));
         }
         let document = review_document(&mut conn, &review).await?;
 
-        let verified = conn
+        let submitted = conn
             .transaction(async |conn| {
-                let verified = conn.verify_review(review_id, origin.account_id).await?;
-                conn.emit_event(
-                    origin,
-                    event::WorkspaceEvent::ReviewVerified(event::ReviewVerified {
-                        review_id: review.id,
-                        document_id: document.id,
-                        document_name: document.display_name.clone(),
-                    }),
-                )
-                .await?;
-                Ok::<_, Error>(verified)
+                let outcome = conn.submit_review(review_id, origin.account_id).await?;
+                // Fire the event only on a real transition: a concurrent submit that
+                // lost the race under the lock reports `changed = false` and must not
+                // re-announce the submission.
+                if outcome.changed {
+                    conn.emit_event(
+                        origin,
+                        event::WorkspaceEvent::ReviewSubmitted(event::ReviewSubmitted {
+                            review_id: review.id,
+                            document_id: document.id,
+                            document_name: document.display_name.clone(),
+                        }),
+                    )
+                    .await?;
+                }
+                Ok::<_, Error>(outcome.review)
             })
             .await?;
 
-        tracing::info!(target: TRACING_TARGET, "Review verified");
-        Ok(verified)
+        tracing::info!(target: TRACING_TARGET, "Review submitted");
+        Ok(submitted)
     }
 
-    /// Reopens a resolved review back to `needs_review`.
+    /// Requests changes on a review, moving it to `changes_requested` (clearing any
+    /// accumulated approvals) and raising the changes-requested event. Allowed only
+    /// from `in_review` or `partially_approved`.
     ///
     /// # Errors
     ///
     /// - `NotFound` if the review does not exist in the workspace.
+    /// - `Conflict` if the review is not awaiting a decision.
+    /// - A database error if the query fails.
+    pub async fn request_changes(
+        &self,
+        origin: event::EventOrigin<'_>,
+        review_id: Uuid,
+    ) -> Result<WorkspaceReview> {
+        let mut conn = self.postgres.get_connection().await?;
+        let review = find_review(&mut conn, origin.workspace_id, review_id).await?;
+        if !matches!(
+            review.review_status,
+            ReviewStatus::InReview | ReviewStatus::PartiallyApproved
+        ) {
+            return Err(ErrorKind::Conflict
+                .with_message("Only a review awaiting a decision can have changes requested"));
+        }
+        let document = review_document(&mut conn, &review).await?;
+
+        let updated = conn
+            .transaction(async |conn| {
+                let updated = conn.request_changes(review_id, origin.account_id).await?;
+                // Emit only when the transition actually happened. The repository
+                // re-checks the status under its row lock; if a concurrent approve won
+                // the race between the unlocked pre-check above and that lock, it
+                // returns the review unchanged, and we must not announce a changes
+                // request that did not occur.
+                if updated.review_status == ReviewStatus::ChangesRequested {
+                    conn.emit_event(
+                        origin,
+                        event::WorkspaceEvent::ReviewChangesRequested(
+                            event::ReviewChangesRequested {
+                                review_id: review.id,
+                                document_id: document.id,
+                                document_name: document.display_name.clone(),
+                            },
+                        ),
+                    )
+                    .await?;
+                }
+                Ok::<_, Error>(updated)
+            })
+            .await?;
+
+        tracing::info!(target: TRACING_TARGET, "Review changes requested");
+        Ok(updated)
+    }
+
+    /// Records the caller's approval of a review (by stamping their assignee row),
+    /// optionally recording the approved redaction as its output. The review reaches
+    /// `approved` once the number of approved assignees meets the workspace's
+    /// `min_approvals`, otherwise it rests at `partially_approved`. Raises the
+    /// review-approved event only when the quorum is reached. Honors the workspace's
+    /// `author_can_approve` policy.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the review, or the given redaction, does not exist in the
+    ///   workspace.
+    /// - `Conflict` if the review is not awaiting a decision.
+    /// - `Forbidden` if the caller is not an assigned reviewer, or is the author
+    ///   approving their own review where the workspace forbids it.
+    /// - `BadRequest` if the redaction is for a different document than the review.
+    /// - A database error if the query fails.
+    pub async fn approve(
+        &self,
+        origin: event::EventOrigin<'_>,
+        review_id: Uuid,
+        redaction_id: Option<Uuid>,
+    ) -> Result<WorkspaceReview> {
+        let mut conn = self.postgres.get_connection().await?;
+        let workspace_id = origin.workspace_id;
+        let review = find_review(&mut conn, workspace_id, review_id).await?;
+        if !matches!(
+            review.review_status,
+            ReviewStatus::InReview | ReviewStatus::PartiallyApproved
+        ) {
+            return Err(ErrorKind::Conflict
+                .with_message("Only a review awaiting a decision can be approved"));
+        }
+
+        // A reviewer approves by stamping their own assignee row, so the caller must
+        // be an assigned reviewer of this review.
+        let assignees = conn.list_review_assignees(review_id).await?;
+        if !assignees.iter().any(|a| a.id == origin.account_id) {
+            return Err(ErrorKind::Forbidden
+                .with_message("Only an assigned reviewer can approve this review"));
+        }
+
+        let policy = self.review_settings(&mut conn, workspace_id).await?;
+        if !policy.author_can_approve && review.author_account_id == origin.account_id {
+            return Err(ErrorKind::Forbidden
+                .with_message("The author of a review cannot approve it in this workspace"));
+        }
+
+        // The approved output, when given, must be a redaction of the review's own
+        // document.
+        if let Some(redaction_id) = redaction_id {
+            let redaction = conn
+                .find_redaction_in_workspace(workspace_id, redaction_id)
+                .await?
+                .ok_or_else(|| Error::not_found("workspace_redaction"))?;
+            let detection = conn
+                .find_workspace_detection_by_id(workspace_id, redaction.detection_id)
+                .await?
+                .ok_or_else(|| Error::not_found("workspace_detection"))?;
+            if detection.input_document_id != review.document_id {
+                return Err(ErrorKind::BadRequest
+                    .with_message("Redaction is for a different document than this review"));
+            }
+        }
+
+        let document = review_document(&mut conn, &review).await?;
+        let required = policy.required_approvals();
+
+        let updated = conn
+            .transaction(async |conn| {
+                let outcome = conn
+                    .approve_review(review_id, origin.account_id, required, redaction_id)
+                    .await?;
+                // A later approval that names a different output than the one already
+                // bound is rejected under the lock: the quorum must endorse one
+                // redaction, so the approver either approves the bound one or reopens.
+                if outcome.rebind_rejected {
+                    return Err(ErrorKind::Conflict.with_message(
+                        "This review already has an approved redaction; approve that one or reopen the review to change it",
+                    ));
+                }
+                // Announce approval only when this call recorded a new approval that
+                // reached quorum. `recorded` guards the lost-race case: if a concurrent
+                // request-changes won between the unlocked pre-check and the row lock,
+                // the repository returns the review unchanged with `recorded = false`,
+                // and a quorum reached by some other request must not fire a second
+                // event here. A partial approval advances state without an event.
+                if outcome.recorded && outcome.review.review_status == ReviewStatus::Approved {
+                    conn.emit_event(
+                        origin,
+                        event::WorkspaceEvent::ReviewApproved(event::ReviewApproved {
+                            review_id: review.id,
+                            document_id: document.id,
+                            document_name: document.display_name.clone(),
+                        }),
+                    )
+                    .await?;
+                }
+                Ok::<_, Error>(outcome.review)
+            })
+            .await?;
+
+        tracing::info!(target: TRACING_TARGET, "Review approval recorded");
+        Ok(updated)
+    }
+
+    /// Reopens an approved review back to `in_review` (clearing its approvals and
+    /// approved output).
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the review does not exist in the workspace.
+    /// - `Conflict` if the review is not approved.
     /// - A database error if the query fails.
     pub async fn reopen(
         &self,
-        workspace_id: Uuid,
+        origin: event::EventOrigin<'_>,
         review_id: Uuid,
-        actor: Uuid,
     ) -> Result<WorkspaceReview> {
         let mut conn = self.postgres.get_connection().await?;
-        find_review(&mut conn, workspace_id, review_id).await?;
-        let review = conn.reopen_review(review_id, actor).await?;
+        let review = find_review(&mut conn, origin.workspace_id, review_id).await?;
+        if review.review_status != ReviewStatus::Approved {
+            return Err(ErrorKind::Conflict.with_message("Only an approved review can be reopened"));
+        }
+        let document = review_document(&mut conn, &review).await?;
+
+        let reopened = conn
+            .transaction(async |conn| {
+                let outcome = conn.reopen_review(review_id, origin.account_id).await?;
+                // Fire the event only on a real transition: a concurrent reopen that
+                // lost the race under the lock reports `changed = false` and must not
+                // re-announce the reopen.
+                if outcome.changed {
+                    conn.emit_event(
+                        origin,
+                        event::WorkspaceEvent::ReviewReopened(event::ReviewReopened {
+                            review_id: review.id,
+                            document_id: document.id,
+                            document_name: document.display_name.clone(),
+                        }),
+                    )
+                    .await?;
+                }
+                Ok::<_, Error>(outcome.review)
+            })
+            .await?;
+
         tracing::info!(target: TRACING_TARGET, "Review reopened");
-        Ok(review)
+        Ok(reopened)
     }
 
     /// Assigns a reviewer to a review (idempotent). The assignee must be a
     /// workspace member. Raises the review-assigned event, notifying the assignee
-    /// unless they assigned themselves. The first assignee of a not-yet-resolved
-    /// review moves it to `in_review`.
+    /// unless they assigned themselves. Assignment is metadata (who is responsible);
+    /// it does not change the review's status.
     ///
     /// # Errors
     ///
@@ -569,8 +747,10 @@ impl WorkspaceReviewService {
         Ok(updated)
     }
 
-    /// Removes a reviewer from a review. Raises the review-unassigned event. Clearing
-    /// the last assignee of an in-review review returns it to `needs_review`.
+    /// Removes a reviewer from a review. Raises the review-unassigned event. Removing
+    /// a reviewer who had approved drops their approval, so a review that thereby falls
+    /// below the workspace's required approvals is demoted (an approved review returns
+    /// to in-review and drops its approved output).
     ///
     /// # Errors
     ///
@@ -585,11 +765,17 @@ impl WorkspaceReviewService {
         let mut conn = self.postgres.get_connection().await?;
         let review = find_review(&mut conn, origin.workspace_id, review_id).await?;
         let document = review_document(&mut conn, &review).await?;
+        // Removing an approved assignee can drop the review below quorum, so the repo
+        // reconciles the status under its lock against the workspace's required count.
+        let required = self
+            .review_settings(&mut conn, origin.workspace_id)
+            .await?
+            .required_approvals();
 
         let updated = conn
             .transaction(async |conn| {
                 let outcome = conn
-                    .remove_assignee(review_id, account_id, origin.account_id)
+                    .remove_assignee(review_id, account_id, origin.account_id, required)
                     .await?;
                 // Emit only when a link was actually removed (removing a
                 // non-assignee is a silent no-op).
@@ -610,6 +796,21 @@ impl WorkspaceReviewService {
 
         tracing::info!(target: TRACING_TARGET, "Reviewer unassigned");
         Ok(updated)
+    }
+
+    /// Loads a workspace's review approval policy from its settings, falling back to
+    /// the defaults (single approver, author allowed) when the workspace or its
+    /// settings cannot be read as expected.
+    async fn review_settings(
+        &self,
+        conn: &mut PgConn,
+        workspace_id: Uuid,
+    ) -> Result<ReviewSettings> {
+        let workspace = conn
+            .find_workspace_by_id(workspace_id)
+            .await?
+            .ok_or_else(|| Error::not_found("workspace"))?;
+        Ok(workspace.settings.or_default().review)
     }
 }
 

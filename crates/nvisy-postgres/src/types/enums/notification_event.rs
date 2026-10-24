@@ -19,11 +19,11 @@ db_enum! {
         /// A connection sync failed.
         ConnectionSyncFailed = "connection.sync.failed",
         /// A detection finished analysis and is ready to redact.
-        DetectionCompleted = "pipeline.detection.completed",
+        DetectionCompleted = "detection.completed",
         /// A redaction was created (redacted output produced).
-        RedactionCreated = "pipeline.redaction.created",
+        RedactionCreated = "redaction.created",
         /// A detection failed.
-        DetectionFailed = "pipeline.detection.failed",
+        DetectionFailed = "detection.failed",
         /// A file's review was assigned to the reviewer.
         ReviewAssigned = "review.assigned",
         /// An account was mentioned in a comment.

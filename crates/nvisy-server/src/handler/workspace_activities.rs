@@ -41,7 +41,7 @@ struct ActivityExportRow {
     timestamp: String,
     /// The full dotted activity type, e.g. `file.created`.
     activity_type: String,
-    /// The object half of the type, e.g. `file` or `pipeline.run`.
+    /// The object half of the type, e.g. `file` or `detection.run`.
     object_type: String,
     /// The action half of the type, e.g. `created`.
     action_type: String,

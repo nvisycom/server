@@ -7,44 +7,55 @@ db_enum! {
     /// document).
     ///
     /// Corresponds to the `REVIEW_STATUS` `PostgreSQL` enum. The state is driven by
-    /// assignment and explicit sign-off, not derived from linked artifacts: a review
-    /// opens at `NeedsReview`; gaining its first assignee moves it to `InReview`, and
-    /// removing the last assignee returns it to `NeedsReview`; verifying it sets
-    /// `Resolved`, and reopening a resolved review returns it to `NeedsReview`.
-    /// Assigning or unassigning a resolved review leaves it `Resolved`.
-    pub enum ReviewStatus: Default = NeedsReview, "crate::schema::sql_types::ReviewStatus" {
-        /// Open and not yet signed off: either awaiting a reviewer to pick it up,
-        /// or reopened after being resolved (an assignee from before may remain).
-        NeedsReview = "needs_review",
-        /// At least one reviewer is assigned and the review is in progress.
+    /// explicit reviewer decisions, not by assignment: a review opens at `Draft`;
+    /// `submit` moves it to `InReview`; a reviewer can `request-changes`
+    /// (`ChangesRequested`, from which `resubmit` returns it to `InReview`) or
+    /// `approve`. An approval reaches `Approved` once the workspace's required number
+    /// of distinct approvals is met, and rests at `PartiallyApproved` in between
+    /// (only reachable when two or more approvals are required). Reopening an
+    /// `Approved` review returns it to `InReview`.
+    pub enum ReviewStatus: Default = Draft, "crate::schema::sql_types::ReviewStatus" {
+        /// Opened, edits being assembled; `submit` sends it for review.
+        Draft = "draft",
+        /// Submitted and awaiting a reviewer decision.
         InReview = "in_review",
-        /// A reviewer has verified (signed off on) the review.
-        Resolved = "resolved",
+        /// A reviewer requested changes; `resubmit` returns it to `InReview`.
+        ChangesRequested = "changes_requested",
+        /// Some, but not all, required approvals are in. Only reachable when the
+        /// workspace requires two or more approvals.
+        PartiallyApproved = "partially_approved",
+        /// Signed off: the required approvals are in and the approved redaction is
+        /// the review's output.
+        Approved = "approved",
     }
 }
 
 impl ReviewStatus {
-    /// Whether the review has been verified.
+    /// Whether the review is fully signed off.
     #[inline]
     #[must_use]
-    pub fn is_resolved(self) -> bool {
-        matches!(self, ReviewStatus::Resolved)
+    pub fn is_approved(self) -> bool {
+        matches!(self, ReviewStatus::Approved)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ReviewStatus::{self, InReview, NeedsReview, Resolved};
+    use super::ReviewStatus::{
+        self, Approved, ChangesRequested, Draft, InReview, PartiallyApproved,
+    };
 
     #[test]
-    fn default_is_needs_review() {
-        assert_eq!(ReviewStatus::default(), NeedsReview);
+    fn default_is_draft() {
+        assert_eq!(ReviewStatus::default(), Draft);
     }
 
     #[test]
-    fn is_resolved_only_for_resolved() {
-        assert!(!NeedsReview.is_resolved());
-        assert!(!InReview.is_resolved());
-        assert!(Resolved.is_resolved());
+    fn is_approved_only_for_approved() {
+        assert!(!Draft.is_approved());
+        assert!(!InReview.is_approved());
+        assert!(!ChangesRequested.is_approved());
+        assert!(!PartiallyApproved.is_approved());
+        assert!(Approved.is_approved());
     }
 }

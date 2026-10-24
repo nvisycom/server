@@ -7,24 +7,29 @@ db_enum! {
     ///
     /// Corresponds to the `REVIEW_EVENT_KIND` `PostgreSQL` enum. A review's stream
     /// interleaves comments (messages) with these events: the lifecycle (opened,
-    /// renamed, verified, reopened) and the sign-off workflow (detections and
-    /// redactions referenced, assignment changes).
+    /// renamed, submitted, changes requested, approved, reopened), re-detection, and
+    /// assignment changes.
     pub enum ReviewEventKind = "crate::schema::sql_types::ReviewEventKind" {
-        /// The review was opened.
+        /// The review was opened. Its target carries the initial detection id, when
+        /// the review was opened against one.
         Opened = "review.opened",
         /// The review's display name was changed.
         Renamed = "review.renamed",
-        /// A detection was referenced by the review.
-        DetectionLinked = "detection.linked",
-        /// A redaction was referenced by the review.
-        RedactionLinked = "redaction.linked",
+        /// The review was repointed at a newer detection (the document was
+        /// re-detected). Its target carries the new detection id.
+        Redetected = "review.redetected",
         /// The review was assigned to a reviewer.
-        Assigned = "assigned",
+        Assigned = "review.assigned",
         /// A reviewer was unassigned.
-        Unassigned = "unassigned",
-        /// The review was verified (resolved).
-        Verified = "verified",
-        /// A resolved review was reopened (back to `needs_review`).
-        Reopened = "reopened",
+        Unassigned = "review.unassigned",
+        /// The review was submitted (or resubmitted) for review.
+        Submitted = "review.submitted",
+        /// A reviewer requested changes.
+        ChangesRequested = "review.changes_requested",
+        /// A reviewer approved the review (quorum may require more approvals). Its
+        /// target carries the approved output redaction id, when one was named.
+        Approved = "review.approved",
+        /// An approved review was reopened (back to `in_review`).
+        Reopened = "review.reopened",
     }
 }

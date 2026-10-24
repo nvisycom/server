@@ -411,7 +411,7 @@ mod tests {
 
         let db = TestDatabase::start().await;
         // A workspace with a document (and thus one live blob).
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let document = conn

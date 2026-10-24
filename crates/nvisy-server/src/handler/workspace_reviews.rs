@@ -1,13 +1,14 @@
 //! Review handlers: opening reviews, the review queue, a document's reviews, the
-//! discussion (comments), the interleaved timeline, referencing
-//! detections/redactions, and the review transitions (rename, delete, verify,
-//! assign, reopen). A thin HTTP layer over [`WorkspaceReviewService`].
+//! discussion (comments), the interleaved timeline, pointing at the detection under
+//! review, and the review transitions (rename, delete, submit, request-changes,
+//! approve, reopen, assign). A thin HTTP layer over [`WorkspaceReviewService`].
 //!
-//! A review is a named discussion on a document with a manual sign-off lifecycle
-//! (0..N per document), opened explicitly by a reviewer. It references the
-//! detections/redactions done for it. Viewing and reads (`ViewReviews`); opening,
-//! commenting, linking, and verifying (`Review`); renaming and deleting
-//! (`ManageReviews`); assigning (`AssignReviews`).
+//! A review is a named discussion on a document with an explicit approval lifecycle
+//! (0..N per document, concurrent per audience), opened explicitly by a reviewer. It is
+//! anchored to its document and points at the detection it reviews and the redaction
+//! it approves. Viewing and reads (`ViewReviews`); opening, commenting, pointing,
+//! and the approval transitions (`Review`); renaming and deleting (`ManageReviews`);
+//! assigning (`AssignReviews`).
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
@@ -27,7 +28,7 @@ use crate::handler::request::{
     CreateWorkspaceComment, CreateWorkspaceReview, CursorPagination, RenameWorkspaceReview,
     UpdateWorkspaceComment, WorkspaceCommentPathParams, WorkspaceDocumentPathParams,
     WorkspaceReviewAssigneePathParams, WorkspaceReviewDetectionPathParams,
-    WorkspaceReviewPathParams, WorkspaceReviewRedactionPathParams, WorkspaceReviewsQuery,
+    WorkspaceReviewPathParams, WorkspaceReviewsQuery,
 };
 use crate::handler::response::{
     AccountRef, WorkspaceComment, WorkspaceReview, WorkspaceReviewEntry, WorkspaceReviewEvent,
@@ -66,6 +67,7 @@ async fn open_review(
         .open(
             origin(workspace.id, authz.account_id, &security),
             path_params.document_id,
+            request.detection_id.map(|id| id.as_uuid()),
             request.display_name,
         )
         .await?;
@@ -336,7 +338,7 @@ fn create_comment_docs(op: TransformOperation) -> TransformOperation {
         .description(
             "Posts a comment (message) in a review. @username mentions notify those \
              members. Requires the Review permission. Returns 409 if the review is \
-             resolved.",
+             approved.",
         )
         .response::<201, Json<WorkspaceComment>>()
         .response::<400, Json<ErrorResponse>>()
@@ -500,8 +502,9 @@ fn list_review_timeline_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List a review's timeline")
         .description(
             "Returns the review's timeline — comments and lifecycle events (opened, \
-             renamed, linked, assigned, verified, reopened) interleaved, oldest \
-             first, with cursor pagination. Requires ViewReviews.",
+             renamed, redetected, assigned, unassigned, submitted, changes \
+             requested, approved, reopened) interleaved, oldest first, with cursor \
+             pagination. Requires ViewReviews.",
         )
         .response::<200, Json<WorkspaceTimelinePage>>()
         .response::<401, Json<ErrorResponse>>()
@@ -556,8 +559,9 @@ async fn list_review_events(
 fn list_review_events_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List a review's events")
         .description(
-            "Returns a review's activity events only (links, assignment, \
-             verification, reopen), oldest first. Requires ViewReviews.",
+            "Returns a review's activity events only (re-detection, assignment, \
+             submission, change requests, approvals, reopen), oldest first. Requires \
+             ViewReviews.",
         )
         .response::<200, Json<WorkspaceReviewTimelinePage>>()
         .response::<401, Json<ErrorResponse>>()
@@ -565,7 +569,8 @@ fn list_review_events_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// References a detection from a review. Idempotent. Requires `Review`.
+/// Points a review at the detection it is currently reviewing. Idempotent. Used on
+/// open and when the document is re-detected. Requires `Review`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -575,17 +580,17 @@ fn list_review_events_docs(op: TransformOperation) -> TransformOperation {
         detection_id = %path_params.detection_id,
     )
 )]
-async fn link_detection(
+async fn point_detection(
     State(pg_client): State<PgClient>,
     State(reviews): State<domain::WorkspaceReviewService>,
     authz: Authorized<markers::Review>,
     Path(path_params): Path<WorkspaceReviewDetectionPathParams>,
 ) -> Result<(StatusCode, Json<WorkspaceReview>)> {
-    tracing::debug!(target: TRACING_TARGET, "Linking detection to review");
+    tracing::debug!(target: TRACING_TARGET, "Pointing review at detection");
 
     let workspace = authz.workspace;
     let review = reviews
-        .link_detection(
+        .point_detection(
             workspace.id,
             path_params.review_id,
             path_params.detection_id.as_uuid(),
@@ -599,60 +604,21 @@ async fn link_detection(
     Ok((StatusCode::OK, Json(response)))
 }
 
-fn link_detection_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Reference a detection from a review")
-        .description("Links a detection to a review (idempotent). Requires Review.")
-        .response::<200, Json<WorkspaceReview>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
-}
-
-/// References a redaction from a review. Idempotent. Requires `Review`.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-        review_id = %path_params.review_id,
-        redaction_id = %path_params.redaction_id,
-    )
-)]
-async fn link_redaction(
-    State(pg_client): State<PgClient>,
-    State(reviews): State<domain::WorkspaceReviewService>,
-    authz: Authorized<markers::Review>,
-    Path(path_params): Path<WorkspaceReviewRedactionPathParams>,
-) -> Result<(StatusCode, Json<WorkspaceReview>)> {
-    tracing::debug!(target: TRACING_TARGET, "Linking redaction to review");
-
-    let workspace = authz.workspace;
-    let review = reviews
-        .link_redaction(
-            workspace.id,
-            path_params.review_id,
-            path_params.redaction_id.as_uuid(),
-            authz.account_id,
+fn point_detection_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Point a review at a detection")
+        .description(
+            "Points a review at the detection it is currently reviewing (idempotent). \
+             Re-detecting a document repoints the review. Requires Review.",
         )
-        .await?;
-
-    let mut conn = pg_client.get_connection().await?;
-    let response = review_response(&mut conn, review).await?;
-
-    Ok((StatusCode::OK, Json(response)))
-}
-
-fn link_redaction_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Reference a redaction from a review")
-        .description("Links a redaction to a review (idempotent). Requires Review.")
         .response::<200, Json<WorkspaceReview>>()
+        .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Verifies a review, moving it to `resolved`. Requires `Review` (a reviewer signs
-/// off their own work).
+/// Submits (or resubmits) a review for review, moving it to `in_review`. Requires
+/// `Review`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -661,34 +627,34 @@ fn link_redaction_docs(op: TransformOperation) -> TransformOperation {
         review_id = %path_params.review_id,
     )
 )]
-async fn verify_review(
+async fn submit_review(
     State(pg_client): State<PgClient>,
     State(reviews): State<domain::WorkspaceReviewService>,
     authz: Authorized<markers::Review>,
     Path(path_params): Path<WorkspaceReviewPathParams>,
     security: SecurityContext,
 ) -> Result<(StatusCode, Json<WorkspaceReview>)> {
-    tracing::debug!(target: TRACING_TARGET, "Verifying review");
+    tracing::debug!(target: TRACING_TARGET, "Submitting review");
 
     let workspace = authz.workspace;
-    let verified = reviews
-        .verify(
+    let submitted = reviews
+        .submit(
             origin(workspace.id, authz.account_id, &security),
             path_params.review_id,
         )
         .await?;
 
     let mut conn = pg_client.get_connection().await?;
-    let response = review_response(&mut conn, verified).await?;
+    let response = review_response(&mut conn, submitted).await?;
 
     Ok((StatusCode::OK, Json(response)))
 }
 
-fn verify_review_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Verify a review")
+fn submit_review_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Submit a review")
         .description(
-            "Verifies a review, moving it to `resolved`. 409 if already resolved. \
-             Requires Review.",
+            "Submits (or resubmits) a review for review, moving it to `in_review`. \
+             409 unless it is a draft or has changes requested. Requires Review.",
         )
         .response::<200, Json<WorkspaceReview>>()
         .response::<401, Json<ErrorResponse>>()
@@ -697,7 +663,106 @@ fn verify_review_docs(op: TransformOperation) -> TransformOperation {
         .response::<409, Json<ErrorResponse>>()
 }
 
-/// Reopens a resolved review back to `needs_review`. Requires `Review`.
+/// Requests changes on a review, moving it to `changes_requested`. Requires `Review`.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
+        review_id = %path_params.review_id,
+    )
+)]
+async fn request_changes(
+    State(pg_client): State<PgClient>,
+    State(reviews): State<domain::WorkspaceReviewService>,
+    authz: Authorized<markers::Review>,
+    Path(path_params): Path<WorkspaceReviewPathParams>,
+    security: SecurityContext,
+) -> Result<(StatusCode, Json<WorkspaceReview>)> {
+    tracing::debug!(target: TRACING_TARGET, "Requesting changes on review");
+
+    let workspace = authz.workspace;
+    let updated = reviews
+        .request_changes(
+            origin(workspace.id, authz.account_id, &security),
+            path_params.review_id,
+        )
+        .await?;
+
+    let mut conn = pg_client.get_connection().await?;
+    let response = review_response(&mut conn, updated).await?;
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+fn request_changes_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Request changes on a review")
+        .description(
+            "Requests changes on a review, moving it to `changes_requested` and \
+             clearing any accumulated approvals. 409 unless it is awaiting a \
+             decision. Requires Review.",
+        )
+        .response::<200, Json<WorkspaceReview>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
+}
+
+/// Approves a review, recording the caller's approval and optionally its output
+/// redaction. Reaches `approved` once the workspace's required approvals are in.
+/// Requires `Review`.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
+        review_id = %path_params.review_id,
+    )
+)]
+async fn approve_review(
+    State(pg_client): State<PgClient>,
+    State(reviews): State<domain::WorkspaceReviewService>,
+    authz: Authorized<markers::Review>,
+    Path(path_params): Path<WorkspaceReviewPathParams>,
+    security: SecurityContext,
+    ValidateJson(request): ValidateJson<crate::handler::request::ApproveWorkspaceReview>,
+) -> Result<(StatusCode, Json<WorkspaceReview>)> {
+    tracing::debug!(target: TRACING_TARGET, "Approving review");
+
+    let workspace = authz.workspace;
+    let approved = reviews
+        .approve(
+            origin(workspace.id, authz.account_id, &security),
+            path_params.review_id,
+            request.redaction_id.map(|id| id.as_uuid()),
+        )
+        .await?;
+
+    let mut conn = pg_client.get_connection().await?;
+    let response = review_response(&mut conn, approved).await?;
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+fn approve_review_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Approve a review")
+        .description(
+            "Records the caller's approval and, optionally, the approved output \
+             redaction. The review reaches `approved` once the workspace's required \
+             approvals are in, otherwise `partially_approved`. 409 unless it is \
+             awaiting a decision; 403 if the author approves their own review where \
+             the workspace forbids it. Requires Review.",
+        )
+        .response::<200, Json<WorkspaceReview>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
+}
+
+/// Reopens an approved review back to `in_review`. Requires `Review`.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -711,12 +776,16 @@ async fn reopen_review(
     State(reviews): State<domain::WorkspaceReviewService>,
     authz: Authorized<markers::Review>,
     Path(path_params): Path<WorkspaceReviewPathParams>,
+    security: SecurityContext,
 ) -> Result<(StatusCode, Json<WorkspaceReview>)> {
     tracing::debug!(target: TRACING_TARGET, "Reopening review");
 
     let workspace = authz.workspace;
     let reopened = reviews
-        .reopen(workspace.id, path_params.review_id, authz.account_id)
+        .reopen(
+            origin(workspace.id, authz.account_id, &security),
+            path_params.review_id,
+        )
         .await?;
 
     let mut conn = pg_client.get_connection().await?;
@@ -727,11 +796,15 @@ async fn reopen_review(
 
 fn reopen_review_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Reopen a review")
-        .description("Reopens a resolved review back to `needs_review`. Requires Review.")
+        .description(
+            "Reopens an approved review back to `in_review`, clearing its approvals \
+             and approved output. 409 unless it is approved. Requires Review.",
+        )
         .response::<200, Json<WorkspaceReview>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
 }
 
 /// Assigns a reviewer to a review (idempotent).
@@ -773,9 +846,9 @@ async fn add_review_assignee(
 fn add_review_assignee_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Assign a reviewer")
         .description(
-            "Assigns a workspace member as a reviewer of a review (idempotent). The \
-             first assignee moves a needs-review review to in-review. Requires \
-             AssignReviews.",
+            "Assigns a workspace member as a reviewer of a review (idempotent). \
+             Assignment is metadata (who is responsible) and does not change the \
+             review's status. Requires AssignReviews.",
         )
         .response::<200, Json<WorkspaceReview>>()
         .response::<401, Json<ErrorResponse>>()
@@ -822,8 +895,8 @@ async fn remove_review_assignee(
 fn remove_review_assignee_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Unassign a reviewer")
         .description(
-            "Removes a reviewer from a review. Removing the last assignee returns an \
-             in-review review to needs-review. Requires AssignReviews.",
+            "Removes a reviewer from a review. Assignment is metadata and does not \
+             change the review's status. Requires AssignReviews.",
         )
         .response::<200, Json<WorkspaceReview>>()
         .response::<401, Json<ErrorResponse>>()
@@ -912,8 +985,16 @@ pub fn routes() -> ApiRouter<ServiceState> {
             get_with(list_review_events, list_review_events_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/reviews/{reviewId}/verify",
-            post_with(verify_review, verify_review_docs),
+            "/workspaces/{workspaceId}/reviews/{reviewId}/submit",
+            post_with(submit_review, submit_review_docs),
+        )
+        .api_route(
+            "/workspaces/{workspaceId}/reviews/{reviewId}/request-changes",
+            post_with(request_changes, request_changes_docs),
+        )
+        .api_route(
+            "/workspaces/{workspaceId}/reviews/{reviewId}/approve",
+            post_with(approve_review, approve_review_docs),
         )
         .api_route(
             "/workspaces/{workspaceId}/reviews/{reviewId}/reopen",
@@ -926,11 +1007,7 @@ pub fn routes() -> ApiRouter<ServiceState> {
         )
         .api_route(
             "/workspaces/{workspaceId}/reviews/{reviewId}/detections/{detectionId}",
-            post_with(link_detection, link_detection_docs),
-        )
-        .api_route(
-            "/workspaces/{workspaceId}/reviews/{reviewId}/redactions/{redactionId}",
-            post_with(link_redaction, link_redaction_docs),
+            post_with(point_detection, point_detection_docs),
         )
         .with_path_items(|item| item.tag("Reviews"))
 }

@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::input::{
     CreatePolicyInput, PolicyBodyInput, PolicyDraftInput, UpdatePolicyInput,
 };
+use crate::extract::validators::validate_non_blank;
 
 /// Query parameters for listing policies.
 ///
@@ -19,7 +20,7 @@ use crate::domain::input::{
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePoliciesQuery {
-    /// Narrow the list to a single policy kind (`authored` or `oneshot`).
+    /// Narrow the list to a single policy kind (`authored` or `derived`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<PolicyKind>,
 }
@@ -102,7 +103,7 @@ pub enum PolicyBody {
         /// template id, and most requests use a template.
         definition: Box<PolicyDraft>,
     },
-    /// A one-shot body: a bare list of labels, each erased. The created policy is
+    /// A derived body: a bare list of labels, each erased. The created policy is
     /// content-addressed and deduplicated (an identical one is reused) and is
     /// immutable once minted. This is the ad-hoc redact flow.
     Labels {
@@ -134,7 +135,7 @@ impl From<PolicyBody> for PolicyBodyInput {
 #[garde(allow_unvalidated)]
 pub struct CreateWorkspacePolicy {
     /// Optional display name override. Defaults to the policy's own name. Ignored
-    /// for a one-shot (labels) body, whose name is generated.
+    /// for a derived (labels) body, whose name is generated.
     #[garde(length(chars, min = 1, max = 255))]
     pub display_name: Option<String>,
     /// Optional description override. Defaults to the policy's own description.
@@ -156,7 +157,7 @@ impl From<CreateWorkspacePolicy> for CreatePolicyInput {
     }
 }
 
-/// A one-shot (labels) body must name at least one label and no more than 128.
+/// A derived (labels) body must name at least one label and no more than 128.
 // reason: signature is fixed by garde's custom validator interface.
 #[allow(clippy::trivially_copy_pass_by_ref)]
 fn validate_body(body: &PolicyBody, _: &()) -> garde::Result {
@@ -210,6 +211,19 @@ impl From<UpdateWorkspacePolicy> for UpdatePolicyInput {
             definition: request.definition.map(Into::into),
         }
     }
+}
+
+/// Request payload for promoting a derived policy to an authored one.
+///
+/// A derived policy carries a neutral, generated hash name, so promotion requires a
+/// human-readable title to replace it — the server never synthesizes one (that would
+/// store unlocalizable prose; the client names it in the user's language).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct PromoteWorkspacePolicy {
+    /// Human-readable display name for the promoted policy (1-255 characters).
+    #[garde(length(chars, min = 1, max = 255), custom(validate_non_blank))]
+    pub display_name: String,
 }
 
 #[cfg(test)]

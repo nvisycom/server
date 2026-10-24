@@ -1,11 +1,10 @@
 //! `WorkspaceDetection` response types.
 
+use elide_pipeline::entity::EditSet;
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceDetection as DetectionModel;
 use nvisy_postgres::query::DetectionDocuments;
-use nvisy_postgres::types::{
-    DetectionId, DetectionMetadata, DetectionStatus, Handle, PipelineTriggerType,
-};
+use nvisy_postgres::types::{DetectionId, DetectionMetadata, DetectionStatus, Handle};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -14,19 +13,14 @@ use super::{AccountRef, Page};
 
 /// Response type for a detection.
 ///
-/// A detection is addressed by its own opaque id; the owning pipeline and
-/// workspace handles are carried for context. Redacted outputs are not here — a
-/// detection produces many redactions, each fetched from its `redactions`
-/// endpoint.
+/// A detection is addressed by its own opaque id; the workspace handle is carried
+/// for context. Redacted outputs are not here — a detection produces many
+/// redactions, each fetched from its `redactions` endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceDetection {
     /// Opaque identifier of the detection.
     pub id: DetectionId,
-    /// Unique identifier of the pipeline this detection belongs to; absent for an
-    /// ad-hoc detection.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pipeline_id: Option<Uuid>,
     /// Unique identifier of the workspace.
     pub workspace_id: Uuid,
     /// URL-safe workspace handle. Display-only.
@@ -39,8 +33,6 @@ pub struct WorkspaceDetection {
     pub input_document_name: Option<String>,
     /// Account that triggered the detection.
     pub triggered_by: AccountRef,
-    /// How the detection was triggered.
-    pub trigger_type: PipelineTriggerType,
     /// Current detection status.
     ///
     /// The detections are available to fetch from the detection's `analysis`
@@ -51,6 +43,13 @@ pub struct WorkspaceDetection {
     pub error: Option<String>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: DetectionMetadata,
+    /// The accumulated reviewer edits applied over the base analysis at redact time,
+    /// so a client can display and revise them. Absent when the detection has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edits: Option<EditSet>,
+    /// Optimistic-concurrency version of `edits`; echo it back on an edit PATCH so a
+    /// stale write is rejected rather than overwriting a concurrent edit.
+    pub edit_set_rev: i32,
     /// When the detection started.
     pub started_at: Timestamp,
     /// When the detection completed analysis.
@@ -64,7 +63,7 @@ pub type WorkspaceDetectionsPage = Page<WorkspaceDetection>;
 impl WorkspaceDetection {
     /// Creates a detection response from the database model, the owning workspace
     /// id and handle, the triggering account, and the resolved input file display
-    /// name. The owning pipeline id is read from the model.
+    /// name.
     pub fn from_model(
         detection: &DetectionModel,
         workspace_id: Uuid,
@@ -76,20 +75,25 @@ impl WorkspaceDetection {
         // enqueue-failure path) as a dedicated field for a failed detection.
         let metadata = detection.metadata.or_default();
         let error = metadata.error.clone();
-        let pipeline_id = detection.pipeline_id;
+        // The edit-set is stored opaquely as JSON; present it typed when it decodes,
+        // and omit it (rather than surface a raw blob) if a stored shape no longer does.
+        let edits = detection
+            .edit_set
+            .as_ref()
+            .and_then(|stored| serde_json::from_value(stored.as_value().clone()).ok());
 
         Self {
             id: DetectionId::from_uuid(detection.id),
-            pipeline_id,
             workspace_id,
             workspace_handle,
             input_document_id: detection.input_document_id,
             input_document_name: files.input,
             triggered_by,
-            trigger_type: detection.trigger_type,
             status: detection.status,
             error,
             metadata,
+            edits,
+            edit_set_rev: detection.edit_set_rev,
             started_at: detection.started_at.into(),
             completed_at: detection.completed_at.map(Into::into),
         }

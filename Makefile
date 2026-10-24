@@ -102,8 +102,8 @@ clear-migrations: ## Reverts all database migrations.
 	done
 	@$(call log,All migrations reverted successfully.)
 
-.PHONY: reset-docker
-reset-docker: ## Resets Docker containers (down -v, then up -d).
+.PHONY: reset
+reset: ## Resets Docker containers (down -v, then up -d).
 	@$(call log,Stopping and removing Docker containers and volumes...)
 	@docker compose -f ./docker/docker-compose.dev.yml down -v
 	@$(call log,Starting Docker containers...)

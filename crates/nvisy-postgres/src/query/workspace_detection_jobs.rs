@@ -159,12 +159,11 @@ mod tests {
 
     /// Seeds a detection and returns its id — the FK parent an outbox row needs.
     async fn seed_detection(db: &TestDatabase) -> anyhow::Result<Uuid> {
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.workspace_id,
-                seeded.pipeline_id,
                 seeded.account_id,
                 seeded.document_id,
             ))
