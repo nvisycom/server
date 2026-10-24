@@ -267,9 +267,15 @@ pub enum ActivityPayload {
     /// A comment (message) was posted in a review.
     #[serde(rename = "review.comment.created")]
     ReviewCommentCreated(ReviewCommentActivityParams),
-    /// A review was verified.
-    #[serde(rename = "review.verified")]
-    ReviewVerified(ReviewActivityParams),
+    /// A review was submitted (or resubmitted) for review.
+    #[serde(rename = "review.submitted")]
+    ReviewSubmitted(ReviewActivityParams),
+    /// A reviewer requested changes on a review.
+    #[serde(rename = "review.changes_requested")]
+    ReviewChangesRequested(ReviewActivityParams),
+    /// A review was approved.
+    #[serde(rename = "review.approved")]
+    ReviewApproved(ReviewActivityParams),
     /// A review was assigned to a reviewer.
     #[serde(rename = "review.assigned")]
     ReviewAssigned(ReviewActivityParams),
@@ -346,7 +352,9 @@ impl ActivityPayload {
             ActivityPayload::ReviewRenamed(_) => ActivityType::ReviewRenamed,
             ActivityPayload::ReviewDeleted(_) => ActivityType::ReviewDeleted,
             ActivityPayload::ReviewCommentCreated(_) => ActivityType::ReviewCommentCreated,
-            ActivityPayload::ReviewVerified(_) => ActivityType::ReviewVerified,
+            ActivityPayload::ReviewSubmitted(_) => ActivityType::ReviewSubmitted,
+            ActivityPayload::ReviewChangesRequested(_) => ActivityType::ReviewChangesRequested,
+            ActivityPayload::ReviewApproved(_) => ActivityType::ReviewApproved,
             ActivityPayload::ReviewAssigned(_) => ActivityType::ReviewAssigned,
             ActivityPayload::ReviewUnassigned(_) => ActivityType::ReviewUnassigned,
             ActivityPayload::PipelineCreated(_) => ActivityType::PipelineCreated,
@@ -400,7 +408,9 @@ impl ActivityPayload {
             ActivityPayload::ReviewOpened(_) => W::ReviewOpened,
             ActivityPayload::ReviewReopened(_) => W::ReviewReopened,
             ActivityPayload::ReviewRenamed(_) => W::ReviewRenamed,
-            ActivityPayload::ReviewVerified(_) => W::ReviewVerified,
+            ActivityPayload::ReviewSubmitted(_) => W::ReviewSubmitted,
+            ActivityPayload::ReviewChangesRequested(_) => W::ReviewChangesRequested,
+            ActivityPayload::ReviewApproved(_) => W::ReviewApproved,
             ActivityPayload::ReviewAssigned(_) => W::ReviewAssigned,
             ActivityPayload::ReviewUnassigned(_) => W::ReviewUnassigned,
             ActivityPayload::PipelineCreated(_) => W::PipelineCreated,
@@ -467,7 +477,9 @@ impl ActivityPayload {
             | ActivityPayload::ReviewReopened(p)
             | ActivityPayload::ReviewRenamed(p)
             | ActivityPayload::ReviewDeleted(p)
-            | ActivityPayload::ReviewVerified(p)
+            | ActivityPayload::ReviewSubmitted(p)
+            | ActivityPayload::ReviewChangesRequested(p)
+            | ActivityPayload::ReviewApproved(p)
             | ActivityPayload::ReviewAssigned(p)
             | ActivityPayload::ReviewUnassigned(p) => Some(p.review_id.to_string()),
 
@@ -529,7 +541,9 @@ impl ActivityPayload {
             | ActivityPayload::ReviewRenamed(_)
             | ActivityPayload::ReviewDeleted(_)
             | ActivityPayload::ReviewCommentCreated(_)
-            | ActivityPayload::ReviewVerified(_)
+            | ActivityPayload::ReviewSubmitted(_)
+            | ActivityPayload::ReviewChangesRequested(_)
+            | ActivityPayload::ReviewApproved(_)
             | ActivityPayload::ReviewAssigned(_)
             | ActivityPayload::ReviewUnassigned(_)
             | ActivityPayload::PipelineCreated(_)

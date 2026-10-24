@@ -78,7 +78,7 @@ pub use workspace_review_comments::{
     NewWorkspaceReviewComment, UpdateWorkspaceReviewComment, WorkspaceReviewComment,
 };
 pub use workspace_review_events::{NewWorkspaceReviewEvent, WorkspaceReviewEvent};
-pub use workspace_review_links::{NewReviewAssignee, NewReviewDetection, NewReviewRedaction};
+pub use workspace_review_links::NewReviewAssignee;
 pub use workspace_reviews::{NewWorkspaceReview, UpdateWorkspaceReview, WorkspaceReview};
 pub use workspace_webhooks::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
 pub use workspaces::{NewWorkspace, UpdateWorkspace, Workspace};

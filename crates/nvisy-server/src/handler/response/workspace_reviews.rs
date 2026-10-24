@@ -14,9 +14,10 @@ use uuid::Uuid;
 
 use super::{AccountRef, Page};
 
-/// Response type for a review: a named discussion on a document with a manual
-/// sign-off lifecycle (0..N per document), opened explicitly. It carries a
-/// `reviewStatus`, a `displayName`, and its `assignees` (0..N reviewers); its
+/// Response type for a review: a named discussion on a document with an explicit
+/// approval lifecycle (0..N per document, concurrent per audience), opened explicitly. It
+/// carries a `reviewStatus`, a `displayName`, its `assignees` (0..N reviewers), the
+/// `detectionId` it is currently reviewing, and the `redactionId` it approved; its
 /// stream is a [`WorkspaceReviewEntry`] timeline.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +26,12 @@ pub struct WorkspaceReview {
     pub id: Uuid,
     /// Document under review.
     pub document_id: Uuid,
+    /// The detection the review is currently reviewing, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detection_id: Option<Uuid>,
+    /// The approved redaction output, set once the review is approved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redaction_id: Option<Uuid>,
     /// The review's title.
     pub display_name: String,
     /// Account that opened the review.
@@ -54,6 +61,8 @@ impl WorkspaceReview {
         Self {
             id: review.id,
             document_id: review.document_id,
+            detection_id: review.detection_id,
+            redaction_id: review.redaction_id,
             display_name: review.display_name.clone(),
             author,
             review_status: review.review_status,

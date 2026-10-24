@@ -38,8 +38,8 @@ pub use json::{
     NotificationPayload, PipelineActivityParams, PipelineMetadata, PolicyActivityParams,
     ProviderActivityParams, RasterPolicy, RedactionActivityParams, RedactionCreatedParams,
     Retention, RetentionOverride, RetentionScope, RetentionSettings, ReviewActivityParams,
-    ReviewAssignedParams, ReviewCommentActivityParams, WebhookActivityParams, WebhookHeaders,
-    WorkspaceActivityParams, WorkspaceMetadata, WorkspaceSettings,
+    ReviewAssignedParams, ReviewCommentActivityParams, ReviewSettings, WebhookActivityParams,
+    WebhookHeaders, WorkspaceActivityParams, WorkspaceMetadata, WorkspaceSettings,
 };
 pub(crate) use pagination::keyset;
 pub use pagination::{

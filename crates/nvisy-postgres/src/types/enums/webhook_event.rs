@@ -44,8 +44,12 @@ db_enum! {
         ReviewRenamed = "review.renamed",
         /// A review was reopened.
         ReviewReopened = "review.reopened",
-        /// A review was verified.
-        ReviewVerified = "review.verified",
+        /// A review was submitted (or resubmitted) for review.
+        ReviewSubmitted = "review.submitted",
+        /// A reviewer requested changes on a review.
+        ReviewChangesRequested = "review.changes_requested",
+        /// A review was approved.
+        ReviewApproved = "review.approved",
         /// A review was assigned to a reviewer.
         ReviewAssigned = "review.assigned",
         /// A review's reviewer was unassigned.
@@ -84,7 +88,9 @@ impl WebhookEvent {
             WebhookEvent::ReviewOpened
             | WebhookEvent::ReviewRenamed
             | WebhookEvent::ReviewReopened
-            | WebhookEvent::ReviewVerified
+            | WebhookEvent::ReviewSubmitted
+            | WebhookEvent::ReviewChangesRequested
+            | WebhookEvent::ReviewApproved
             | WebhookEvent::ReviewAssigned
             | WebhookEvent::ReviewUnassigned => "review",
             WebhookEvent::MemberAdded

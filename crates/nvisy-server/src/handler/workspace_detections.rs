@@ -19,6 +19,7 @@ use async_stream::stream;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::sse::Event;
+use elide_pipeline::entity::EditSet;
 use elide_pipeline::governance::policy::Policy;
 use futures::StreamExt;
 use nvisy_postgres::model::{
@@ -39,7 +40,7 @@ use crate::extract::{
 };
 use crate::handler::request::{
     CreateAdhocWorkspaceDetection, CreateWorkspaceDetection, CursorPagination,
-    RedactWorkspaceDetection, WorkspaceDetectionPathParams, WorkspaceDetectionsQuery,
+    EditWorkspaceDetection, WorkspaceDetectionPathParams, WorkspaceDetectionsQuery,
     WorkspacePipelineDetectionsQuery, WorkspacePipelinePathParams,
 };
 use crate::handler::response::{
@@ -554,7 +555,6 @@ async fn redact_detection(
     authz: Authorized<markers::RunRedactions>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
     security: SecurityContext,
-    Json(request): Json<RedactWorkspaceDetection>,
 ) -> Result<(StatusCode, Json<WorkspaceRedactionResult>)> {
     tracing::debug!(target: TRACING_TARGET, "Redacting detection");
 
@@ -635,13 +635,21 @@ async fn redact_detection(
         .load_audit(&engine, workspace.id, &inputs.audit_blob)
         .await?;
 
-    // Layer the reviewer's edits onto the working audit's report before redaction.
-    // Both validation and landing are report-relative (an unknown target, a
-    // self-contradiction, or an edit naming a part of the wrong modality → 400, via
-    // `EditError`'s `From` impl), so a reviewer is never told a decision took effect
-    // when the document says otherwise. `apply` is fallible in its own right: some
-    // landing failures (a modality mismatch) surface only when the edit lands.
-    if let Some(edits) = &request.edits {
+    // Layer the detection's accumulated reviewer edits onto the working audit's
+    // report before redaction. The edits are persisted on the detection (not passed
+    // per request), so they survive between redactions. Both validation and landing
+    // are report-relative (an unknown target, a self-contradiction, or an edit naming
+    // a part of the wrong modality → 400, via `EditError`'s `From` impl), so a
+    // reviewer is never told a decision took effect when the document says otherwise.
+    // `apply` is fallible in its own right: some landing failures (a modality
+    // mismatch) surface only when the edit lands. A malformed stored edit-set is a
+    // 500, not a redaction against a silently dropped edit.
+    if let Some(stored) = &inputs.detection.edit_set {
+        let edits: EditSet = serde_json::from_value(stored.as_value().clone()).map_err(|err| {
+            ErrorKind::InternalServerError
+                .with_message("The detection's stored edits are malformed")
+                .with_context(err.to_string())
+        })?;
         edits.validate(&reviewed.report)?;
         edits.apply(&mut reviewed.report)?;
     }
@@ -818,12 +826,11 @@ async fn redact_detection(
 fn redact_detection_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Redact a detection")
         .description(
-            "Applies the pipeline's policies to the detection's stored analysis — with any \
-             reviewer `edits` layered on first (suppress a false positive, retag a detection, or \
-             add one the analysis missed) — and produces a new redaction: a redacted document \
-             plus a review audit recording what was redacted. A detection can be redacted more \
-             than once. An edit targeting a detection not in the analysis, or a set that \
-             contradicts itself, is rejected (400).",
+            "Applies the pipeline's policies to the detection's stored analysis — with the \
+             detection's accumulated reviewer edits layered on first (set via the edit endpoint) \
+             — and produces a new redaction: a redacted document plus a review audit recording \
+             what was redacted. A detection can be redacted more than once. Requires \
+             RunRedactions.",
         )
         .response::<201, Json<WorkspaceRedactionResult>>()
         .response::<400, Json<ErrorResponse>>()
@@ -831,6 +838,66 @@ fn redact_detection_docs(op: TransformOperation) -> TransformOperation {
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
+}
+
+/// Sets (or clears) a detection's accumulated reviewer edits, which are layered over
+/// its base analysis at redact time and persist between redactions. Requires
+/// `RunRedactions`.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        account_id = %authz.account_id,
+        workspace_id = %authz.workspace.id,
+        detection_id = %path_params.detection_id,
+    )
+)]
+async fn edit_detection(
+    State(pg_client): State<PgClient>,
+    State(detections): State<domain::WorkspaceDetectionService>,
+    authz: Authorized<markers::RunRedactions>,
+    Path(path_params): Path<WorkspaceDetectionPathParams>,
+    Json(request): Json<EditWorkspaceDetection>,
+) -> Result<(StatusCode, Json<WorkspaceDetection>)> {
+    tracing::debug!(target: TRACING_TARGET, "Setting detection edits");
+
+    let workspace = authz.workspace;
+    let detection_id = path_params.detection_id.as_uuid();
+    detections
+        .set_edits(workspace.id, detection_id, request.edits)
+        .await?;
+
+    // Re-read through `get` so the response carries the same shape as the other
+    // detection endpoints (trigger account and documents resolved).
+    let (detection, trigger_account_id, documents) =
+        detections.get(workspace.id, detection_id).await?;
+    let mut conn = pg_client.get_connection().await?;
+    let trigger = resolve_account_ref(&mut conn, trigger_account_id).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(WorkspaceDetection::from_model(
+            &detection,
+            workspace.id,
+            workspace.handle,
+            trigger,
+            documents,
+        )),
+    ))
+}
+
+fn edit_detection_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Edit a detection")
+        .description(
+            "Sets the detection's accumulated reviewer edits (suppress a false positive, retag a \
+             detection, or add one the analysis missed), or clears them when `edits` is omitted. \
+             The edits persist on the detection and are layered over its base analysis at redact \
+             time, so they survive between redactions. Requires RunRedactions.",
+        )
+        .response::<200, Json<WorkspaceDetection>>()
+        .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Returns a [`Router`] with all detection routes.
@@ -852,7 +919,8 @@ pub fn routes() -> ApiRouter<ServiceState> {
         )
         .api_route(
             "/workspaces/{workspaceId}/detections/{detectionId}",
-            get_with(get_detection, get_detection_docs),
+            get_with(get_detection, get_detection_docs)
+                .patch_with(edit_detection, edit_detection_docs),
         )
         .api_route(
             "/workspaces/{workspaceId}/detections/{detectionId}/events",

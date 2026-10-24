@@ -27,10 +27,11 @@ pub use crate::service::event::workspace_event::{
     DetectionStarted, DocumentCreated, DocumentDeleted, DocumentUpdated, InviteAccepted,
     InviteCanceled, InviteCreated, InviteDeclined, MemberAdded, MemberDeleted, MemberUpdated,
     PipelineCreated, PipelineDeleted, PipelineUpdated, PolicyCreated, PolicyDeleted, PolicyUpdated,
-    ProviderCreated, ProviderDeleted, ProviderUpdated, RedactionCreated, ReviewAssigned,
-    ReviewCommentCreated, ReviewDeleted, ReviewOpened, ReviewRenamed, ReviewUnassigned,
-    ReviewVerified, WebhookCreated, WebhookDeleted, WebhookUpdated, WorkspaceCreated,
-    WorkspaceDeleted, WorkspaceEvent, WorkspaceUpdated,
+    ProviderCreated, ProviderDeleted, ProviderUpdated, RedactionCreated, ReviewApproved,
+    ReviewAssigned, ReviewChangesRequested, ReviewCommentCreated, ReviewDeleted, ReviewOpened,
+    ReviewRenamed, ReviewReopened, ReviewSubmitted, ReviewUnassigned, WebhookCreated,
+    WebhookDeleted, WebhookUpdated, WorkspaceCreated, WorkspaceDeleted, WorkspaceEvent,
+    WorkspaceUpdated,
 };
 
 /// Who raised an event and where.

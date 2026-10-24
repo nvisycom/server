@@ -68,8 +68,12 @@ db_enum! {
         ReviewDeleted = "review.deleted",
         /// A comment (message) was posted in a review.
         ReviewCommentCreated = "review.comment.created",
-        /// A review was verified.
-        ReviewVerified = "review.verified",
+        /// A review was submitted (or resubmitted) for review.
+        ReviewSubmitted = "review.submitted",
+        /// A reviewer requested changes on a review.
+        ReviewChangesRequested = "review.changes_requested",
+        /// A review was approved.
+        ReviewApproved = "review.approved",
         /// A review was assigned to a reviewer.
         ReviewAssigned = "review.assigned",
         /// A review's reviewer was unassigned.

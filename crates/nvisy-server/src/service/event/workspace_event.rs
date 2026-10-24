@@ -64,7 +64,10 @@ workspace_events! {
     ReviewRenamed           => "review.renamed",
     ReviewDeleted           => "review.deleted",
     ReviewCommentCreated    => "review.comment.created",
-    ReviewVerified          => "review.verified",
+    ReviewSubmitted         => "review.submitted",
+    ReviewChangesRequested  => "review.changes_requested",
+    ReviewApproved          => "review.approved",
+    ReviewReopened          => "review.reopened",
     ReviewAssigned          => "review.assigned",
     ReviewUnassigned        => "review.unassigned",
 
@@ -594,23 +597,23 @@ impl EventKind for ReviewCommentCreated {
     }
 }
 
-/// A review was verified (reached `resolved`). Raises no notification.
+/// A review was submitted (or resubmitted) for review. Raises no notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReviewVerified {
+pub struct ReviewSubmitted {
     pub review_id: Uuid,
     pub document_id: Uuid,
     pub document_name: String,
 }
 
-impl EventKind for ReviewVerified {
-    const TAG: &'static str = "review.verified";
+impl EventKind for ReviewSubmitted {
+    const TAG: &'static str = "review.submitted";
 
     fn resource_id(&self) -> Uuid {
         self.review_id
     }
 
     fn activity(&self) -> ActivityPayload {
-        ActivityPayload::ReviewVerified(ReviewActivityParams {
+        ActivityPayload::ReviewSubmitted(ReviewActivityParams {
             review_id: self.review_id,
             document_id: self.document_id,
             assignee_id: None,
@@ -619,7 +622,109 @@ impl EventKind for ReviewVerified {
 
     fn webhook(&self) -> Option<WebhookDelivery> {
         Some(WebhookDelivery {
-            event: WebhookEvent::ReviewVerified,
+            event: WebhookEvent::ReviewSubmitted,
+            body: webhook_body(&ReviewWebhookBody {
+                display_name: &self.document_name,
+                assignee_id: None,
+            }),
+        })
+    }
+}
+
+/// A reviewer requested changes on a review. Raises no notification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewChangesRequested {
+    pub review_id: Uuid,
+    pub document_id: Uuid,
+    pub document_name: String,
+}
+
+impl EventKind for ReviewChangesRequested {
+    const TAG: &'static str = "review.changes_requested";
+
+    fn resource_id(&self) -> Uuid {
+        self.review_id
+    }
+
+    fn activity(&self) -> ActivityPayload {
+        ActivityPayload::ReviewChangesRequested(ReviewActivityParams {
+            review_id: self.review_id,
+            document_id: self.document_id,
+            assignee_id: None,
+        })
+    }
+
+    fn webhook(&self) -> Option<WebhookDelivery> {
+        Some(WebhookDelivery {
+            event: WebhookEvent::ReviewChangesRequested,
+            body: webhook_body(&ReviewWebhookBody {
+                display_name: &self.document_name,
+                assignee_id: None,
+            }),
+        })
+    }
+}
+
+/// A review was approved (reached `approved`). Raises no notification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewApproved {
+    pub review_id: Uuid,
+    pub document_id: Uuid,
+    pub document_name: String,
+}
+
+impl EventKind for ReviewApproved {
+    const TAG: &'static str = "review.approved";
+
+    fn resource_id(&self) -> Uuid {
+        self.review_id
+    }
+
+    fn activity(&self) -> ActivityPayload {
+        ActivityPayload::ReviewApproved(ReviewActivityParams {
+            review_id: self.review_id,
+            document_id: self.document_id,
+            assignee_id: None,
+        })
+    }
+
+    fn webhook(&self) -> Option<WebhookDelivery> {
+        Some(WebhookDelivery {
+            event: WebhookEvent::ReviewApproved,
+            body: webhook_body(&ReviewWebhookBody {
+                display_name: &self.document_name,
+                assignee_id: None,
+            }),
+        })
+    }
+}
+
+/// An approved review was reopened (back to `in_review`). Raises no notification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewReopened {
+    pub review_id: Uuid,
+    pub document_id: Uuid,
+    pub document_name: String,
+}
+
+impl EventKind for ReviewReopened {
+    const TAG: &'static str = "review.reopened";
+
+    fn resource_id(&self) -> Uuid {
+        self.review_id
+    }
+
+    fn activity(&self) -> ActivityPayload {
+        ActivityPayload::ReviewReopened(ReviewActivityParams {
+            review_id: self.review_id,
+            document_id: self.document_id,
+            assignee_id: None,
+        })
+    }
+
+    fn webhook(&self) -> Option<WebhookDelivery> {
+        Some(WebhookDelivery {
+            event: WebhookEvent::ReviewReopened,
             body: webhook_body(&ReviewWebhookBody {
                 display_name: &self.document_name,
                 assignee_id: None,

@@ -12,6 +12,7 @@
 //!
 //! [`find`]: WorkspaceDetectionService::find
 
+use elide_pipeline::entity::EditSet;
 use elide_pipeline::governance::policy::Policy;
 use elide_pipeline::provider::DocumentContext;
 use nvisy_postgres::model::{
@@ -385,6 +386,42 @@ impl WorkspaceDetectionService {
     ) -> Result<(WorkspaceDetectionModel, Option<WorkspacePipeline>)> {
         let mut conn = self.postgres.get_connection().await?;
         conn.find_workspace_detection_by_id(workspace_id, detection_id)
+            .await?
+            .ok_or_else(|| Error::not_found("detection"))
+    }
+
+    /// Persists a detection's accumulated reviewer edits (`edit_set`), the manual
+    /// corrections layered over the base analysis at redact time. Passing `None`
+    /// clears them. The edits live on the detection so they survive between
+    /// redactions and a solo user keeps their work without opening a review. Returns
+    /// the updated detection.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the detection does not exist in the workspace.
+    /// - A database error if a connection or the query fails.
+    pub async fn set_edits(
+        &self,
+        workspace_id: Uuid,
+        detection_id: Uuid,
+        edits: Option<EditSet>,
+    ) -> Result<WorkspaceDetectionModel> {
+        let mut conn = self.postgres.get_connection().await?;
+        // The postgres layer stores the edit-set opaquely as raw JSON (it has no
+        // dependency on the engine's `EditSet` type), so encode to a value here.
+        let edit_set = edits
+            .as_ref()
+            .map(|edits| {
+                serde_json::to_value(edits)
+                    .map(Json::from_raw)
+                    .map_err(|err| {
+                        ErrorKind::InternalServerError
+                            .with_message("Failed to encode detection edits")
+                            .with_context(err.to_string())
+                    })
+            })
+            .transpose()?;
+        conn.set_detection_edits(workspace_id, detection_id, edit_set)
             .await?
             .ok_or_else(|| Error::not_found("detection"))
     }

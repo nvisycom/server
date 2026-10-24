@@ -1,5 +1,6 @@
 //! Review request types: open a review, rename it, address one by id, post and
-//! edit comments, link artifacts, assign/unassign, and filter the review queue.
+//! edit comments, point at a detection, approve, assign/unassign, and filter the
+//! review queue.
 
 use garde::Validate;
 use nvisy_postgres::types::{DetectionId, DocumentReviewFilter, RedactionId, ReviewStatus};
@@ -29,25 +30,31 @@ pub struct WorkspaceReviewDetectionPathParams {
     pub detection_id: DetectionId,
 }
 
-/// Path parameters addressing a review-to-redaction link.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceReviewRedactionPathParams {
-    /// Unique identifier of the review.
-    pub review_id: Uuid,
-    /// Opaque identifier of the redaction to reference.
-    pub redaction_id: RedactionId,
-}
-
 /// Request payload to open a review on a document.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct CreateWorkspaceReview {
     /// The review's title (1-255 characters).
     #[garde(length(chars, min = 1, max = 255), custom(validate_non_blank))]
     pub display_name: String,
+    /// The detection the review opens against (its subject); omit to open a draft
+    /// with no detection yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detection_id: Option<DetectionId>,
+}
+
+/// Request payload to approve a review.
+#[must_use]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
+pub struct ApproveWorkspaceReview {
+    /// The approved redaction to record as the review's output. Omit to approve
+    /// without (yet) binding an output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redaction_id: Option<RedactionId>,
 }
 
 /// Request payload to rename a review (set its title).

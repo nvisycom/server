@@ -89,8 +89,8 @@ pub use workspace_redactions::{RedactionCursor, WorkspaceRedactionRepository};
 pub use workspace_review_comments::WorkspaceReviewCommentRepository;
 pub use workspace_review_events::{TimelineCursor, TimelineSource, WorkspaceReviewEventRepository};
 pub use workspace_reviews::{
-    AssignmentOutcome, DocumentReviewCursor, ReviewEventCursor, WithActor, WithReviewers,
-    WorkspaceReviewRepository,
+    ApprovalOutcome, AssignmentOutcome, DocumentReviewCursor, ReviewEventCursor, WithActor,
+    WithReviewers, WorkspaceReviewRepository,
 };
 pub use workspace_webhooks::{WebhookCursor, WorkspaceWebhookRepository};
 pub use workspaces::WorkspaceRepository;

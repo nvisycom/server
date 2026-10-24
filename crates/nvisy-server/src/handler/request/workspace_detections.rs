@@ -140,18 +140,17 @@ impl From<CreateAdhocWorkspaceDetection> for CreateAdhocDetectionInput {
     }
 }
 
-/// Request payload to redact a detection.
+/// Request payload to set a detection's accumulated reviewer edits.
 ///
-/// The reviewer's edits layer over the detection's analysis before redaction:
-/// suppress a false positive, retag a detection, or add one the analysis missed.
-/// Omit `edits` to redact with the policy decisions exactly as detected. Each
-/// redact request produces a new redaction.
+/// The edits (suppress a false positive, retag a detection, add one the analysis
+/// missed) persist on the detection and are layered over its base analysis at redact
+/// time, so they survive between redactions. Omit `edits` to clear them.
 #[must_use]
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct RedactWorkspaceDetection {
-    /// Reviewer edits to apply before redaction, grouped by modality. Omit to
-    /// redact with the policy decisions exactly as detected.
+pub struct EditWorkspaceDetection {
+    /// The reviewer edits to persist, grouped by modality. Omit to clear the
+    /// detection's stored edits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edits: Option<EditSet>,
 }

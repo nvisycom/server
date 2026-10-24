@@ -15,12 +15,13 @@ use uuid::Uuid;
 
 use crate::client::PgClientMigrationExt;
 use crate::model::{
-    NewAccount, NewBlob, NewWorkspace, NewWorkspaceDocument, NewWorkspaceMember,
-    NewWorkspacePipeline,
+    NewAccount, NewBlob, NewWorkspace, NewWorkspaceDetection, NewWorkspaceDocument,
+    NewWorkspaceMember, NewWorkspacePipeline, NewWorkspaceRedaction,
 };
 use crate::query::{
-    AccountRepository, WorkspaceDocumentRepository, WorkspaceMemberRepository,
-    WorkspacePipelineRepository, WorkspaceRepository,
+    AccountRepository, WorkspaceDetectionRepository, WorkspaceDocumentRepository,
+    WorkspaceMemberRepository, WorkspacePipelineRepository, WorkspaceRedactionRepository,
+    WorkspaceRepository,
 };
 use crate::types::WorkspaceRole;
 use crate::{PgClient, PgConfig};
@@ -222,6 +223,41 @@ impl TestDatabase {
             document_id: document.id,
         }
     }
+
+    /// Seeds the [`seed_pipeline_and_document`](Self::seed_pipeline_and_document)
+    /// parents plus one detection over the document and one redaction produced from
+    /// it — the FK parents the review layer's `detection_id` / `redaction_id` need.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any insert fails.
+    pub async fn seed_detection_and_redaction(&self) -> SeededRedaction {
+        let seeded = self.seed_pipeline_and_document().await;
+        let mut conn = self
+            .client
+            .get_connection()
+            .await
+            .expect("failed to get a connection");
+        let detection = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.workspace_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.document_id,
+            ))
+            .await
+            .expect("failed to seed detection");
+        let redaction = conn
+            .create_redaction(NewWorkspaceRedaction::test(detection.id, seeded.account_id))
+            .await
+            .expect("failed to seed redaction");
+
+        SeededRedaction {
+            seeded,
+            detection_id: detection.id,
+            redaction_id: redaction.id,
+        }
+    }
 }
 
 /// An account and a workspace it owns, seeded for a test.
@@ -245,6 +281,18 @@ pub struct SeededPipeline {
     pub pipeline_id: Uuid,
     /// The input document.
     pub document_id: Uuid,
+}
+
+/// The [`SeededPipeline`] parents plus one detection over the document and one
+/// redaction produced from it.
+#[derive(Debug, Clone, Copy)]
+pub struct SeededRedaction {
+    /// The account, workspace, pipeline, and document parents.
+    pub seeded: SeededPipeline,
+    /// A detection over the input document.
+    pub detection_id: Uuid,
+    /// A redaction produced from the detection.
+    pub redaction_id: Uuid,
 }
 
 /// Test-only helpers that backdate a single row's timestamp column(s).

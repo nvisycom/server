@@ -87,6 +87,13 @@ CREATE TABLE workspace_detections (
     metadata        JSONB                   NOT NULL DEFAULT '{}',
     CONSTRAINT workspace_detections_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
 
+    -- Accumulated reviewer edits (the engine's EditSet: suppress/retag/add) layered
+    -- over the detection's immutable base analysis at redact time. Persisted here, not
+    -- per redact request, so manual corrections survive between redactions and a solo
+    -- user keeps their work without opening a review. NULL means no edits yet.
+    edit_set        JSONB                   DEFAULT NULL,
+    CONSTRAINT workspace_detections_edit_set_size CHECK (edit_set IS NULL OR length(edit_set::TEXT) <= 262144),
+
     -- Detection lease: when a worker last claimed this detection. A redelivered
     -- job whose claim is still fresh is skipped (no double-analyze); a stale claim
     -- (a worker that died mid-analysis) can be re-claimed. Null until claimed.
@@ -166,6 +173,7 @@ COMMENT ON COLUMN workspace_detections.status IS 'Current detection status';
 COMMENT ON COLUMN workspace_detections.idempotency_key IS 'Detect idempotency key (dedupes retries)';
 COMMENT ON COLUMN workspace_detections.retention_override IS 'Retention override the detection ran under, snapshotted at create; read on redact so output retention reflects the run, not a since-edited pipeline. NULL falls back to the workspace baseline';
 COMMENT ON COLUMN workspace_detections.metadata IS 'Non-encrypted metadata for filtering/display; holds the full per-call usage report under `usage`';
+COMMENT ON COLUMN workspace_detections.edit_set IS 'Accumulated reviewer edits (EditSet) applied over the base analysis at redact time; persists across redactions. NULL means none';
 COMMENT ON COLUMN workspace_detections.claimed_at IS 'Detection lease: when a worker last claimed this detection';
 COMMENT ON COLUMN workspace_detections.started_at IS 'When the detection started';
 COMMENT ON COLUMN workspace_detections.completed_at IS 'When the detection completed; NULL while in flight';

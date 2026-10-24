@@ -54,6 +54,11 @@ pub struct WorkspaceDetection {
     pub retention_override: Option<Json<RetentionOverride>>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Json<DetectionMetadata>,
+    /// Accumulated reviewer edits (the engine's `EditSet`) layered over the base
+    /// analysis at redact time, so manual corrections persist between redactions.
+    /// Stored opaquely as JSON here (the engine type lives in the server layer);
+    /// `None` means no edits yet.
+    pub edit_set: Option<Json<serde_json::Value>>,
     /// When a worker last claimed this detection. Acts as a lease: a redelivered
     /// job whose claim is still fresh is skipped, while a stale claim (a worker
     /// that died mid-analysis) can be re-claimed. `None` until first claimed.
@@ -132,6 +137,8 @@ pub struct UpdateWorkspaceDetection {
     pub audit_blob_id: Option<Option<Uuid>>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<Json<DetectionMetadata>>,
+    /// Accumulated reviewer edits; outer `None` leaves it, inner `None` clears it.
+    pub edit_set: Option<Option<Json<serde_json::Value>>>,
     /// When a worker last claimed this detection (lease timestamp).
     pub claimed_at: Option<Option<Timestamp>>,
     /// When the detection completed analysis.

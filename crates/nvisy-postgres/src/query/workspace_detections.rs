@@ -14,7 +14,7 @@ use crate::model::{
     WorkspacePipeline,
 };
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, DetectionFilter, DetectionStatus, keyset,
+    AccountRefRow, CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Json, keyset,
 };
 use crate::{Error, PgConnection, Result, schema};
 
@@ -181,6 +181,18 @@ pub trait WorkspaceDetectionRepository {
         updates: UpdateWorkspaceDetection,
     ) -> impl Future<Output = Result<bool>> + Send;
 
+    /// Sets a live detection's accumulated reviewer edits (`edit_set`), scoped to
+    /// its workspace. Pass `Some` to store the edits, `None` to clear them. Returns
+    /// the updated detection, or `None` when no live detection matches. These edits
+    /// are layered over the detection's immutable base analysis at redact time and
+    /// persist across redactions.
+    fn set_detection_edits(
+        &mut self,
+        workspace_id: Uuid,
+        detection_id: Uuid,
+        edit_set: Option<Json<serde_json::Value>>,
+    ) -> impl Future<Output = Result<Option<WorkspaceDetection>>> + Send;
+
     /// Records a detection's inference usage: one call row per model call, with
     /// the meters each spent. A no-op for an empty slice (a deterministic
     /// detection makes no model calls). Written once, at analyze time, inside the
@@ -206,6 +218,28 @@ impl WorkspaceDetectionRepository for PgConnection {
             .map_err(Error::from)?;
 
         Ok(detection)
+    }
+
+    async fn set_detection_edits(
+        &mut self,
+        workspace_id: Uuid,
+        detection_id: Uuid,
+        edit_set: Option<Json<serde_json::Value>>,
+    ) -> Result<Option<WorkspaceDetection>> {
+        use schema::workspace_detections::{self, dsl};
+
+        diesel::update(
+            workspace_detections::table
+                .filter(dsl::id.eq(detection_id))
+                .filter(dsl::workspace_id.eq(workspace_id))
+                .filter(dsl::deleted_at.is_null()),
+        )
+        .set(dsl::edit_set.eq(edit_set))
+        .returning(WorkspaceDetection::as_returning())
+        .get_result(self)
+        .await
+        .optional()
+        .map_err(Error::from)
     }
 
     async fn find_workspace_detection_by_id(
