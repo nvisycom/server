@@ -465,17 +465,22 @@ impl WorkspaceReviewService {
 
         let submitted = conn
             .transaction(async |conn| {
-                let submitted = conn.submit_review(review_id, origin.account_id).await?;
-                conn.emit_event(
-                    origin,
-                    event::WorkspaceEvent::ReviewSubmitted(event::ReviewSubmitted {
-                        review_id: review.id,
-                        document_id: document.id,
-                        document_name: document.display_name.clone(),
-                    }),
-                )
-                .await?;
-                Ok::<_, Error>(submitted)
+                let outcome = conn.submit_review(review_id, origin.account_id).await?;
+                // Fire the event only on a real transition: a concurrent submit that
+                // lost the race under the lock reports `changed = false` and must not
+                // re-announce the submission.
+                if outcome.changed {
+                    conn.emit_event(
+                        origin,
+                        event::WorkspaceEvent::ReviewSubmitted(event::ReviewSubmitted {
+                            review_id: review.id,
+                            document_id: document.id,
+                            document_name: document.display_name.clone(),
+                        }),
+                    )
+                    .await?;
+                }
+                Ok::<_, Error>(outcome.review)
             })
             .await?;
 
@@ -609,6 +614,14 @@ impl WorkspaceReviewService {
                 let outcome = conn
                     .approve_review(review_id, origin.account_id, required, redaction_id)
                     .await?;
+                // A later approval that names a different output than the one already
+                // bound is rejected under the lock: the quorum must endorse one
+                // redaction, so the approver either approves the bound one or reopens.
+                if outcome.rebind_rejected {
+                    return Err(ErrorKind::Conflict.with_message(
+                        "This review already has an approved redaction; approve that one or reopen the review to change it",
+                    ));
+                }
                 // Announce approval only when this call recorded a new approval that
                 // reached quorum. `recorded` guards the lost-race case: if a concurrent
                 // request-changes won between the unlocked pre-check and the row lock,
@@ -656,17 +669,22 @@ impl WorkspaceReviewService {
 
         let reopened = conn
             .transaction(async |conn| {
-                let reopened = conn.reopen_review(review_id, origin.account_id).await?;
-                conn.emit_event(
-                    origin,
-                    event::WorkspaceEvent::ReviewReopened(event::ReviewReopened {
-                        review_id: review.id,
-                        document_id: document.id,
-                        document_name: document.display_name.clone(),
-                    }),
-                )
-                .await?;
-                Ok::<_, Error>(reopened)
+                let outcome = conn.reopen_review(review_id, origin.account_id).await?;
+                // Fire the event only on a real transition: a concurrent reopen that
+                // lost the race under the lock reports `changed = false` and must not
+                // re-announce the reopen.
+                if outcome.changed {
+                    conn.emit_event(
+                        origin,
+                        event::WorkspaceEvent::ReviewReopened(event::ReviewReopened {
+                            review_id: review.id,
+                            document_id: document.id,
+                            document_name: document.display_name.clone(),
+                        }),
+                    )
+                    .await?;
+                }
+                Ok::<_, Error>(outcome.review)
             })
             .await?;
 
@@ -729,9 +747,10 @@ impl WorkspaceReviewService {
         Ok(updated)
     }
 
-    /// Removes a reviewer from a review. Raises the review-unassigned event.
-    /// Assignment is metadata; removing an assignee does not change the review's
-    /// status.
+    /// Removes a reviewer from a review. Raises the review-unassigned event. Removing
+    /// a reviewer who had approved drops their approval, so a review that thereby falls
+    /// below the workspace's required approvals is demoted (an approved review returns
+    /// to in-review and drops its approved output).
     ///
     /// # Errors
     ///
@@ -746,11 +765,17 @@ impl WorkspaceReviewService {
         let mut conn = self.postgres.get_connection().await?;
         let review = find_review(&mut conn, origin.workspace_id, review_id).await?;
         let document = review_document(&mut conn, &review).await?;
+        // Removing an approved assignee can drop the review below quorum, so the repo
+        // reconciles the status under its lock against the workspace's required count.
+        let required = self
+            .review_settings(&mut conn, origin.workspace_id)
+            .await?
+            .required_approvals();
 
         let updated = conn
             .transaction(async |conn| {
                 let outcome = conn
-                    .remove_assignee(review_id, account_id, origin.account_id)
+                    .remove_assignee(review_id, account_id, origin.account_id, required)
                     .await?;
                 // Emit only when a link was actually removed (removing a
                 // non-assignee is a silent no-op).

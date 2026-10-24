@@ -93,8 +93,9 @@ pub trait WorkspaceDetectionRepository {
     ) -> impl Future<Output = Result<Option<WorkspaceDetection>>> + Send;
 
     /// Lists all of a workspace's detections with cursor pagination, scoped by the
-    /// detection's own `workspace_id`. `filter` narrows by status, document, policy,
-    /// and/or triggering account.
+    /// detection's own `workspace_id`. `filter` narrows by status, document, and/or
+    /// triggering account; the policy filter matches a detection through its pinned
+    /// policy versions, so it excludes any detection with no recorded versions.
     fn cursor_list_workspace_detections(
         &mut self,
         workspace_id: Uuid,

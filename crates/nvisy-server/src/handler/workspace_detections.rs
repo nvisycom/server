@@ -181,8 +181,7 @@ fn list_workspace_detections_docs(op: TransformOperation) -> TransformOperation 
     op.summary("List workspace detections")
         .description(
             "Returns all detections across the workspace, most recent first, \
-             with optional status, document, policy, trigger-account, and \
-             trigger-type filters.",
+             with optional status, document, policy, and trigger-account filters.",
         )
         .response::<200, Json<WorkspaceDetectionsPage>>()
         .response::<401, Json<ErrorResponse>>()

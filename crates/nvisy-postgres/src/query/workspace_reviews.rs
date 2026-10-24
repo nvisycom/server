@@ -146,11 +146,18 @@ pub trait WorkspaceReviewRepository {
     /// existed. Does not change the review's status. The [`AssignmentOutcome`] reports
     /// the review and whether a link was actually removed (`false` when the reviewer
     /// was not assigned).
+    /// Removes `account_id` from the review's assignees, recording an `unassigned`
+    /// event when a row was removed. If the removed reviewer had approved, their
+    /// approval is removed with the row, so the review's status is reconciled under
+    /// the same lock: should the remaining approvals fall below `required_approvals`,
+    /// an `approved` review is demoted (clearing its approved output) and a
+    /// `partially_approved` review with no approvals left returns to `in_review`.
     fn remove_assignee(
         &mut self,
         review_id: Uuid,
         account_id: Uuid,
         actor: Uuid,
+        required_approvals: u32,
     ) -> impl Future<Output = Result<AssignmentOutcome>> + Send;
 
     /// Lists a review's assignees' account references.
@@ -161,13 +168,15 @@ pub trait WorkspaceReviewRepository {
 
     /// Submits (or resubmits) a review for review, moving it from `draft` or
     /// `changes_requested` to `in_review` and recording a `submitted` event. Locks
-    /// the review first; returned unchanged when it is already `in_review` (the domain
-    /// layer pre-checks to report a clean conflict for other states).
+    /// the review first and re-checks the status under the lock: a review in any other
+    /// state is returned unchanged (`changed = false`), so a
+    /// concurrent submit that lost the race neither reverts an approval nor re-fires
+    /// the event.
     fn submit_review(
         &mut self,
         review_id: Uuid,
         actor: Uuid,
-    ) -> impl Future<Output = Result<WorkspaceReview>> + Send;
+    ) -> impl Future<Output = Result<StatusOutcome>> + Send;
 
     /// Requests changes on a review, moving it to `changes_requested`, clearing all
     /// accumulated approvals, and recording a `changes_requested` event. Locks the
@@ -194,13 +203,15 @@ pub trait WorkspaceReviewRepository {
     ) -> impl Future<Output = Result<ApprovalOutcome>> + Send;
 
     /// Reopens an approved review back to `in_review`, clearing its approvals and its
-    /// approved `redaction_id`, and recording a `reopened` event. A no-op returning
-    /// the review when it is not approved.
+    /// approved `redaction_id`, and recording a `reopened` event. Locks the review
+    /// first and re-checks the status under the lock: a review that is not approved is
+    /// returned unchanged (`changed = false`), so a concurrent
+    /// reopen that lost the race does not re-fire the event.
     fn reopen_review(
         &mut self,
         review_id: Uuid,
         actor: Uuid,
-    ) -> impl Future<Output = Result<WorkspaceReview>> + Send;
+    ) -> impl Future<Output = Result<StatusOutcome>> + Send;
 
     /// Lists a review's activity events with cursor pagination, each paired with
     /// the actor's account reference (when the account still exists). Order follows
@@ -217,12 +228,24 @@ pub trait WorkspaceReviewRepository {
 
 /// The result of an assignee add/remove: the review and whether the operation
 /// actually changed anything (`false` for an idempotent no-op — an already-assigned
-/// add or a not-assigned remove). Assignment does not change the review's status.
+/// add or a not-assigned remove). Adding never changes the status; removing an
+/// assignee who had approved can demote a review that thereby falls below quorum.
 #[derive(Debug, Clone)]
 pub struct AssignmentOutcome {
     /// The review after the operation.
     pub review: WorkspaceReview,
     /// Whether a link was added or removed (vs an idempotent no-op).
+    pub changed: bool,
+}
+
+/// The result of a status transition (submit, reopen): the review and whether the
+/// status actually changed (`false` for a no-op, e.g. a concurrent request that lost
+/// the race under the lock). The caller fires the lifecycle event only when `changed`.
+#[derive(Debug, Clone)]
+pub struct StatusOutcome {
+    /// The review after the operation.
+    pub review: WorkspaceReview,
+    /// Whether the status transitioned (vs an unchanged no-op).
     pub changed: bool,
 }
 
@@ -237,6 +260,9 @@ pub struct ApprovalOutcome {
     pub recorded: bool,
     /// The count of distinct approvals on the review after the operation.
     pub approvals: u32,
+    /// `true` when the approval named a different output than the one already bound
+    /// to the review, so nothing was stamped. The domain layer maps this to a 409.
+    pub rebind_rejected: bool,
 }
 
 /// A review event paired with its actor's account reference (absent when the
@@ -565,11 +591,24 @@ impl WorkspaceReviewRepository for PgConnection {
         review_id: Uuid,
         account_id: Uuid,
         actor: Uuid,
+        required_approvals: u32,
     ) -> Result<AssignmentOutcome> {
         self.transaction(async |conn| {
             use schema::workspace_review_assignees as wra;
 
             let review = lock_review(conn, review_id).await?;
+
+            // Capture whether this assignee had approved before deleting the row: an
+            // approved reviewer's removal drops one approval, so the review's status may
+            // need to be recomputed below.
+            let had_approved: Option<Option<jiff_diesel::Timestamp>> = wra::table
+                .filter(wra::review_id.eq(review_id))
+                .filter(wra::account_id.eq(account_id))
+                .select(wra::approved_at)
+                .first(conn)
+                .await
+                .optional()
+                .map_err(Error::from)?;
 
             let deleted = diesel::delete(
                 wra::table
@@ -597,8 +636,43 @@ impl WorkspaceReviewRepository for PgConnection {
             )
             .await?;
 
-            // Assignment is metadata only; removing an assignee does not change the
-            // review's status.
+            // Removing an assignee who had not approved cannot change the decision, so
+            // the status stands. Removing one who had approved drops an approval: if the
+            // remaining count no longer meets quorum, demote the review under the same
+            // lock so it never sits `approved` (or keeps an approved output) on fewer
+            // approvals than the policy requires.
+            let removed_an_approval = matches!(had_approved, Some(Some(_)));
+            let mut review = review;
+            if removed_an_approval
+                && matches!(
+                    review.review_status,
+                    ReviewStatus::Approved | ReviewStatus::PartiallyApproved
+                )
+            {
+                let approvals = count_approvals(conn, review_id).await?;
+                if approvals < required_approvals.max(1) {
+                    // Below quorum: an approved review returns to in_review and drops its
+                    // approved output; a partially-approved review with approvals left
+                    // stays partial, and one with none left returns to in_review.
+                    let status = if approvals == 0 {
+                        ReviewStatus::InReview
+                    } else {
+                        ReviewStatus::PartiallyApproved
+                    };
+                    let clear_output = review.review_status == ReviewStatus::Approved;
+                    review = apply_update(
+                        conn,
+                        review_id,
+                        UpdateWorkspaceReview {
+                            review_status: Some(status),
+                            redaction_id: clear_output.then_some(None),
+                            ..Default::default()
+                        },
+                    )
+                    .await?;
+                }
+            }
+
             Ok(AssignmentOutcome {
                 review,
                 changed: true,
@@ -625,20 +699,32 @@ impl WorkspaceReviewRepository for PgConnection {
             .map_err(Error::from)
     }
 
-    async fn submit_review(&mut self, review_id: Uuid, actor: Uuid) -> Result<WorkspaceReview> {
+    async fn submit_review(&mut self, review_id: Uuid, actor: Uuid) -> Result<StatusOutcome> {
         self.transaction(async |conn| {
             let review = lock_review(conn, review_id).await?;
 
-            // Already in review: idempotent no-op (the domain layer pre-checks and
-            // reports a 409 for states that cannot submit, so this only guards a
-            // concurrent double-submit).
-            if review.review_status == ReviewStatus::InReview {
-                return Ok(review);
+            // Re-check the status under the row lock: the domain pre-check runs on an
+            // unlocked read, so only here is the repository authoritative. Only a draft
+            // or pushed-back review submits; any other state (already in review, or a
+            // concurrent approve won the race) is left untouched — in particular an
+            // approved review must not revert to in_review with its approval stamps
+            // still set.
+            if !matches!(
+                review.review_status,
+                ReviewStatus::Draft | ReviewStatus::ChangesRequested
+            ) {
+                return Ok(StatusOutcome {
+                    review,
+                    changed: false,
+                });
             }
 
             let review = update_status(conn, review_id, ReviewStatus::InReview).await?;
             record_event(conn, &review, ReviewEventKind::Submitted, actor, None).await?;
-            Ok(review)
+            Ok(StatusOutcome {
+                review,
+                changed: true,
+            })
         })
         .await
     }
@@ -712,6 +798,26 @@ impl WorkspaceReviewRepository for PgConnection {
                     review,
                     recorded: false,
                     approvals,
+                    rebind_rejected: false,
+                });
+            }
+
+            // Once an earlier approval has bound an output, every later approval must
+            // name that same redaction (or name none and inherit it). A quorum is only
+            // meaningful if all its approvals endorse the same output; allowing a later
+            // approver to rebind would mark the review approved for a redaction an
+            // earlier approver never saw. Checked under the lock so the binding cannot
+            // change between this read and the stamp below; the domain layer maps the
+            // rejection to a 409.
+            if let (Some(bound), Some(named)) = (review.redaction_id, output)
+                && bound != named
+            {
+                let approvals = count_approvals(conn, review_id).await?;
+                return Ok(ApprovalOutcome {
+                    review,
+                    recorded: false,
+                    approvals,
+                    rebind_rejected: true,
                 });
             }
 
@@ -740,6 +846,7 @@ impl WorkspaceReviewRepository for PgConnection {
                     review,
                     recorded: false,
                     approvals,
+                    rebind_rejected: false,
                 });
             }
 
@@ -781,18 +888,24 @@ impl WorkspaceReviewRepository for PgConnection {
                 review,
                 recorded: true,
                 approvals,
+                rebind_rejected: false,
             })
         })
         .await
     }
 
-    async fn reopen_review(&mut self, review_id: Uuid, actor: Uuid) -> Result<WorkspaceReview> {
+    async fn reopen_review(&mut self, review_id: Uuid, actor: Uuid) -> Result<StatusOutcome> {
         self.transaction(async |conn| {
             let review = lock_review(conn, review_id).await?;
 
-            // Only an approved review reopens; otherwise leave it as is.
+            // Re-check the status under the row lock: only an approved review reopens.
+            // Any other state (a concurrent reopen already won) is left untouched and
+            // reported unchanged, so the event does not fire twice.
             if review.review_status != ReviewStatus::Approved {
-                return Ok(review);
+                return Ok(StatusOutcome {
+                    review,
+                    changed: false,
+                });
             }
 
             // Reopening invalidates the approvals and the approved output: the review
@@ -809,7 +922,10 @@ impl WorkspaceReviewRepository for PgConnection {
             )
             .await?;
             record_event(conn, &review, ReviewEventKind::Reopened, actor, None).await?;
-            Ok(review)
+            Ok(StatusOutcome {
+                review,
+                changed: true,
+            })
         })
         .await
     }
@@ -1004,12 +1120,15 @@ async fn attach_assignees(
 
 #[cfg(test)]
 mod tests {
+    use super::count_approvals;
     use crate::model::{
-        NewAccount, NewWorkspaceReview, NewWorkspaceReviewComment, UpdateWorkspaceReviewComment,
+        NewAccount, NewWorkspaceRedaction, NewWorkspaceReview, NewWorkspaceReviewComment,
+        UpdateWorkspaceReviewComment,
     };
     use crate::query::{
-        AccountRepository, TimelineCursor, TimelineSource, WorkspaceReviewCommentRepository,
-        WorkspaceReviewEventRepository, WorkspaceReviewRepository,
+        AccountRepository, TimelineCursor, TimelineSource, WorkspaceRedactionRepository,
+        WorkspaceReviewCommentRepository, WorkspaceReviewEventRepository,
+        WorkspaceReviewRepository,
     };
     use crate::test_util::TestDatabase;
     use crate::types::{
@@ -1347,21 +1466,21 @@ mod tests {
         assert_eq!(again.review.review_status, ReviewStatus::Draft);
         assert_eq!(conn.list_review_assignees(review.id).await?.len(), 2);
 
-        // Removing assignees never moves the status either.
+        // Removing assignees who have not approved never moves the status.
         let one_left = conn
-            .remove_assignee(review.id, bob, seeded.account_id)
+            .remove_assignee(review.id, bob, seeded.account_id, 1)
             .await?;
         assert!(one_left.changed);
         assert_eq!(one_left.review.review_status, ReviewStatus::Draft);
         let none_left = conn
-            .remove_assignee(review.id, seeded.account_id, seeded.account_id)
+            .remove_assignee(review.id, seeded.account_id, seeded.account_id, 1)
             .await?;
         assert_eq!(none_left.review.review_status, ReviewStatus::Draft);
         assert_eq!(conn.list_review_assignees(review.id).await?, vec![]);
 
         // Removing a not-assigned reviewer is a no-op (changed = false).
         let noop = conn
-            .remove_assignee(review.id, bob, seeded.account_id)
+            .remove_assignee(review.id, bob, seeded.account_id, 1)
             .await?;
         assert!(!noop.changed, "removing a non-assignee changes nothing");
 
@@ -1407,7 +1526,8 @@ mod tests {
 
         // submit: draft -> in_review.
         let submitted = conn.submit_review(review.id, seeded.account_id).await?;
-        assert_eq!(submitted.review_status, ReviewStatus::InReview);
+        assert!(submitted.changed);
+        assert_eq!(submitted.review.review_status, ReviewStatus::InReview);
 
         // request-changes: in_review -> changes_requested.
         let pushed_back = conn.request_changes(review.id, seeded.account_id).await?;
@@ -1415,7 +1535,8 @@ mod tests {
 
         // resubmit (submit from changes_requested): -> in_review.
         let resubmitted = conn.submit_review(review.id, seeded.account_id).await?;
-        assert_eq!(resubmitted.review_status, ReviewStatus::InReview);
+        assert!(resubmitted.changed);
+        assert_eq!(resubmitted.review.review_status, ReviewStatus::InReview);
 
         // approve with a single required approval: -> approved, output recorded. A
         // reviewer approves by stamping their own assignee row, so assign first.
@@ -1432,8 +1553,9 @@ mod tests {
 
         // reopen: approved -> in_review, approvals + output cleared.
         let reopened = conn.reopen_review(review.id, seeded.account_id).await?;
-        assert_eq!(reopened.review_status, ReviewStatus::InReview);
-        assert_eq!(reopened.redaction_id, None);
+        assert!(reopened.changed);
+        assert_eq!(reopened.review.review_status, ReviewStatus::InReview);
+        assert_eq!(reopened.review.redaction_id, None);
 
         let kinds: Vec<_> = conn
             .cursor_list_review_events(
@@ -1564,6 +1686,152 @@ mod tests {
         // absent output on the final approval does not clear it.
         assert_eq!(approved.review.review_status, ReviewStatus::Approved);
         assert_eq!(approved.review.redaction_id, Some(redaction_id));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_later_approval_cannot_rebind_the_output() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let fixture = db.seed_detection_and_redaction().await;
+        let seeded = fixture.seeded;
+        let redaction_id = fixture.redaction_id;
+        let bob = {
+            let mut conn = db.client.get_connection().await?;
+            conn.create_account(NewAccount::test()).await?.id
+        };
+        let mut conn = db.client.get_connection().await?;
+
+        // A second redaction of the same detection: a valid, different output.
+        let other_redaction = conn
+            .create_redaction(NewWorkspaceRedaction::test(
+                fixture.detection_id,
+                seeded.account_id,
+            ))
+            .await?
+            .id;
+
+        let review = conn
+            .create_review(NewWorkspaceReview::test(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            ))
+            .await?;
+        conn.submit_review(review.id, seeded.account_id).await?;
+        conn.add_assignee(review.id, seeded.account_id, seeded.account_id)
+            .await?;
+        conn.add_assignee(review.id, bob, seeded.account_id).await?;
+
+        // The first approver binds one output.
+        conn.approve_review(review.id, seeded.account_id, 2, Some(redaction_id))
+            .await?;
+
+        // A second approver naming a different output is rejected under the lock:
+        // nothing is stamped, the binding stands, and the status does not advance.
+        let rebind = conn
+            .approve_review(review.id, bob, 2, Some(other_redaction))
+            .await?;
+        assert!(rebind.rebind_rejected);
+        assert!(!rebind.recorded);
+        assert_eq!(rebind.approvals, 1);
+        assert_eq!(rebind.review.review_status, ReviewStatus::PartiallyApproved);
+        assert_eq!(rebind.review.redaction_id, Some(redaction_id));
+
+        // The second approver endorsing the already-bound output meets quorum.
+        let agreed = conn
+            .approve_review(review.id, bob, 2, Some(redaction_id))
+            .await?;
+        assert!(agreed.recorded);
+        assert_eq!(agreed.review.review_status, ReviewStatus::Approved);
+        assert_eq!(agreed.review.redaction_id, Some(redaction_id));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_is_a_no_op_once_a_review_is_approved() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let fixture = db.seed_detection_and_redaction().await;
+        let seeded = fixture.seeded;
+        let redaction_id = fixture.redaction_id;
+        let mut conn = db.client.get_connection().await?;
+
+        let review = conn
+            .create_review(NewWorkspaceReview::test(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            ))
+            .await?;
+        conn.submit_review(review.id, seeded.account_id).await?;
+        conn.add_assignee(review.id, seeded.account_id, seeded.account_id)
+            .await?;
+        conn.approve_review(review.id, seeded.account_id, 1, Some(redaction_id))
+            .await?;
+
+        // A submit racing in after the review is approved finds it in a non-submittable
+        // state under the lock: it changes nothing and leaves the approval intact.
+        let outcome = conn.submit_review(review.id, seeded.account_id).await?;
+        assert!(!outcome.changed, "an approved review does not re-submit");
+        assert_eq!(outcome.review.review_status, ReviewStatus::Approved);
+        assert_eq!(outcome.review.redaction_id, Some(redaction_id));
+        assert_eq!(
+            count_approvals(&mut conn, review.id).await?,
+            1,
+            "the approval stamp survives the no-op submit"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn removing_an_approved_assignee_demotes_below_quorum() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let fixture = db.seed_detection_and_redaction().await;
+        let seeded = fixture.seeded;
+        let redaction_id = fixture.redaction_id;
+        let bob = {
+            let mut conn = db.client.get_connection().await?;
+            conn.create_account(NewAccount::test()).await?.id
+        };
+        let mut conn = db.client.get_connection().await?;
+
+        let review = conn
+            .create_review(NewWorkspaceReview::test(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            ))
+            .await?;
+        conn.submit_review(review.id, seeded.account_id).await?;
+        conn.add_assignee(review.id, seeded.account_id, seeded.account_id)
+            .await?;
+        conn.add_assignee(review.id, bob, seeded.account_id).await?;
+
+        // Two approvals meet a quorum of two: approved, output bound.
+        conn.approve_review(review.id, seeded.account_id, 2, Some(redaction_id))
+            .await?;
+        let approved = conn.approve_review(review.id, bob, 2, None).await?;
+        assert_eq!(approved.review.review_status, ReviewStatus::Approved);
+
+        // Removing one approver drops to one approval, below the quorum of two: the
+        // review returns to partially_approved and its approved output is cleared.
+        let outcome = conn
+            .remove_assignee(review.id, bob, seeded.account_id, 2)
+            .await?;
+        assert!(outcome.changed);
+        assert_eq!(
+            outcome.review.review_status,
+            ReviewStatus::PartiallyApproved
+        );
+        assert_eq!(
+            outcome.review.redaction_id, None,
+            "the approved output is cleared when the review falls below quorum"
+        );
+
+        // Removing the last approver too drops to zero approvals: back to in_review.
+        let outcome = conn
+            .remove_assignee(review.id, seeded.account_id, seeded.account_id, 2)
+            .await?;
+        assert_eq!(outcome.review.review_status, ReviewStatus::InReview);
         Ok(())
     }
 
