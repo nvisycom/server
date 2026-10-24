@@ -26,13 +26,13 @@ pub struct PolicyWithVersion {
     pub version: WorkspacePolicyVersion,
 }
 
-/// A resolved one-shot policy, and whether this call created it.
+/// A resolved derived policy, and whether this call created it.
 #[derive(Debug, Clone)]
-pub struct OneshotPolicy {
+pub struct DerivedPolicy {
     /// The policy and its current version.
     pub policy: PolicyWithVersion,
     /// `true` when a fresh row was inserted, `false` when an identical live
-    /// one-shot was reused.
+    /// derived policy was reused.
     pub created: bool,
 }
 
@@ -57,22 +57,22 @@ pub trait WorkspacePolicyRepository {
         version_metadata: Option<serde_json::Value>,
     ) -> impl Future<Output = Result<PolicyWithVersion>> + Send;
 
-    /// Returns the live one-shot policy with the same content in this workspace,
+    /// Returns the live derived policy with the same content in this workspace,
     /// creating it if absent.
     ///
-    /// One-shot policies are content-addressed by `content_hash` (a hash of the
-    /// labels plus action): an identical one-shot is reused rather than duplicated,
-    /// so re-redacting the same label set does not accumulate rows. A fresh policy
-    /// is created with its first version; a reused one keeps its existing current
-    /// version (no new version is minted). `new_policy.kind` must be `Oneshot` and
-    /// `new_policy.content_hash` must match `content_hash`.
-    fn find_or_create_oneshot_policy(
+    /// Derived policies are content-addressed by `content_hash` (a hash of the
+    /// labels plus action): an identical derived policy is reused rather than
+    /// duplicated, so re-redacting the same label set does not accumulate rows. A
+    /// fresh policy is created with its first version; a reused one keeps its
+    /// existing current version (no new version is minted). `new_policy.kind` must
+    /// be `Derived` and `new_policy.content_hash` must match `content_hash`.
+    fn find_or_create_derived_policy(
         &mut self,
         new_policy: NewWorkspacePolicy,
         content_hash: Vec<u8>,
         definition: serde_json::Value,
         version_metadata: Option<serde_json::Value>,
-    ) -> impl Future<Output = Result<OneshotPolicy>> + Send;
+    ) -> impl Future<Output = Result<DerivedPolicy>> + Send;
 
     /// Creates a logical policy with a placeholder definition version, returning
     /// just the logical policy — a convenience for tests that do not exercise the
@@ -198,26 +198,26 @@ impl WorkspacePolicyRepository for PgConnection {
         .await
     }
 
-    async fn find_or_create_oneshot_policy(
+    async fn find_or_create_derived_policy(
         &mut self,
         new_policy: NewWorkspacePolicy,
         content_hash: Vec<u8>,
         definition: serde_json::Value,
         version_metadata: Option<serde_json::Value>,
-    ) -> Result<OneshotPolicy> {
-        if new_policy.kind != PolicyKind::Oneshot
+    ) -> Result<DerivedPolicy> {
+        if new_policy.kind != PolicyKind::Derived
             || new_policy.content_hash.as_deref() != Some(content_hash.as_slice())
         {
             return Err(Error::unexpected(
-                "one-shot policy kind and content hash do not match",
+                "derived policy kind and content hash do not match",
             ));
         }
 
         let workspace_id = new_policy.workspace_id;
 
-        // Reuse an identical live one-shot if one already exists.
-        if let Some(existing) = find_live_oneshot(self, workspace_id, &content_hash).await? {
-            return Ok(OneshotPolicy {
+        // Reuse an identical live derived policy if one already exists.
+        if let Some(existing) = find_live_derived(self, workspace_id, &content_hash).await? {
+            return Ok(DerivedPolicy {
                 policy: existing,
                 created: false,
             });
@@ -230,15 +230,15 @@ impl WorkspacePolicyRepository for PgConnection {
             .create_workspace_policy(new_policy, definition, version_metadata)
             .await
         {
-            Ok(policy) => Ok(OneshotPolicy {
+            Ok(policy) => Ok(DerivedPolicy {
                 policy,
                 created: true,
             }),
             Err(err) if err.is_unique_violation() => {
-                let existing = find_live_oneshot(self, workspace_id, &content_hash)
+                let existing = find_live_derived(self, workspace_id, &content_hash)
                     .await?
                     .ok_or(err)?;
-                Ok(OneshotPolicy {
+                Ok(DerivedPolicy {
                     policy: existing,
                     created: false,
                 })
@@ -396,7 +396,7 @@ impl WorkspacePolicyRepository for PgConnection {
         use schema::{accounts, workspace_policies};
 
         // The list carries every kind; `kind` narrows to one when set. A client
-        // distinguishes authored from one-shot policies by the `kind` field.
+        // distinguishes authored from derived policies by the `kind` field.
         let total = if pagination.include_count {
             let mut count_query = workspace_policies::table
                 .filter(dsl::workspace_id.eq(workspace_id))
@@ -494,10 +494,10 @@ impl WorkspacePolicyRepository for PgConnection {
     }
 }
 
-/// Finds the live one-shot policy with `content_hash` in a workspace, paired with
-/// its current version. Only `kind = Oneshot` rows carry a content hash, so this
+/// Finds the live derived policy with `content_hash` in a workspace, paired with
+/// its current version. Only `kind = Derived` rows carry a content hash, so this
 /// never matches an authored policy.
-async fn find_live_oneshot(
+async fn find_live_derived(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     content_hash: &[u8],
@@ -758,18 +758,18 @@ mod tests {
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
-        let mut new_oneshot = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
-        new_oneshot.kind = PolicyKind::Oneshot;
-        new_oneshot.content_hash = Some(vec![9, 9, 9]);
-        let oneshot = conn
-            .find_or_create_oneshot_policy(
-                new_oneshot,
+        let mut new_derived = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        new_derived.kind = PolicyKind::Derived;
+        new_derived.content_hash = Some(vec![9, 9, 9]);
+        let derived = conn
+            .find_or_create_derived_policy(
+                new_derived,
                 vec![9, 9, 9],
                 serde_json::json!({"v":1}),
                 None,
             )
             .await?;
-        assert_eq!(oneshot.policy.policy.kind, PolicyKind::Oneshot);
+        assert_eq!(derived.policy.policy.kind, PolicyKind::Derived);
 
         let authored = conn
             .create_test_policy(NewWorkspacePolicy::test(
@@ -784,19 +784,19 @@ mod tests {
             .await?;
         let all_ids: Vec<Uuid> = all.items.iter().map(|p| p.item.id).collect();
         assert!(all_ids.contains(&authored.id));
-        assert!(all_ids.contains(&oneshot.policy.policy.id));
+        assert!(all_ids.contains(&derived.policy.policy.id));
 
         // Filtering narrows to the requested kind.
-        let only_oneshot = conn
+        let only_derived = conn
             .cursor_list_workspace_policies(
                 seeded.workspace_id,
                 CursorPagination::new(50),
-                Some(PolicyKind::Oneshot),
+                Some(PolicyKind::Derived),
             )
             .await?;
-        let oneshot_ids: Vec<Uuid> = only_oneshot.items.iter().map(|p| p.item.id).collect();
-        assert!(oneshot_ids.contains(&oneshot.policy.policy.id));
-        assert!(!oneshot_ids.contains(&authored.id));
+        let derived_ids: Vec<Uuid> = only_derived.items.iter().map(|p| p.item.id).collect();
+        assert!(derived_ids.contains(&derived.policy.policy.id));
+        assert!(!derived_ids.contains(&authored.id));
 
         let only_authored = conn
             .cursor_list_workspace_policies(
@@ -807,21 +807,21 @@ mod tests {
             .await?;
         let authored_ids: Vec<Uuid> = only_authored.items.iter().map(|p| p.item.id).collect();
         assert!(authored_ids.contains(&authored.id));
-        assert!(!authored_ids.contains(&oneshot.policy.policy.id));
+        assert!(!authored_ids.contains(&derived.policy.policy.id));
         Ok(())
     }
 
     #[tokio::test]
-    async fn oneshot_dedups_identical_content_and_distinguishes_different() -> anyhow::Result<()> {
+    async fn derived_dedups_identical_content_and_distinguishes_different() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
         let mut first_new = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
-        first_new.kind = PolicyKind::Oneshot;
+        first_new.kind = PolicyKind::Derived;
         first_new.content_hash = Some(vec![1, 1, 1]);
         let first = conn
-            .find_or_create_oneshot_policy(
+            .find_or_create_derived_policy(
                 first_new,
                 vec![1, 1, 1],
                 serde_json::json!({"v":7}),
@@ -832,10 +832,10 @@ mod tests {
 
         // Same content reuses the same row and mints no new version.
         let mut again_new = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
-        again_new.kind = PolicyKind::Oneshot;
+        again_new.kind = PolicyKind::Derived;
         again_new.content_hash = Some(vec![1, 1, 1]);
         let again = conn
-            .find_or_create_oneshot_policy(
+            .find_or_create_derived_policy(
                 again_new,
                 vec![1, 1, 1],
                 serde_json::json!({"v":7}),
@@ -854,10 +854,10 @@ mod tests {
 
         // Different content creates a distinct row.
         let mut other_new = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
-        other_new.kind = PolicyKind::Oneshot;
+        other_new.kind = PolicyKind::Derived;
         other_new.content_hash = Some(vec![2, 2, 2]);
         let other = conn
-            .find_or_create_oneshot_policy(
+            .find_or_create_derived_policy(
                 other_new,
                 vec![2, 2, 2],
                 serde_json::json!({"v":8}),
@@ -870,17 +870,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn find_or_create_oneshot_rejects_mismatched_kind_or_hash() -> anyhow::Result<()> {
+    async fn find_or_create_derived_rejects_mismatched_kind_or_hash() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
-        // An authored kind is not a one-shot: rejected before any write.
+        // An authored kind is not a derived: rejected before any write.
         let mut wrong_kind = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
         wrong_kind.kind = PolicyKind::Authored;
         wrong_kind.content_hash = Some(vec![9, 9, 9]);
         assert!(
-            conn.find_or_create_oneshot_policy(
+            conn.find_or_create_derived_policy(
                 wrong_kind,
                 vec![9, 9, 9],
                 serde_json::json!({"v":1}),
@@ -893,10 +893,10 @@ mod tests {
 
         // A content hash that disagrees with the lookup key is rejected.
         let mut wrong_hash = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
-        wrong_hash.kind = PolicyKind::Oneshot;
+        wrong_hash.kind = PolicyKind::Derived;
         wrong_hash.content_hash = Some(vec![1, 1, 1]);
         assert!(
-            conn.find_or_create_oneshot_policy(
+            conn.find_or_create_derived_policy(
                 wrong_hash,
                 vec![2, 2, 2],
                 serde_json::json!({"v":1}),
@@ -915,12 +915,12 @@ mod tests {
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
-        let mut new_oneshot = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
-        new_oneshot.kind = PolicyKind::Oneshot;
-        new_oneshot.content_hash = Some(vec![5, 5, 5]);
-        let oneshot = conn
-            .find_or_create_oneshot_policy(
-                new_oneshot,
+        let mut new_derived = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        new_derived.kind = PolicyKind::Derived;
+        new_derived.content_hash = Some(vec![5, 5, 5]);
+        let derived = conn
+            .find_or_create_derived_policy(
+                new_derived,
                 vec![5, 5, 5],
                 serde_json::json!({"v":1}),
                 None,
@@ -929,7 +929,7 @@ mod tests {
 
         // Clearing the hash takes the content out of the dedup set.
         conn.update_workspace_policy(
-            oneshot.policy.policy.id,
+            derived.policy.policy.id,
             UpdateWorkspacePolicy {
                 kind: Some(PolicyKind::Authored),
                 content_hash: Some(None),
@@ -938,12 +938,12 @@ mod tests {
         )
         .await?;
 
-        // A new one-shot with the same content now creates a fresh row.
+        // A new derived with the same content now creates a fresh row.
         let mut again_new = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
-        again_new.kind = PolicyKind::Oneshot;
+        again_new.kind = PolicyKind::Derived;
         again_new.content_hash = Some(vec![5, 5, 5]);
         let again = conn
-            .find_or_create_oneshot_policy(
+            .find_or_create_derived_policy(
                 again_new,
                 vec![5, 5, 5],
                 serde_json::json!({"v":1}),
@@ -951,7 +951,7 @@ mod tests {
             )
             .await?;
         assert!(again.created);
-        assert_ne!(again.policy.policy.id, oneshot.policy.policy.id);
+        assert_ne!(again.policy.policy.id, derived.policy.policy.id);
         Ok(())
     }
 

@@ -52,7 +52,7 @@ pub enum PolicyBodyInput {
         /// The client-authored policy body.
         definition: Box<PolicyDraftInput>,
     },
-    /// A one-shot body: a bare list of labels, each erased.
+    /// A derived policy body: a bare list of labels, each erased.
     Labels {
         /// The built-in labels to detect and erase.
         labels: Vec<String>,
@@ -60,14 +60,14 @@ pub enum PolicyBodyInput {
 }
 
 impl PolicyBodyInput {
-    /// The content-address hash of a one-shot body, or `None` for template/inline.
+    /// The content-address hash of a derived policy body, or `None` for template/inline.
     ///
-    /// A one-shot is identified by its label set (every one-shot erases, so the
-    /// action is not part of the identity). Labels are sorted and deduplicated so
-    /// the same set hashes equally regardless of order, letting an identical
-    /// one-shot be reused rather than duplicated. The minted definition `id` is not
-    /// part of the hash.
-    pub fn oneshot_content_hash(&self) -> Option<Vec<u8>> {
+    /// A derived policy is identified by its label set (every derived policy
+    /// erases, so the action is not part of the identity). Labels are sorted and
+    /// deduplicated so the same set hashes equally regardless of order, letting an
+    /// identical derived policy be reused rather than duplicated. The minted
+    /// definition `id` is not part of the hash.
+    pub fn derived_content_hash(&self) -> Option<Vec<u8>> {
         let PolicyBodyInput::Labels { labels } = self else {
             return None;
         };
@@ -112,7 +112,7 @@ impl PolicyBodyInput {
 
 /// Input for creating a policy: the body plus optional identity overrides.
 pub struct CreatePolicyInput {
-    /// Optional display name override; ignored for a one-shot body.
+    /// Optional display name override; ignored for a derived policy body.
     pub display_name: Option<String>,
     /// Optional description override.
     pub description: Option<String>,
@@ -141,8 +141,8 @@ mod tests {
             labels: vec!["person_name".to_owned(), "email_address".to_owned()],
         };
 
-        let definition = body.into_definition("Quick redaction abc123");
-        assert_eq!(&*definition.name, "Quick redaction abc123");
+        let definition = body.into_definition("d-abc123");
+        assert_eq!(&*definition.name, "d-abc123");
         assert!(definition.rules.is_empty());
         assert_eq!(definition.scopes.len(), 1);
         let labels: Vec<&str> = definition.scopes[0]
@@ -158,19 +158,19 @@ mod tests {
     }
 
     #[test]
-    fn oneshot_hash_is_order_insensitive() {
+    fn derived_hash_is_order_insensitive() {
         let a = PolicyBodyInput::Labels {
             labels: vec!["person_name".to_owned(), "email_address".to_owned()],
         };
         let b = PolicyBodyInput::Labels {
             labels: vec!["email_address".to_owned(), "person_name".to_owned()],
         };
-        assert_eq!(a.oneshot_content_hash(), b.oneshot_content_hash());
+        assert_eq!(a.derived_content_hash(), b.derived_content_hash());
 
         let different = PolicyBodyInput::Labels {
             labels: vec!["ip_address".to_owned()],
         };
-        assert_ne!(a.oneshot_content_hash(), different.oneshot_content_hash());
+        assert_ne!(a.derived_content_hash(), different.derived_content_hash());
 
         let inline = PolicyBodyInput::Inline {
             definition: Box::new(PolicyDraftInput {
@@ -181,6 +181,6 @@ mod tests {
                 fallback: None,
             }),
         };
-        assert!(inline.oneshot_content_hash().is_none());
+        assert!(inline.derived_content_hash().is_none());
     }
 }

@@ -303,7 +303,7 @@ pub(crate) async fn resolve_policies(
 /// ad-hoc detection that names its policies directly rather than through a
 /// pipeline.
 ///
-/// Each id must resolve to a live policy of any kind (authored or one-shot) in
+/// Each id must resolve to a live policy of any kind (authored or derived) in
 /// the workspace; an unknown id fails the run. Returns the same
 /// [`ResolvedPolicy`] shape as [`resolve_policies`], so the caller pins versions
 /// identically.

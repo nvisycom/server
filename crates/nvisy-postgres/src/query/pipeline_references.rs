@@ -41,7 +41,7 @@ pub trait PipelineReferenceRepository {
     /// preserving request order.
     ///
     /// Each id must name a live (not soft-deleted) authored policy in the
-    /// workspace; one-shot policies are excluded and so do not validate. Returns
+    /// workspace; derived policies are excluded and so do not validate. Returns
     /// `None` if any id fails to validate, so the caller can reject the whole set
     /// rather than silently dropping an unknown reference. An empty input
     /// validates to an empty vec.
@@ -115,8 +115,8 @@ impl PipelineReferenceRepository for PgConnection {
             return Ok(Some(Vec::new()));
         }
 
-        // One-shot policies are not attachable to a pipeline: a pipeline references
-        // authored policies only. Excluding them here means a one-shot id validates
+        // Derived policies are not attachable to a pipeline: a pipeline references
+        // authored policies only. Excluding them here means a derived id validates
         // as unknown, so attachment rejects it.
         let found: Vec<Uuid> = workspace_policies::table
             .filter(dsl::workspace_id.eq(workspace_id))
@@ -289,25 +289,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn validate_policy_ids_ignores_oneshot_policies() -> anyhow::Result<()> {
+    async fn validate_policy_ids_ignores_derived_policies() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
-        let mut new_oneshot = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
-        new_oneshot.kind = PolicyKind::Oneshot;
-        new_oneshot.content_hash = Some(vec![3, 3, 3]);
-        let oneshot = conn
-            .find_or_create_oneshot_policy(
-                new_oneshot,
+        let mut new_derived = NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id);
+        new_derived.kind = PolicyKind::Derived;
+        new_derived.content_hash = Some(vec![3, 3, 3]);
+        let derived = conn
+            .find_or_create_derived_policy(
+                new_derived,
                 vec![3, 3, 3],
                 serde_json::json!({"v":1}),
                 None,
             )
             .await?;
-        let policy_id = oneshot.policy.policy.id;
+        let policy_id = derived.policy.policy.id;
 
-        // A one-shot policy's id does not validate for pipeline attachment, so the
+        // A derived policy's id does not validate for pipeline attachment, so the
         // set is rejected as if the id were unknown.
         assert_eq!(
             conn.validate_policy_ids(seeded.workspace_id, std::slice::from_ref(&policy_id))

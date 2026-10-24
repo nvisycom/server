@@ -32,7 +32,7 @@ pub struct WorkspacePolicy {
     pub definition: Policy,
     /// The current version number of the policy's definition.
     pub version_number: i32,
-    /// How the policy came to exist. A one-shot policy (minted from labels) is
+    /// How the policy came to exist. A derived policy (minted from labels) is
     /// content-addressed, deduplicated, and immutable; an authored policy is a
     /// normal, editable policy.
     pub kind: PolicyKind,
@@ -63,7 +63,7 @@ pub struct WorkspacePolicySummary {
     /// Policy description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// How the policy came to exist. A one-shot policy (minted from labels) is
+    /// How the policy came to exist. A derived policy (minted from labels) is
     /// content-addressed, deduplicated, and immutable; an authored policy is a
     /// normal, editable policy.
     pub kind: PolicyKind,

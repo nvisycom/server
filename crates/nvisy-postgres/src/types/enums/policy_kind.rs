@@ -7,12 +7,14 @@ db_enum! {
     ///
     /// Corresponds to the `POLICY_KIND` `PostgreSQL` enum. An authored policy is a
     /// normal, editable policy created from a template or an inline definition. A
-    /// one-shot policy is minted inline from a bare label list (the ad-hoc redact
+    /// derived policy is minted inline from a bare label list (the ad-hoc redact
     /// flow): it is content-addressed and deduplicated, and immutable once minted.
+    /// A derived policy can be promoted to an authored one, which clears its
+    /// content hash and makes it editable and attachable to pipelines.
     pub enum PolicyKind: Default = Authored, "crate::schema::sql_types::PolicyKind" {
         /// A normal, editable policy (template or inline definition).
         Authored = "authored",
-        /// A one-shot policy minted from labels, content-addressed and immutable.
-        Oneshot = "oneshot",
+        /// A policy derived from a label list, content-addressed and immutable.
+        Derived = "derived",
     }
 }
