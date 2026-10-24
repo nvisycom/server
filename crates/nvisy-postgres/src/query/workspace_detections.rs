@@ -299,6 +299,21 @@ impl WorkspaceDetectionRepository for PgConnection {
             if let Some(trigger_type) = filter.trigger_type {
                 query = query.filter(dsl::trigger_type.eq(trigger_type));
             }
+            if let Some(policy_id) = filter.policy_id {
+                use schema::{
+                    workspace_detection_policy_versions as dpv, workspace_policy_versions as pv,
+                };
+                // A detection ran against a policy when it pinned any version of
+                // that policy. EXISTS avoids the row duplication a join would cause
+                // for a detection that pinned several versions.
+                query = query.filter(diesel::dsl::exists(
+                    dpv::table.inner_join(pv::table).filter(
+                        dpv::detection_id
+                            .eq(dsl::id)
+                            .and(pv::policy_id.eq(policy_id)),
+                    ),
+                ));
+            }
             query
         };
 
@@ -401,6 +416,21 @@ impl WorkspaceDetectionRepository for PgConnection {
             }
             if let Some(trigger_type) = filter.trigger_type {
                 query = query.filter(detections::trigger_type.eq(trigger_type));
+            }
+            if let Some(policy_id) = filter.policy_id {
+                use schema::{
+                    workspace_detection_policy_versions as dpv, workspace_policy_versions as pv,
+                };
+                // A detection ran against a policy when it pinned any version of
+                // that policy. EXISTS avoids the row duplication a join would cause
+                // for a detection that pinned several versions.
+                query = query.filter(diesel::dsl::exists(
+                    dpv::table.inner_join(pv::table).filter(
+                        dpv::detection_id
+                            .eq(detections::id)
+                            .and(pv::policy_id.eq(policy_id)),
+                    ),
+                ));
             }
             query
         };
@@ -1068,6 +1098,74 @@ mod tests {
         assert!(
             page.items[0].input_document_name.is_some(),
             "input document name should resolve through the join"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cursor_list_filters_by_policy() -> anyhow::Result<()> {
+        use crate::model::NewWorkspacePolicy;
+        use crate::query::{DetectionPolicyVersionRepository, WorkspacePolicyRepository};
+
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_pipeline_and_document().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // Two policies, each with one version.
+        let policy_a = conn
+            .create_workspace_policy(
+                NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id),
+                serde_json::json!({ "v": "a" }),
+                None,
+            )
+            .await?;
+        let policy_b = conn
+            .create_workspace_policy(
+                NewWorkspacePolicy::test(seeded.workspace_id, seeded.account_id),
+                serde_json::json!({ "v": "b" }),
+                None,
+            )
+            .await?;
+
+        // One detection pinned to policy A, another to policy B.
+        let detection_a = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.workspace_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.document_id,
+            ))
+            .await?;
+        conn.record_detection_policy_versions(detection_a.id, &[policy_a.version.id])
+            .await?;
+        let detection_b = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.workspace_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.document_id,
+            ))
+            .await?;
+        conn.record_detection_policy_versions(detection_b.id, &[policy_b.version.id])
+            .await?;
+
+        // Filtering by policy A returns only the detection that ran against it.
+        let page = conn
+            .cursor_list_workspace_detections(
+                seeded.workspace_id,
+                CursorPagination::new(50),
+                &DetectionFilter {
+                    policy_id: Some(policy_a.policy.id),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert_eq!(
+            page.items
+                .iter()
+                .map(|r| r.detection.id)
+                .collect::<Vec<_>>(),
+            vec![detection_a.id]
         );
         Ok(())
     }

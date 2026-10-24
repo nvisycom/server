@@ -24,6 +24,8 @@ pub struct WorkspaceDetectionsQuery {
     pub document_id: Option<Uuid>,
     /// Filter by the owning pipeline.
     pub pipeline_id: Option<Uuid>,
+    /// Filter to detections that ran against a specific policy (any version).
+    pub policy_id: Option<Uuid>,
     /// Filter by the account that triggered the detection.
     pub triggered_by: Option<Uuid>,
     /// Filter by how the detection was initiated (user vs system).
@@ -36,6 +38,7 @@ impl From<WorkspaceDetectionsQuery> for DetectionFilter {
             status: query.status,
             input_document_id: query.document_id,
             pipeline_id: query.pipeline_id,
+            policy_id: query.policy_id,
             account_id: query.triggered_by,
             trigger_type: query.trigger_type,
         }
@@ -44,7 +47,7 @@ impl From<WorkspaceDetectionsQuery> for DetectionFilter {
 
 /// Query parameters for listing a single pipeline's detections.
 ///
-/// The pipeline is fixed by the route, so it narrows only by status, file,
+/// The pipeline is fixed by the route, so it narrows only by status, file, policy,
 /// trigger account, and trigger type.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +56,8 @@ pub struct WorkspacePipelineDetectionsQuery {
     pub status: Option<DetectionStatus>,
     /// Filter by the source document the detection analyzes.
     pub document_id: Option<Uuid>,
+    /// Filter to detections that ran against a specific policy (any version).
+    pub policy_id: Option<Uuid>,
     /// Filter by the account that triggered the detection.
     pub triggered_by: Option<Uuid>,
     /// Filter by how the detection was initiated (user vs system).
@@ -65,6 +70,7 @@ impl From<WorkspacePipelineDetectionsQuery> for DetectionFilter {
             status: query.status,
             input_document_id: query.document_id,
             pipeline_id: None,
+            policy_id: query.policy_id,
             account_id: query.triggered_by,
             trigger_type: query.trigger_type,
         }
@@ -102,7 +108,7 @@ impl From<CreateWorkspaceDetection> for CreateDetectionInput {
 /// Request payload to start an ad-hoc detection over a document, naming its
 /// policies directly rather than through a pipeline.
 ///
-/// Analyzes the document against the given policies (authored or one-shot) and
+/// Analyzes the document against the given policies (authored or derived) and
 /// returns the detection holding the findings for review before redaction.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]

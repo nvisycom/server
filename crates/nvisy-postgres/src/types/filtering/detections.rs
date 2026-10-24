@@ -24,6 +24,10 @@ pub struct DetectionFilter {
     /// (already scoped to one pipeline); used by the workspace-wide listing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pipeline_id: Option<Uuid>,
+    /// Filter to detections that ran against a specific policy, matching any of
+    /// its versions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_id: Option<Uuid>,
     /// Filter by the account that triggered the detection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_id: Option<Uuid>,
