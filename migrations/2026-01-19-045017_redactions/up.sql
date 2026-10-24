@@ -61,6 +61,6 @@ COMMENT ON COLUMN workspace_redactions.created_at IS 'When the redaction was cre
 COMMENT ON COLUMN workspace_redactions.deleted_at IS 'Soft-deletion timestamp; NULL means live. The row is kept as a ledger record; only its blob bytes are reclaimed';
 
 -- Redaction creation feeds the activity log, webhooks, and in-app notifications.
-ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'pipeline.redaction.created';
-ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'pipeline.redaction.created';
-ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'pipeline.redaction.created';
+ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'redaction.created';
+ALTER TYPE WEBHOOK_EVENT ADD VALUE IF NOT EXISTS 'redaction.created';
+ALTER TYPE NOTIFICATION_EVENT ADD VALUE IF NOT EXISTS 'redaction.created';

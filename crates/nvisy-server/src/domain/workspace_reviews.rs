@@ -89,7 +89,7 @@ impl WorkspaceReviewService {
 
         // A detection the review opens against must analyze the review's document.
         if let Some(detection_id) = detection_id {
-            let (detection, _) = conn
+            let detection = conn
                 .find_workspace_detection_by_id(workspace_id, detection_id)
                 .await?
                 .ok_or_else(|| Error::not_found("workspace_detection"))?;
@@ -422,7 +422,7 @@ impl WorkspaceReviewService {
     ) -> Result<WorkspaceReview> {
         let mut conn = self.postgres.get_connection().await?;
         let review = find_review(&mut conn, workspace_id, review_id).await?;
-        let (detection, _) = conn
+        let detection = conn
             .find_workspace_detection_by_id(workspace_id, detection_id)
             .await?
             .ok_or_else(|| Error::not_found("workspace_detection"))?;
@@ -591,7 +591,7 @@ impl WorkspaceReviewService {
                 .find_redaction_in_workspace(workspace_id, redaction_id)
                 .await?
                 .ok_or_else(|| Error::not_found("workspace_redaction"))?;
-            let (detection, _) = conn
+            let detection = conn
                 .find_workspace_detection_by_id(workspace_id, redaction.detection_id)
                 .await?
                 .ok_or_else(|| Error::not_found("workspace_detection"))?;

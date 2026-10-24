@@ -38,8 +38,7 @@ pub trait WorkspaceRedactionRepository {
     ///
     /// A [`RedactionId`] is globally unique, so a redaction is addressable by id
     /// alone; this resolves it only within the given workspace by joining through
-    /// its detection's own workspace, so an ad-hoc detection (no pipeline) or one
-    /// whose pipeline was deleted still resolves.
+    /// its detection's own workspace.
     ///
     /// [`RedactionId`]: crate::types::RedactionId
     fn find_redaction_in_workspace(
@@ -59,8 +58,7 @@ pub trait WorkspaceRedactionRepository {
     /// narrowed by an optional detection and document.
     ///
     /// Redactions carry no workspace column; the scope (and the `document_id`
-    /// filter) is applied through the redaction's detection, so an ad-hoc
-    /// detection (no pipeline) or one whose pipeline was deleted still resolves.
+    /// filter) is applied through the redaction's detection within its workspace.
     fn cursor_list_workspace_redactions(
         &mut self,
         workspace_id: Uuid,
@@ -96,8 +94,7 @@ impl WorkspaceRedactionRepository for PgConnection {
         use schema::{workspace_detections, workspace_redactions};
 
         // Redactions carry no workspace column; scope through the detection's own
-        // workspace so the id resolves only within its workspace, including an
-        // ad-hoc detection (no pipeline) and one whose pipeline was deleted.
+        // workspace so the id resolves only within its workspace.
         let redaction = workspace_redactions::table
             .inner_join(workspace_detections::table)
             .filter(redactions::id.eq(redaction_id))
@@ -240,36 +237,28 @@ mod tests {
 
     use super::*;
     use crate::model::{NewWorkspaceDetection, NewWorkspaceRedaction};
-    use crate::query::{
-        WorkspaceDetectionRepository, WorkspacePipelineRepository, WorkspaceRedactionRepository,
-    };
+    use crate::query::{WorkspaceDetectionRepository, WorkspaceRedactionRepository};
     use crate::test_util::{TestDatabase, backdate};
 
-    /// Seeds a detection and returns `(account_id, workspace_id, pipeline_id,
-    /// detection_id)` — a redaction's FK parent plus the context tests scope on.
-    async fn seed_detection(db: &TestDatabase) -> anyhow::Result<(Uuid, Uuid, Uuid, Uuid)> {
-        let seeded = db.seed_pipeline_and_document().await;
+    /// Seeds a detection and returns `(account_id, workspace_id, detection_id)` — a
+    /// redaction's FK parent plus the context tests scope on.
+    async fn seed_detection(db: &TestDatabase) -> anyhow::Result<(Uuid, Uuid, Uuid)> {
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.workspace_id,
-                seeded.pipeline_id,
                 seeded.account_id,
                 seeded.document_id,
             ))
             .await?;
-        Ok((
-            seeded.account_id,
-            seeded.workspace_id,
-            seeded.pipeline_id,
-            detection.id,
-        ))
+        Ok((seeded.account_id, seeded.workspace_id, detection.id))
     }
 
     #[tokio::test]
     async fn create_then_find_is_scoped_to_the_detection_workspace() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, workspace_id, _pipeline, detection_id) = seed_detection(&db).await?;
+        let (account_id, workspace_id, detection_id) = seed_detection(&db).await?;
         let mut conn = db.client.get_connection().await?;
 
         let redaction = conn
@@ -292,35 +281,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_redaction_resolves_after_its_pipeline_is_soft_deleted() -> anyhow::Result<()> {
-        let db = TestDatabase::start().await;
-        let (account_id, workspace_id, pipeline_id, detection_id) = seed_detection(&db).await?;
-        let mut conn = db.client.get_connection().await?;
-
-        let redaction = conn
-            .create_redaction(NewWorkspaceRedaction::test(detection_id, account_id))
-            .await?;
-        assert!(
-            conn.find_redaction_in_workspace(workspace_id, redaction.id)
-                .await?
-                .is_some()
-        );
-
-        // The redaction is scoped by its detection's workspace, not its pipeline,
-        // so soft-deleting the owning pipeline leaves it discoverable.
-        conn.delete_workspace_pipeline(pipeline_id).await?;
-        assert!(
-            conn.find_redaction_in_workspace(workspace_id, redaction.id)
-                .await?
-                .is_some()
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn cursor_list_returns_a_detections_redactions_newest_first() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let (account_id, _ws, _pipeline, detection_id) = seed_detection(&db).await?;
+        let (account_id, _ws, detection_id) = seed_detection(&db).await?;
         let mut conn = db.client.get_connection().await?;
 
         // Backdate `first` an hour so the newest-first order is deterministic.
@@ -361,7 +324,7 @@ mod tests {
         use crate::types::RedactionFilter;
 
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         // Two detections in the same workspace over two different documents, each
@@ -378,7 +341,6 @@ mod tests {
         let detection_a = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.workspace_id,
-                seeded.pipeline_id,
                 seeded.account_id,
                 doc_a,
             ))
@@ -387,7 +349,6 @@ mod tests {
         let detection_b = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.workspace_id,
-                seeded.pipeline_id,
                 seeded.account_id,
                 doc_b,
             ))

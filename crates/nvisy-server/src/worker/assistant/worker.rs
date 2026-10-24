@@ -39,7 +39,7 @@ const TRACING_TARGET: &str = "nvisy_server::worker::assistant";
 const PREAMBLE: &str = "You are the assistant for a document redaction platform. \
      You are replying inside a review's discussion where a user has mentioned you. \
      Help the user understand and operate their workspace: redaction policies, \
-     detections, pipelines, and the discussion in this review. You do not have \
+     detections, and the discussion in this review. You do not have \
      access to the contents of any document. Be concise and accurate.";
 
 /// Fallback concurrency when the runtime cannot report available parallelism.

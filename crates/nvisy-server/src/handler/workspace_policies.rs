@@ -244,10 +244,10 @@ fn update_policy_docs(op: TransformOperation) -> TransformOperation {
 
 /// Promotes a derived policy to an authored one.
 ///
-/// A derived (ad-hoc) policy is immutable and not attachable to pipelines;
-/// promoting it clears its content hash and makes it editable and attachable,
-/// keeping its id and current definition. Rejected for an already-authored
-/// policy. Requires `ManagePolicies` permission.
+/// A derived (ad-hoc) policy is immutable and content-addressed; promoting it
+/// clears its content hash and makes it an editable, reusable authored policy
+/// selectable for detections, keeping its id and current definition. Rejected for
+/// an already-authored policy. Requires `ManagePolicies` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -291,8 +291,8 @@ fn promote_policy_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Promote policy")
         .description(
             "Promotes a derived (ad-hoc) policy to an authored one: clears its \
-             content hash and makes it editable and attachable to pipelines, \
-             keeping its id and current definition. A `displayName` is required and \
+             content hash and makes it an editable, reusable policy selectable for \
+             detections, keeping its id and current definition. A `displayName` is required and \
              replaces the policy's generated hash name. Returns 400 if the policy is \
              already authored.",
         )

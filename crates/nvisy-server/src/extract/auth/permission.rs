@@ -34,16 +34,6 @@ pub enum Permission {
     /// Can delete documents from the workspace.
     DeleteDocuments,
 
-    // Pipeline permissions
-    /// Can view pipelines in the workspace.
-    ViewPipelines,
-    /// Can create new pipelines.
-    CreatePipelines,
-    /// Can update existing pipelines.
-    UpdatePipelines,
-    /// Can delete pipelines.
-    DeletePipelines,
-
     // Detection permissions
     /// Can view detections and their results (analyses, redactions, audits).
     ViewDetections,
@@ -135,7 +125,6 @@ impl Permission {
             | Self::ViewDocuments
             | Self::DownloadRedactedDocuments
             | Self::DownloadAudit
-            | Self::ViewPipelines
             | Self::ViewDetections
             | Self::ViewReviews
             | Self::Review
@@ -152,9 +141,6 @@ impl Permission {
             | Self::UpdateDocuments
             | Self::DownloadOriginalDocuments
             | Self::DeleteDocuments
-            | Self::CreatePipelines
-            | Self::UpdatePipelines
-            | Self::DeletePipelines
             | Self::RunDetections
             | Self::RunRedactions
             | Self::ManageReviews

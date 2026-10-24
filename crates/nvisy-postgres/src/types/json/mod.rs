@@ -7,7 +7,6 @@
 mod activity_params;
 mod detection_metadata;
 mod notification_params;
-mod pipeline_metadata;
 mod retention;
 mod typed_json;
 mod webhook_headers;
@@ -16,9 +15,9 @@ mod workspace_settings;
 
 pub use activity_params::{
     ActivityPayload, ConnectionActivityParams, DetectionActivityParams, DocumentActivityParams,
-    InviteActivityParams, MemberActivityParams, PipelineActivityParams, PolicyActivityParams,
-    ProviderActivityParams, RedactionActivityParams, ReviewActivityParams,
-    ReviewCommentActivityParams, WebhookActivityParams, WorkspaceActivityParams,
+    InviteActivityParams, MemberActivityParams, PolicyActivityParams, ProviderActivityParams,
+    RedactionActivityParams, ReviewActivityParams, ReviewCommentActivityParams,
+    WebhookActivityParams, WorkspaceActivityParams,
 };
 pub use detection_metadata::DetectionMetadata;
 pub use notification_params::{
@@ -26,8 +25,7 @@ pub use notification_params::{
     DetectionCompletedParams, DetectionFailedParams, MemberJoinedParams, NotificationPayload,
     RedactionCreatedParams, ReviewAssignedParams,
 };
-pub use pipeline_metadata::{PipelineMetadata, RetentionOverride};
-pub use retention::{Retention, RetentionScope, RetentionSettings};
+pub use retention::{Retention, RetentionOverride, RetentionScope, RetentionSettings};
 pub use typed_json::Json;
 pub use webhook_headers::{InvalidHeader, WebhookHeaders};
 pub use workspace_metadata::WorkspaceMetadata;

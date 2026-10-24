@@ -53,7 +53,7 @@ async fn list_detection_redactions(
 
     // Confirm the detection exists in this workspace (404 otherwise) before
     // listing its redactions.
-    let (detection, _pipeline) = detections
+    let detection = detections
         .find(workspace.id, path_params.detection_id.as_uuid())
         .await?;
 
@@ -210,7 +210,7 @@ fn get_redaction_review_docs(op: TransformOperation) -> TransformOperation {
 /// Loads a redaction scoped to the workspace, mapping a missing one to a 404.
 ///
 /// A [`RedactionId`] is globally unique, so the redaction is addressed by id
-/// alone and resolved within the workspace via its detection's pipeline.
+/// alone and resolved within the workspace through its detection.
 ///
 /// [`RedactionId`]: nvisy_postgres::types::RedactionId
 async fn find_redaction(

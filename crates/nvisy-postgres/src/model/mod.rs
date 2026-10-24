@@ -7,7 +7,6 @@ mod account_api_tokens;
 mod account_identities;
 mod account_notifications;
 mod accounts;
-mod pipeline_references;
 mod workspace_activities;
 mod workspace_assistant_jobs;
 mod workspace_blobs;
@@ -24,7 +23,6 @@ mod workspace_documents;
 mod workspace_event_outbox;
 mod workspace_invites;
 mod workspace_members;
-mod workspace_pipelines;
 mod workspace_policies;
 mod workspace_policy_versions;
 mod workspace_providers;
@@ -42,7 +40,6 @@ pub use account_notifications::{
     AccountNotification, NewAccountNotification, UpdateAccountNotification,
 };
 pub use accounts::{Account, NewAccount, UpdateAccount};
-pub use pipeline_references::PipelinePolicy;
 pub use workspace_activities::{NewWorkspaceActivity, WorkspaceActivity};
 pub use workspace_assistant_jobs::{NewWorkspaceAssistantJob, WorkspaceAssistantJob};
 pub use workspace_blobs::{Blob, NewBlob};
@@ -69,7 +66,6 @@ pub use workspace_documents::{NewWorkspaceDocument, UpdateWorkspaceDocument, Wor
 pub use workspace_event_outbox::{NewWorkspaceEventOutbox, WorkspaceEventOutbox};
 pub use workspace_invites::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
 pub use workspace_members::{NewWorkspaceMember, UpdateWorkspaceMember, WorkspaceMember};
-pub use workspace_pipelines::{NewWorkspacePipeline, UpdateWorkspacePipeline, WorkspacePipeline};
 pub use workspace_policies::{NewWorkspacePolicy, UpdateWorkspacePolicy, WorkspacePolicy};
 pub use workspace_policy_versions::{NewWorkspacePolicyVersion, WorkspacePolicyVersion};
 pub use workspace_providers::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};

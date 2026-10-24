@@ -19,7 +19,6 @@ mod account_notifications;
 mod accounts;
 mod analytics;
 mod blob_pointers;
-mod pipeline_references;
 mod search;
 mod workspace_activities;
 mod workspace_assistant_jobs;
@@ -34,7 +33,6 @@ mod workspace_documents;
 mod workspace_event_outbox;
 mod workspace_invites;
 mod workspace_members;
-mod workspace_pipelines;
 mod workspace_policies;
 mod workspace_policy_versions;
 mod workspace_providers;
@@ -59,7 +57,6 @@ pub use blob_pointers::{
     clear_expired_detection_audits, clear_expired_detection_intermediates,
     clear_expired_review_audits,
 };
-pub use pipeline_references::PipelineReferenceRepository;
 pub use workspace_activities::{ActivityCursor, ActivityFilter, WorkspaceActivityRepository};
 pub use workspace_assistant_jobs::AssistantJobOutboxRepository;
 pub use workspace_blobs::{ReclaimableBlob, WorkspaceBlobRepository};
@@ -82,7 +79,6 @@ pub use workspace_invites::{InviteCursor, WorkspaceInviteRepository};
 pub use workspace_members::{
     AccountWorkspaceCursor, WorkspaceMemberCursor, WorkspaceMemberRepository,
 };
-pub use workspace_pipelines::{PipelineCursor, WorkspacePipelineRepository};
 pub use workspace_policies::{PolicyCursor, PolicyWithVersion, WorkspacePolicyRepository};
 pub use workspace_policy_versions::WorkspacePolicyVersionRepository;
 pub use workspace_providers::{ProviderCursor, WorkspaceProviderRepository};

@@ -54,20 +54,14 @@ db_enum! {
         ReviewAssigned = "review.assigned",
         /// A review's reviewer was unassigned.
         ReviewUnassigned = "review.unassigned",
-        /// A pipeline was created.
-        PipelineCreated = "pipeline.created",
-        /// A pipeline was updated.
-        PipelineUpdated = "pipeline.updated",
-        /// A pipeline was deleted.
-        PipelineDeleted = "pipeline.deleted",
         /// A detection was started.
-        DetectionStarted = "pipeline.detection.started",
+        DetectionStarted = "detection.started",
         /// A detection finished analysis.
-        DetectionCompleted = "pipeline.detection.completed",
+        DetectionCompleted = "detection.completed",
         /// A detection failed.
-        DetectionFailed = "pipeline.detection.failed",
+        DetectionFailed = "detection.failed",
         /// A redaction was created.
-        RedactionCreated = "pipeline.redaction.created",
+        RedactionCreated = "redaction.created",
         /// A policy was created.
         PolicyCreated = "policy.created",
         /// A policy was updated.
@@ -105,13 +99,10 @@ impl WebhookEvent {
             WebhookEvent::ProviderCreated
             | WebhookEvent::ProviderUpdated
             | WebhookEvent::ProviderDeleted => "provider",
-            WebhookEvent::PipelineCreated
-            | WebhookEvent::PipelineUpdated
-            | WebhookEvent::PipelineDeleted
-            | WebhookEvent::DetectionStarted
+            WebhookEvent::DetectionStarted
             | WebhookEvent::DetectionCompleted
-            | WebhookEvent::DetectionFailed
-            | WebhookEvent::RedactionCreated => "pipeline",
+            | WebhookEvent::DetectionFailed => "detection",
+            WebhookEvent::RedactionCreated => "redaction",
             WebhookEvent::PolicyCreated
             | WebhookEvent::PolicyUpdated
             | WebhookEvent::PolicyDeleted => "policy",
@@ -121,7 +112,7 @@ impl WebhookEvent {
     /// Returns the event as a subject string for NATS routing.
     ///
     /// The event name is already a dotted, NATS-legal subject (e.g.
-    /// `document.created`, `pipeline.redaction.created`), so this is the event's own
+    /// `document.created`, `redaction.created`), so this is the event's own
     /// string representation (from its `strum(serialize)`).
     #[must_use]
     pub fn as_subject(&self) -> &'static str {

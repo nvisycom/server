@@ -10,7 +10,8 @@ db_enum! {
     /// derived policy is minted inline from a bare label list (the ad-hoc redact
     /// flow): it is content-addressed and deduplicated, and immutable once minted.
     /// A derived policy can be promoted to an authored one, which clears its
-    /// content hash and makes it editable and attachable to pipelines.
+    /// content hash and makes it an editable, reusable policy selectable for
+    /// detections.
     pub enum PolicyKind: Default = Authored, "crate::schema::sql_types::PolicyKind" {
         /// A normal, editable policy (template or inline definition).
         Authored = "authored",

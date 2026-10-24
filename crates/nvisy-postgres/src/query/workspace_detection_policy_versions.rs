@@ -93,13 +93,12 @@ mod tests {
     #[tokio::test]
     async fn records_dedups_and_lists_pinned_versions() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.workspace_id,
-                seeded.pipeline_id,
                 seeded.account_id,
                 seeded.document_id,
             ))
@@ -147,13 +146,12 @@ mod tests {
     #[tokio::test]
     async fn recording_an_empty_set_is_a_noop() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.workspace_id,
-                seeded.pipeline_id,
                 seeded.account_id,
                 seeded.document_id,
             ))

@@ -181,7 +181,7 @@ pub trait WorkspaceAnalyticsRepository {
     /// detection — the series is sparse — so the caller gap-fills the window to a
     /// dense series (see `DetectionTimeSeries::from_window`). The window is
     /// bucketed by `date_trunc('day', started_at)`; detections are scoped through
-    /// their live pipeline. The caller is responsible for bounding the window.
+    /// the detection. The caller is responsible for bounding the window.
     ///
     /// Detection counts, durations, and per-meter totals are read in one
     /// transaction so the two grouped statements observe the same snapshot.
@@ -312,7 +312,7 @@ async fn load_storage_by_kind(
         .collect())
 }
 
-/// Detection count per `status`, scoped through the live pipeline. Only statuses
+/// Detection count per `status`, Only statuses
 /// with a detection appear.
 async fn load_detections_by_status(
     conn: &mut PgConnection,
@@ -372,7 +372,7 @@ async fn load_detection_durations(
 }
 
 /// Inference usage per model across the workspace's detections — summed per
-/// meter, plus call and error counts — scoped through the live pipeline. Only
+/// meter, plus call and error counts — Only
 /// models actually used appear. Kept per-model rather than summed to one total,
 /// since a detection may mix models.
 async fn load_usage_by_model(
@@ -441,15 +441,15 @@ async fn load_usage_by_model(
 /// The day bucket a detection's start falls in. Shared by both daily queries so
 /// the truncation text cannot drift — they must group on the same expression for
 /// the per-day merge to line up. The column is table-qualified so the join to
-/// pipelines can never make it ambiguous. Returns a fresh fragment per call, as
+/// Returns a fresh fragment per call, as
 /// the builder consumes it in both `group_by` and `select`.
 fn detection_day() -> diesel::expression::SqlLiteral<Timestamptz> {
     diesel::dsl::sql::<Timestamptz>("date_trunc('day', workspace_detections.started_at)")
 }
 
-/// Per-day detection counts and durations over `[from, to)`, scoped through the
-/// live pipeline. Sparse: only days that have a detection. Shared with the
-/// per-meter query so both observe the same snapshot inside one transaction.
+/// Per-day detection counts and durations over `[from, to)`. Sparse: only days that
+/// have a detection. Shared with the per-meter query so both observe the same
+/// snapshot inside one transaction.
 async fn load_detection_day_counts(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -467,7 +467,7 @@ async fn load_detection_day_counts(
     // mean are `sql` fragments; the counts and predicates are fully typed.
     // Conditional counts are `sum(CASE WHEN cond THEN 1 ELSE 0 END)` since Diesel's
     // aggregate FILTER is not available on `count(*)`. Columns are table-qualified
-    // so the join to pipelines can never make them ambiguous.
+    //
     // Durations describe successful analysis only, so both aggregates filter on
     // the terminal `complete` status: `completed_at` is stamped on failure too, so
     // a presence check alone would fold failed detections into avg/p95. The FILTER
@@ -509,7 +509,7 @@ async fn load_detection_day_counts(
 }
 
 /// Per-day inference usage over `[from, to)`, as `(day, meter, summed amount)`
-/// rows, scoped through the live pipeline. Each meter row belongs to exactly one
+/// rows, Each meter row belongs to exactly one
 /// call and so one detection and day, so summing `amount` over the join never
 /// double-counts — no per-detection dedup is needed (unlike detection counts).
 /// Only days with metered usage appear; the caller gap-fills the window.
@@ -582,15 +582,13 @@ mod tests {
     async fn completed_detection(
         conn: &mut PgConn,
         workspace_id: Uuid,
-        pipeline_id: Uuid,
         account_id: Uuid,
         input_document_id: Uuid,
         started_ago: Span,
         duration: Span,
     ) -> anyhow::Result<Uuid> {
         let started = Timestamp::now() - started_ago;
-        let mut new =
-            NewWorkspaceDetection::test(workspace_id, pipeline_id, account_id, input_document_id);
+        let mut new = NewWorkspaceDetection::test(workspace_id, account_id, input_document_id);
         new.status = Some(DetectionStatus::Complete);
         let detection = conn.create_workspace_detection(new).await?;
         // Backdate the run span so the day-bucket and duration aggregates see a
@@ -602,7 +600,7 @@ mod tests {
     #[tokio::test]
     async fn snapshot_aggregates_storage_detections_and_usage_by_group() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         // Storage: the seeded original document plus a second original and a
@@ -624,7 +622,6 @@ mod tests {
         let complete = completed_detection(
             &mut conn,
             seeded.workspace_id,
-            seeded.pipeline_id,
             seeded.account_id,
             seeded.document_id,
             Span::new().hours(2),
@@ -634,7 +631,6 @@ mod tests {
         let _pending = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.workspace_id,
-                seeded.pipeline_id,
                 seeded.account_id,
                 seeded.document_id,
             ))
@@ -701,12 +697,11 @@ mod tests {
         let seeded = db.seed_account_and_workspace().await;
 
         // A different workspace with a detection.
-        let other = db.seed_pipeline_and_document().await;
+        let other = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
         let _ = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 other.workspace_id,
-                other.pipeline_id,
                 other.account_id,
                 other.document_id,
             ))
@@ -732,14 +727,13 @@ mod tests {
     #[tokio::test]
     async fn detections_by_day_buckets_within_the_window() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         // Two detections started ~1 day ago (same UTC day), one ~3 days ago.
         let recent = completed_detection(
             &mut conn,
             seeded.workspace_id,
-            seeded.pipeline_id,
             seeded.account_id,
             seeded.document_id,
             Span::new().hours(25),
@@ -749,7 +743,6 @@ mod tests {
         let _recent2 = completed_detection(
             &mut conn,
             seeded.workspace_id,
-            seeded.pipeline_id,
             seeded.account_id,
             seeded.document_id,
             Span::new().hours(26),
@@ -759,7 +752,6 @@ mod tests {
         let _old = completed_detection(
             &mut conn,
             seeded.workspace_id,
-            seeded.pipeline_id,
             seeded.account_id,
             seeded.document_id,
             Span::new().hours(72),

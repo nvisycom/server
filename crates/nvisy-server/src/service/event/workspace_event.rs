@@ -16,10 +16,10 @@ use nvisy_postgres::types::{
     ConnectionSyncCompletedParams, ConnectionSyncFailedParams, DetectionActivityParams,
     DetectionCompletedParams, DetectionFailedParams, DetectionId, DocumentActivityParams,
     InviteActivityParams, MemberActivityParams, MemberJoinedParams, NotificationPayload,
-    PipelineActivityParams, PolicyActivityParams, ProviderActivityParams, ProviderId,
-    RedactionActivityParams, RedactionCreatedParams, RedactionId, ReviewActivityParams,
-    ReviewAssignedParams, ReviewCommentActivityParams, WebhookActivityParams, WebhookEvent,
-    WebhookId, WorkspaceActivityParams, WorkspaceRole,
+    PolicyActivityParams, ProviderActivityParams, ProviderId, RedactionActivityParams,
+    RedactionCreatedParams, RedactionId, ReviewActivityParams, ReviewAssignedParams,
+    ReviewCommentActivityParams, WebhookActivityParams, WebhookEvent, WebhookId,
+    WorkspaceActivityParams, WorkspaceRole,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -71,15 +71,11 @@ workspace_events! {
     ReviewAssigned          => "review.assigned",
     ReviewUnassigned        => "review.unassigned",
 
-    PipelineCreated         => "pipeline.created",
-    PipelineUpdated         => "pipeline.updated",
-    PipelineDeleted         => "pipeline.deleted",
+    DetectionStarted        => "detection.started",
+    DetectionCompleted      => "detection.completed",
+    DetectionFailed         => "detection.failed",
 
-    DetectionStarted        => "pipeline.detection.started",
-    DetectionCompleted      => "pipeline.detection.completed",
-    DetectionFailed         => "pipeline.detection.failed",
-
-    RedactionCreated        => "pipeline.redaction.created",
+    RedactionCreated        => "redaction.created",
 
     PolicyCreated           => "policy.created",
     PolicyUpdated           => "policy.updated",
@@ -817,52 +813,35 @@ impl EventKind for ReviewUnassigned {
     }
 }
 
-// Pipeline lifecycle events. (Detection/redaction run events are hand-written
-// below: they carry run-specific fields and notifications.)
-crud_events! {
-    fields { pipeline_id: Uuid }
-    id = pipeline_id;
-    activity(this) = PipelineActivityParams { pipeline_id: this.pipeline_id };
-    webhook = yes;
-
-    /// A pipeline was created.
-    PipelineCreated => "pipeline.created",
-    /// A pipeline was updated.
-    PipelineUpdated => "pipeline.updated",
-    /// A pipeline was deleted.
-    PipelineDeleted => "pipeline.deleted",
-}
-
 // A detection started: a plain activity + webhook event, no notification. (The
 // completed/failed events below notify the triggering account.)
 crud_events! {
-    fields { detection_id: Uuid, pipeline_id: Option<Uuid> }
+    fields { detection_id: Uuid }
     id = detection_id;
-    activity(this) = detection_activity(this.detection_id, this.pipeline_id);
+    activity(this) = detection_activity(this.detection_id);
     webhook = yes;
 
     /// A detection was started.
-    DetectionStarted => "pipeline.detection.started",
+    DetectionStarted => "detection.started",
 }
 
 /// A detection finished analysis. Notifies the triggering account.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionCompleted {
     pub detection_id: Uuid,
-    pub pipeline_id: Option<Uuid>,
     pub input_document_name: Option<String>,
     pub notify: Uuid,
 }
 
 impl EventKind for DetectionCompleted {
-    const TAG: &'static str = "pipeline.detection.completed";
+    const TAG: &'static str = "detection.completed";
 
     fn resource_id(&self) -> Uuid {
         self.detection_id
     }
 
     fn activity(&self) -> ActivityPayload {
-        ActivityPayload::DetectionCompleted(detection_activity(self.detection_id, self.pipeline_id))
+        ActivityPayload::DetectionCompleted(detection_activity(self.detection_id))
     }
 
     fn webhook(&self) -> Option<WebhookDelivery> {
@@ -877,7 +856,6 @@ impl EventKind for DetectionCompleted {
             target: NotifyTarget::Account(self.notify),
             payload: NotificationPayload::DetectionCompleted(DetectionCompletedParams {
                 detection_id: DetectionId::from_uuid(self.detection_id),
-                pipeline_id: self.pipeline_id,
                 input_document_name: self.input_document_name,
             }),
         }]
@@ -888,21 +866,20 @@ impl EventKind for DetectionCompleted {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionFailed {
     pub detection_id: Uuid,
-    pub pipeline_id: Option<Uuid>,
     pub input_document_name: Option<String>,
     pub error: Option<String>,
     pub notify: Uuid,
 }
 
 impl EventKind for DetectionFailed {
-    const TAG: &'static str = "pipeline.detection.failed";
+    const TAG: &'static str = "detection.failed";
 
     fn resource_id(&self) -> Uuid {
         self.detection_id
     }
 
     fn activity(&self) -> ActivityPayload {
-        ActivityPayload::DetectionFailed(detection_activity(self.detection_id, self.pipeline_id))
+        ActivityPayload::DetectionFailed(detection_activity(self.detection_id))
     }
 
     fn webhook(&self) -> Option<WebhookDelivery> {
@@ -917,7 +894,6 @@ impl EventKind for DetectionFailed {
             target: NotifyTarget::Account(self.notify),
             payload: NotificationPayload::DetectionFailed(DetectionFailedParams {
                 detection_id: DetectionId::from_uuid(self.detection_id),
-                pipeline_id: self.pipeline_id,
                 input_document_name: self.input_document_name,
                 error: self.error,
             }),
@@ -926,9 +902,8 @@ impl EventKind for DetectionFailed {
 }
 
 /// Builds the shared detection activity params.
-fn detection_activity(detection_id: Uuid, pipeline_id: Option<Uuid>) -> DetectionActivityParams {
+fn detection_activity(detection_id: Uuid) -> DetectionActivityParams {
     DetectionActivityParams {
-        pipeline_id,
         detection_id: DetectionId::from_uuid(detection_id),
     }
 }
@@ -937,7 +912,6 @@ fn detection_activity(detection_id: Uuid, pipeline_id: Option<Uuid>) -> Detectio
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RedactionCreated {
     pub detection_id: Uuid,
-    pub pipeline_id: Option<Uuid>,
     /// The redaction that was produced (its own id, distinct from the detection's
     /// — a detection can produce many redactions).
     pub redaction_id: Uuid,
@@ -946,7 +920,7 @@ pub struct RedactionCreated {
 }
 
 impl EventKind for RedactionCreated {
-    const TAG: &'static str = "pipeline.redaction.created";
+    const TAG: &'static str = "redaction.created";
 
     fn resource_id(&self) -> Uuid {
         // The affected resource is the redaction produced, not the detection it
@@ -956,7 +930,6 @@ impl EventKind for RedactionCreated {
 
     fn activity(&self) -> ActivityPayload {
         ActivityPayload::RedactionCreated(RedactionActivityParams {
-            pipeline_id: self.pipeline_id,
             redaction_id: RedactionId::from_uuid(self.redaction_id),
         })
     }
@@ -974,7 +947,6 @@ impl EventKind for RedactionCreated {
             payload: NotificationPayload::RedactionCreated(RedactionCreatedParams {
                 redaction_id: RedactionId::from_uuid(self.redaction_id),
                 detection_id: DetectionId::from_uuid(self.detection_id),
-                pipeline_id: self.pipeline_id,
                 input_document_name: self.input_document_name,
             }),
         }]

@@ -160,7 +160,7 @@ mod tests {
     /// Seeds a review with a comment and returns that comment's id — the FK parent
     /// an outbox row needs.
     async fn seed_comment(db: &TestDatabase) -> anyhow::Result<Uuid> {
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
         let review = conn
             .create_review(NewWorkspaceReview::test(

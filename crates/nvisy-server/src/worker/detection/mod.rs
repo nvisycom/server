@@ -4,7 +4,7 @@
 //! The request-side [`DetectionQueue`] enqueues a job (transactionally with the
 //! detection) and wakes the [`Coordinator`]; the [`DetectionOutboxDrainer`]
 //! relays pending jobs to the detection NATS work-queue, and the
-//! [`DetectionWorker`] consumes them, runs the pipeline's policies against the
+//! [`DetectionWorker`] consumes them, runs the detection's policies against the
 //! document, stores the encrypted audit, and marks the detection `Complete` (or
 //! `Failed`). Each terminal transition is broadcast on the detection's core-NATS
 //! status subject (see [`detection_subject`]) for SSE watchers and emitted as a

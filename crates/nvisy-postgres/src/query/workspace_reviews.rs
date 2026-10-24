@@ -1019,7 +1019,7 @@ mod tests {
     #[tokio::test]
     async fn create_lists_and_finds_reviews_per_document() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         // A document can have many concurrent reviews, one per audience.
@@ -1070,7 +1070,7 @@ mod tests {
     #[tokio::test]
     async fn multiple_concurrent_reviews_per_document_are_allowed() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         // The same document is reviewed for different audiences at the same time; both
@@ -1101,7 +1101,7 @@ mod tests {
     #[tokio::test]
     async fn rename_records_the_new_name() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let review = conn
@@ -1144,7 +1144,7 @@ mod tests {
     #[tokio::test]
     async fn comment_edit_and_delete() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let review = conn
@@ -1191,7 +1191,7 @@ mod tests {
     #[tokio::test]
     async fn delete_review_hides_it_and_its_comments() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let review = conn
@@ -1220,7 +1220,7 @@ mod tests {
     #[tokio::test]
     async fn create_reply_is_unique_per_triggering_comment() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let review = conn
@@ -1265,7 +1265,7 @@ mod tests {
     #[tokio::test]
     async fn lock_comment_returns_only_live_in_scope_comments() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let review = conn
@@ -1314,7 +1314,7 @@ mod tests {
     async fn assignment_is_metadata_and_records_timeline_without_changing_status()
     -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let bob = {
             let mut conn = db.client.get_connection().await?;
             conn.create_account(NewAccount::test()).await?.id
@@ -1570,7 +1570,7 @@ mod tests {
     #[tokio::test]
     async fn queue_filters_by_assignee_and_status() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         let a = conn
@@ -1654,7 +1654,7 @@ mod tests {
     #[tokio::test]
     async fn timeline_pages_comments_and_events_in_one_order() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
-        let seeded = db.seed_pipeline_and_document().await;
+        let seeded = db.seed_document().await;
         let mut conn = db.client.get_connection().await?;
 
         // A review with a known set of timeline entries: opening (1 event), two

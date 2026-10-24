@@ -56,7 +56,7 @@ async fn get_detection_analysis(
     // Resolve the detection through the service, then resolve its audit file row on
     // a scoped connection released before the object-store load below so the pooled
     // connection is not held across the NATS round-trip.
-    let (detection, _pipeline) = detections
+    let detection = detections
         .find(workspace.id, path_params.detection_id.as_uuid())
         .await?;
     let audit_blob = {
@@ -114,7 +114,7 @@ async fn get_detection_intermediates(
     // Resolve the detection through the service, then resolve its intermediates
     // file row on a scoped connection released before the object-store load so the
     // pooled connection is not held across the NATS round-trip.
-    let (detection, _pipeline) = detections
+    let detection = detections
         .find(workspace.id, path_params.detection_id.as_uuid())
         .await?;
     let intermediates_blob = {
@@ -180,7 +180,7 @@ async fn download_detection_audit(
     // a scoped connection released before the object-store load below so the pooled
     // connection is not held across the NATS round-trip.
     let detection_id = path_params.detection_id.as_uuid();
-    let (detection, _pipeline) = detections.find(workspace.id, detection_id).await?;
+    let detection = detections.find(workspace.id, detection_id).await?;
     let audit_blob = {
         let mut conn = pg_client.get_connection().await?;
         blob.resolve_audit_blob(&mut conn, &detection).await?

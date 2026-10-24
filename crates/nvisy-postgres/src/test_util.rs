@@ -16,12 +16,11 @@ use uuid::Uuid;
 use crate::client::PgClientMigrationExt;
 use crate::model::{
     NewAccount, NewBlob, NewWorkspace, NewWorkspaceDetection, NewWorkspaceDocument,
-    NewWorkspaceMember, NewWorkspacePipeline, NewWorkspaceRedaction,
+    NewWorkspaceMember, NewWorkspaceRedaction,
 };
 use crate::query::{
     AccountRepository, WorkspaceDetectionRepository, WorkspaceDocumentRepository,
-    WorkspaceMemberRepository, WorkspacePipelineRepository, WorkspaceRedactionRepository,
-    WorkspaceRepository,
+    WorkspaceMemberRepository, WorkspaceRedactionRepository, WorkspaceRepository,
 };
 use crate::types::WorkspaceRole;
 use crate::{PgClient, PgConfig};
@@ -188,13 +187,13 @@ impl TestDatabase {
             .expect("failed to seed workspace member");
     }
 
-    /// Seeds an account, a workspace, a pipeline, and an input document (with its
-    /// blob) — the FK parents a detection (and, through it, a redaction) requires.
+    /// Seeds an account, a workspace, and an input document (with its blob) — the FK
+    /// parents a detection (and, through it, a redaction) requires.
     ///
     /// # Panics
     ///
     /// Panics if any insert fails.
-    pub async fn seed_pipeline_and_document(&self) -> SeededPipeline {
+    pub async fn seed_document(&self) -> SeededDocument {
         let SeededWorkspace {
             account_id,
             workspace_id,
@@ -204,10 +203,6 @@ impl TestDatabase {
             .get_connection()
             .await
             .expect("failed to get a connection");
-        let pipeline = conn
-            .create_workspace_pipeline(NewWorkspacePipeline::test(workspace_id, account_id))
-            .await
-            .expect("failed to seed pipeline");
         let document = conn
             .create_workspace_document(
                 NewWorkspaceDocument::test(workspace_id, account_id, Uuid::nil()),
@@ -216,23 +211,22 @@ impl TestDatabase {
             .await
             .expect("failed to seed document");
 
-        SeededPipeline {
+        SeededDocument {
             account_id,
             workspace_id,
-            pipeline_id: pipeline.id,
             document_id: document.id,
         }
     }
 
-    /// Seeds the [`seed_pipeline_and_document`](Self::seed_pipeline_and_document)
-    /// parents plus one detection over the document and one redaction produced from
-    /// it — the FK parents the review layer's `detection_id` / `redaction_id` need.
+    /// Seeds the [`seed_document`](Self::seed_document) parents plus one detection
+    /// over the document and one redaction produced from it — the FK parents the
+    /// review layer's `detection_id` / `redaction_id` need.
     ///
     /// # Panics
     ///
     /// Panics if any insert fails.
     pub async fn seed_detection_and_redaction(&self) -> SeededRedaction {
-        let seeded = self.seed_pipeline_and_document().await;
+        let seeded = self.seed_document().await;
         let mut conn = self
             .client
             .get_connection()
@@ -241,7 +235,6 @@ impl TestDatabase {
         let detection = conn
             .create_workspace_detection(NewWorkspaceDetection::test(
                 seeded.workspace_id,
-                seeded.pipeline_id,
                 seeded.account_id,
                 seeded.document_id,
             ))
@@ -269,26 +262,24 @@ pub struct SeededWorkspace {
     pub workspace_id: Uuid,
 }
 
-/// An account, workspace, pipeline, and input document, seeded for a test — the
-/// FK parents a detection and redaction need.
+/// An account, workspace, and input document, seeded for a test — the FK parents a
+/// detection and redaction need.
 #[derive(Debug, Clone, Copy)]
-pub struct SeededPipeline {
+pub struct SeededDocument {
     /// The account that owns everything.
     pub account_id: Uuid,
     /// The workspace.
     pub workspace_id: Uuid,
-    /// The pipeline.
-    pub pipeline_id: Uuid,
     /// The input document.
     pub document_id: Uuid,
 }
 
-/// The [`SeededPipeline`] parents plus one detection over the document and one
+/// The [`SeededDocument`] parents plus one detection over the document and one
 /// redaction produced from it.
 #[derive(Debug, Clone, Copy)]
 pub struct SeededRedaction {
-    /// The account, workspace, pipeline, and document parents.
-    pub seeded: SeededPipeline,
+    /// The account, workspace, and document parents.
+    pub seeded: SeededDocument,
     /// A detection over the input document.
     pub detection_id: Uuid,
     /// A redaction produced from the detection.

@@ -3,14 +3,42 @@
 //!
 //! These are pure serializable views of stored JSON — a workspace's
 //! `settings.retention` baseline ([`RetentionSettings`], one [`Retention`] per
-//! [`RetentionScope`]) and a pipeline's per-scope override ([`RetentionOverride`],
-//! carried by `PipelineMetadata::retention`). The worker that enforces them lives
+//! [`RetentionScope`]) and a detection's per-scope override ([`RetentionOverride`],
+//! snapshotted on the detection it ran under). The worker that enforces them lives
 //! in the server crate.
 
 use jiff::{Span, Timestamp};
 use serde::{Deserialize, Serialize};
 
-use super::RetentionOverride;
+/// A detection's optional per-scope override of the workspace retention. A `None`
+/// field inherits the workspace value for that scope.
+///
+/// Only scopes that are produced are overridable — original documents are ingested,
+/// not produced, so they have no override and always follow the workspace baseline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", default)]
+pub struct RetentionOverride {
+    /// Overrides redacted-document retention when set.
+    pub redacted_documents: Option<Retention>,
+    /// Overrides audit-blob retention when set.
+    pub audit_logs: Option<Retention>,
+    /// Overrides enrichment-intermediate retention when set.
+    pub intermediates: Option<Retention>,
+}
+
+impl RetentionOverride {
+    /// The override for `scope`, if any. Original documents have no override.
+    #[must_use]
+    pub fn get(&self, scope: RetentionScope) -> Option<Retention> {
+        match scope {
+            RetentionScope::OriginalDocuments => None,
+            RetentionScope::RedactedDocuments => self.redacted_documents,
+            RetentionScope::AuditLogs => self.audit_logs,
+            RetentionScope::Intermediates => self.intermediates,
+        }
+    }
+}
 
 /// How long a class of data is retained.
 ///
@@ -111,15 +139,15 @@ impl RetentionSettings {
         *self == keep_everything
     }
 
-    /// The effective retention for `scope`: a pipeline override wins over this
-    /// workspace baseline. Data with no owning pipeline passes `None`.
+    /// The effective retention for `scope`: a detection's retention override wins
+    /// over this workspace baseline; data with no override passes `None`.
     #[must_use]
     pub fn resolve(
         &self,
         scope: RetentionScope,
-        pipeline: Option<&RetentionOverride>,
+        override_: Option<&RetentionOverride>,
     ) -> Retention {
-        pipeline
+        override_
             .and_then(|over| over.get(scope))
             .unwrap_or_else(|| self.get(scope))
     }
@@ -145,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_prefers_pipeline_override() {
+    fn resolve_prefers_override() {
         let workspace = RetentionSettings {
             redacted_documents: Retention::Fixed { days: 30 },
             ..Default::default()
@@ -173,12 +201,12 @@ mod tests {
     }
 
     #[test]
-    fn original_documents_ignore_pipeline_override() {
+    fn original_documents_ignore_override() {
         let workspace = RetentionSettings {
             original_documents: Retention::Fixed { days: 30 },
             ..Default::default()
         };
-        // Original documents are ingested, not produced by a pipeline, so an
+        // Original documents are ingested, not produced by a detection, so an
         // override never applies — the workspace baseline always wins.
         assert_eq!(
             workspace.resolve(

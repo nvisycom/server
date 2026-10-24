@@ -106,35 +106,20 @@ pub struct ReviewActivityParams {
     pub assignee_id: Option<Uuid>,
 }
 
-/// Params of a pipeline activity (`pipeline.*`, non-run).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct PipelineActivityParams {
-    /// Id of the pipeline.
-    pub pipeline_id: Uuid,
-}
-
-/// Params of a detection activity (`pipeline.detection.*`).
+/// Params of a detection activity (`detection.*`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DetectionActivityParams {
-    /// Id of the owning pipeline; absent for an ad-hoc detection.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pipeline_id: Option<Uuid>,
     /// Id of the detection.
     pub detection_id: DetectionId,
 }
 
-/// Params of a redaction activity (`pipeline.redaction.*`).
+/// Params of a redaction activity (`redaction.*`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RedactionActivityParams {
-    /// Id of the owning pipeline; absent when the detection was ad-hoc.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pipeline_id: Option<Uuid>,
     /// Id of the redaction.
     pub redaction_id: RedactionId,
 }
@@ -283,26 +268,17 @@ pub enum ActivityPayload {
     #[serde(rename = "review.unassigned")]
     ReviewUnassigned(ReviewActivityParams),
 
-    /// A pipeline was created.
-    #[serde(rename = "pipeline.created")]
-    PipelineCreated(PipelineActivityParams),
-    /// A pipeline was updated.
-    #[serde(rename = "pipeline.updated")]
-    PipelineUpdated(PipelineActivityParams),
-    /// A pipeline was deleted.
-    #[serde(rename = "pipeline.deleted")]
-    PipelineDeleted(PipelineActivityParams),
     /// A detection was started.
-    #[serde(rename = "pipeline.detection.started")]
+    #[serde(rename = "detection.started")]
     DetectionStarted(DetectionActivityParams),
     /// A detection finished analysis.
-    #[serde(rename = "pipeline.detection.completed")]
+    #[serde(rename = "detection.completed")]
     DetectionCompleted(DetectionActivityParams),
     /// A detection failed.
-    #[serde(rename = "pipeline.detection.failed")]
+    #[serde(rename = "detection.failed")]
     DetectionFailed(DetectionActivityParams),
     /// A redaction was created.
-    #[serde(rename = "pipeline.redaction.created")]
+    #[serde(rename = "redaction.created")]
     RedactionCreated(RedactionActivityParams),
 
     /// A policy was created.
@@ -357,9 +333,6 @@ impl ActivityPayload {
             ActivityPayload::ReviewApproved(_) => ActivityType::ReviewApproved,
             ActivityPayload::ReviewAssigned(_) => ActivityType::ReviewAssigned,
             ActivityPayload::ReviewUnassigned(_) => ActivityType::ReviewUnassigned,
-            ActivityPayload::PipelineCreated(_) => ActivityType::PipelineCreated,
-            ActivityPayload::PipelineUpdated(_) => ActivityType::PipelineUpdated,
-            ActivityPayload::PipelineDeleted(_) => ActivityType::PipelineDeleted,
             ActivityPayload::DetectionStarted(_) => ActivityType::DetectionStarted,
             ActivityPayload::DetectionCompleted(_) => ActivityType::DetectionCompleted,
             ActivityPayload::DetectionFailed(_) => ActivityType::DetectionFailed,
@@ -413,9 +386,6 @@ impl ActivityPayload {
             ActivityPayload::ReviewApproved(_) => W::ReviewApproved,
             ActivityPayload::ReviewAssigned(_) => W::ReviewAssigned,
             ActivityPayload::ReviewUnassigned(_) => W::ReviewUnassigned,
-            ActivityPayload::PipelineCreated(_) => W::PipelineCreated,
-            ActivityPayload::PipelineUpdated(_) => W::PipelineUpdated,
-            ActivityPayload::PipelineDeleted(_) => W::PipelineDeleted,
             ActivityPayload::DetectionStarted(_) => W::DetectionStarted,
             ActivityPayload::DetectionCompleted(_) => W::DetectionCompleted,
             ActivityPayload::DetectionFailed(_) => W::DetectionFailed,
@@ -427,8 +397,7 @@ impl ActivityPayload {
     }
 
     /// The stable identifier of the object this activity acted on, when it has
-    /// one. `None` only for the ad-hoc detection/redaction case where the owning
-    /// pipeline id is absent — every addressable object is identified by id.
+    /// one. Every addressable object is identified by id.
     ///
     /// Paired with [`object_label`], this flattens the per-variant params into two
     /// export columns without a per-object-type column explosion.
@@ -444,10 +413,6 @@ impl ActivityPayload {
             ActivityPayload::MemberAdded(p)
             | ActivityPayload::MemberUpdated(p)
             | ActivityPayload::MemberDeleted(p) => Some(p.member_id.to_string()),
-
-            ActivityPayload::PipelineCreated(p)
-            | ActivityPayload::PipelineUpdated(p)
-            | ActivityPayload::PipelineDeleted(p) => Some(p.pipeline_id.to_string()),
 
             ActivityPayload::InviteCreated(p)
             | ActivityPayload::InviteAccepted(p)
@@ -546,9 +511,6 @@ impl ActivityPayload {
             | ActivityPayload::ReviewApproved(_)
             | ActivityPayload::ReviewAssigned(_)
             | ActivityPayload::ReviewUnassigned(_)
-            | ActivityPayload::PipelineCreated(_)
-            | ActivityPayload::PipelineUpdated(_)
-            | ActivityPayload::PipelineDeleted(_)
             | ActivityPayload::DetectionStarted(_)
             | ActivityPayload::DetectionCompleted(_)
             | ActivityPayload::DetectionFailed(_)

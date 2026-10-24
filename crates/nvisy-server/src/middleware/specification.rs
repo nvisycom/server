@@ -248,7 +248,7 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
         .summary("Document detection and redaction platform")
         .description(
             "Nvisy provides intelligent detection of sensitive content in documents, \
-            redaction pipelines, and reviewer workflows. This API enables document \
+            document redaction, and reviewer workflows. This API enables document \
             upload, detection analysis, redaction, and collaborative review across \
             your workspaces.",
         )
@@ -343,11 +343,6 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
         .tag(Tag {
             name: "Providers".into(),
             description: Some("Inference-provider configuration".into()),
-            ..Default::default()
-        })
-        .tag(Tag {
-            name: "Pipelines".into(),
-            description: Some("Redaction pipeline configuration".into()),
             ..Default::default()
         })
         .tag(Tag {

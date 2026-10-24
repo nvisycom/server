@@ -50,22 +50,19 @@ pub struct ConnectionSyncFailedParams {
     pub error: Option<String>,
 }
 
-/// Params of a `pipeline.detection.completed` notification.
+/// Params of a `detection.completed` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DetectionCompletedParams {
     /// Id of the detection.
     pub detection_id: DetectionId,
-    /// Id of the owning pipeline; absent for an ad-hoc detection.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pipeline_id: Option<Uuid>,
     /// Display name of the analyzed document, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_document_name: Option<String>,
 }
 
-/// Params of a `pipeline.redaction.created` notification.
+/// Params of a `redaction.created` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
@@ -74,24 +71,18 @@ pub struct RedactionCreatedParams {
     pub redaction_id: RedactionId,
     /// Id of the detection the redaction was produced from.
     pub detection_id: DetectionId,
-    /// Id of the owning pipeline; absent for an ad-hoc detection.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pipeline_id: Option<Uuid>,
     /// Display name of the redacted document, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_document_name: Option<String>,
 }
 
-/// Params of a `pipeline.detection.failed` notification.
+/// Params of a `detection.failed` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DetectionFailedParams {
     /// Id of the detection.
     pub detection_id: DetectionId,
-    /// Id of the owning pipeline; absent for an ad-hoc detection.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pipeline_id: Option<Uuid>,
     /// Display name of the analyzed document, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_document_name: Option<String>,
@@ -151,15 +142,15 @@ pub enum NotificationPayload {
     ConnectionSyncFailed(ConnectionSyncFailedParams),
 
     /// A detection finished analysis and is ready to redact.
-    #[serde(rename = "pipeline.detection.completed")]
+    #[serde(rename = "detection.completed")]
     DetectionCompleted(DetectionCompletedParams),
 
     /// A redaction was created (redacted output produced).
-    #[serde(rename = "pipeline.redaction.created")]
+    #[serde(rename = "redaction.created")]
     RedactionCreated(RedactionCreatedParams),
 
     /// A detection failed.
-    #[serde(rename = "pipeline.detection.failed")]
+    #[serde(rename = "detection.failed")]
     DetectionFailed(DetectionFailedParams),
 
     /// A document's review was assigned to the reviewer.
@@ -210,19 +201,16 @@ mod tests {
     #[test]
     fn serializes_as_a_type_data_envelope_and_round_trips() {
         let detection_id = DetectionId::from_uuid(Uuid::now_v7());
-        let pipeline_id = Uuid::now_v7();
         let payload = NotificationPayload::DetectionCompleted(DetectionCompletedParams {
             detection_id,
-            pipeline_id: Some(pipeline_id),
             input_document_name: Some("invoice.pdf".to_owned()),
         });
 
         let value = serde_json::to_value(&payload).unwrap();
         // The durable wire shape: a `type` tag and a nested `data` object, matching
         // the activity payload and outbox event. Stored rows depend on it.
-        assert_eq!(value["type"], "pipeline.detection.completed");
+        assert_eq!(value["type"], "detection.completed");
         assert_eq!(value["data"]["detectionId"], detection_id.to_string());
-        assert_eq!(value["data"]["pipelineId"], pipeline_id.to_string());
         assert!(
             value.get("detectionId").is_none(),
             "params must nest under `data`"

@@ -295,10 +295,10 @@ impl WorkspacePolicyService {
     /// Promotes a derived policy to an authored one, returning it with its current
     /// version and creator.
     ///
-    /// A derived (ad-hoc) policy is immutable, content-addressed, and not
-    /// attachable to pipelines. Promotion clears its content hash and flips its
-    /// kind to authored, after which it edits and attaches like any authored
-    /// policy. The policy keeps its id and current definition version.
+    /// A derived (ad-hoc) policy is immutable and content-addressed. Promotion
+    /// clears its content hash and flips its kind to authored, after which it edits
+    /// and is selectable for detections like any authored policy. The policy keeps
+    /// its id and current definition version.
     ///
     /// A derived policy's stored name is a neutral hash token, so promotion
     /// **requires** a caller-supplied `display_name` — the title a human will see.

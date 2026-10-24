@@ -126,7 +126,6 @@ impl_di_domain!(
     crate::domain::WorkspaceInviteService,
     crate::domain::WorkspaceMemberService,
     crate::domain::WorkspacePolicyService,
-    crate::domain::WorkspacePipelineService,
     crate::domain::WorkspaceService,
 );
 

@@ -17,21 +17,17 @@ use elide_pipeline::governance::policy::Policy;
 use elide_pipeline::provider::DocumentContext;
 use nvisy_postgres::model::{
     NewWorkspaceDetection, NewWorkspaceDetectionJob, WorkspaceDetection as WorkspaceDetectionModel,
-    WorkspacePipeline,
 };
 use nvisy_postgres::query::{
     DetectionCursor, DetectionDocuments, DetectionJobOutboxRepository, DetectionListRow,
-    DetectionPolicyVersionRepository, EditWriteOutcome, PipelineReferenceRepository,
-    WorkspaceDetectionRepository, WorkspaceDocumentRepository, WorkspacePipelineRepository,
-    WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
+    DetectionPolicyVersionRepository, EditWriteOutcome, WorkspaceDetectionRepository,
+    WorkspaceDocumentRepository, WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
 };
 use nvisy_postgres::types::{CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Json};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
-use crate::domain::input::{
-    CreateAdhocDetectionInput, CreateDetectionInput, PipelineDefinitionInput,
-};
+use crate::domain::input::CreateDetectionInput;
 use crate::domain::output::CreatedDetection;
 use crate::response::{Error, ErrorKind, Result};
 use crate::service::event::EventEmitter;
@@ -50,8 +46,6 @@ struct CommitDetection {
     workspace_id: Uuid,
     /// The detection row to insert.
     new_detection: NewWorkspaceDetection,
-    /// Pipeline the detection runs, if any.
-    pipeline_id: Option<Uuid>,
     /// Effective document scope for the analysis job.
     scope: Option<DocumentContext>,
     /// Policies the analysis job resolves.
@@ -91,149 +85,33 @@ impl WorkspaceDetectionService {
         }
     }
 
-    /// Starts a detection for a document through a pipeline: validates the request
-    /// synchronously, snapshots the pipeline's retention override, and commits the
-    /// detection row, its start event, its review thread, and its analysis job in
-    /// one transaction, then broadcasts `Pending` and wakes the drainer.
+    /// Starts a detection for a document: validates the request synchronously,
+    /// snapshots the retention override from the request, and commits the detection
+    /// row, its start event, its review thread, and its analysis job in one
+    /// transaction, then broadcasts `Pending` and wakes the drainer.
     ///
-    /// An idempotency key that matches an existing detection replays it instead of
-    /// creating a new one.
-    ///
-    /// # Errors
-    ///
-    /// - `NotFound` if the pipeline or the input document does not exist in the
-    ///   workspace.
-    /// - `Conflict` if the pipeline is not enabled.
-    /// - `BadRequest` if the pipeline has no policies or its definition is invalid.
-    /// - A database error if a connection or a query fails.
-    pub async fn create(
-        &self,
-        origin: event::EventOrigin<'_>,
-        pipeline_id: Uuid,
-        idempotency_key: Option<String>,
-        input: CreateDetectionInput,
-    ) -> Result<CreatedDetection> {
-        let workspace_id = origin.workspace_id;
-        let mut conn = self.postgres.get_connection().await?;
-
-        // Idempotent replay, checked before touching the pipeline: a repeated key
-        // returns the detection created the first time, attributed to whoever
-        // originally triggered it, even if the URL's pipeline has since been
-        // deleted or disabled. The reported pipeline is the existing detection's
-        // own — an idempotency key is workspace-scoped, so a replay may resolve a
-        // detection created by a different pipeline (or none), and reporting this
-        // URL's pipeline would misattribute it.
-        if let Some(key) = &idempotency_key
-            && let Some(existing) = conn
-                .find_detection_by_idempotency_key(workspace_id, key)
-                .await?
-        {
-            return self.replay(&mut conn, workspace_id, existing).await;
-        }
-
-        let pipeline = find_pipeline(&mut conn, workspace_id, pipeline_id).await?;
-
-        // Only an enabled pipeline runs: a draft (still being configured) or a
-        // disabled (paused) pipeline is rejected.
-        if !pipeline.status.is_enabled() {
-            return Err(ErrorKind::Conflict.with_message("Pipeline is not enabled"));
-        }
-
-        // Validate synchronously so a bad request fails fast (4xx) rather than as a
-        // detection that immediately fails in the worker.
-        let document = conn
-            .find_document_in_workspace(workspace_id, input.document_id)
-            .await?
-            .ok_or_else(|| Error::not_found("document"))?;
-
-        if conn.list_pipeline_policy_ids(pipeline.id).await?.is_empty() {
-            return Err(ErrorKind::BadRequest
-                .with_message("Pipeline has no policies; attach at least one before running"));
-        }
-
-        // Decode the pipeline definition now so an undecodable definition fails the
-        // request synchronously (400) instead of failing later in the worker; the
-        // worker rebuilds it from the same stored bytes.
-        let _validated =
-            PipelineDefinitionInput::from_parts(pipeline.definition.clone(), Vec::new()).map_err(
-                |err| {
-                    ErrorKind::BadRequest
-                        .with_message("Pipeline definition is invalid")
-                        .with_context(err.to_string())
-                },
-            )?;
-
-        // Snapshot the pipeline's retention override onto the detection, so redaction
-        // reproduces the retention the run used rather than the pipeline's current
-        // value.
-        let retention_override = pipeline
-            .metadata
-            .or_default()
-            .retention
-            .map(|over| Json::encode(&over));
-        let new_detection = NewWorkspaceDetection {
-            workspace_id,
-            pipeline_id: Some(pipeline.id),
-            input_document_id: document.id,
-            account_id: origin.account_id,
-            status: Some(DetectionStatus::Pending),
-            idempotency_key,
-            retention_override,
-            ..Default::default()
-        };
-
-        let detection_row = self
-            .commit_detection(
-                &mut conn,
-                origin,
-                CommitDetection {
-                    workspace_id,
-                    new_detection,
-                    pipeline_id: Some(pipeline.id),
-                    scope: input.scope,
-                    policy_ids: Vec::new(),
-                },
-            )
-            .await?;
-
-        self.announce(&detection_row).await;
-
-        tracing::info!(target: TRACING_TARGET, detection_id = %detection_row.id, "Detection queued");
-        Ok(CreatedDetection {
-            trigger_account_id: detection_row.account_id,
-            detection: detection_row,
-            documents: DetectionDocuments {
-                input: Some(document.display_name),
-            },
-            created: true,
-        })
-    }
-
-    /// Starts an ad-hoc detection against an explicit policy list, with no pipeline.
+    /// Starts a detection against an explicit policy list over a document.
     ///
     /// Validates the document and every named policy synchronously, then commits and
-    /// enqueues the detection the same way as [`create`]. An idempotency key replays
-    /// an existing detection.
+    /// enqueues the detection. An idempotency key that matches an existing detection
+    /// replays it instead of creating a new one.
     ///
     /// # Errors
     ///
     /// - `NotFound` if the input document or any named policy does not exist in the
     ///   workspace.
     /// - A database error if a connection or the create transaction fails.
-    ///
-    /// [`create`]: Self::create
-    pub async fn create_adhoc(
+    pub async fn create(
         &self,
         origin: event::EventOrigin<'_>,
         idempotency_key: Option<String>,
-        input: CreateAdhocDetectionInput,
+        input: CreateDetectionInput,
     ) -> Result<CreatedDetection> {
         let workspace_id = origin.workspace_id;
         let mut conn = self.postgres.get_connection().await?;
 
-        // Idempotent replay: a workspace-scoped key may resolve a detection created
-        // by a pipeline, so the reported pipeline is the existing detection's own,
-        // not unconditionally none.
+        // Idempotent replay: a repeated workspace-scoped key returns the detection
+        // created the first time, attributed to whoever originally triggered it.
         if let Some(key) = &idempotency_key
             && let Some(existing) = conn
                 .find_detection_by_idempotency_key(workspace_id, key)
@@ -262,7 +140,6 @@ impl WorkspaceDetectionService {
         let retention_override = input.retention_override.map(|over| Json::encode(&over));
         let new_detection = NewWorkspaceDetection {
             workspace_id,
-            pipeline_id: None,
             input_document_id: document.id,
             account_id: origin.account_id,
             status: Some(DetectionStatus::Pending),
@@ -278,7 +155,6 @@ impl WorkspaceDetectionService {
                 CommitDetection {
                     workspace_id,
                     new_detection,
-                    pipeline_id: None,
                     scope: input.scope,
                     policy_ids: input.policy_ids,
                 },
@@ -287,7 +163,7 @@ impl WorkspaceDetectionService {
 
         self.announce(&detection_row).await;
 
-        tracing::info!(target: TRACING_TARGET, detection_id = %detection_row.id, "Ad-hoc detection queued");
+        tracing::info!(target: TRACING_TARGET, detection_id = %detection_row.id, "Detection queued");
         Ok(CreatedDetection {
             trigger_account_id: origin.account_id,
             detection: detection_row,
@@ -298,9 +174,8 @@ impl WorkspaceDetectionService {
         })
     }
 
-    /// Builds the replay response for an existing detection matched by
-    /// idempotency key. The owning pipeline is named by the detection's own
-    /// `pipeline_id` (`None` for an ad-hoc detection).
+    /// Builds the replay response for an existing detection matched by idempotency
+    /// key.
     async fn replay(
         &self,
         conn: &mut PgConn,
@@ -318,28 +193,7 @@ impl WorkspaceDetectionService {
         })
     }
 
-    /// Lists a specific pipeline's detections with cursor pagination.
-    ///
-    /// # Errors
-    ///
-    /// - `NotFound` if the pipeline does not exist in the workspace.
-    /// - A database error if a connection or the query fails.
-    pub async fn list_for_pipeline(
-        &self,
-        workspace_id: Uuid,
-        pipeline_id: Uuid,
-        pagination: CursorPagination<DetectionCursor>,
-        filter: &DetectionFilter,
-    ) -> Result<CursorPage<DetectionListRow>> {
-        let mut conn = self.postgres.get_connection().await?;
-        let pipeline = find_pipeline(&mut conn, workspace_id, pipeline_id).await?;
-        Ok(conn
-            .cursor_list_pipeline_detections(pipeline.id, pagination, filter)
-            .await?)
-    }
-
-    /// Lists all of a workspace's detections with cursor pagination, including
-    /// ad-hoc detections that name no pipeline.
+    /// Lists all of a workspace's detections with cursor pagination.
     ///
     /// # Errors
     ///
@@ -357,8 +211,7 @@ impl WorkspaceDetectionService {
     }
 
     /// Finds a detection by id within a workspace, with the triggering account and
-    /// its input document name — the context a single-detection response renders
-    /// from. The owning pipeline is named by the detection's own `pipeline_id`.
+    /// its input document name — the context a single-detection response renders from.
     ///
     /// # Errors
     ///
@@ -370,7 +223,7 @@ impl WorkspaceDetectionService {
         detection_id: Uuid,
     ) -> Result<(WorkspaceDetectionModel, Uuid, DetectionDocuments)> {
         let mut conn = self.postgres.get_connection().await?;
-        let (detection, _pipeline) = conn
+        let detection = conn
             .find_workspace_detection_by_id(workspace_id, detection_id)
             .await?
             .ok_or_else(|| Error::not_found("detection"))?;
@@ -381,8 +234,8 @@ impl WorkspaceDetectionService {
         Ok((detection, trigger_account_id, documents))
     }
 
-    /// Finds a detection and its owning pipeline (if any) within a workspace, for a
-    /// handler action (stream, redact) that then does its own work.
+    /// Finds a detection within a workspace, for a handler action (stream, redact)
+    /// that then does its own work.
     ///
     /// # Errors
     ///
@@ -392,7 +245,7 @@ impl WorkspaceDetectionService {
         &self,
         workspace_id: Uuid,
         detection_id: Uuid,
-    ) -> Result<(WorkspaceDetectionModel, Option<WorkspacePipeline>)> {
+    ) -> Result<WorkspaceDetectionModel> {
         let mut conn = self.postgres.get_connection().await?;
         conn.find_workspace_detection_by_id(workspace_id, detection_id)
             .await?
@@ -431,7 +284,7 @@ impl WorkspaceDetectionService {
         // is rejected now rather than silently stored to fail a later redaction. This
         // is the same report-relative check the redact path applies.
         if let Some(edits) = &edits {
-            let (detection, _pipeline) = self.find(workspace_id, detection_id).await?;
+            let detection = self.find(workspace_id, detection_id).await?;
             let mut audit = self.load_base_audit(workspace_id, &detection).await?;
             edits.validate(&audit.report)?;
             // Trial-apply on the loaded audit to surface landing failures validation
@@ -551,7 +404,6 @@ impl WorkspaceDetectionService {
                 origin,
                 event::WorkspaceEvent::DetectionStarted(event::DetectionStarted {
                     detection_id: detection_row.id,
-                    pipeline_id: detection.pipeline_id,
                 }),
             )
             .await?;
@@ -601,16 +453,4 @@ fn parse_definition(version_id: Uuid, definition: serde_json::Value) -> Result<P
             .with_message("Stored policy definition is malformed")
             .with_context(format!("policy_version_id: {version_id}: {err}"))
     })
-}
-
-/// Finds a pipeline within a workspace by id or returns `NotFound`.
-async fn find_pipeline(
-    conn: &mut PgConn,
-    workspace_id: Uuid,
-    pipeline_id: Uuid,
-) -> Result<WorkspacePipeline> {
-    conn.find_pipeline_in_workspace_by_id(workspace_id, pipeline_id)
-        .await?
-        .map(|wc| wc.item)
-        .ok_or_else(|| Error::not_found("pipeline"))
 }

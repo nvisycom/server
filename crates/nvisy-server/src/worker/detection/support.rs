@@ -6,9 +6,7 @@ use elide_pipeline::governance::policy::Policy;
 use nvisy_postgres::model::{
     DetectionCallRecord, NewWorkspaceDetectionCall, UpdateWorkspaceDetection,
 };
-use nvisy_postgres::query::{
-    PipelineReferenceRepository, WorkspaceDetectionRepository, WorkspacePolicyRepository,
-};
+use nvisy_postgres::query::{WorkspaceDetectionRepository, WorkspacePolicyRepository};
 use nvisy_postgres::types::{DetectionMetadata, DetectionStatus, Json, UsageMeter};
 use uuid::Uuid;
 
@@ -127,9 +125,6 @@ pub(crate) struct FailDetection<'a> {
     pub workspace_id: Uuid,
     /// The detection to fail.
     pub detection_id: Uuid,
-    /// Id of the detection's pipeline, for the emitted event; `None` for an
-    /// ad-hoc detection.
-    pub pipeline_id: Option<Uuid>,
     /// The account that triggered the detection (the failure's actor and notify
     /// target).
     pub triggered_by: Uuid,
@@ -164,7 +159,6 @@ pub(crate) async fn fail_detection(
     let FailDetection {
         workspace_id,
         detection_id,
-        pipeline_id,
         triggered_by,
         reason,
         mut metadata,
@@ -218,7 +212,6 @@ pub(crate) async fn fail_detection(
             },
             event::WorkspaceEvent::DetectionFailed(event::DetectionFailed {
                 detection_id,
-                pipeline_id,
                 input_document_name: None,
                 error: Some(reason.to_owned()),
                 notify: triggered_by,
@@ -267,45 +260,12 @@ fn parse_definition(version_id: Uuid, definition: serde_json::Value) -> Result<P
     })
 }
 
-/// Resolves a pipeline's live policy references to their current versions.
-///
-/// Each resolved policy carries the version id it came from, so the caller can
-/// pin the exact versions the detection ran against.
-pub(crate) async fn resolve_policies(
-    conn: &mut nvisy_postgres::PgConn,
-    workspace_id: Uuid,
-    pipeline_id: Uuid,
-) -> Result<Vec<ResolvedPolicy>> {
-    let ids = conn.list_pipeline_policy_ids(pipeline_id).await?;
-    let mut policies = Vec::with_capacity(ids.len());
-    for id in ids {
-        // Every referenced policy must resolve: a policy soft-deleted between
-        // listing and lookup would otherwise silently shrink the policy set and
-        // under-redact the document. Fail the run instead.
-        let found = conn
-            .find_policy_with_version(workspace_id, id)
-            .await?
-            .ok_or_else(|| {
-                ErrorKind::InternalServerError
-                    .with_message("Referenced policy is no longer available")
-                    .with_context(format!("policy_id: {id}"))
-            })?;
-        let definition = parse_definition(found.version.id, found.version.definition)?;
-        policies.push(ResolvedPolicy {
-            version_id: found.version.id,
-            definition,
-        });
-    }
-    Ok(policies)
-}
-
-/// Resolves an explicit list of policy ids to their current versions, for an
-/// ad-hoc detection that names its policies directly rather than through a
-/// pipeline.
+/// Resolves an explicit list of policy ids to their current versions, for a
+/// detection that names the policies it runs against.
 ///
 /// Each id must resolve to a live policy of any kind (authored or derived) in
 /// the workspace; an unknown id fails the run. Returns the same
-/// [`ResolvedPolicy`] shape as [`resolve_policies`], so the caller pins versions
+/// [`ResolvedPolicy`] shape with the version id the caller pins
 /// identically.
 pub(crate) async fn resolve_policies_by_ids(
     conn: &mut nvisy_postgres::PgConn,

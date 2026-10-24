@@ -68,13 +68,13 @@ where
     const SUBJECT: &'static str = "connection.sync.jobs";
 }
 
-/// Work queue for pipeline detection jobs.
+/// Work queue for detection jobs.
 ///
-/// A pipeline run is created synchronously, then its detection (analyze) is
-/// enqueued here and handled by a background worker. A single shared durable
-/// consumer delivers each job to one instance at a time (at-least-once); the
-/// worker is idempotent on the run so a redelivery is safe. Messages expire
-/// after 1 hour so a backlog cannot pile up.
+/// A detection is created synchronously, then its analyze step is enqueued here
+/// and handled by a background worker. A single shared durable consumer delivers
+/// each job to one instance at a time (at-least-once); the worker is idempotent
+/// on the detection so a redelivery is safe. Messages expire after 1 hour so a
+/// backlog cannot pile up.
 ///
 /// Generic over its payload `M`; a consumer pins it with a type alias, e.g.
 /// `type DetectionStream = nvisy_nats::stream::DetectionStream<DetectionJob>`.
@@ -93,10 +93,10 @@ where
     // expected analyze so a slow-but-healthy job is not redelivered mid-run.
     const ACK_WAIT: Option<Duration> = Some(Duration::from_mins(15));
     const CONSUMER_NAME: &'static str = "detection-worker";
-    const DESCRIPTION: &'static str = "Pipeline detection jobs";
+    const DESCRIPTION: &'static str = "Detection jobs";
     const MAX_AGE: Option<Duration> = Some(Duration::from_hours(1));
     const NAME: &'static str = "DETECTIONS";
-    const SUBJECT: &'static str = "pipeline.detection.jobs";
+    const SUBJECT: &'static str = "detection.jobs";
 }
 
 /// Work queue for assistant-reply jobs.

@@ -74,15 +74,6 @@ pub struct AccountPathParams {
     pub account_id: Uuid,
 }
 
-/// Path parameters for pipeline operations.
-#[must_use]
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspacePipelinePathParams {
-    /// Id of the pipeline.
-    pub pipeline_id: Uuid,
-}
-
 /// Path parameters for detection operations.
 #[must_use]
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]

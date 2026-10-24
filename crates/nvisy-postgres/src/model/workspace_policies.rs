@@ -33,8 +33,8 @@ pub struct WorkspacePolicy {
     /// The live version whose definition the engine consumes.
     pub current_version_id: Option<Uuid>,
     /// How the policy came to exist. A derived policy is minted from a label
-    /// list: content-addressed and immutable, not attachable to pipelines until
-    /// promoted to an authored policy.
+    /// list: content-addressed and immutable; promoting it to an authored policy
+    /// makes it editable and reusable.
     pub kind: PolicyKind,
     /// Dedup hash of a derived policy's semantic content (labels + action).
     /// `Some` exactly when `kind` is `Derived`; `None` for an authored policy.

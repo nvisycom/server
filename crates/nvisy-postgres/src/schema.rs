@@ -38,14 +38,6 @@ pub mod sql_types {
     pub struct OutboxStatus;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "pipeline_status"))]
-    pub struct PipelineStatus;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "pipeline_trigger_type"))]
-    pub struct PipelineTriggerType;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "policy_kind"))]
     pub struct PolicyKind;
 
@@ -320,18 +312,15 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-    use super::sql_types::PipelineTriggerType;
     use super::sql_types::DetectionStatus;
 
     workspace_detections (id) {
         id -> Uuid,
         workspace_id -> Uuid,
-        pipeline_id -> Nullable<Uuid>,
         account_id -> Uuid,
         input_document_id -> Uuid,
         intermediate_blob_id -> Nullable<Uuid>,
         audit_blob_id -> Nullable<Uuid>,
-        trigger_type -> PipelineTriggerType,
         status -> DetectionStatus,
         idempotency_key -> Nullable<Text>,
         retention_override -> Nullable<Jsonb>,
@@ -443,35 +432,6 @@ diesel::table! {
         updated_by -> Uuid,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-
-    workspace_pipeline_policies (pipeline_id, policy_id) {
-        workspace_id -> Uuid,
-        pipeline_id -> Uuid,
-        policy_id -> Uuid,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use super::sql_types::PipelineStatus;
-
-    workspace_pipelines (id) {
-        id -> Uuid,
-        workspace_id -> Uuid,
-        account_id -> Uuid,
-        display_name -> Text,
-        description -> Nullable<Text>,
-        status -> PipelineStatus,
-        definition -> Jsonb,
-        metadata -> Jsonb,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
     }
 }
 
@@ -665,7 +625,6 @@ diesel::joinable!(workspace_detection_policy_versions -> workspace_detections (d
 diesel::joinable!(workspace_detection_policy_versions -> workspace_policy_versions (policy_version_id));
 diesel::joinable!(workspace_detections -> accounts (account_id));
 diesel::joinable!(workspace_detections -> workspace_documents (input_document_id));
-diesel::joinable!(workspace_detections -> workspace_pipelines (pipeline_id));
 diesel::joinable!(workspace_detections -> workspaces (workspace_id));
 diesel::joinable!(workspace_document_exports -> workspace_connections (connection_id));
 diesel::joinable!(workspace_document_exports -> workspace_documents (document_id));
@@ -678,9 +637,6 @@ diesel::joinable!(workspace_event_outbox -> accounts (account_id));
 diesel::joinable!(workspace_event_outbox -> workspaces (workspace_id));
 diesel::joinable!(workspace_invites -> workspaces (workspace_id));
 diesel::joinable!(workspace_members -> workspaces (workspace_id));
-diesel::joinable!(workspace_pipeline_policies -> workspaces (workspace_id));
-diesel::joinable!(workspace_pipelines -> accounts (account_id));
-diesel::joinable!(workspace_pipelines -> workspaces (workspace_id));
 diesel::joinable!(workspace_policies -> accounts (account_id));
 diesel::joinable!(workspace_policies -> workspaces (workspace_id));
 diesel::joinable!(workspace_policy_versions -> accounts (account_id));
@@ -727,8 +683,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_event_outbox,
     workspace_invites,
     workspace_members,
-    workspace_pipeline_policies,
-    workspace_pipelines,
     workspace_policies,
     workspace_policy_versions,
     workspace_providers,

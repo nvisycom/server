@@ -78,20 +78,14 @@ db_enum! {
         ReviewAssigned = "review.assigned",
         /// A review's reviewer was unassigned.
         ReviewUnassigned = "review.unassigned",
-        /// Pipeline was created.
-        PipelineCreated = "pipeline.created",
-        /// Pipeline was updated.
-        PipelineUpdated = "pipeline.updated",
-        /// Pipeline was deleted.
-        PipelineDeleted = "pipeline.deleted",
         /// Detection was started.
-        DetectionStarted = "pipeline.detection.started",
+        DetectionStarted = "detection.started",
         /// Detection finished analysis.
-        DetectionCompleted = "pipeline.detection.completed",
+        DetectionCompleted = "detection.completed",
         /// Detection failed.
-        DetectionFailed = "pipeline.detection.failed",
+        DetectionFailed = "detection.failed",
         /// Redaction was created.
-        RedactionCreated = "pipeline.redaction.created",
+        RedactionCreated = "redaction.created",
         /// Policy was created.
         PolicyCreated = "policy.created",
         /// Policy was updated.
@@ -103,7 +97,7 @@ db_enum! {
 
 impl ActivityType {
     /// The canonical dotted tag for this type, e.g. `document.created` or
-    /// `pipeline.redaction.created` — the same string used on the wire and in the
+    /// `redaction.created` — the same string used on the wire and in the
     /// DB, from the variant's `strum(serialize)`.
     #[must_use]
     pub fn as_tag(self) -> &'static str {
@@ -111,8 +105,8 @@ impl ActivityType {
     }
 
     /// The object half of the tag: everything before the final segment, e.g.
-    /// `document` for `document.created`, `pipeline.redaction` for
-    /// `pipeline.redaction.created`, `connection.sync` for
+    /// `document` for `document.created`, `redaction` for
+    /// `redaction.created`, `connection.sync` for
     /// `connection.sync.failed`.
     #[must_use]
     pub fn object_type(self) -> &'static str {
@@ -124,7 +118,7 @@ impl ActivityType {
     }
 
     /// The action half of the tag: the final segment, e.g. `created` for
-    /// `document.created`, `created` for `pipeline.redaction.created`.
+    /// `document.created`, `created` for `redaction.created`.
     #[must_use]
     pub fn action_type(self) -> &'static str {
         let tag = self.as_tag();
@@ -167,12 +161,9 @@ mod tests {
         // Two-part tag.
         assert_eq!(ActivityType::DocumentCreated.object_type(), "document");
         assert_eq!(ActivityType::DocumentCreated.action_type(), "created");
-        // Three-part tags: object is everything before the final segment.
-        assert_eq!(
-            ActivityType::RedactionCreated.object_type(),
-            "pipeline.redaction"
-        );
+        assert_eq!(ActivityType::RedactionCreated.object_type(), "redaction");
         assert_eq!(ActivityType::RedactionCreated.action_type(), "created");
+        // Three-part tags: object is everything before the final segment.
         assert_eq!(
             ActivityType::ConnectionSyncFailed.object_type(),
             "connection.sync"
