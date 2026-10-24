@@ -511,15 +511,24 @@ impl WorkspaceReviewService {
         let updated = conn
             .transaction(async |conn| {
                 let updated = conn.request_changes(review_id, origin.account_id).await?;
-                conn.emit_event(
-                    origin,
-                    event::WorkspaceEvent::ReviewChangesRequested(event::ReviewChangesRequested {
-                        review_id: review.id,
-                        document_id: document.id,
-                        document_name: document.display_name.clone(),
-                    }),
-                )
-                .await?;
+                // Emit only when the transition actually happened. The repository
+                // re-checks the status under its row lock; if a concurrent approve won
+                // the race between the unlocked pre-check above and that lock, it
+                // returns the review unchanged, and we must not announce a changes
+                // request that did not occur.
+                if updated.review_status == ReviewStatus::ChangesRequested {
+                    conn.emit_event(
+                        origin,
+                        event::WorkspaceEvent::ReviewChangesRequested(
+                            event::ReviewChangesRequested {
+                                review_id: review.id,
+                                document_id: document.id,
+                                document_name: document.display_name.clone(),
+                            },
+                        ),
+                    )
+                    .await?;
+                }
                 Ok::<_, Error>(updated)
             })
             .await?;
@@ -600,9 +609,13 @@ impl WorkspaceReviewService {
                 let outcome = conn
                     .approve_review(review_id, origin.account_id, required, redaction_id)
                     .await?;
-                // Announce approval only when the quorum is reached (the review is now
-                // signed off); a partial approval advances state without an event.
-                if outcome.review.review_status == ReviewStatus::Approved {
+                // Announce approval only when this call recorded a new approval that
+                // reached quorum. `recorded` guards the lost-race case: if a concurrent
+                // request-changes won between the unlocked pre-check and the row lock,
+                // the repository returns the review unchanged with `recorded = false`,
+                // and a quorum reached by some other request must not fire a second
+                // event here. A partial approval advances state without an event.
+                if outcome.recorded && outcome.review.review_status == ReviewStatus::Approved {
                     conn.emit_event(
                         origin,
                         event::WorkspaceEvent::ReviewApproved(event::ReviewApproved {

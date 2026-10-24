@@ -292,8 +292,8 @@ fn promote_policy_docs(op: TransformOperation) -> TransformOperation {
         .description(
             "Promotes a derived (ad-hoc) policy to an authored one: clears its \
              content hash and makes it editable and attachable to pipelines, \
-             keeping its id and current definition. An optional `displayName` \
-             replaces the policy's generated name. Returns 400 if the policy is \
+             keeping its id and current definition. A `displayName` is required and \
+             replaces the policy's generated hash name. Returns 400 if the policy is \
              already authored.",
         )
         .response::<200, Json<WorkspacePolicy>>()

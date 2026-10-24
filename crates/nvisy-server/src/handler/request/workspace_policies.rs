@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::input::{
     CreatePolicyInput, PolicyBodyInput, PolicyDraftInput, UpdatePolicyInput,
 };
+use crate::extract::validators::validate_non_blank;
 
 /// Query parameters for listing policies.
 ///
@@ -214,16 +215,15 @@ impl From<UpdateWorkspacePolicy> for UpdatePolicyInput {
 
 /// Request payload for promoting a derived policy to an authored one.
 ///
-/// A derived policy carries a neutral, generated name, so promotion optionally
-/// takes a human-readable title to replace it. Omitting it keeps the generated
-/// name. The whole body is optional: a bare `POST` promotes without renaming.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, Validate)]
+/// A derived policy carries a neutral, generated hash name, so promotion requires a
+/// human-readable title to replace it — the server never synthesizes one (that would
+/// store unlocalizable prose; the client names it in the user's language).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
-#[garde(allow_unvalidated)]
 pub struct PromoteWorkspacePolicy {
-    /// Optional human-readable display name for the promoted policy.
-    #[garde(length(chars, min = 1, max = 255))]
-    pub display_name: Option<String>,
+    /// Human-readable display name for the promoted policy (1-255 characters).
+    #[garde(length(chars, min = 1, max = 255), custom(validate_non_blank))]
+    pub display_name: String,
 }
 
 #[cfg(test)]
