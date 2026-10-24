@@ -338,7 +338,7 @@ fn create_comment_docs(op: TransformOperation) -> TransformOperation {
         .description(
             "Posts a comment (message) in a review. @username mentions notify those \
              members. Requires the Review permission. Returns 409 if the review is \
-             resolved.",
+             approved.",
         )
         .response::<201, Json<WorkspaceComment>>()
         .response::<400, Json<ErrorResponse>>()
@@ -502,8 +502,9 @@ fn list_review_timeline_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List a review's timeline")
         .description(
             "Returns the review's timeline — comments and lifecycle events (opened, \
-             renamed, linked, assigned, verified, reopened) interleaved, oldest \
-             first, with cursor pagination. Requires ViewReviews.",
+             renamed, redetected, assigned, unassigned, submitted, changes \
+             requested, approved, reopened) interleaved, oldest first, with cursor \
+             pagination. Requires ViewReviews.",
         )
         .response::<200, Json<WorkspaceTimelinePage>>()
         .response::<401, Json<ErrorResponse>>()
@@ -558,8 +559,9 @@ async fn list_review_events(
 fn list_review_events_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List a review's events")
         .description(
-            "Returns a review's activity events only (links, assignment, \
-             verification, reopen), oldest first. Requires ViewReviews.",
+            "Returns a review's activity events only (re-detection, assignment, \
+             submission, change requests, approvals, reopen), oldest first. Requires \
+             ViewReviews.",
         )
         .response::<200, Json<WorkspaceReviewTimelinePage>>()
         .response::<401, Json<ErrorResponse>>()

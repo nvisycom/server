@@ -59,6 +59,9 @@ pub struct WorkspaceDetection {
     /// Stored opaquely as JSON here (the engine type lives in the server layer);
     /// `None` means no edits yet.
     pub edit_set: Option<Json<serde_json::Value>>,
+    /// Optimistic-concurrency version for `edit_set`, bumped on every edit write; an
+    /// edit names the revision it read and the write proceeds only if it still matches.
+    pub edit_set_rev: i32,
     /// When a worker last claimed this detection. Acts as a lease: a redelivered
     /// job whose claim is still fresh is skipped, while a stale claim (a worker
     /// that died mid-analysis) can be re-claimed. `None` until first claimed.

@@ -21,9 +21,9 @@ use nvisy_postgres::model::{
 };
 use nvisy_postgres::query::{
     DetectionCursor, DetectionDocuments, DetectionJobOutboxRepository, DetectionListRow,
-    DetectionPolicyVersionRepository, PipelineReferenceRepository, WorkspaceDetectionRepository,
-    WorkspaceDocumentRepository, WorkspacePipelineRepository, WorkspacePolicyRepository,
-    WorkspacePolicyVersionRepository,
+    DetectionPolicyVersionRepository, EditWriteOutcome, PipelineReferenceRepository,
+    WorkspaceDetectionRepository, WorkspaceDocumentRepository, WorkspacePipelineRepository,
+    WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
 };
 use nvisy_postgres::types::{CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Json};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
@@ -35,7 +35,7 @@ use crate::domain::input::{
 use crate::domain::output::CreatedDetection;
 use crate::response::{Error, ErrorKind, Result};
 use crate::service::event::EventEmitter;
-use crate::service::{DetectionQueue, event};
+use crate::service::{ArtifactReader, DetectionQueue, EngineService, event};
 use crate::worker::detection::DetectionJob;
 
 /// Tracing target for detection domain operations.
@@ -60,25 +60,34 @@ struct CommitDetection {
 
 /// Creates and enqueues detections, and reads them back.
 ///
-/// Holds the Postgres client (acquiring its own connection per call) and the
-/// detection queue (to broadcast the initial status and wake the outbox drainer
-/// after a create commits). Resolved per request from
-/// [`ServiceState`].
+/// Holds the Postgres client (acquiring its own connection per call), the detection
+/// queue (to broadcast the initial status and wake the outbox drainer after a create
+/// commits), and the blob reader + engine (to load a detection's base analysis when
+/// validating reviewer edits against it). Resolved per request from [`ServiceState`].
 ///
 /// [`ServiceState`]: crate::service::ServiceState
 #[derive(Clone)]
 pub struct WorkspaceDetectionService {
     postgres: PgClient,
     detection: DetectionQueue,
+    reader: ArtifactReader,
+    engine: EngineService,
 }
 
 impl WorkspaceDetectionService {
     /// Creates a [`WorkspaceDetectionService`] over its clients.
     #[must_use]
-    pub fn new(postgres: PgClient, detection: DetectionQueue) -> Self {
+    pub fn new(
+        postgres: PgClient,
+        detection: DetectionQueue,
+        reader: ArtifactReader,
+        engine: EngineService,
+    ) -> Self {
         Self {
             postgres,
             detection,
+            reader,
+            engine,
         }
     }
 
@@ -390,22 +399,46 @@ impl WorkspaceDetectionService {
             .ok_or_else(|| Error::not_found("detection"))
     }
 
-    /// Persists a detection's accumulated reviewer edits (`edit_set`), the manual
-    /// corrections layered over the base analysis at redact time. Passing `None`
-    /// clears them. The edits live on the detection so they survive between
-    /// redactions and a solo user keeps their work without opening a review. Returns
-    /// the updated detection.
+    /// Persists a detection's accumulated reviewer edits (`edit_set`) under an
+    /// optimistic-concurrency guard, the manual corrections layered over the base
+    /// analysis at redact time. Passing `None` clears them. `expected_rev` is the
+    /// `edit_set_rev` the caller read; the write lands only if it still matches. The
+    /// edits live on the detection so they survive between redactions and a solo user
+    /// keeps their work without opening a review.
+    ///
+    /// The edits are validated against the detection's base analysis before being
+    /// stored — an edit naming an unknown target or the wrong modality is rejected
+    /// here (`BadRequest`), so an invalid set is never persisted to wedge a later
+    /// redaction. Clearing (no edits) needs no analysis and skips this.
     ///
     /// # Errors
     ///
-    /// - `NotFound` if the detection does not exist in the workspace.
+    /// - `NotFound` if the detection does not exist in the workspace, or its analysis
+    ///   has been reclaimed.
+    /// - `Conflict` if the detection has no analysis yet, or `expected_rev` is stale
+    ///   (a concurrent edit won).
+    /// - `BadRequest` if the edits do not validate against the base analysis.
     /// - A database error if a connection or the query fails.
     pub async fn set_edits(
         &self,
         workspace_id: Uuid,
         detection_id: Uuid,
+        expected_rev: i32,
         edits: Option<EditSet>,
     ) -> Result<WorkspaceDetectionModel> {
+        // Validate the edits against the detection's base analysis before storing. An
+        // unknown target, a self-contradiction, or an edit naming the wrong modality
+        // is rejected now rather than silently stored to fail a later redaction. This
+        // is the same report-relative check the redact path applies.
+        if let Some(edits) = &edits {
+            let (detection, _pipeline) = self.find(workspace_id, detection_id).await?;
+            let mut audit = self.load_base_audit(workspace_id, &detection).await?;
+            edits.validate(&audit.report)?;
+            // Trial-apply on the loaded audit to surface landing failures validation
+            // alone does not (e.g. a modality mismatch); the audit is then discarded.
+            edits.apply(&mut audit.report)?;
+        }
+
         let mut conn = self.postgres.get_connection().await?;
         // The postgres layer stores the edit-set opaquely as raw JSON (it has no
         // dependency on the engine's `EditSet` type), so encode to a value here.
@@ -421,9 +454,43 @@ impl WorkspaceDetectionService {
                     })
             })
             .transpose()?;
-        conn.set_detection_edits(workspace_id, detection_id, edit_set)
+        match conn
+            .set_detection_edits(workspace_id, detection_id, expected_rev, edit_set)
             .await?
-            .ok_or_else(|| Error::not_found("detection"))
+        {
+            EditWriteOutcome::Updated(detection) => Ok(*detection),
+            EditWriteOutcome::Stale => Err(ErrorKind::Conflict.with_message(
+                "The detection's edits changed since you loaded them; reload and retry",
+            )),
+            EditWriteOutcome::Absent => Err(Error::not_found("detection")),
+        }
+    }
+
+    /// Loads a detection's base analysis (its [`Audit`]), for validating reviewer
+    /// edits against its report. Resolves the audit blob under a short-lived
+    /// connection, then decodes it with the engine (no connection held across the
+    /// object-store round-trip).
+    ///
+    /// [`Audit`]: elide_pipeline::Audit
+    ///
+    /// # Errors
+    ///
+    /// - `Conflict` if the detection has no analysis yet.
+    /// - `NotFound` if the analysis blob has been reclaimed.
+    /// - `InternalServerError` if the stored audit cannot be decoded.
+    /// - A database error if a lookup fails.
+    async fn load_base_audit(
+        &self,
+        workspace_id: Uuid,
+        detection: &WorkspaceDetectionModel,
+    ) -> Result<elide_pipeline::Audit> {
+        let audit_blob = {
+            let mut conn = self.postgres.get_connection().await?;
+            self.reader.resolve_audit_blob(&mut conn, detection).await?
+        };
+        self.reader
+            .load_audit(self.engine.engine(), workspace_id, &audit_blob)
+            .await
     }
 
     /// Loads the exact policy definitions a detection was analyzed with, from the

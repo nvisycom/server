@@ -856,14 +856,23 @@ async fn edit_detection(
     State(detections): State<domain::WorkspaceDetectionService>,
     authz: Authorized<markers::RunRedactions>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
-    Json(request): Json<EditWorkspaceDetection>,
+    ValidateJson(request): ValidateJson<EditWorkspaceDetection>,
 ) -> Result<(StatusCode, Json<WorkspaceDetection>)> {
     tracing::debug!(target: TRACING_TARGET, "Setting detection edits");
 
     let workspace = authz.workspace;
     let detection_id = path_params.detection_id.as_uuid();
+
+    // The domain validates the edits against the detection's base analysis before
+    // storing (an unknown target or wrong modality → 400), so an invalid set never
+    // wedges a later redaction.
     detections
-        .set_edits(workspace.id, detection_id, request.edits)
+        .set_edits(
+            workspace.id,
+            detection_id,
+            request.edit_set_rev,
+            request.edits,
+        )
         .await?;
 
     // Re-read through `get` so the response carries the same shape as the other
@@ -890,14 +899,18 @@ fn edit_detection_docs(op: TransformOperation) -> TransformOperation {
         .description(
             "Sets the detection's accumulated reviewer edits (suppress a false positive, retag a \
              detection, or add one the analysis missed), or clears them when `edits` is omitted. \
-             The edits persist on the detection and are layered over its base analysis at redact \
-             time, so they survive between redactions. Requires RunRedactions.",
+             The edits are validated against the detection's analysis before being stored (400 on \
+             an unknown target or modality mismatch), persist on the detection, and are layered \
+             over its base analysis at redact time so they survive between redactions. Pass the \
+             `editSetRev` you last read; a stale value is rejected with 409. Requires \
+             RunRedactions.",
         )
         .response::<200, Json<WorkspaceDetection>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
+        .response::<409, Json<ErrorResponse>>()
 }
 
 /// Returns a [`Router`] with all detection routes.

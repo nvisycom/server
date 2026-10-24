@@ -337,6 +337,7 @@ diesel::table! {
         retention_override -> Nullable<Jsonb>,
         metadata -> Jsonb,
         edit_set -> Nullable<Jsonb>,
+        edit_set_rev -> Int4,
         claimed_at -> Nullable<Timestamptz>,
         started_at -> Timestamptz,
         completed_at -> Nullable<Timestamptz>,

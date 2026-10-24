@@ -1,5 +1,6 @@
 //! `WorkspaceDetection` response types.
 
+use elide_pipeline::entity::EditSet;
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceDetection as DetectionModel;
 use nvisy_postgres::query::DetectionDocuments;
@@ -51,6 +52,13 @@ pub struct WorkspaceDetection {
     pub error: Option<String>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: DetectionMetadata,
+    /// The accumulated reviewer edits applied over the base analysis at redact time,
+    /// so a client can display and revise them. Absent when the detection has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edits: Option<EditSet>,
+    /// Optimistic-concurrency version of `edits`; echo it back on an edit PATCH so a
+    /// stale write is rejected rather than overwriting a concurrent edit.
+    pub edit_set_rev: i32,
     /// When the detection started.
     pub started_at: Timestamp,
     /// When the detection completed analysis.
@@ -77,6 +85,12 @@ impl WorkspaceDetection {
         let metadata = detection.metadata.or_default();
         let error = metadata.error.clone();
         let pipeline_id = detection.pipeline_id;
+        // The edit-set is stored opaquely as JSON; present it typed when it decodes,
+        // and omit it (rather than surface a raw blob) if a stored shape no longer does.
+        let edits = detection
+            .edit_set
+            .as_ref()
+            .and_then(|stored| serde_json::from_value(stored.as_value().clone()).ok());
 
         Self {
             id: DetectionId::from_uuid(detection.id),
@@ -90,6 +104,8 @@ impl WorkspaceDetection {
             status: detection.status,
             error,
             metadata,
+            edits,
+            edit_set_rev: detection.edit_set_rev,
             started_at: detection.started_at.into(),
             completed_at: detection.completed_at.map(Into::into),
         }

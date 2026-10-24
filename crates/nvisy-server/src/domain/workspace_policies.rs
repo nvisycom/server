@@ -300,10 +300,13 @@ impl WorkspacePolicyService {
     /// kind to authored, after which it edits and attaches like any authored
     /// policy. The policy keeps its id and current definition version. A derived
     /// policy's stored name is a neutral hash token, so promotion takes an optional
-    /// `display_name` to give it a real, caller-authored title; omitting it keeps
-    /// the existing name. Promotion is rejected when nothing would change: an
-    /// already-authored policy returns `BadRequest`. The write and its event commit
-    /// together.
+    /// `display_name` to give it a real, caller-authored title; omitting it assigns a
+    /// generated `Policy <hash>` title. (The policy must vacate the bare-hash name: a
+    /// later ad-hoc redact for the same labels mints a fresh derived policy with that
+    /// exact hash name, which would otherwise collide on the display-name unique
+    /// index and break the redact flow.) Promotion is rejected when nothing would
+    /// change: an already-authored policy returns `BadRequest`. The write and its
+    /// event commit together.
     ///
     /// # Errors
     ///
@@ -326,12 +329,26 @@ impl WorkspacePolicyService {
             return Err(ErrorKind::BadRequest.with_message("Only a derived policy can be promoted"));
         }
 
+        // The promoted policy must give up its bare-hash name so a future derived
+        // policy for the same labels can take it. Without a caller title, synthesize a
+        // `Policy <hash>` name: the "Policy " prefix cannot collide with a derived
+        // name (which is pure hex), and the user can rename it afterwards. A derived
+        // policy always carries a content hash; fall back to its id if one is somehow
+        // absent, so the name stays unique either way.
+        let display_name = Some(display_name.unwrap_or_else(|| {
+            let token = existing
+                .content_hash
+                .as_deref()
+                .map_or_else(|| policy_id.simple().to_string(), |h| hex_prefix(h, 12));
+            format!("Policy {token}")
+        }));
+
         let workspace_id = origin.workspace_id;
         conn.transaction(async |conn| {
             // Flip to authored and clear the dedup hash together: the
             // `(kind = 'derived') = (content_hash IS NOT NULL)` check constraint
-            // requires an authored row to carry no hash. An optional new title
-            // replaces the neutral hash name a derived policy carried.
+            // requires an authored row to carry no hash. The title that replaces the
+            // neutral hash name is the caller's, or the generated one above.
             conn.update_workspace_policy(
                 policy_id,
                 model::UpdateWorkspacePolicy {
@@ -674,6 +691,45 @@ mod tests {
             .await
             .expect_err("an authored policy cannot be promoted");
         assert_eq!(err.kind(), ErrorKind::BadRequest);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn promoting_without_a_name_frees_the_derived_name_for_the_same_labels()
+    -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let service = WorkspacePolicyService::new(db.client.clone());
+        let security = security();
+        let origin = || event::EventOrigin {
+            workspace_id: seeded.workspace_id,
+            account_id: seeded.account_id,
+            security: &security,
+        };
+
+        // A derived policy for a label set, promoted without a caller-supplied name.
+        let derived = service
+            .create(origin(), derived_request(&["person_name"]))
+            .await?;
+        let first_id = derived.policy.id;
+        let hash_name = derived.policy.display_name.clone();
+
+        let (promoted, _) = service.promote(origin(), first_id, None).await?;
+        assert_eq!(promoted.item.kind, PolicyKind::Authored);
+        // The promoted policy vacates the bare-hash name so the slot is free; it now
+        // carries a generated title that cannot collide with a derived name.
+        assert_ne!(promoted.item.display_name, hash_name);
+        assert!(promoted.item.display_name.starts_with("Policy "));
+
+        // Re-creating a derived policy for the same labels must succeed (mint a fresh
+        // row), not deadlock on the display-name unique index.
+        let recreated = service
+            .create(origin(), derived_request(&["person_name"]))
+            .await?;
+        assert!(recreated.created, "a fresh derived policy is minted");
+        assert_ne!(recreated.policy.id, first_id);
+        assert_eq!(recreated.policy.kind, PolicyKind::Derived);
+        assert_eq!(recreated.policy.display_name, hash_name);
         Ok(())
     }
 }

@@ -94,6 +94,12 @@ CREATE TABLE workspace_detections (
     edit_set        JSONB                   DEFAULT NULL,
     CONSTRAINT workspace_detections_edit_set_size CHECK (edit_set IS NULL OR length(edit_set::TEXT) <= 262144),
 
+    -- Optimistic-concurrency version for edit_set, bumped on every edit write. An
+    -- edit PATCH names the revision it read, and the write proceeds only if it still
+    -- matches, so two reviewers editing the same detection cannot silently overwrite
+    -- each other (a stale PATCH is rejected as a conflict).
+    edit_set_rev    INTEGER                 NOT NULL DEFAULT 0,
+
     -- Detection lease: when a worker last claimed this detection. A redelivered
     -- job whose claim is still fresh is skipped (no double-analyze); a stale claim
     -- (a worker that died mid-analysis) can be re-claimed. Null until claimed.
@@ -174,6 +180,7 @@ COMMENT ON COLUMN workspace_detections.idempotency_key IS 'Detect idempotency ke
 COMMENT ON COLUMN workspace_detections.retention_override IS 'Retention override the detection ran under, snapshotted at create; read on redact so output retention reflects the run, not a since-edited pipeline. NULL falls back to the workspace baseline';
 COMMENT ON COLUMN workspace_detections.metadata IS 'Non-encrypted metadata for filtering/display; holds the full per-call usage report under `usage`';
 COMMENT ON COLUMN workspace_detections.edit_set IS 'Accumulated reviewer edits (EditSet) applied over the base analysis at redact time; persists across redactions. NULL means none';
+COMMENT ON COLUMN workspace_detections.edit_set_rev IS 'Optimistic-concurrency version of edit_set, bumped on each edit write; an edit PATCH must name the revision it read';
 COMMENT ON COLUMN workspace_detections.claimed_at IS 'Detection lease: when a worker last claimed this detection';
 COMMENT ON COLUMN workspace_detections.started_at IS 'When the detection started';
 COMMENT ON COLUMN workspace_detections.completed_at IS 'When the detection completed; NULL while in flight';

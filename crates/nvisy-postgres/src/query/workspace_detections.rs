@@ -18,6 +18,18 @@ use crate::types::{
 };
 use crate::{Error, PgConnection, Result, schema};
 
+/// The outcome of a guarded `edit_set` write.
+#[derive(Debug, Clone)]
+pub enum EditWriteOutcome {
+    /// The write landed; carries the updated detection (with the bumped revision).
+    Updated(Box<WorkspaceDetection>),
+    /// The detection exists but its `edit_set_rev` no longer matches the expected
+    /// one — a concurrent edit won, so this write was not applied.
+    Stale,
+    /// No live detection matches in the workspace.
+    Absent,
+}
+
 /// Keyset for paginating detections: newest first by `started_at`, `id` as the
 /// tiebreaker. Shared by the pipeline-scoped and workspace-scoped listings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,17 +193,24 @@ pub trait WorkspaceDetectionRepository {
         updates: UpdateWorkspaceDetection,
     ) -> impl Future<Output = Result<bool>> + Send;
 
-    /// Sets a live detection's accumulated reviewer edits (`edit_set`), scoped to
-    /// its workspace. Pass `Some` to store the edits, `None` to clear them. Returns
-    /// the updated detection, or `None` when no live detection matches. These edits
-    /// are layered over the detection's immutable base analysis at redact time and
-    /// persist across redactions.
+    /// Sets a live detection's accumulated reviewer edits (`edit_set`), scoped to its
+    /// workspace, under an optimistic-concurrency guard. `expected_rev` is the
+    /// `edit_set_rev` the caller read; the write proceeds and bumps the revision only
+    /// if it still matches. Pass `Some` to store the edits, `None` to clear them.
+    ///
+    /// Returns [`EditWriteOutcome::Updated`] with the new row, [`Stale`] when the
+    /// detection exists but its revision has moved on (a concurrent edit won), or
+    /// [`Absent`] when no live detection matches.
+    ///
+    /// [`Stale`]: EditWriteOutcome::Stale
+    /// [`Absent`]: EditWriteOutcome::Absent
     fn set_detection_edits(
         &mut self,
         workspace_id: Uuid,
         detection_id: Uuid,
+        expected_rev: i32,
         edit_set: Option<Json<serde_json::Value>>,
-    ) -> impl Future<Output = Result<Option<WorkspaceDetection>>> + Send;
+    ) -> impl Future<Output = Result<EditWriteOutcome>> + Send;
 
     /// Records a detection's inference usage: one call row per model call, with
     /// the meters each spent. A no-op for an empty slice (a deterministic
@@ -224,22 +243,52 @@ impl WorkspaceDetectionRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         detection_id: Uuid,
+        expected_rev: i32,
         edit_set: Option<Json<serde_json::Value>>,
-    ) -> Result<Option<WorkspaceDetection>> {
+    ) -> Result<EditWriteOutcome> {
         use schema::workspace_detections::{self, dsl};
 
-        diesel::update(
+        // Update only when the revision still matches, bumping it so the next writer's
+        // stale guard trips. The whole read-decide-write is one statement, so it is
+        // atomic against a concurrent edit without a separate lock.
+        let updated: Option<WorkspaceDetection> = diesel::update(
             workspace_detections::table
                 .filter(dsl::id.eq(detection_id))
                 .filter(dsl::workspace_id.eq(workspace_id))
-                .filter(dsl::deleted_at.is_null()),
+                .filter(dsl::deleted_at.is_null())
+                .filter(dsl::edit_set_rev.eq(expected_rev)),
         )
-        .set(dsl::edit_set.eq(edit_set))
+        .set((
+            dsl::edit_set.eq(edit_set),
+            dsl::edit_set_rev.eq(dsl::edit_set_rev + 1),
+        ))
         .returning(WorkspaceDetection::as_returning())
         .get_result(self)
         .await
         .optional()
-        .map_err(Error::from)
+        .map_err(Error::from)?;
+
+        if let Some(detection) = updated {
+            return Ok(EditWriteOutcome::Updated(Box::new(detection)));
+        }
+
+        // No row updated: either the detection is gone (Absent) or its revision moved
+        // on (Stale). A scoped existence check separates the two.
+        let exists: bool = diesel::select(diesel::dsl::exists(
+            workspace_detections::table
+                .filter(dsl::id.eq(detection_id))
+                .filter(dsl::workspace_id.eq(workspace_id))
+                .filter(dsl::deleted_at.is_null()),
+        ))
+        .get_result(self)
+        .await
+        .map_err(Error::from)?;
+
+        Ok(if exists {
+            EditWriteOutcome::Stale
+        } else {
+            EditWriteOutcome::Absent
+        })
     }
 
     async fn find_workspace_detection_by_id(
@@ -1295,6 +1344,60 @@ mod tests {
                 .any(|b| b.id == blob.id),
             "an unreferenced, expired intermediate blob is due for purge"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn set_detection_edits_is_guarded_by_revision() -> anyhow::Result<()> {
+        use crate::query::EditWriteOutcome;
+        use crate::types::Json;
+
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_pipeline_and_document().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let detection = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.workspace_id,
+                seeded.pipeline_id,
+                seeded.account_id,
+                seeded.document_id,
+            ))
+            .await?;
+        assert_eq!(detection.edit_set_rev, 0, "a new detection starts at rev 0");
+
+        let edits = || Some(Json::from_raw(serde_json::json!({ "v": 1 })));
+
+        // A write at the current revision lands and bumps the revision.
+        let first = conn
+            .set_detection_edits(seeded.workspace_id, detection.id, 0, edits())
+            .await?;
+        let EditWriteOutcome::Updated(updated) = first else {
+            panic!("expected the write to land");
+        };
+        assert_eq!(updated.edit_set_rev, 1);
+
+        // A second write at the now-stale revision 0 is rejected, nothing changes.
+        let stale = conn
+            .set_detection_edits(seeded.workspace_id, detection.id, 0, edits())
+            .await?;
+        assert!(matches!(stale, EditWriteOutcome::Stale));
+
+        // A write at the current revision 1 lands again.
+        let next = conn
+            .set_detection_edits(seeded.workspace_id, detection.id, 1, None)
+            .await?;
+        let EditWriteOutcome::Updated(cleared) = next else {
+            panic!("expected the write to land");
+        };
+        assert_eq!(cleared.edit_set_rev, 2);
+        assert!(cleared.edit_set.is_none(), "None clears the edits");
+
+        // A write against a detection that does not exist reports Absent.
+        let absent = conn
+            .set_detection_edits(seeded.workspace_id, uuid::Uuid::now_v7(), 0, edits())
+            .await?;
+        assert!(matches!(absent, EditWriteOutcome::Absent));
         Ok(())
     }
 }

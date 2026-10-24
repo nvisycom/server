@@ -107,8 +107,8 @@ impl WorkspaceComment {
     }
 }
 
-/// One non-message entry in a review timeline (opened, renamed, a detection or
-/// redaction linked, an assignment change, verified, or reopened).
+/// One non-message entry in a review timeline (opened, renamed, redetected, an
+/// assignment change, submitted, changes requested, approved, or reopened).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceReviewEvent {

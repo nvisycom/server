@@ -154,9 +154,12 @@ impl_di_new! {
         |state| state.infra.postgres.clone(), state.crypto.clone(), state.endpoint_policy;
     // The engine (resolve list-filter format/modality tokens).
     crate::domain::WorkspaceDocumentService => |state| state.infra.postgres.clone(), state.engine.clone();
-    // The detection queue (broadcast status and wake the drainer after a create).
+    // The detection queue (broadcast status and wake the drainer after a create),
+    // plus the blob reader + engine (load a detection's base analysis to validate
+    // reviewer edits against it before storing them).
     crate::domain::WorkspaceDetectionService =>
-        |state| state.infra.postgres.clone(), DetectionQueue::from_ref(state);
+        |state| state.infra.postgres.clone(), DetectionQueue::from_ref(state),
+        ArtifactReader::from_ref(state), state.engine.clone();
     // The blob writer/reader both encrypt/decrypt blob content, so each composes
     // from `Infra` plus the crypto service.
     ArtifactWriter => |state| state.infra.clone(), state.crypto.clone();

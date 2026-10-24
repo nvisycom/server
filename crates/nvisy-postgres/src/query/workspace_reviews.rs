@@ -647,15 +647,32 @@ impl WorkspaceReviewRepository for PgConnection {
         self.transaction(async |conn| {
             let review = lock_review(conn, review_id).await?;
 
-            // Already awaiting changes: idempotent no-op.
-            if review.review_status == ReviewStatus::ChangesRequested {
+            // Re-check the status under the row lock: the domain pre-check runs on an
+            // unlocked read, so only here, holding the lock, is the repository
+            // authoritative. Changes can be requested only on a review awaiting a
+            // decision; any other state (a concurrent approve won the race, or it was
+            // already pushed back) is left untouched.
+            if !matches!(
+                review.review_status,
+                ReviewStatus::InReview | ReviewStatus::PartiallyApproved
+            ) {
                 return Ok(review);
             }
 
             // A pushback invalidates the approvals accumulated against the prior
-            // state, so clear them before moving the status.
+            // state, and the output they approved, so clear both before moving the
+            // status (matching reopen, so an invalidated approval keeps no output).
             clear_approvals(conn, review_id).await?;
-            let review = update_status(conn, review_id, ReviewStatus::ChangesRequested).await?;
+            let review = apply_update(
+                conn,
+                review_id,
+                UpdateWorkspaceReview {
+                    review_status: Some(ReviewStatus::ChangesRequested),
+                    redaction_id: Some(None),
+                    ..Default::default()
+                },
+            )
+            .await?;
             record_event(
                 conn,
                 &review,
@@ -680,6 +697,23 @@ impl WorkspaceReviewRepository for PgConnection {
             use schema::workspace_review_assignees as wra;
 
             let review = lock_review(conn, review_id).await?;
+
+            // Re-check the status under the row lock: the domain pre-check runs on an
+            // unlocked read, so a concurrent request-changes could have committed
+            // between it and this lock. Only a review awaiting a decision can be
+            // approved; otherwise return unchanged so the race's winner is not
+            // overwritten.
+            if !matches!(
+                review.review_status,
+                ReviewStatus::InReview | ReviewStatus::PartiallyApproved
+            ) {
+                let approvals = count_approvals(conn, review_id).await?;
+                return Ok(ApprovalOutcome {
+                    review,
+                    recorded: false,
+                    approvals,
+                });
+            }
 
             // Stamp the caller's own assignee row, but only if they are assigned and
             // have not already approved (approved_at IS NULL). The row count tells us
@@ -1471,18 +1505,14 @@ mod tests {
         assert_eq!(again.approvals, 1);
         assert_eq!(again.review.review_status, ReviewStatus::PartiallyApproved);
 
-        // The second distinct approval meets quorum: approved, output set.
-        let second = conn
-            .approve_review(review.id, bob, 2, Some(redaction_id))
-            .await?;
-        assert!(second.recorded);
-        assert_eq!(second.approvals, 2);
-        assert_eq!(second.review.review_status, ReviewStatus::Approved);
-        assert_eq!(second.review.redaction_id, Some(redaction_id));
-
-        // request-changes clears the approvals so quorum must be met afresh.
+        // Requesting changes while partially approved clears the accumulated approval
+        // (and its bound output), so quorum must be met afresh.
         let pushed_back = conn.request_changes(review.id, seeded.account_id).await?;
         assert_eq!(pushed_back.review_status, ReviewStatus::ChangesRequested);
+        assert_eq!(
+            pushed_back.redaction_id, None,
+            "the invalidated approval's output is cleared"
+        );
         conn.submit_review(review.id, seeded.account_id).await?;
         let after = conn
             .approve_review(review.id, seeded.account_id, 2, None)
@@ -1492,6 +1522,12 @@ mod tests {
             "approvals were reset by request-changes"
         );
         assert_eq!(after.review.review_status, ReviewStatus::PartiallyApproved);
+
+        // The second distinct approval now meets quorum again: approved.
+        let second = conn.approve_review(review.id, bob, 2, None).await?;
+        assert!(second.recorded);
+        assert_eq!(second.approvals, 2);
+        assert_eq!(second.review.review_status, ReviewStatus::Approved);
         Ok(())
     }
 

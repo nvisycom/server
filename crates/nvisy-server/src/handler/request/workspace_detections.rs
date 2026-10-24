@@ -146,9 +146,15 @@ impl From<CreateAdhocWorkspaceDetection> for CreateAdhocDetectionInput {
 /// missed) persist on the detection and are layered over its base analysis at redact
 /// time, so they survive between redactions. Omit `edits` to clear them.
 #[must_use]
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema, Validate)]
 #[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
 pub struct EditWorkspaceDetection {
+    /// The `editSetRev` the client last read for this detection. The write is applied
+    /// only if it still matches, so a concurrent edit is not silently overwritten; a
+    /// stale value is rejected with 409. Defaults to 0 (a detection with no edits yet).
+    #[serde(default)]
+    pub edit_set_rev: i32,
     /// The reviewer edits to persist, grouped by modality. Omit to clear the
     /// detection's stored edits.
     #[serde(default, skip_serializing_if = "Option::is_none")]

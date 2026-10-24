@@ -71,7 +71,8 @@ pub use workspace_connections::{
 pub use workspace_detection_jobs::DetectionJobOutboxRepository;
 pub use workspace_detection_policy_versions::DetectionPolicyVersionRepository;
 pub use workspace_detections::{
-    DetectionCursor, DetectionDocuments, DetectionListRow, WorkspaceDetectionRepository,
+    DetectionCursor, DetectionDocuments, DetectionListRow, EditWriteOutcome,
+    WorkspaceDetectionRepository,
 };
 pub use workspace_documents::{
     DocumentCursor, DocumentWithBlob, ImportedDocumentRef, WorkspaceDocumentRepository,
