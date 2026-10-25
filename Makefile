@@ -105,17 +105,27 @@ clear-migrations: ## Reverts all database migrations.
 .PHONY: reset
 reset: ## Resets Docker containers (down -v, then up -d).
 	@$(call log,Stopping and removing Docker containers and volumes...)
-	@docker compose -f ./docker/docker-compose.dev.yml down -v
+	@docker compose -f ./docker/compose.yaml down -v
 	@$(call log,Starting Docker containers...)
-	@docker compose -f ./docker/docker-compose.dev.yml up -d
+	@docker compose -f ./docker/compose.yaml up -d
 	@$(call log,Docker containers reset successfully.)
 
+# `NER=1` also starts the GLiNER2 NER service and points the server at the NER
+# engine config. Set by the `run` recipe below.
+ifdef NER
+RUN_ENGINE_ENV := ENGINE_CONFIG_FILEPATH=./docker/engine.dev.toml
+endif
+
 .PHONY: run
-run: ## Runs the server with .env loaded (starts Postgres, NATS, and RustFS first).
+run: ## Runs the server (NATS, Postgres, RustFS first). Pass NER=1 to also start the GLiNER2 NER service.
 	@$(call log,Starting Postgres, NATS, and RustFS...)
-	@docker compose -f ./docker/docker-compose.dev.yml up -d --wait postgres nats rustfs
+	@docker compose -f ./docker/compose.yaml up -d --wait postgres nats rustfs
 	@$(call log,Provisioning the blob store bucket...)
-	@docker compose -f ./docker/docker-compose.dev.yml up --exit-code-from rustfs-init rustfs-init
+	@docker compose -f ./docker/compose.yaml up --exit-code-from rustfs-init rustfs-init
+ifdef NER
+	@$(call log,Starting the NER service (first run downloads the model)...)
+	@docker compose -f ./docker/compose.yaml --profile ner up -d --wait ner
+endif
 	@$(call log,Starting server... (output also written to latest.log))
 	@# Tee via process substitution rather than a pipe: a pipe would put `tee`
 	@# in the foreground process group, so Ctrl+C (SIGINT) kills `tee` first and
@@ -123,7 +133,7 @@ run: ## Runs the server with .env loaded (starts Postgres, NATS, and RustFS firs
 	@# then lost and, under `pipefail`, the recipe reports exit 130. With `> >(tee)`
 	@# the server owns the terminal and receives the signal directly; its shutdown
 	@# runs and is logged, and the process exits cleanly.
-	@bash -c 'cargo run --features dotenv --bin nvisy-cli > >(tee latest.log) 2>&1'
+	@bash -c '$(RUN_ENGINE_ENV) cargo run --features dotenv --bin nvisy-cli > >(tee latest.log) 2>&1'
 
 .PHONY: generate-all
 generate-all: generate-env generate-keys generate-migrations

@@ -123,7 +123,7 @@ jobs:
         run: make install-tools
 
       - name: Start services
-        run: docker compose -f docker/docker-compose.dev.yml up -d
+        run: docker compose -f docker/compose.yaml up -d
 
       - name: Wait for services
         run: |
@@ -138,7 +138,7 @@ jobs:
 
       - name: Stop services
         if: always()
-        run: docker compose -f docker/docker-compose.dev.yml down -v
+        run: docker compose -f docker/compose.yaml down -v
 
   docs:
     name: Docs

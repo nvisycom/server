@@ -96,10 +96,77 @@ services:
     networks:
       - nvisy-dev
 
+  # Warms the NER model into the shared Hugging Face cache and exits. The
+  # elide-ner image carries no weights, so this one-shot `elide_ner.warm` run
+  # downloads them first (as root, to populate the fresh named volume, which it
+  # hands to the uid the service runs as); the service gates on it completing.
+  # Not started by `make run`'s default set — bring NER up with the `ner`
+  # profile (`make run-ner`).
+  ner-init:
+    image: ${ELIDE_NER_IMAGE:-ghcr.io/nvisycom/elide-ner}:${ELIDE_VERSION:-0.1.0-rc.4}
+    container_name: nvisy-ner-init-dev
+    profiles: ["ner"]
+    # The warmer is the one process that must reach the Hub; the service then
+    # runs offline against the cache it leaves behind.
+    user: root
+    environment:
+      HF_HOME: /cache/huggingface
+      HF_HUB_OFFLINE: "0"
+      TRANSFORMERS_OFFLINE: "0"
+      ELIDE_BENTO_NER_MODEL: ${ELIDE_NER_MODEL:-fastino/gliner2-privacy-filter-PII-multi}
+    entrypoint: ["python", "-m", "elide_ner.warm"]
+    volumes:
+      - hf_cache:/cache/huggingface
+    networks:
+      - nvisy-dev
+
+  # GLiNER2 schema-driven NER/PII service. The host-run server reaches it at
+  # localhost:3100 (ELIDE_NER_PORT); point the engine config's NER recognizer
+  # there. The service runs as a non-root uid with the cache read-only and
+  # HF_HUB_OFFLINE on, so request text never reaches the Hub.
+  ner:
+    image: ${ELIDE_NER_IMAGE:-ghcr.io/nvisycom/elide-ner}:${ELIDE_VERSION:-0.1.0-rc.4}
+    container_name: nvisy-ner-dev
+    profiles: ["ner"]
+    restart: unless-stopped
+    ports:
+      - "${ELIDE_NER_PORT:-3100}:3000"
+    environment:
+      HF_HOME: /cache/huggingface
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      ELIDE_BENTO_NER_MODEL: ${ELIDE_NER_MODEL:-fastino/gliner2-privacy-filter-PII-multi}
+      ELIDE_BENTO_NER_QUANTIZE: ${ELIDE_NER_QUANTIZE:-}
+      ELIDE_BENTO_NER_MAX_TOKENS: ${ELIDE_NER_MAX_TOKENS:-512}
+      LOG_LEVEL: ${ELIDE_LOG_LEVEL:-INFO}
+    volumes:
+      - hf_cache:/cache/huggingface:ro
+    # The bentoml image ships no curl/wget, so /readyz is probed with Python.
+    # The model loads in __init__, so readiness lags liveness; the long
+    # start_period covers a cold load without flapping.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:3000/readyz', timeout=5)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    depends_on:
+      ner-init:
+        condition: service_completed_successfully
+    networks:
+      - nvisy-dev
+
 volumes:
   postgres_data:
   nats_data:
   rustfs_data:
+  # Hugging Face cache the NER init container populates and the service mounts
+  # read-only; keeps the model weights out of the image and off repeat pulls.
+  hf_cache:
 
 networks:
   nvisy-dev:

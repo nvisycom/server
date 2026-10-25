@@ -54,9 +54,14 @@ server locally:
 make install-all       # Install tools and make scripts executable
 make generate-all      # Generate .env, auth keys, and apply migrations
 
-docker compose -f docker/docker-compose.dev.yml up -d   # Start Postgres, NATS, RustFS
+docker compose -f docker/compose.yaml up -d   # Start Postgres, NATS, RustFS
 make run                                                # Run the server
 ```
+
+To run with the GLiNER2 NER service (pattern recognition otherwise runs alone),
+pass `make run NER=1` — it also starts the `ner` compose profile and points the
+server at `docker/engine.dev.toml`. The first run downloads the model (~1.2 GB)
+into a cached volume.
 
 The API then serves interactive OpenAPI docs (Scalar UI) at the running server's
 docs path. For self-hosted deployments, see [`docker/`](docker/) for compose
