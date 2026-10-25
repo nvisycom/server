@@ -1,4 +1,4 @@
-//! The typed LLM inference connection configuration.
+//! The typed LLM connection configuration.
 
 use std::fmt;
 
@@ -6,7 +6,7 @@ use std::fmt;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::InferenceClient;
+use super::AssistantClient;
 use crate::error::Result;
 use crate::provider::{
     AnthropicProvider, Client, OllamaCredentials, OllamaProvider, OpenAiProvider,
@@ -54,7 +54,7 @@ pub struct UnauthenticatedProvider {
     pub default_model: Option<String>,
 }
 
-/// A fully-typed LLM inference connection configuration.
+/// A fully-typed LLM connection configuration.
 ///
 /// The `provider` tag selects the variant and thereby the credential shape, so
 /// an `OpenAI` connection cannot carry Anthropic credentials. The key-bearing
@@ -145,7 +145,7 @@ impl LlmConfig {
         }
     }
 
-    /// Builds a ready-to-use [`InferenceClient`] for this config.
+    /// Builds a ready-to-use [`AssistantClient`] for this config.
     ///
     /// `model` overrides the configured [`default_model`]; if neither is set, the
     /// provider's own default applies.
@@ -156,7 +156,7 @@ impl LlmConfig {
     ///
     /// Returns a `Result` for a stable call-site seam; building a provider client
     /// from a validated config does not currently fail.
-    pub fn connect(&self, model: Option<&str>) -> Result<InferenceClient> {
+    pub fn connect(&self, model: Option<&str>) -> Result<AssistantClient> {
         let model = model.or_else(|| self.default_model()).unwrap_or_default();
         let client = match self {
             Self::OpenAi(p) => {
@@ -183,12 +183,12 @@ impl LlmConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(untagged)]
-pub enum InferenceConfig {
+pub enum AssistantConfig {
     /// A language model (chat/completion) connection.
     Llm(LlmConfig),
 }
 
-impl InferenceConfig {
+impl AssistantConfig {
     /// The provider identifier for this config, matching the serialized `provider`
     /// tag and used for the stored `provider` column and for filtering.
     #[must_use]

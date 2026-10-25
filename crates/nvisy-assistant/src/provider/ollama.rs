@@ -10,7 +10,7 @@ use rig::providers::ollama::{self, OllamaConfig};
 use super::{Client, OllamaCredentials, map_verify};
 use crate::error::Result;
 
-/// Ollama-backed inference client.
+/// Ollama-backed assistant client.
 pub struct OllamaProvider(ollama::Ollama);
 
 impl Client for OllamaProvider {
@@ -29,7 +29,7 @@ impl Client for OllamaProvider {
     /// Ollama is unauthenticated, so there is no credential to check, but the
     /// daemon still has to be reachable at the configured base URL. Probe it by
     /// listing models (`GET /api/tags`); an unreachable server or a wrong URL
-    /// fails here rather than at the first inference request.
+    /// fails here rather than at the first assistant request.
     async fn verify(&self) -> Result<()> {
         map_verify(self.0.list_models().await.map(|_| ()))
     }

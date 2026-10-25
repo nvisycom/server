@@ -30,7 +30,7 @@ The Rust workspace contains these crates, each with a single responsibility:
 | `nvisy-s3`           | First-party blob storage over an S3-compatible backend |
 | `nvisy-object-store` | Providers for external object stores (S3, Azure, GCS)  |
 | `nvisy-file-service` | OAuth-based cloud file services (Google Drive, ...)    |
-| `nvisy-inference`    | LLM inference provider configuration and clients       |
+| `nvisy-assistant`    | LLM assistant engine and provider clients              |
 | `nvisy-postgres`     | PostgreSQL ORM layer using Diesel with async support   |
 | `nvisy-server`       | HTTP API handlers, middleware, authentication          |
 | `nvisy-webhook`      | Webhook delivery for external event notification       |

@@ -1,6 +1,6 @@
 //! Inference-provider configuration.
 //!
-//! A provider's stored config is an [`InferenceConfig`] — the inference family
+//! A provider's stored config is an [`AssistantConfig`] — the inference family
 //! (a language model today, other model kinds later). The outer enum is untagged,
 //! so on the wire it is flat: the inner config's own `provider` tag is the sole
 //! discriminator (`{ "provider": "openai", ... }`). This is the inference analog
@@ -9,8 +9,8 @@
 //!
 //! [`ConnectionConfig`]: super::ConnectionConfig
 
+use nvisy_assistant::AssistantConfig;
 use nvisy_core::net::EndpointPolicy;
-use nvisy_inference::InferenceConfig;
 use nvisy_postgres::types::ProviderType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -21,12 +21,12 @@ use crate::response::{ErrorKind, Result};
 ///
 /// Untagged: the inner config's `provider` tag is the sole discriminator, so the
 /// stored/wire form is flat. A new inference kind is added as a variant of
-/// [`InferenceConfig`] with no change here.
+/// [`AssistantConfig`] with no change here.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ProviderConfig {
     /// An inference connection (an LLM today; other model kinds later).
-    Inference(InferenceConfig),
+    Inference(AssistantConfig),
 }
 
 impl ProviderConfig {
@@ -45,7 +45,7 @@ impl ProviderConfig {
     pub fn provider_type(&self) -> ProviderType {
         match self {
             Self::Inference(config) => match config {
-                InferenceConfig::Llm(_) => ProviderType::Llm,
+                AssistantConfig::Llm(_) => ProviderType::Llm,
             },
         }
     }
@@ -79,7 +79,7 @@ impl ProviderConfig {
     /// # Errors
     ///
     /// Returns the inference error describing the build or verification failure.
-    pub async fn validate(&self) -> nvisy_inference::Result<()> {
+    pub async fn validate(&self) -> nvisy_assistant::Result<()> {
         match self {
             Self::Inference(config) => config.validate().await,
         }

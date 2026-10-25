@@ -11,7 +11,7 @@ use std::num::NonZero;
 use std::sync::Arc;
 use std::time::Duration;
 
-use nvisy_inference::{ChatTurn, InferenceClient, InferenceConfig};
+use nvisy_assistant::{AssistantClient, AssistantConfig, ChatTurn};
 use nvisy_postgres::model::{NewWorkspaceReviewComment, WorkspaceReview, WorkspaceReviewComment};
 use nvisy_postgres::query::{
     EventOutboxRepository, WorkspaceProviderRepository, WorkspaceReviewCommentRepository,
@@ -321,7 +321,7 @@ impl AssistantWorker {
         &self,
         conn: &mut PgConn,
         workspace_id: Uuid,
-    ) -> Result<InferenceClient> {
+    ) -> Result<AssistantClient> {
         let provider = conn
             .find_provider_by_type(workspace_id, ProviderType::Llm)
             .await?
@@ -335,7 +335,7 @@ impl AssistantWorker {
             .decrypt_json(workspace_id, &provider.encrypted_data)?;
 
         let llm = match config {
-            ProviderConfig::Inference(InferenceConfig::Llm(llm)) => llm,
+            ProviderConfig::Inference(AssistantConfig::Llm(llm)) => llm,
         };
 
         llm.connect(None).map_err(|err| {

@@ -2,12 +2,12 @@
 //! serialized [`ErrorResponse`] body, plus the `From` conversions that turn each
 //! infrastructure error into an [`Error`] at the request boundary.
 
+mod assistant_error;
 mod crypto_error;
 mod engine_error;
 mod error_response;
 mod file_service_error;
 mod http_error;
-mod inference_error;
 mod nats_error;
 mod object_error;
 mod oidc_error;

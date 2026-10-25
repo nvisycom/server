@@ -9,7 +9,7 @@ use rig::providers::openai::{self, OpenAIConfig};
 use super::{Client, map_verify};
 use crate::error::Result;
 
-/// OpenAI-backed inference client.
+/// OpenAI-backed assistant client.
 pub struct OpenAiProvider(openai::OpenAI);
 
 impl Client for OpenAiProvider {

@@ -6,7 +6,7 @@ members = [
     "./crates/nvisy-cli",
     "./crates/nvisy-core",
     "./crates/nvisy-nats",
-    "./crates/nvisy-inference",
+    "./crates/nvisy-assistant",
     "./crates/nvisy-object-store",
     "./crates/nvisy-file-service",
     "./crates/nvisy-s3",
@@ -52,7 +52,7 @@ elide-pipeline = { git = "https://github.com/nvisycom/elide-runtime", branch = "
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
 nvisy-nats = { path = "./crates/nvisy-nats", version = "0.1.0" }
-nvisy-inference = { path = "./crates/nvisy-inference", version = "0.1.0" }
+nvisy-assistant = { path = "./crates/nvisy-assistant", version = "0.1.0" }
 nvisy-object-store = { path = "./crates/nvisy-object-store", version = "0.1.0" }
 nvisy-file-service = { path = "./crates/nvisy-file-service", version = "0.1.0" }
 nvisy-postgres = { path = "./crates/nvisy-postgres", version = "0.1.0" }

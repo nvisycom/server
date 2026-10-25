@@ -63,7 +63,7 @@ elide-pipeline = { workspace = true, features = [
 # Internal crates
 nvisy-core = { workspace = true, features = ["schema"] }
 nvisy-nats = { workspace = true, features = [] }
-nvisy-inference = { workspace = true, features = ["schema"] }
+nvisy-assistant = { workspace = true, features = ["schema"] }
 nvisy-object-store = { workspace = true, features = ["schema"] }
 nvisy-file-service = { workspace = true, features = ["schema"] }
 nvisy-postgres = { workspace = true, features = ["schema"] }
