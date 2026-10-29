@@ -1,5 +1,6 @@
 //! Workspace detections repository for managing analysis instances.
 
+use std::collections::HashMap;
 use std::future::Future;
 
 use diesel::prelude::*;
@@ -13,6 +14,7 @@ use crate::model::{
     NewWorkspaceDetectionCallMeter, UpdateWorkspaceDetection, WorkspaceDetection,
 };
 use crate::query::search::ilike_contains;
+use crate::query::{DetectionRedactedOutput, WorkspaceRedactionRepository};
 use crate::schema::{
     workspace_blobs as blobs, workspace_detections as detections, workspace_documents as documents,
     workspace_redactions as redactions,
@@ -146,11 +148,34 @@ pub struct DetectionListRow {
     pub input_document_name: Option<String>,
 }
 
+/// One detection tree: a detection run with its artifacts.
+#[derive(Debug, Clone)]
+pub struct DetectionTreeRow {
+    /// Detection run identifier.
+    pub detection_id: Uuid,
+    /// Input document identifier, retained even when the input is deleted.
+    pub input_document_id: Uuid,
+    /// Live input name, or None for a deleted input.
+    pub input_document_name: Option<String>,
+    /// Whether intermediate artifact bytes are retained.
+    pub intermediate_available: bool,
+    /// Live redacted output files for this run, newest first.
+    pub redacted_outputs: Vec<DetectionRedactedOutput>,
+}
+
 /// Repository for workspace detection database operations.
 ///
 /// Handles detection lifecycle management including creation, status updates,
 /// completion tracking, and queries.
 pub trait WorkspaceDetectionRepository {
+    /// Lists detection trees, paginating the roots before fetching their outputs.
+    fn cursor_list_detection_trees(
+        &mut self,
+        workspace_id: Uuid,
+        pagination: CursorPagination<DetectionCursor>,
+        filter: &DetectionFilter,
+    ) -> impl Future<Output = Result<CursorPage<DetectionTreeRow>>> + Send;
+
     /// Creates a new workspace detection record.
     fn create_workspace_detection(
         &mut self,
@@ -286,6 +311,33 @@ pub trait WorkspaceDetectionRepository {
 }
 
 impl WorkspaceDetectionRepository for PgConnection {
+    async fn cursor_list_detection_trees(
+        &mut self,
+        workspace_id: Uuid,
+        pagination: CursorPagination<DetectionCursor>,
+        filter: &DetectionFilter,
+    ) -> Result<CursorPage<DetectionTreeRow>> {
+        let page = self
+            .cursor_list_workspace_detections(workspace_id, pagination, filter)
+            .await?;
+        let ids: Vec<_> = page.items.iter().map(|row| row.detection.id).collect();
+        let outputs = self.detection_outputs_batch(workspace_id, &ids).await?;
+        let mut by_detection: HashMap<Uuid, Vec<DetectionRedactedOutput>> = HashMap::new();
+        for output in outputs {
+            by_detection
+                .entry(output.detection_id)
+                .or_default()
+                .push(output);
+        }
+        Ok(page.map(|row| DetectionTreeRow {
+            detection_id: row.detection.id,
+            input_document_id: row.detection.input_document_id,
+            input_document_name: row.input_document_name,
+            intermediate_available: row.detection.has_intermediate,
+            redacted_outputs: by_detection.remove(&row.detection.id).unwrap_or_default(),
+        }))
+    }
+
     async fn create_workspace_detection(
         &mut self,
         new_detection: NewWorkspaceDetection,
@@ -1074,6 +1126,100 @@ mod tests {
         ))
         .await?;
         Ok((seeded, ids))
+    }
+
+    #[tokio::test]
+    async fn artifact_trees_paginate_roots_and_keep_outputs_with_their_detection()
+    -> anyhow::Result<()> {
+        use crate::query::WorkspaceDocumentRepository;
+
+        let db = TestDatabase::start().await;
+        let (seeded, _) = seed_searchable_runs(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+        let filter = DetectionFilter {
+            search: Some("Report".into()),
+            ..Default::default()
+        };
+        let first = conn
+            .cursor_list_detection_trees(
+                seeded.workspace_id,
+                CursorPagination::new(1).with_count(),
+                &filter,
+            )
+            .await?;
+        assert_eq!(first.total, Some(2));
+        assert_eq!(first.items.len(), 1);
+        assert!(first.next_cursor.is_some());
+        let second = conn
+            .cursor_list_detection_trees(
+                seeded.workspace_id,
+                CursorPagination::from_cursor_string(1, first.next_cursor.as_deref()).with_count(),
+                &filter,
+            )
+            .await?;
+        assert_eq!(second.total, Some(2));
+        assert_eq!(second.items.len(), 1);
+        assert_ne!(first.items[0].detection_id, second.items[0].detection_id);
+        assert!(second.next_cursor.is_none());
+        for tree in [&first.items[0], &second.items[0]] {
+            assert_eq!(tree.input_document_name.as_deref(), Some("Report_50%.pdf"));
+            assert!(tree.intermediate_available);
+            assert_eq!(tree.redacted_outputs.len(), 3);
+            assert!(
+                tree.redacted_outputs
+                    .iter()
+                    .all(|output| output.detection_id == tree.detection_id)
+            );
+        }
+        let unknown_workspace = conn
+            .cursor_list_detection_trees(
+                Uuid::new_v4(),
+                CursorPagination::new(10).with_count(),
+                &filter,
+            )
+            .await?;
+        assert_eq!(unknown_workspace.total, Some(0));
+        assert_eq!(unknown_workspace.items.len(), 0);
+        assert!(unknown_workspace.next_cursor.is_none());
+
+        // Deleting child files does not remove their detection roots.
+        conn.delete_workspace_document(seeded.document_id).await?;
+        let input_id = first.items[0].input_document_id;
+        let by_input = DetectionFilter {
+            input_document_id: Some(input_id),
+            ..Default::default()
+        };
+        let without_outputs = conn
+            .cursor_list_detection_trees(
+                seeded.workspace_id,
+                CursorPagination::new(10).with_count(),
+                &by_input,
+            )
+            .await?;
+        assert_eq!(without_outputs.total, Some(2));
+        assert!(
+            without_outputs
+                .items
+                .iter()
+                .all(|tree| tree.redacted_outputs.is_empty())
+        );
+        // Deleted inputs also leave the run history intact, with no input metadata.
+        conn.delete_workspace_document(input_id).await?;
+        let without_input = conn
+            .cursor_list_detection_trees(
+                seeded.workspace_id,
+                CursorPagination::new(10).with_count(),
+                &by_input,
+            )
+            .await?;
+        assert_eq!(without_input.total, Some(2));
+        assert!(
+            without_input
+                .items
+                .iter()
+                .all(|tree| tree.input_document_name.is_none())
+        );
+        Ok(())
     }
 
     #[tokio::test]

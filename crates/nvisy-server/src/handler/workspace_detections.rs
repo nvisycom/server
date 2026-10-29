@@ -41,8 +41,8 @@ use crate::handler::request::{
     WorkspaceDetectionPathParams, WorkspaceDetectionsQuery,
 };
 use crate::handler::response::{
-    WorkspaceDetection, WorkspaceDetectionArtifacts, WorkspaceDetectionSummary,
-    WorkspaceDetectionsPage, WorkspaceRedactionResult,
+    DetectionTreesPage, WorkspaceDetection, WorkspaceDetectionSummary, WorkspaceDetectionsPage,
+    WorkspaceRedactionResult,
 };
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, SseResponse};
@@ -231,23 +231,25 @@ fn get_detection_docs(op: TransformOperation) -> TransformOperation {
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Returns metadata for the files and intermediate produced by a detection.
+/// Lists a workspace's detection trees, with pagination on detections.
 #[tracing::instrument(skip_all)]
-async fn get_detection_artifacts(
+async fn list_detection_trees(
     State(detections): State<domain::WorkspaceDetectionService>,
     authz: Authorized<markers::ViewDetections>,
-    Path(path_params): Path<WorkspaceDetectionPathParams>,
-) -> Result<Json<WorkspaceDetectionArtifacts>> {
-    let artifacts = detections
-        .artifacts(authz.workspace.id, path_params.detection_id.as_uuid())
+    Query(pagination): Query<CursorPagination>,
+    Query(query): Query<WorkspaceDetectionsQuery>,
+) -> Result<Json<DetectionTreesPage>> {
+    let page = detections
+        .list_trees(authz.workspace.id, pagination.into_cursor(), &query.into())
         .await?;
-    Ok(Json(artifacts.into()))
+    Ok(Json(DetectionTreesPage::from_cursor_page(page, Into::into)))
 }
 
-fn get_detection_artifacts_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Get detection artifacts")
-        .description("Returns the input file, intermediate availability, and live redacted output file metadata for one detection. Deleted input files are omitted; deleted or reclaimed outputs are omitted. No file content is embedded.")
-        .response::<200, Json<WorkspaceDetectionArtifacts>>()
+fn list_detection_trees_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List detection trees")
+        .description("Lists detection trees newest first with the same cursor pagination and status, document, policy, account, and filename search filters as the detection list. Each root contains its detection ID, live input metadata, intermediate availability, and all live redacted outputs newest first. Deleted input files are omitted; deleted or reclaimed outputs are omitted. Totals count detections, not child files. No file content is embedded.")
+        .response::<200, Json<DetectionTreesPage>>()
+        .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -825,8 +827,8 @@ pub fn routes() -> ApiRouter<ServiceState> {
                 .patch_with(edit_detection, edit_detection_docs),
         )
         .api_route(
-            "/workspaces/{workspaceId}/detections/{detectionId}/artifacts",
-            get_with(get_detection_artifacts, get_detection_artifacts_docs),
+            "/workspaces/{workspaceId}/detections/trees",
+            get_with(list_detection_trees, list_detection_trees_docs),
         )
         .api_route(
             "/workspaces/{workspaceId}/detections/{detectionId}/events",
