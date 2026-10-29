@@ -103,7 +103,7 @@ services:
   # Not started by `make run`'s default set — bring NER up with the `ner`
   # profile (`make run-ner`).
   ner-init:
-    image: ${ELIDE_NER_IMAGE:-ghcr.io/nvisycom/elide-ner}:${ELIDE_VERSION:-0.1.0-rc.4}
+    image: ${ELIDE_NER_IMAGE:-ghcr.io/nvisycom/elide-ner}:${ELIDE_VERSION:-0.1.0-rc.6}
     container_name: nvisy-ner-init-dev
     profiles: ["ner"]
     # The warmer is the one process that must reach the Hub; the service then
@@ -121,16 +121,18 @@ services:
       - nvisy-dev
 
   # GLiNER2 schema-driven NER/PII service. The host-run server reaches it at
-  # localhost:3100 (ELIDE_NER_PORT); point the engine config's NER recognizer
-  # there. The service runs as a non-root uid with the cache read-only and
-  # HF_HUB_OFFLINE on, so request text never reaches the Hub.
+  # localhost:3200 (ELIDE_NER_PORT); point the engine config's NER recognizer
+  # there. The host port is 3200, not the service's own 3000, so this coexists
+  # with a standalone elide-runtime stack (which publishes NER on 3100). The
+  # service runs as a non-root uid with the cache read-only and HF_HUB_OFFLINE
+  # on, so request text never reaches the Hub.
   ner:
-    image: ${ELIDE_NER_IMAGE:-ghcr.io/nvisycom/elide-ner}:${ELIDE_VERSION:-0.1.0-rc.4}
+    image: ${ELIDE_NER_IMAGE:-ghcr.io/nvisycom/elide-ner}:${ELIDE_VERSION:-0.1.0-rc.6}
     container_name: nvisy-ner-dev
     profiles: ["ner"]
     restart: unless-stopped
     ports:
-      - "${ELIDE_NER_PORT:-3100}:3000"
+      - "${ELIDE_NER_PORT:-3200}:3000"
     environment:
       HF_HOME: /cache/huggingface
       HF_HUB_OFFLINE: "1"
