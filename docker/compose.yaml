@@ -132,7 +132,7 @@ services:
     profiles: ["ner"]
     restart: unless-stopped
     ports:
-      - "${ELIDE_NER_PORT:-3200}:3000"
+      - "127.0.0.1:${ELIDE_NER_PORT:-3200}:3000"
     environment:
       HF_HOME: /cache/huggingface
       HF_HUB_OFFLINE: "1"

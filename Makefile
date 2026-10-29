@@ -113,7 +113,7 @@ reset: ## Resets Docker containers (down -v, then up -d).
 # `NER=1` also starts the GLiNER2 NER service and points the server at the NER
 # engine config. Set by the `run` recipe below.
 ifdef NER
-RUN_ENGINE_ENV := ENGINE_CONFIG_FILEPATH=./docker/engine.dev.toml
+RUN_ENGINE_ENV := ENGINE_CONFIG_FILEPATH="$$engine_config"
 endif
 
 .PHONY: run
@@ -133,7 +133,7 @@ endif
 	@# then lost and, under `pipefail`, the recipe reports exit 130. With `> >(tee)`
 	@# the server owns the terminal and receives the signal directly; its shutdown
 	@# runs and is logged, and the process exits cleanly.
-	@bash -c '$(RUN_ENGINE_ENV) cargo run --features dotenv --bin nvisy-cli > >(tee latest.log) 2>&1'
+	@bash -c 'engine_config=$$(mktemp); trap "rm -f \"$$engine_config\"" EXIT; sed "s|\$${ELIDE_NER_PORT:-3200}|$${ELIDE_NER_PORT:-3200}|g" docker/engine.dev.toml > "$$engine_config"; $(RUN_ENGINE_ENV) cargo run --features dotenv --bin nvisy-cli > >(tee latest.log) 2>&1'
 
 .PHONY: generate-all
 generate-all: generate-env generate-keys generate-migrations

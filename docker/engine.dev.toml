@@ -7,9 +7,10 @@
 # OCR, STT).
 
 # GLiNER2 schema-driven NER/PII. Served by the `ner` service in
-# docker/compose.yaml (profile `ner`), published on host port 3200.
+# docker/compose.yaml (profile `ner`), published on host port 3200 by default.
+# `make run NER=1` substitutes ELIDE_NER_PORT when generating this config.
 [[recognizers.ner]]
 name = "gliner2-ner"
 kind = "bento"
-base_url = "http://localhost:3200"
+base_url = "http://localhost:${ELIDE_NER_PORT:-3200}"
 model = "fastino/gliner2-privacy-filter-PII-multi"

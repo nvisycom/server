@@ -46,8 +46,10 @@ cargo run --features dotenv --bin nvisy-cli
 #### Optional: NER (GLiNER2)
 
 The `ner` compose profile adds the GLiNER2 NER/PII service (`elide-ner`), which
-the engine config reaches at `http://localhost:3200`. `make run NER=1` brings it
-up and runs the server with `engine.dev.toml`; the first start downloads the
+the engine config reaches at `http://localhost:3200` by default. Its published
+port binds to localhost only. `make run NER=1` brings it up and runs the server
+with `engine.dev.toml`, substituting `ELIDE_NER_PORT` into a temporary config so
+custom port settings stay in sync; the first start downloads the
 model (~1.2 GB) into the `hf_cache` volume via a one-shot `ner-init` warmer. Set
 `ELIDE_NER_MODEL`, `ELIDE_NER_PORT`, or `ELIDE_VERSION` to override the defaults.
 
