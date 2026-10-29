@@ -78,11 +78,8 @@ impl Worker for DetectionWorker {
 
         let result = self.run_inner(cancel).await;
 
-        match &result {
-            Ok(()) => tracing::info!(target: TRACING_TARGET, "Detection worker stopped"),
-            Err(err) => {
-                tracing::error!(target: TRACING_TARGET, error = %err, "Detection worker failed");
-            }
+        if let Err(err) = &result {
+            tracing::error!(target: TRACING_TARGET, error = %err, "Detection worker failed");
         }
 
         result
@@ -133,7 +130,6 @@ impl DetectionWorker {
             // closed semaphore — treat that as fatal for the loop.
             let permit = tokio::select! {
                 () = cancel.cancelled() => {
-                    tracing::info!(target: TRACING_TARGET, "Detection worker shutdown requested");
                     break;
                 }
                 // Reap completed tasks as they finish, so the set stays bounded by
@@ -147,7 +143,6 @@ impl DetectionWorker {
 
             tokio::select! {
                 () = cancel.cancelled() => {
-                    tracing::info!(target: TRACING_TARGET, "Detection worker shutdown requested");
                     break;
                 }
                 result = stream.next_with_timeout(Duration::from_secs(5)) => {

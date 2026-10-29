@@ -104,7 +104,9 @@ impl Cli {
 
     /// Initializes tracing with environment-based filtering.
     pub fn init_tracing() {
-        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+        let filter = EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new("info"))
+            .add_directive("async_nats=warn".parse().expect("valid log directive"));
 
         tracing_subscriber::registry()
             .with(filter)

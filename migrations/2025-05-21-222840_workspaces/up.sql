@@ -116,12 +116,10 @@ CREATE TABLE workspace_members (
 
     -- Notification preferences
     notify_via_email          BOOLEAN              NOT NULL DEFAULT FALSE,
-    -- An empty in-app set means "every event": a member is notified out of the
-    -- box and narrows the set by replacing it (see the notification service). The
-    -- default is therefore empty rather than an explicit list of every value, so
-    -- it needs no maintenance as the NOTIFICATION_EVENT enum grows. Email stays
-    -- opt-in (also empty, but never expanded to "all" by the service).
-    notification_events_app   NOTIFICATION_EVENT[] NOT NULL DEFAULT '{}',
+    -- An empty in-app set means "no events". New members receive all currently
+    -- defined events by default; enum_range also includes values added later.
+    -- Email stays opt-in and an empty list means no email event types.
+    notification_events_app   NOTIFICATION_EVENT[] NOT NULL DEFAULT enum_range(NULL::NOTIFICATION_EVENT),
     notification_events_email NOTIFICATION_EVENT[] NOT NULL DEFAULT '{}',
 
     -- Audit tracking

@@ -20,8 +20,9 @@ use nvisy_postgres::model::{
 };
 use nvisy_postgres::query::{
     DetectionCursor, DetectionDocuments, DetectionJobOutboxRepository, DetectionListRow,
-    DetectionPolicyVersionRepository, EditWriteOutcome, WorkspaceDetectionRepository,
-    WorkspaceDocumentRepository, WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
+    DetectionPolicyVersionRepository, EditWriteOutcome, WorkspaceBlobRepository,
+    WorkspaceDetectionRepository, WorkspaceDocumentRepository, WorkspacePolicyRepository,
+    WorkspacePolicyVersionRepository, WorkspaceRedactionRepository,
 };
 use nvisy_postgres::types::{CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Json};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
@@ -208,6 +209,41 @@ impl WorkspaceDetectionService {
         Ok(conn
             .cursor_list_workspace_detections(workspace_id, pagination, filter)
             .await?)
+    }
+
+    /// Returns the input, intermediate availability, and live output files for a
+    /// detection.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the detection is missing or deleted.
+    /// - A database error if a connection or query fails.
+    pub async fn artifacts(
+        &self,
+        workspace_id: Uuid,
+        detection_id: Uuid,
+    ) -> Result<crate::domain::output::DetectionArtifacts> {
+        let mut conn = self.postgres.get_connection().await?;
+        let detection = conn
+            .find_workspace_detection_by_id(workspace_id, detection_id)
+            .await?
+            .ok_or_else(|| Error::not_found("detection"))?;
+        let input = conn
+            .find_document_in_workspace(workspace_id, detection.input_document_id)
+            .await?;
+        let intermediate_available = if let Some(blob_id) = detection.intermediate_blob_id {
+            conn.find_blob_by_id(blob_id)
+                .await?
+                .is_some_and(|blob| blob.workspace_id == workspace_id && blob.purged_at.is_none())
+        } else {
+            false
+        };
+        let outputs = conn.detection_outputs(workspace_id, detection_id).await?;
+        Ok(crate::domain::output::DetectionArtifacts {
+            input,
+            intermediate_available,
+            redacted_outputs: outputs,
+        })
     }
 
     /// Finds a detection by id within a workspace, with the triggering account and

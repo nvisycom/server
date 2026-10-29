@@ -45,7 +45,6 @@ impl Worker for BlobReaper {
             }
         }
 
-        tracing::info!(target: TRACING_TARGET, "Blob reaper stopped");
         Ok(())
     }
 }

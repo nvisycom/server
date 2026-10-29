@@ -40,7 +40,7 @@ use crate::handler::request::{
     UpdateWorkspaceDocument, WorkspaceDocumentPathParams,
 };
 use crate::handler::response::{
-    self, WorkspaceDocument, WorkspaceDocuments, WorkspaceDocumentsPage,
+    self, WorkspaceDocument, WorkspaceDocumentDetails, WorkspaceDocuments, WorkspaceDocumentsPage,
 };
 use crate::handler::utility::{DownloadDocs, resolve_account_ref};
 use crate::middleware::UploadConfig;
@@ -101,7 +101,7 @@ async fn list_documents(
 fn list_documents_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List documents")
         .description(
-            "Lists documents in a workspace with cursor-based pagination. Use the `after` parameter with the `nextCursor` value from the response to fetch subsequent pages. Pass `hash` (a hex SHA-256) to find documents with identical content — a non-empty result means the document already exists, so an upload can be skipped.",
+            "Lists documents in a workspace with cursor-based pagination. Use the `after` parameter with the `nextCursor` value from the response to fetch subsequent pages. Use `kind=original` or `kind=redacted` to filter by role, and `search` to find a display name or original filename. Pass `hash` (a hex SHA-256) to find documents with identical content — a non-empty result means the document already exists, so an upload can be skipped.",
         )
         .response::<200, Json<WorkspaceDocumentsPage>>()
         .response::<400, Json<ErrorResponse>>()
@@ -364,16 +364,16 @@ async fn upload_document(
         );
     }
 
-    // Re-acquire a connection only for the final commit, so the pool is free
-    // during the streaming above.
-    let mut conn = pg_client.get_connection().await?;
     let origin = event::EventOrigin {
         workspace_id: workspace.id,
         account_id: authz.account_id,
         security: &security,
     };
-    let created = match conn
-        .transaction(async |conn| {
+    // Acquisition and commit share the cleanup path: any failure after staging
+    // must reclaim the objects, including an exhausted connection pool.
+    let created = match async {
+        let mut conn = pg_client.get_connection().await?;
+        conn.transaction(async |conn| {
             let mut created: Vec<DocumentWithBlob> = Vec::with_capacity(staged.len());
             for staged_document in &staged {
                 let document = conn
@@ -406,6 +406,8 @@ async fn upload_document(
             Ok::<_, Error>(created)
         })
         .await
+    }
+    .await
     {
         Ok(created) => created,
         Err(err) => {
@@ -469,7 +471,7 @@ async fn read_document(
     State(documents): State<domain::WorkspaceDocumentService>,
     authz: Authorized<markers::ViewDocuments>,
     Path(path_params): Path<WorkspaceDocumentPathParams>,
-) -> Result<(StatusCode, Json<WorkspaceDocument>)> {
+) -> Result<(StatusCode, Json<WorkspaceDocumentDetails>)> {
     tracing::debug!(target: TRACING_TARGET, "Reading document metadata");
 
     let workspace = authz.workspace;
@@ -481,7 +483,7 @@ async fn read_document(
 
     Ok((
         StatusCode::OK,
-        Json(WorkspaceDocument::from_model(
+        Json(WorkspaceDocumentDetails::from_model(
             found.item.document,
             &found.item.blob,
             workspace.id,
@@ -494,7 +496,7 @@ async fn read_document(
 fn read_document_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get document metadata")
         .description("Returns document metadata without downloading the document content.")
-        .response::<200, Json<WorkspaceDocument>>()
+        .response::<200, Json<WorkspaceDocumentDetails>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -515,7 +517,7 @@ async fn update_document(
     Path(path_params): Path<WorkspaceDocumentPathParams>,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWorkspaceDocument>,
-) -> Result<(StatusCode, Json<WorkspaceDocument>)> {
+) -> Result<(StatusCode, Json<WorkspaceDocumentDetails>)> {
     tracing::debug!(target: TRACING_TARGET, "Updating document");
 
     let workspace = authz.workspace;
@@ -532,7 +534,7 @@ async fn update_document(
 
     Ok((
         StatusCode::OK,
-        Json(response::WorkspaceDocument::from_model(
+        Json(response::WorkspaceDocumentDetails::from_model(
             found.item.document,
             &found.item.blob,
             workspace.id,
@@ -544,8 +546,10 @@ async fn update_document(
 
 fn update_document_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update document")
-        .description("Updates document metadata such as display name, tags, or metadata.")
-        .response::<200, Json<WorkspaceDocument>>()
+        .description(
+            "Updates the display name or replaces custom metadata; returns the updated metadata.",
+        )
+        .response::<200, Json<WorkspaceDocumentDetails>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()

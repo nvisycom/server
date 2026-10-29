@@ -75,11 +75,8 @@ impl Worker for AssistantWorker {
 
         let result = self.run_inner(cancel).await;
 
-        match &result {
-            Ok(()) => tracing::info!(target: TRACING_TARGET, "Assistant worker stopped"),
-            Err(err) => {
-                tracing::error!(target: TRACING_TARGET, error = %err, "Assistant worker failed");
-            }
+        if let Err(err) = &result {
+            tracing::error!(target: TRACING_TARGET, error = %err, "Assistant worker failed");
         }
 
         result
@@ -120,7 +117,6 @@ impl AssistantWorker {
             // stream's redelivery lease, does not advance while every slot is busy.
             let permit = tokio::select! {
                 () = cancel.cancelled() => {
-                    tracing::info!(target: TRACING_TARGET, "Assistant worker shutdown requested");
                     break;
                 }
                 Some(_) = tasks.join_next() => continue,
@@ -132,7 +128,6 @@ impl AssistantWorker {
 
             tokio::select! {
                 () = cancel.cancelled() => {
-                    tracing::info!(target: TRACING_TARGET, "Assistant worker shutdown requested");
                     break;
                 }
                 result = stream.next_with_timeout(Duration::from_secs(5)) => {

@@ -50,7 +50,6 @@ impl Worker for WorkspacePurgeWorker {
             }
         }
 
-        tracing::info!(target: TRACING_TARGET, "Workspace purge worker stopped");
         Ok(())
     }
 }

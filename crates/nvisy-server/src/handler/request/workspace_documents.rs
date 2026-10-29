@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use derive_more::{AsRef, Into};
 use elide_pipeline::FormatRegistry;
 use garde::Validate;
+use nvisy_postgres::types::DocumentKind;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -105,7 +106,10 @@ registry_token!(
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ListWorkspaceDocuments {
-    /// Search by document name (case-insensitive, partial match).
+    /// Filter by document role (`original` or `redacted`). Omit to include both.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<DocumentKind>,
+    /// Search the display name or original filename (case-insensitive).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search: Option<String>,
     /// Filter by file extension. Each entry expands to its format's full
@@ -125,6 +129,7 @@ pub struct ListWorkspaceDocuments {
 impl From<ListWorkspaceDocuments> for ListDocumentsInput {
     fn from(query: ListWorkspaceDocuments) -> Self {
         ListDocumentsInput {
+            kind: query.kind,
             search: query.search,
             formats: query
                 .formats

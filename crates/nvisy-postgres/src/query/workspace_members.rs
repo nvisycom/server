@@ -119,9 +119,8 @@ pub trait WorkspaceMemberRepository {
     /// Returns the account ids of members holding any of `roles` who accept
     /// `event` as an in-app notification.
     ///
-    /// A member accepts the event when their `notification_events_app` is empty
-    /// (the default, meaning "all") or contains it. One query resolves the whole
-    /// recipient set for a broadcast.
+    /// A member accepts the event when their `notification_events_app` contains
+    /// it. One query resolves the whole recipient set for a broadcast.
     fn notification_recipients_by_roles(
         &mut self,
         workspace_id: Uuid,
@@ -383,20 +382,14 @@ impl WorkspaceMemberRepository for PgConnection {
     ) -> Result<Vec<Uuid>> {
         use schema::workspace_members::{self, dsl};
 
-        // A member accepts the event when their in-app preference list is empty
-        // (default = all) or contains it (`@>`). The array column is
+        // An empty preference list opts out of every event. The array column is
         // Array<Nullable<NotificationEvent>>, so the needle matches that shape.
         let needle: Vec<Option<NotificationEvent>> = vec![Some(event)];
-        let empty: Vec<Option<NotificationEvent>> = Vec::new();
 
         let account_ids = workspace_members::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::member_role.eq_any(roles.to_vec()))
-            .filter(
-                dsl::notification_events_app
-                    .eq(empty)
-                    .or(dsl::notification_events_app.contains(needle)),
-            )
+            .filter(dsl::notification_events_app.contains(needle))
             .select(dsl::account_id)
             .load::<Uuid>(self)
             .await
@@ -659,20 +652,16 @@ mod tests {
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
-        // An owner with default (empty) prefs accepts every event.
-        let _ = conn
-            .add_workspace_member(NewWorkspaceMember::new(
-                seeded.workspace_id,
-                seeded.account_id,
-                WorkspaceRole::Owner,
-            ))
-            .await?;
+        // A newly created member receives all current events by default.
+        let owner =
+            NewWorkspaceMember::new(seeded.workspace_id, seeded.account_id, WorkspaceRole::Owner);
+        let _ = conn.add_workspace_member(owner).await?;
 
         // A viewer who opted in to ONLY `member.joined`.
         let viewer_id = conn.create_account(NewAccount::test()).await?.id;
         let mut viewer =
             NewWorkspaceMember::new(seeded.workspace_id, viewer_id, WorkspaceRole::Reviewer);
-        viewer.notification_events_app = vec![Some(NotificationEvent::MemberJoined)];
+        viewer.notification_events_app = Some(vec![Some(NotificationEvent::MemberJoined)]);
         let _ = conn.add_workspace_member(viewer).await?;
 
         // For `member.joined`, restricted to owners: only the owner matches.
@@ -698,7 +687,7 @@ mod tests {
         expected.sort();
         assert_eq!(both, expected);
 
-        // For an event the viewer did NOT opt into: only the all-events owner.
+        // For an event the viewer did NOT opt into: only the owner receives it.
         let detection = conn
             .notification_recipients_by_roles(
                 seeded.workspace_id,
@@ -707,6 +696,25 @@ mod tests {
             )
             .await?;
         assert_eq!(detection, vec![seeded.account_id]);
+
+        // Clearing the preference list opts the viewer out of all events.
+        conn.update_workspace_member(
+            seeded.workspace_id,
+            viewer_id,
+            UpdateWorkspaceMember {
+                notification_events_app: Some(Vec::new()),
+                ..Default::default()
+            },
+        )
+        .await?;
+        let cleared = conn
+            .notification_recipients_by_roles(
+                seeded.workspace_id,
+                &[WorkspaceRole::Reviewer],
+                NotificationEvent::MemberJoined,
+            )
+            .await?;
+        assert_eq!(cleared, [] as [uuid::Uuid; 0]);
         Ok(())
     }
 

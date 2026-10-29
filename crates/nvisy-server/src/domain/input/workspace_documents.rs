@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use nvisy_postgres::model::UpdateWorkspaceDocument as UpdateDocumentModel;
-use nvisy_postgres::types::DocumentFilter;
+use nvisy_postgres::types::{DocumentFilter, DocumentKind};
 
 use crate::service::{EngineService, UnknownFormatToken};
 
@@ -13,6 +13,8 @@ use crate::service::{EngineService, UnknownFormatToken};
 /// against the engine's codec registry at query time.
 #[derive(Default)]
 pub struct ListDocumentsInput {
+    /// Document role to include.
+    pub kind: Option<DocumentKind>,
     /// Search term over document names; an empty term imposes no constraint.
     pub search: Option<String>,
     /// File-extension filter tokens (each expands to its format's full set).
@@ -44,9 +46,13 @@ impl ListDocumentsInput {
             .modality
             .map(|t| engine.resolve_modalities(&t))
             .transpose()?;
-        let search = self.search.filter(|s| !s.is_empty());
+        let search = self
+            .search
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
 
         Ok(DocumentFilter {
+            kind: self.kind,
             search,
             extensions: intersect_facets(formats, modality),
             hash: self.hash,

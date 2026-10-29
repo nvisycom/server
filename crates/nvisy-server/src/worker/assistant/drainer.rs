@@ -89,7 +89,6 @@ impl Worker for AssistantOutboxDrainer {
             }
         }
 
-        tracing::info!(target: TRACING_TARGET, "Assistant-job drainer stopped");
         Ok(())
     }
 }

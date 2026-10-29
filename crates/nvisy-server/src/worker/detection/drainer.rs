@@ -94,7 +94,6 @@ impl Worker for DetectionOutboxDrainer {
             }
         }
 
-        tracing::info!(target: TRACING_TARGET, "Detection-job drainer stopped");
         Ok(())
     }
 }

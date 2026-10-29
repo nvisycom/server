@@ -113,9 +113,8 @@ impl NotificationEmitter {
     /// notification preferences within `workspace_id`.
     ///
     /// The notification is skipped (returning `false`) when the account is not a
-    /// member of the workspace, or has narrowed its `notification_events_app` to
-    /// exclude this event. A member with the default (empty is treated as "all",
-    /// as is any list that contains the event) receives it.
+    /// member of the workspace, or has not selected this event in
+    /// `notification_events_app`. An empty list opts out of all events.
     ///
     /// Best-effort by contract: callers log-and-continue on error so a failed
     /// notification never fails the operation that triggered it.
@@ -135,13 +134,12 @@ impl NotificationEmitter {
 
         let mut conn = self.infra.postgres.get_connection().await?;
 
-        // Respect the member's in-app preferences. An empty preference list means
-        // "all events" (the column defaults to every event), so only a member who
-        // has narrowed the set and excluded this event is skipped.
+        // Deliver only explicitly selected events; an empty list opts out.
+        // New memberships default to the full set of current events.
         let member = conn.find_workspace_member(workspace_id, account_id).await?;
         let deliver = if let Some(member) = member {
             let prefs = member.app_notification_events();
-            prefs.is_empty() || prefs.contains(&event)
+            prefs.contains(&event)
         } else {
             tracing::debug!(
                 target: TRACING_TARGET,
@@ -220,5 +218,95 @@ impl NotificationEmitter {
         }
 
         Ok(created)
+    }
+}
+
+#[cfg(all(test, feature = "test_util"))]
+mod tests {
+    use nvisy_postgres::model::UpdateWorkspaceMember;
+    use nvisy_postgres::test_util::TestDatabase;
+    use nvisy_postgres::types::{MemberJoinedParams, NotificationEvent};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn direct_notifications_respect_empty_and_selected_preferences() {
+        let db = TestDatabase::start().await;
+        let nats = nvisy_nats::TestNats::start().await;
+        let blobs = nvisy_s3::TestBlobStore::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        db.seed_workspace_member(seeded.workspace_id, seeded.account_id, WorkspaceRole::Owner)
+            .await;
+        let emitter = NotificationEmitter::new(Infra {
+            postgres: db.client.clone(),
+            nats: nats.client.clone(),
+            blobs: blobs.store.clone(),
+        });
+        let payload = || {
+            NotificationPayload::MemberJoined(MemberJoinedParams {
+                workspace_id: seeded.workspace_id,
+                member_id: seeded.account_id,
+            })
+        };
+        assert!(
+            emitter
+                .notify_account(seeded.workspace_id, seeded.account_id, payload())
+                .await
+                .unwrap()
+        );
+
+        let mut conn = db.client.get_connection().await.unwrap();
+        for preferences in [Vec::new(), vec![Some(NotificationEvent::DetectionFailed)]] {
+            conn.update_workspace_member(
+                seeded.workspace_id,
+                seeded.account_id,
+                UpdateWorkspaceMember {
+                    notification_events_app: Some(preferences),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+            assert!(
+                !emitter
+                    .notify_account(seeded.workspace_id, seeded.account_id, payload())
+                    .await
+                    .unwrap()
+            );
+            assert_eq!(
+                conn.count_unread_account_notifications(seeded.account_id)
+                    .await
+                    .unwrap(),
+                1
+            );
+        }
+        conn.update_workspace_member(
+            seeded.workspace_id,
+            seeded.account_id,
+            UpdateWorkspaceMember {
+                notification_events_app: Some(vec![Some(NotificationEvent::MemberJoined)]),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            emitter
+                .notify_account(seeded.workspace_id, seeded.account_id, payload())
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            conn.count_unread_account_notifications(seeded.account_id)
+                .await
+                .unwrap(),
+            2
+        );
+        assert!(
+            !emitter
+                .notify_account(Uuid::new_v4(), seeded.account_id, payload())
+                .await
+                .unwrap()
+        );
     }
 }

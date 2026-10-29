@@ -22,12 +22,34 @@ pub struct RedactionCursor {
     pub id: uuid::Uuid,
 }
 
+/// Redacted output metadata for one detection, used by the artifacts endpoint.
+#[derive(Debug, Clone)]
+pub struct DetectionRedactedOutput {
+    /// Redaction pass that produced the output.
+    pub redaction_id: Uuid,
+    /// Output document id.
+    pub document_id: Uuid,
+    /// Display name of the output document.
+    pub display_name: String,
+    /// File extension without the dot.
+    pub extension: String,
+    /// Plaintext size in bytes.
+    pub size: i64,
+}
+
 /// Repository for workspace redaction database operations.
 ///
 /// A redaction is one redact pass over a detection's analysis; a detection can
 /// have many. Each redaction owns the review audit it applied and the redacted
 /// document it produced.
 pub trait WorkspaceRedactionRepository {
+    /// Lists live redacted output files for a detection, newest first.
+    fn detection_outputs(
+        &mut self,
+        workspace_id: Uuid,
+        detection_id: Uuid,
+    ) -> impl Future<Output = Result<Vec<DetectionRedactedOutput>>> + Send;
+
     /// Creates a new workspace redaction record.
     fn create_redaction(
         &mut self,
@@ -68,6 +90,62 @@ pub trait WorkspaceRedactionRepository {
 }
 
 impl WorkspaceRedactionRepository for PgConnection {
+    async fn detection_outputs(
+        &mut self,
+        workspace_id: Uuid,
+        detection_id: Uuid,
+    ) -> Result<Vec<DetectionRedactedOutput>> {
+        use schema::workspace_detections::dsl as detections;
+        use schema::workspace_documents::dsl as documents;
+        use schema::workspace_redactions::dsl as redactions;
+        use schema::{
+            workspace_blobs, workspace_detections, workspace_documents, workspace_redactions,
+        };
+
+        let rows = workspace_redactions::table
+            .inner_join(workspace_detections::table)
+            .inner_join(
+                workspace_documents::table
+                    .on(redactions::output_document_id.eq(documents::id.nullable())),
+            )
+            .inner_join(
+                workspace_blobs::table.on(documents::blob_id.eq(workspace_blobs::id.nullable())),
+            )
+            .filter(detections::workspace_id.eq(workspace_id))
+            .filter(detections::deleted_at.is_null())
+            .filter(redactions::deleted_at.is_null())
+            .filter(documents::deleted_at.is_null())
+            .filter(documents::workspace_id.eq(workspace_id))
+            .filter(workspace_blobs::workspace_id.eq(workspace_id))
+            .filter(workspace_blobs::purged_at.is_null())
+            .order((redactions::created_at.desc(), redactions::id.desc()))
+            .filter(redactions::detection_id.eq(detection_id))
+            .select((
+                redactions::id,
+                documents::id,
+                documents::display_name,
+                documents::file_extension,
+                workspace_blobs::file_size_bytes,
+            ))
+            .load::<(Uuid, Uuid, String, String, i64)>(self)
+            .await
+            .map_err(Error::from)?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(redaction_id, document_id, display_name, extension, size)| {
+                    DetectionRedactedOutput {
+                        redaction_id,
+                        document_id,
+                        display_name,
+                        extension,
+                        size,
+                    }
+                },
+            )
+            .collect())
+    }
+
     async fn create_redaction(
         &mut self,
         new_redaction: NewWorkspaceRedaction,
@@ -239,6 +317,52 @@ mod tests {
     use crate::model::{NewWorkspaceDetection, NewWorkspaceRedaction};
     use crate::query::{WorkspaceDetectionRepository, WorkspaceRedactionRepository};
     use crate::test_util::{TestDatabase, backdate};
+
+    #[tokio::test]
+    async fn detection_outputs_exclude_other_workspaces_and_deleted_files() -> anyhow::Result<()> {
+        use crate::model::{NewBlob, NewWorkspaceDocument};
+        use crate::query::WorkspaceDocumentRepository;
+        use crate::types::DocumentKind;
+
+        let db = TestDatabase::start().await;
+        let (account_id, workspace_id, detection_id) = seed_detection(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+        let mut document = NewWorkspaceDocument::test(workspace_id, account_id, Uuid::nil());
+        document.kind = Some(DocumentKind::Redacted);
+        document.display_name = Some("redacted.txt".into());
+        document.file_extension = Some("txt".into());
+        let document = conn
+            .create_workspace_document(document, NewBlob::test(workspace_id))
+            .await?;
+        let mut redaction = NewWorkspaceRedaction::test(detection_id, account_id);
+        redaction.output_document_id = Some(document.id);
+        let redaction = conn.create_redaction(redaction).await?;
+
+        let outputs = conn.detection_outputs(workspace_id, detection_id).await?;
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs[0].document_id, document.id);
+        assert_eq!(outputs[0].redaction_id, redaction.id);
+        assert_eq!(outputs[0].display_name, "redacted.txt");
+        assert_eq!(outputs[0].extension, "txt");
+        assert!(
+            conn.detection_outputs(Uuid::new_v4(), detection_id)
+                .await?
+                .is_empty()
+        );
+        assert!(
+            conn.detection_outputs(workspace_id, Uuid::new_v4())
+                .await?
+                .is_empty()
+        );
+
+        conn.delete_workspace_document(document.id).await?;
+        assert!(
+            conn.detection_outputs(workspace_id, detection_id)
+                .await?
+                .is_empty()
+        );
+        Ok(())
+    }
 
     /// Seeds a detection and returns `(account_id, workspace_id, detection_id)` — a
     /// redaction's FK parent plus the context tests scope on.

@@ -16,6 +16,8 @@ use crate::domain::input::CreateDetectionInput;
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceDetectionsQuery {
+    /// Case-insensitive substring search of the input display name or original filename.
+    pub search: Option<String>,
     /// Filter by detection status.
     pub status: Option<DetectionStatus>,
     /// Filter by the source document the detection analyzes.
@@ -29,6 +31,7 @@ pub struct WorkspaceDetectionsQuery {
 impl From<WorkspaceDetectionsQuery> for DetectionFilter {
     fn from(query: WorkspaceDetectionsQuery) -> Self {
         DetectionFilter {
+            search: query.search,
             status: query.status,
             input_document_id: query.document_id,
             policy_id: query.policy_id,

@@ -556,13 +556,18 @@ impl WorkspaceDocumentRepository for PgConnection {
                 .filter(dsl::deleted_at.is_null())
                 .into_boxed();
 
+            if let Some(kind) = filter.kind {
+                query = query.filter(dsl::kind.eq(kind));
+            }
+
             // Hybrid name search: ILIKE substring (works for short queries) OR
             // trigram similarity (typo tolerance); both served by the trgm index.
             if let Some(ref term) = search_term {
                 query = query.filter(
                     dsl::display_name
                         .ilike(ilike_contains(term))
-                        .or(dsl::display_name.trgm_similar_to(term)),
+                        .or(dsl::display_name.trgm_similar_to(term))
+                        .or(dsl::original_filename.ilike(ilike_contains(term))),
                 );
             }
 
@@ -692,6 +697,88 @@ mod tests {
     use super::*;
     use crate::query::{WorkspaceBlobRepository, WorkspaceDocumentRepository};
     use crate::test_util::TestDatabase;
+
+    #[tokio::test]
+    async fn cursor_list_combines_kind_and_original_filename_search() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+        for kind in [
+            DocumentKind::Original,
+            DocumentKind::Original,
+            DocumentKind::Redacted,
+        ] {
+            let mut document =
+                NewWorkspaceDocument::test(seeded.workspace_id, seeded.account_id, Uuid::nil());
+            document.kind = Some(kind);
+            document.display_name = Some("Renamed document".into());
+            document.original_filename = Some("Contract_50%.pdf".into());
+            document.file_extension = Some("pdf".into());
+            conn.create_workspace_document(document, NewBlob::test(seeded.workspace_id))
+                .await?;
+        }
+        let filter = DocumentFilter {
+            kind: Some(DocumentKind::Original),
+            search: Some("cOnTrAcT_50%".into()),
+            extensions: Some(vec!["pdf".into()]),
+            ..Default::default()
+        };
+        let first = conn
+            .cursor_list_workspace_documents(
+                seeded.workspace_id,
+                CursorPagination::new(1).with_count(),
+                filter.clone(),
+            )
+            .await?;
+        assert_eq!(first.total, Some(2));
+        assert_eq!(first.items.len(), 1);
+        assert_eq!(first.items[0].item.document.kind, DocumentKind::Original);
+        let second = conn
+            .cursor_list_workspace_documents(
+                seeded.workspace_id,
+                CursorPagination::from_cursor_string(1, first.next_cursor.as_deref()).with_count(),
+                filter,
+            )
+            .await?;
+        assert_eq!(second.total, Some(2));
+        assert_eq!(second.items.len(), 1);
+        assert_ne!(
+            first.items[0].item.document.id,
+            second.items[0].item.document.id
+        );
+        assert!(second.next_cursor.is_none());
+        let redacted = conn
+            .cursor_list_workspace_documents(
+                seeded.workspace_id,
+                CursorPagination::new(10),
+                DocumentFilter {
+                    kind: Some(DocumentKind::Redacted),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert_eq!(redacted.items.len(), 1);
+        let both = conn
+            .cursor_list_workspace_documents(
+                seeded.workspace_id,
+                CursorPagination::new(10),
+                DocumentFilter::default(),
+            )
+            .await?;
+        assert_eq!(both.items.len(), 3);
+        let missing = conn
+            .cursor_list_workspace_documents(
+                seeded.workspace_id,
+                CursorPagination::new(10),
+                DocumentFilter {
+                    search: Some("%no-match".into()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert_eq!(missing.items.len(), 0);
+        Ok(())
+    }
 
     #[tokio::test]
     async fn create_find_update_and_soft_delete_drops_the_blob_reference() -> anyhow::Result<()> {
