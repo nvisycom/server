@@ -47,7 +47,7 @@ debug = true
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
 # Elide crates
-elide-pipeline = { git = "https://github.com/nvisycom/elide-runtime", branch = "main", default-features = false }
+elide-pipeline = { git = "https://github.com/nvisycom/elide-runtime", rev = "eb23876f773e01f532d8d327b2883347e17465fa", default-features = false }
 
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
