@@ -110,21 +110,22 @@ reset: ## Resets Docker containers (down -v, then up -d).
 	@docker compose -f ./docker/compose.yaml up -d
 	@$(call log,Docker containers reset successfully.)
 
-# `NER=1` also starts the GLiNER2 NER service and points the server at the NER
-# engine config. Set by the `run` recipe below.
-ifdef NER
-RUN_ENGINE_ENV := ENGINE_CONFIG_FILEPATH="$$engine_config"
-endif
+# Inference services to start alongside the server. Set NER=1, OCR=1, and/or
+# STT=1 to bring up that bento (first run downloads its model). The `run` recipe
+# below starts the matching compose profiles and generates an engine config
+# naming only the services that are up; with none set, the server runs the
+# built-in pattern recognizers only.
+INFERENCE_PROFILES := $(if $(NER),--profile ner) $(if $(OCR),--profile ocr) $(if $(STT),--profile stt)
 
 .PHONY: run
-run: ## Runs the server (NATS, Postgres, RustFS first). Pass NER=1 to also start the GLiNER2 NER service.
+run: ## Runs the server (NATS, Postgres, RustFS first). Set NER=1, OCR=1, and/or STT=1 to also start that inference service.
 	@$(call log,Starting Postgres, NATS, and RustFS...)
 	@docker compose -f ./docker/compose.yaml up -d --wait postgres nats rustfs
 	@$(call log,Provisioning the blob store bucket...)
 	@docker compose -f ./docker/compose.yaml up --exit-code-from rustfs-init rustfs-init
-ifdef NER
-	@$(call log,Starting the NER service (first run downloads the model)...)
-	@docker compose -f ./docker/compose.yaml --profile ner up -d --wait ner
+ifneq ($(strip $(INFERENCE_PROFILES)),)
+	@$(call log,Starting inference services (first run downloads their models)...)
+	@docker compose -f ./docker/compose.yaml $(INFERENCE_PROFILES) up -d --wait
 endif
 	@$(call log,Starting server... (output also written to latest.log))
 	@# Tee via process substitution rather than a pipe: a pipe would put `tee`
@@ -133,7 +134,19 @@ endif
 	@# then lost and, under `pipefail`, the recipe reports exit 130. With `> >(tee)`
 	@# the server owns the terminal and receives the signal directly; its shutdown
 	@# runs and is logged, and the process exits cleanly.
-	@bash -c 'engine_config=$$(mktemp); trap "rm -f \"$$engine_config\"" EXIT; sed "s|\$${ELIDE_NER_PORT:-3200}|$${ELIDE_NER_PORT:-3200}|g" docker/engine.dev.toml > "$$engine_config"; $(RUN_ENGINE_ENV) cargo run --features dotenv --bin nvisy-cli > >(tee latest.log) 2>&1'
+	@# The engine config is generated from the enabled services, so it always
+	@# matches the running stack and its resolved ports; no config file is used
+	@# when none are enabled.
+	@bash -c '\
+		set -o pipefail; \
+		engine_env=; \
+		if [ -n "$(strip $(INFERENCE_PROFILES))" ]; then \
+			engine_config=$$(mktemp); \
+			trap "rm -f \"$$engine_config\"" EXIT; \
+			NER=$(if $(NER),1) OCR=$(if $(OCR),1) STT=$(if $(STT),1) ./scripts/gen-engine-config.sh > "$$engine_config"; \
+			engine_env="ENGINE_CONFIG_FILEPATH=$$engine_config"; \
+		fi; \
+		env $$engine_env cargo run --features dotenv --bin nvisy-cli > >(tee latest.log) 2>&1'
 
 .PHONY: generate-all
 generate-all: generate-env generate-keys generate-migrations
