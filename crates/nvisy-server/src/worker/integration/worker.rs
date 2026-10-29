@@ -105,11 +105,8 @@ impl Worker for ConnectionSyncWorker {
 
         let result = self.run_inner(cancel).await;
 
-        match &result {
-            Ok(()) => tracing::info!(target: TRACING_TARGET, "Connection sync worker stopped"),
-            Err(err) => {
-                tracing::error!(target: TRACING_TARGET, error = %err, "Connection sync worker failed");
-            }
+        if let Err(err) = &result {
+            tracing::error!(target: TRACING_TARGET, error = %err, "Connection sync worker failed");
         }
 
         result
@@ -250,7 +247,6 @@ impl ConnectionSyncWorker {
         loop {
             tokio::select! {
                 () = cancel.cancelled() => {
-                    tracing::info!(target: TRACING_TARGET, "Connection sync worker shutdown requested");
                     break;
                 }
                 result = stream.next_with_timeout(Duration::from_secs(5)) => {

@@ -90,7 +90,6 @@ impl Worker for EventOutboxDrainer {
             }
         }
 
-        tracing::info!(target: TRACING_TARGET, "Event-outbox drainer stopped");
         Ok(())
     }
 }

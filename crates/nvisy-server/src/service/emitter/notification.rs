@@ -113,9 +113,8 @@ impl NotificationEmitter {
     /// notification preferences within `workspace_id`.
     ///
     /// The notification is skipped (returning `false`) when the account is not a
-    /// member of the workspace, or has narrowed its `notification_events_app` to
-    /// exclude this event. A member with the default (empty is treated as "all",
-    /// as is any list that contains the event) receives it.
+    /// member of the workspace, or has not selected this event in
+    /// `notification_events_app`. An empty list opts out of all events.
     ///
     /// Best-effort by contract: callers log-and-continue on error so a failed
     /// notification never fails the operation that triggered it.

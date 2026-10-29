@@ -13,6 +13,9 @@ use crate::types::DetectionStatus;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DetectionFilter {
+    /// Case-insensitive substring search of the input display name or original filename.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search: Option<String>,
     /// Filter by detection status.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<DetectionStatus>,

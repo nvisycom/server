@@ -68,7 +68,7 @@ pub use workspace_connections::{
 pub use workspace_detection_jobs::DetectionJobOutboxRepository;
 pub use workspace_detection_policy_versions::DetectionPolicyVersionRepository;
 pub use workspace_detections::{
-    DetectionCursor, DetectionDocuments, DetectionListRow, EditWriteOutcome,
+    DetectionCursor, DetectionDocuments, DetectionListRow, DetectionSummary, EditWriteOutcome,
     WorkspaceDetectionRepository,
 };
 pub use workspace_documents::{
@@ -82,7 +82,9 @@ pub use workspace_members::{
 pub use workspace_policies::{PolicyCursor, PolicyWithVersion, WorkspacePolicyRepository};
 pub use workspace_policy_versions::WorkspacePolicyVersionRepository;
 pub use workspace_providers::{ProviderCursor, WorkspaceProviderRepository};
-pub use workspace_redactions::{RedactionCursor, WorkspaceRedactionRepository};
+pub use workspace_redactions::{
+    DetectionRedactedOutput, RedactionCursor, WorkspaceRedactionRepository,
+};
 pub use workspace_review_comments::WorkspaceReviewCommentRepository;
 pub use workspace_review_events::{TimelineCursor, TimelineSource, WorkspaceReviewEventRepository};
 pub use workspace_reviews::{

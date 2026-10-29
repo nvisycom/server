@@ -26,8 +26,7 @@ use nvisy_postgres::model::{
     WorkspaceDetection as WorkspaceDetectionModel, WorkspaceDocument,
 };
 use nvisy_postgres::query::{
-    DetectionDocuments, WorkspaceBlobRepository, WorkspaceDocumentRepository,
-    WorkspaceRedactionRepository,
+    WorkspaceBlobRepository, WorkspaceDocumentRepository, WorkspaceRedactionRepository,
 };
 use nvisy_postgres::types::{DetectionStatus, DocumentKind};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
@@ -42,7 +41,8 @@ use crate::handler::request::{
     WorkspaceDetectionPathParams, WorkspaceDetectionsQuery,
 };
 use crate::handler::response::{
-    WorkspaceDetection, WorkspaceDetectionsPage, WorkspaceRedactionResult,
+    WorkspaceDetection, WorkspaceDetectionArtifacts, WorkspaceDetectionSummary,
+    WorkspaceDetectionsPage, WorkspaceRedactionResult,
 };
 use crate::handler::utility::resolve_account_ref;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, SseResponse};
@@ -164,15 +164,7 @@ async fn list_workspace_detections(
     Ok((
         StatusCode::OK,
         Json(WorkspaceDetectionsPage::from_cursor_page(page, |row| {
-            WorkspaceDetection::from_model(
-                &row.detection,
-                workspace.id,
-                workspace.handle.clone(),
-                row.account.into(),
-                DetectionDocuments {
-                    input: row.input_document_name,
-                },
-            )
+            WorkspaceDetectionSummary::from_row(row, workspace.id, workspace.handle.clone())
         })),
     ))
 }
@@ -181,7 +173,9 @@ fn list_workspace_detections_docs(op: TransformOperation) -> TransformOperation 
     op.summary("List workspace detections")
         .description(
             "Returns all detections across the workspace, most recent first, \
-             with optional status, document, policy, and trigger-account filters.",
+             with optional status, document, policy, trigger-account, and input filename search filters. \
+             Returns compact summaries and artifact indicators; fetch an individual detection \
+             for full metadata and reviewer edits.",
         )
         .response::<200, Json<WorkspaceDetectionsPage>>()
         .response::<401, Json<ErrorResponse>>()
@@ -232,6 +226,28 @@ fn get_detection_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get detection")
         .description("Returns the detection and its status for review.")
         .response::<200, Json<WorkspaceDetection>>()
+        .response::<401, Json<ErrorResponse>>()
+        .response::<403, Json<ErrorResponse>>()
+        .response::<404, Json<ErrorResponse>>()
+}
+
+/// Returns metadata for the files and intermediate produced by a detection.
+#[tracing::instrument(skip_all)]
+async fn get_detection_artifacts(
+    State(detections): State<domain::WorkspaceDetectionService>,
+    authz: Authorized<markers::ViewDetections>,
+    Path(path_params): Path<WorkspaceDetectionPathParams>,
+) -> Result<Json<WorkspaceDetectionArtifacts>> {
+    let artifacts = detections
+        .artifacts(authz.workspace.id, path_params.detection_id.as_uuid())
+        .await?;
+    Ok(Json(artifacts.into()))
+}
+
+fn get_detection_artifacts_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("Get detection artifacts")
+        .description("Returns the input file, intermediate availability, and live redacted output file metadata for one detection. Deleted input files are null; deleted or reclaimed outputs are omitted. No file content is embedded.")
+        .response::<200, Json<WorkspaceDetectionArtifacts>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
@@ -807,6 +823,10 @@ pub fn routes() -> ApiRouter<ServiceState> {
             "/workspaces/{workspaceId}/detections/{detectionId}",
             get_with(get_detection, get_detection_docs)
                 .patch_with(edit_detection, edit_detection_docs),
+        )
+        .api_route(
+            "/workspaces/{workspaceId}/detections/{detectionId}/artifacts",
+            get_with(get_detection_artifacts, get_detection_artifacts_docs),
         )
         .api_route(
             "/workspaces/{workspaceId}/detections/{detectionId}/events",

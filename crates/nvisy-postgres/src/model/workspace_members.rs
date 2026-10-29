@@ -48,8 +48,8 @@ pub struct NewWorkspaceMember {
     pub member_role: WorkspaceRole,
     /// Whether to send email notifications.
     pub notify_via_email: bool,
-    /// Notification events to receive in-app.
-    pub notification_events_app: Vec<Option<NotificationEvent>>,
+    /// In-app events: None uses the database default; Some(empty) opts out.
+    pub notification_events_app: Option<Vec<Option<NotificationEvent>>>,
     /// Notification events to receive via email.
     pub notification_events_email: Vec<Option<NotificationEvent>>,
     /// Created by.

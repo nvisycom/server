@@ -1,5 +1,7 @@
 //! Filtering options for document queries.
 
+use crate::types::DocumentKind;
+
 /// Filter options for documents.
 ///
 /// Each field narrows the result when set; unset fields impose no constraint.
@@ -11,6 +13,8 @@
 /// taxonomy, which lives in the engine's codec registry.
 #[derive(Debug, Default, Clone)]
 pub struct DocumentFilter {
+    /// Document role to include; absent includes both originals and redacted files.
+    pub kind: Option<DocumentKind>,
     /// Search by document name (case-insensitive, partial match). An empty string
     /// is resolved to `None` by the caller, so a set value is always a real
     /// search.

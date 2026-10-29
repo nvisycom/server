@@ -68,6 +68,41 @@ impl WorkspaceDocument {
     }
 }
 
+/// Full document metadata, returned by the read and update endpoints.
+#[must_use]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDocumentDetails {
+    /// Standard file fields, flattened to preserve the existing response shape.
+    #[serde(flatten)]
+    pub document: WorkspaceDocument,
+    /// Custom metadata stored on the document.
+    pub metadata: serde_json::Value,
+}
+
+impl WorkspaceDocumentDetails {
+    /// Builds a detail response including the stored custom metadata.
+    pub fn from_model(
+        mut document: DocumentModel,
+        blob: &Blob,
+        workspace_id: Uuid,
+        workspace_handle: Handle,
+        uploaded_by: AccountRef,
+    ) -> Self {
+        let metadata = std::mem::take(&mut document.metadata);
+        Self {
+            document: WorkspaceDocument::from_model(
+                document,
+                blob,
+                workspace_id,
+                workspace_handle,
+                uploaded_by,
+            ),
+            metadata,
+        }
+    }
+}
+
 /// Result of a bulk document deletion.
 ///
 /// The deletion is idempotent: `deleted` holds the ids that resolved to live
@@ -90,3 +125,48 @@ pub type WorkspaceDocuments = Vec<WorkspaceDocument>;
 
 /// Paginated response for document listing.
 pub type WorkspaceDocumentsPage = Page<WorkspaceDocument>;
+
+#[cfg(test)]
+mod tests {
+    use nvisy_postgres::model::UpdateWorkspaceDocument;
+    use nvisy_postgres::query::WorkspaceDocumentRepository;
+    use nvisy_postgres::test_util::TestDatabase;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn document_details_return_stored_custom_metadata_at_the_top_level() {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_document().await;
+        let mut conn = db.client.get_connection().await.unwrap();
+        let metadata = serde_json::json!({"tags": ["confidential"], "source": "client"});
+        conn.update_workspace_document(
+            seeded.document_id,
+            UpdateWorkspaceDocument {
+                metadata: Some(metadata.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let found = conn
+            .find_document_in_workspace_with_creator(seeded.workspace_id, seeded.document_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let details = WorkspaceDocumentDetails::from_model(
+            found.item.document,
+            &found.item.blob,
+            seeded.workspace_id,
+            "test-workspace".parse().unwrap(),
+            found.account.into(),
+        );
+        let json = serde_json::to_value(details).unwrap();
+        assert_eq!(json["id"], seeded.document_id.to_string());
+        assert_eq!(json["metadata"], metadata);
+        assert!(
+            json.get("document").is_none(),
+            "file fields must remain at the top level"
+        );
+    }
+}

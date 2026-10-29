@@ -108,20 +108,12 @@ impl Worker for WebhookDeliveryWorker {
 
         let result = self.run_inner(cancel).await;
 
-        match &result {
-            Ok(()) => {
-                tracing::info!(
-                    target: TRACING_TARGET,
-                    "Webhook worker stopped"
-                );
-            }
-            Err(err) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    error = %err,
-                    "Webhook worker failed"
-                );
-            }
+        if let Err(err) = &result {
+            tracing::error!(
+                target: TRACING_TARGET,
+                error = %err,
+                "Webhook worker failed"
+            );
         }
 
         result
@@ -148,10 +140,6 @@ impl WebhookDeliveryWorker {
         loop {
             tokio::select! {
                 () = cancel.cancelled() => {
-                    tracing::info!(
-                        target: TRACING_TARGET,
-                        "Webhook worker shutdown requested"
-                    );
                     break;
                 }
                 result = stream.next_with_timeout(Duration::from_secs(5)) => {

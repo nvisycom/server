@@ -12,6 +12,11 @@ use crate::model::{
     DetectionCallRecord, NewWorkspaceDetection, NewWorkspaceDetectionCall,
     NewWorkspaceDetectionCallMeter, UpdateWorkspaceDetection, WorkspaceDetection,
 };
+use crate::query::search::ilike_contains;
+use crate::schema::{
+    workspace_blobs as blobs, workspace_detections as detections, workspace_documents as documents,
+    workspace_redactions as redactions,
+};
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Json, keyset,
 };
@@ -50,13 +55,91 @@ pub struct DetectionDocuments {
     pub input: Option<String>,
 }
 
+diesel::alias!(schema::workspace_documents as artifact_outputs: ArtifactOutputs);
+
+// Typed correlated subqueries preserve one row per detection. Retention and
+// deletion predicates match the artifacts endpoint.
+#[diesel::dsl::auto_type]
+fn detection_error() -> _ {
+    schema::workspace_detections::metadata
+        .retrieve_as_text("error")
+        .nullable()
+}
+
+#[diesel::dsl::auto_type]
+fn retained_intermediate() -> _ {
+    diesel::dsl::exists(
+        blobs::table.filter(
+            blobs::id
+                .nullable()
+                .eq(detections::intermediate_blob_id)
+                .and(blobs::workspace_id.eq(detections::workspace_id))
+                .and(blobs::purged_at.is_null()),
+        ),
+    )
+}
+
+#[diesel::dsl::auto_type]
+fn live_redacted_output_count() -> _ {
+    let outputs: diesel::query_source::Alias<ArtifactOutputs> = artifact_outputs;
+    let output_id: diesel::query_source::AliasedField<ArtifactOutputs, documents::id> =
+        outputs.field(documents::id);
+    let blob_id: diesel::query_source::AliasedField<ArtifactOutputs, documents::blob_id> =
+        outputs.field(documents::blob_id);
+    let workspace_id: diesel::query_source::AliasedField<ArtifactOutputs, documents::workspace_id> =
+        outputs.field(documents::workspace_id);
+    let deleted_at: diesel::query_source::AliasedField<ArtifactOutputs, documents::deleted_at> =
+        outputs.field(documents::deleted_at);
+    redactions::table
+        .inner_join(outputs.on(redactions::output_document_id.eq(output_id.nullable())))
+        .inner_join(blobs::table.on(blob_id.eq(blobs::id.nullable())))
+        .filter(redactions::detection_id.eq(detections::id))
+        .filter(redactions::deleted_at.is_null())
+        .filter(deleted_at.is_null())
+        .filter(workspace_id.eq(detections::workspace_id))
+        .filter(blobs::workspace_id.eq(detections::workspace_id))
+        .filter(blobs::purged_at.is_null())
+        .count()
+        .single_value()
+        .assume_not_null()
+}
+
+/// Compact database projection for detection listings; excludes edits and usage JSON.
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = schema::workspace_detections)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct DetectionSummary {
+    /// Detection identifier.
+    pub id: Uuid,
+    /// Input document identifier.
+    pub input_document_id: Uuid,
+    /// Current execution status.
+    pub status: DetectionStatus,
+    /// When the detection started.
+    pub started_at: jiff_diesel::Timestamp,
+    /// When the detection finished, if terminal.
+    pub completed_at: Option<jiff_diesel::Timestamp>,
+    /// Failure reason, without loading the rest of the metadata.
+    #[diesel(select_expression = detection_error())]
+    #[diesel(select_expression_type = detection_error)]
+    pub error: Option<String>,
+    /// Whether an intermediate artifact is retained.
+    #[diesel(select_expression = retained_intermediate())]
+    #[diesel(select_expression_type = retained_intermediate)]
+    pub has_intermediate: bool,
+    /// Number of live redacted output files.
+    #[diesel(select_expression = live_redacted_output_count())]
+    #[diesel(select_expression_type = live_redacted_output_count)]
+    pub redacted_output_count: i64,
+}
+
 /// One row of a detection listing: the detection plus the context a response
 /// needs to render it without follow-up lookups — the triggering account and the
 /// input document's display name (`None` if the document was removed).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Queryable)]
 pub struct DetectionListRow {
     /// The detection.
-    pub detection: WorkspaceDetection,
+    pub detection: DetectionSummary,
     /// The account that triggered the detection.
     pub account: AccountRefRow,
     /// Display name of the detection's input document, if still present.
@@ -337,6 +420,19 @@ impl WorkspaceDetectionRepository for PgConnection {
                 .filter(detections::workspace_id.eq(workspace_id))
                 .filter(detections::deleted_at.is_null())
                 .into_boxed();
+            if let Some(search) = filter
+                .search
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                let pattern = ilike_contains(search);
+                query = query.filter(
+                    documents::display_name
+                        .ilike(pattern.clone())
+                        .or(documents::original_filename.ilike(pattern)),
+                );
+            }
             if let Some(status) = filter.status {
                 query = query.filter(detections::status.eq(status));
             }
@@ -376,8 +472,10 @@ impl WorkspaceDetectionRepository for PgConnection {
             None
         };
 
+        // Correlated aggregates preserve one row per detection, so counts and
+        // cursor boundaries cannot be inflated by multiple redaction outputs.
         let selection = (
-            WorkspaceDetection::as_select(),
+            DetectionSummary::as_select(),
             (
                 accounts::id,
                 accounts::username,
@@ -390,7 +488,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         let after = pagination
             .after_key()
             .map(|k| (jiff_diesel::Timestamp::from(k.started_at), k.id));
-        let rows: Vec<(WorkspaceDetection, AccountRefRow, Option<String>)> = keyset!(
+        let items = keyset!(
             scoped(),
             detections::started_at,
             detections::id,
@@ -399,20 +497,9 @@ impl WorkspaceDetectionRepository for PgConnection {
         )
         .select(selection)
         .limit(pagination.fetch_limit())
-        .load(self)
+        .load::<DetectionListRow>(self)
         .await
         .map_err(Error::from)?;
-
-        let items = rows
-            .into_iter()
-            .map(
-                |(detection, account, input_document_name)| DetectionListRow {
-                    detection,
-                    account,
-                    input_document_name,
-                },
-            )
-            .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
             DetectionCursor {
@@ -932,10 +1019,153 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![pending.id]
         );
+        assert!(!page.items[0].detection.has_intermediate);
+        assert_eq!(page.items[0].detection.redacted_output_count, 0);
         assert!(
             page.items[0].input_document_name.is_some(),
             "input document name should resolve through the join"
         );
+        Ok(())
+    }
+
+    async fn seed_searchable_runs(
+        db: &TestDatabase,
+    ) -> anyhow::Result<(crate::test_util::SeededDocument, Vec<Uuid>)> {
+        use crate::model::{NewBlob, NewWorkspaceDocument, NewWorkspaceRedaction};
+        use crate::query::{
+            WorkspaceBlobRepository, WorkspaceDocumentRepository, WorkspaceRedactionRepository,
+        };
+
+        let seeded = db.seed_document().await;
+        let mut conn = db.client.get_connection().await?;
+        let mut input =
+            NewWorkspaceDocument::test(seeded.workspace_id, seeded.account_id, Uuid::nil());
+        input.display_name = Some("Report_50%.pdf".into());
+        input.original_filename = Some("original-contract.pdf".into());
+        let input = conn
+            .create_workspace_document(input, NewBlob::test(seeded.workspace_id))
+            .await?;
+        let intermediate = conn
+            .find_or_create_blob(NewBlob::test(seeded.workspace_id))
+            .await?;
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let mut new =
+                NewWorkspaceDetection::test(seeded.workspace_id, seeded.account_id, input.id);
+            new.intermediate_blob_id = Some(intermediate.id);
+            new.metadata = Some(Json::encode(&crate::types::DetectionMetadata {
+                error: Some("example failure".into()),
+                usage: Some(serde_json::json!({"large": "detail"})),
+                ..Default::default()
+            }));
+            let detection = conn.create_workspace_detection(new).await?;
+            ids.push(detection.id);
+            for _ in 0..3 {
+                let mut output = NewWorkspaceRedaction::test(detection.id, seeded.account_id);
+                output.output_document_id = Some(seeded.document_id);
+                conn.create_redaction(output).await?;
+            }
+        }
+        // A non-matching run in the same workspace must not affect search totals.
+        conn.create_workspace_detection(NewWorkspaceDetection::test(
+            seeded.workspace_id,
+            seeded.account_id,
+            seeded.document_id,
+        ))
+        .await?;
+        Ok((seeded, ids))
+    }
+
+    #[tokio::test]
+    async fn cursor_list_search_and_artifact_counts_preserve_pagination() -> anyhow::Result<()> {
+        use crate::query::{WorkspaceDocumentRepository, WorkspaceRedactionRepository};
+
+        let db = TestDatabase::start().await;
+        let (seeded, ids) = seed_searchable_runs(&db).await?;
+        let mut conn = db.client.get_connection().await?;
+        let filter = DetectionFilter {
+            search: Some("rEpOrT_50%".into()),
+            ..Default::default()
+        };
+        let first = conn
+            .cursor_list_workspace_detections(
+                seeded.workspace_id,
+                CursorPagination::new(1).with_count(),
+                &filter,
+            )
+            .await?;
+        assert_eq!(first.total, Some(2));
+        assert_eq!(first.items.len(), 1);
+        assert!(first.items[0].detection.has_intermediate);
+        assert_eq!(first.items[0].detection.redacted_output_count, 3);
+        assert_eq!(
+            first.items[0].detection.error.as_deref(),
+            Some("example failure")
+        );
+        let second = conn
+            .cursor_list_workspace_detections(
+                seeded.workspace_id,
+                CursorPagination::from_cursor_string(1, first.next_cursor.as_deref()).with_count(),
+                &filter,
+            )
+            .await?;
+        assert_eq!(second.total, Some(2));
+        assert_eq!(second.items.len(), 1);
+        assert_ne!(first.items[0].detection.id, second.items[0].detection.id);
+        assert!(second.next_cursor.is_none());
+        let by_original = conn
+            .cursor_list_workspace_detections(
+                seeded.workspace_id,
+                CursorPagination::new(10),
+                &DetectionFilter {
+                    search: Some("CONTRACT".into()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert_eq!(by_original.items.len(), 2);
+        let wildcard = conn
+            .cursor_list_workspace_detections(
+                seeded.workspace_id,
+                CursorPagination::new(10),
+                &DetectionFilter {
+                    search: Some("%".into()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert_eq!(wildcard.items.len(), 2, "percent must be matched literally");
+        let elsewhere = conn
+            .cursor_list_workspace_detections(
+                Uuid::new_v4(),
+                CursorPagination::new(10).with_count(),
+                &filter,
+            )
+            .await?;
+        assert_eq!(elsewhere.total, Some(0));
+
+        // Indicators agree with the artifacts endpoint after an output is deleted.
+        conn.delete_workspace_document(seeded.document_id).await?;
+        let remaining = conn
+            .cursor_list_workspace_detections(
+                seeded.workspace_id,
+                CursorPagination::new(10),
+                &filter,
+            )
+            .await?;
+        assert!(
+            remaining
+                .items
+                .iter()
+                .all(|row| row.detection.redacted_output_count == 0)
+        );
+        for id in ids {
+            assert!(
+                conn.detection_outputs(seeded.workspace_id, id)
+                    .await?
+                    .is_empty()
+            );
+        }
         Ok(())
     }
 
