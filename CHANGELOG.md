@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **nvisy-s3** - First-party S3-compatible blob storage (files, audits, avatars)
 - **nvisy-object-store** - External tenant object-store providers (S3, Azure, GCS)
 - **nvisy-file-service** - OAuth-based cloud file-service providers (Google Drive, Dropbox)
-- **nvisy-inference** - LLM inference providers (OpenAI, Ollama, Anthropic)
+- **nvisy-assistant** - LLM assistant engine and providers (OpenAI, Ollama, Anthropic)
 - **nvisy-webhook** - Webhook delivery types and traits
 - **nvisy-server** - HTTP handlers, middleware, pipeline, and services
 

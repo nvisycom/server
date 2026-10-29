@@ -7,7 +7,7 @@ use rig::providers::anthropic::{self, AnthropicConfig};
 use super::{Client, map_verify};
 use crate::error::Result;
 
-/// Anthropic-backed inference client.
+/// Anthropic-backed assistant client.
 pub struct AnthropicProvider(anthropic::Anthropic);
 
 impl Client for AnthropicProvider {

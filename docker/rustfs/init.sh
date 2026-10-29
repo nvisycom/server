@@ -1,6 +1,6 @@
 #!/bin/sh
 # Provisions the first-party bucket in RustFS (which does not auto-create
-# buckets). Shared by docker-compose.dev.yml and docker-compose.yml, mounted
+# buckets). Shared by compose.yaml and compose.prod.yaml, mounted
 # read-only and run by the rustfs-init container. Idempotent: safe to re-run.
 #
 # Configuration comes from the environment (never interpolated into a shell

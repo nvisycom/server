@@ -14,10 +14,10 @@ use crate::error::Result;
 /// (`Err`) and ends the stream. Owned and `'static`, so it can be moved into a
 /// response body outliving the client that produced it.
 ///
-/// Yielded by [`InferenceClient::stream_chat`]. Poll it with the [`Stream`] API
+/// Yielded by [`AssistantClient::stream_chat`]. Poll it with the [`Stream`] API
 /// ([`futures::StreamExt`]).
 ///
-/// [`InferenceClient::stream_chat`]: crate::InferenceClient::stream_chat
+/// [`AssistantClient::stream_chat`]: crate::AssistantClient::stream_chat
 #[must_use = "a token stream does nothing unless polled"]
 pub struct TokenStream {
     inner: BoxStream<'static, Result<String>>,

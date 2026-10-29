@@ -1,13 +1,13 @@
-//! Provider-agnostic inference client backed by a rig agent.
+//! Provider-agnostic assistant client backed by a rig agent.
 //!
-//! [`InferenceClient`] is a thin, cloneable wrapper around any provider's rig
+//! [`AssistantClient`] is a thin, cloneable wrapper around any provider's rig
 //! [`Agent`] that provides convenience methods for the most common operations —
-//! one-shot [`prompt`](InferenceClient::prompt), multi-turn
-//! [`chat`](InferenceClient::chat), and streaming
-//! [`stream_chat`](InferenceClient::stream_chat). Every public method is
+//! one-shot [`prompt`](AssistantClient::prompt), multi-turn
+//! [`chat`](AssistantClient::chat), and streaming
+//! [`stream_chat`](AssistantClient::stream_chat). Every public method is
 //! instrumented with [`tracing`] for observability. It plays the same role for
-//! inference that `ObjectStoreClient` plays for object storage: one runtime
-//! handle callers use regardless of which provider backs it.
+//! language-model access that `ObjectStoreClient` plays for object storage: one
+//! runtime handle callers use regardless of which provider backs it.
 
 use std::sync::Arc;
 
@@ -20,15 +20,15 @@ use rig::streaming::{Item, StreamEvent};
 use super::{ChatTurn, TokenStream};
 use crate::error::{Error, Result};
 
-/// Cloneable handle to any inference backend (`OpenAI`, Anthropic, Ollama, ...).
+/// Cloneable handle to any language-model backend (`OpenAI`, Anthropic, Ollama, ...).
 ///
 /// Wraps a rig [`Agent`] — which erases its provider's completion-model type
 /// internally — behind a provider-agnostic interface, so callers issue prompts
 /// without knowing which provider is configured.
 #[derive(Clone)]
-pub struct InferenceClient(Arc<Agent>);
+pub struct AssistantClient(Arc<Agent>);
 
-impl InferenceClient {
+impl AssistantClient {
     /// Wrap a rig [`Agent`].
     pub(crate) fn new(agent: Agent) -> Self {
         Self(Arc::new(agent))
@@ -40,7 +40,7 @@ impl InferenceClient {
     /// # Errors
     ///
     /// A `Prompt` error if the completion request fails at runtime.
-    #[tracing::instrument(name = "inference.prompt", skip_all)]
+    #[tracing::instrument(name = "assistant.prompt", skip_all)]
     pub async fn prompt(&self, prompt: &str) -> Result<String> {
         self.0
             .prompt(prompt.to_owned())
@@ -56,7 +56,7 @@ impl InferenceClient {
     /// # Errors
     ///
     /// A `Prompt` error if the completion request fails at runtime.
-    #[tracing::instrument(name = "inference.chat", skip_all, fields(history_len = history.len()))]
+    #[tracing::instrument(name = "assistant.chat", skip_all, fields(history_len = history.len()))]
     pub async fn chat(&self, prompt: &str, history: Vec<ChatTurn>) -> Result<String> {
         let mut history = to_messages(history);
         self.0
@@ -74,10 +74,10 @@ impl InferenceClient {
     /// a failure mid-generation ends the stream with an `Err`. `history` is the
     /// prior conversation as [`ChatTurn`]s; persist the user prompt and the
     /// assembled reply on the caller side.
-    #[tracing::instrument(name = "inference.stream_chat", skip_all, fields(history_len = history.len()))]
+    #[tracing::instrument(name = "assistant.stream_chat", skip_all, fields(history_len = history.len()))]
     pub fn stream_chat(&self, prompt: &str, history: Vec<ChatTurn>) -> TokenStream {
         // Own the agent handle in the generator so the result is `'static` and
-        // can outlive this `InferenceClient` (moved into a response body). The
+        // can outlive this `AssistantClient` (moved into a response body). The
         // provider stream borrows the owned `Arc`, which the coroutine keeps
         // alive for the whole stream.
         let agent = Arc::clone(&self.0);

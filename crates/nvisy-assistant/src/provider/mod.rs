@@ -1,4 +1,4 @@
-//! Inference provider clients and the dispatch trait over them.
+//! LLM provider clients and the dispatch trait over them.
 
 mod anthropic;
 mod ollama;
@@ -12,15 +12,15 @@ use rig::agent::AgentBuilder;
 use rig::error::ProviderError;
 use rig::operation::Completion;
 
-use crate::client::InferenceClient;
+use crate::client::AssistantClient;
 use crate::error::{Error, Result};
 
-/// An inference provider that builds a verifiable, prompt-capable client from
+/// An LLM provider that builds a verifiable, prompt-capable client from
 /// typed credentials.
 ///
 /// Each provider is a newtype wrapping its rig client. [`verify`](Client::verify)
 /// checks its credentials, and [`model`](Client::model) turns it into a
-/// provider-agnostic `InferenceClient`.
+/// provider-agnostic `AssistantClient`.
 pub(crate) trait Client: Send + Sync + 'static {
     /// The credential this provider connects with. A single-secret provider uses
     /// `str` (the API key); a keyless one (Ollama) uses a unit type.
@@ -44,10 +44,10 @@ pub(crate) trait Client: Send + Sync + 'static {
     /// the agent builder.
     fn completion_model(&self, model: &str) -> DynModel<Completion>;
 
-    /// Turn this provider client into a provider-agnostic [`InferenceClient`]
+    /// Turn this provider client into a provider-agnostic [`AssistantClient`]
     /// bound to `model`.
-    fn model(&self, model: &str) -> InferenceClient {
-        InferenceClient::new(AgentBuilder::new(self.completion_model(model)).build())
+    fn model(&self, model: &str) -> AssistantClient {
+        AssistantClient::new(AgentBuilder::new(self.completion_model(model)).build())
     }
 }
 

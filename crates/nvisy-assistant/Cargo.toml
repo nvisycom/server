@@ -1,8 +1,8 @@
 [package]
-name = "nvisy-inference"
-description = "LLM inference providers (OpenAI, Ollama, Anthropic) for Nvisy"
+name = "nvisy-assistant"
+description = "LLM assistant engine and providers (OpenAI, Ollama, Anthropic) for Nvisy"
 readme = "./README.md"
-keywords = ["nvisy", "llm", "openai", "ollama", "anthropic"]
+keywords = ["nvisy", "assistant", "llm", "openai", "anthropic"]
 categories = ["api-bindings"]
 
 version = { workspace = true }

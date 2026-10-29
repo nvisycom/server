@@ -1,12 +1,12 @@
-# nvisy-inference
+# nvisy-assistant
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/server/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/server/actions/workflows/build.yml)
 
-LLM inference provider configuration and clients for the Nvisy platform.
+The LLM assistant engine and its provider clients for the Nvisy platform.
 
 ## Overview
 
-A provider-agnostic inference layer over
+A provider-agnostic LLM layer over
 [`rig`](https://crates.io/crates/rig), supporting `OpenAI`, Ollama, and
 Anthropic behind a single provider-tagged `LlmConfig`. The config carries each
 provider's credentials and is stored encrypted at rest by a workspace

@@ -30,7 +30,7 @@ compose files provision it with a one-shot init container.
 Start PostgreSQL, NATS, and RustFS for local development:
 
 ```bash
-docker compose -f docker-compose.dev.yml up -d
+docker compose -f compose.yaml up -d
 ```
 
 This starts the services with development defaults (`postgres:postgres`
@@ -42,6 +42,16 @@ locally:
 make generate-all   # .env, keys, migrations
 cargo run --features dotenv --bin nvisy-cli
 ```
+
+#### Optional: NER (GLiNER2)
+
+The `ner` compose profile adds the GLiNER2 NER/PII service (`elide-ner`), which
+the engine config reaches at `http://localhost:3200` by default. Its published
+port binds to localhost only. `make run NER=1` brings it up and runs the server
+with `engine.dev.toml`, substituting `ELIDE_NER_PORT` into a temporary config so
+custom port settings stay in sync; the first start downloads the
+model (~1.2 GB) into the `hf_cache` volume via a one-shot `ner-init` warmer. Set
+`ELIDE_NER_MODEL`, `ELIDE_NER_PORT`, or `ELIDE_VERSION` to override the defaults.
 
 The API documentation is available at:
 
