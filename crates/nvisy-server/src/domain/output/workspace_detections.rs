@@ -20,13 +20,3 @@ pub struct CreatedDetection {
     /// idempotency key replayed an existing one (`200`).
     pub created: bool,
 }
-
-/// Artifact metadata for one detection run.
-pub struct DetectionArtifacts {
-    /// Live input document, if it has not been deleted.
-    pub input: Option<nvisy_postgres::model::WorkspaceDocument>,
-    /// Whether an intermediate artifact is retained.
-    pub intermediate_available: bool,
-    /// Live redacted output files.
-    pub redacted_outputs: Vec<nvisy_postgres::query::DetectionRedactedOutput>,
-}
