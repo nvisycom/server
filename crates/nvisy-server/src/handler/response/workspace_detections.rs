@@ -162,7 +162,8 @@ impl WorkspaceDetection {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceDetectionArtifacts {
-    /// Input document metadata, or null if the document was deleted.
+    /// Input document metadata, omitted if the document was deleted.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<DetectionArtifactInput>,
     /// Intermediate artifact availability; no artifact content is embedded.
     pub intermediate: DetectionArtifactIntermediate,

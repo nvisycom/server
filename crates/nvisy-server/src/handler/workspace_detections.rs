@@ -246,7 +246,7 @@ async fn get_detection_artifacts(
 
 fn get_detection_artifacts_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get detection artifacts")
-        .description("Returns the input file, intermediate availability, and live redacted output file metadata for one detection. Deleted input files are null; deleted or reclaimed outputs are omitted. No file content is embedded.")
+        .description("Returns the input file, intermediate availability, and live redacted output file metadata for one detection. Deleted input files are omitted; deleted or reclaimed outputs are omitted. No file content is embedded.")
         .response::<200, Json<WorkspaceDetectionArtifacts>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
