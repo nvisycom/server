@@ -25,6 +25,8 @@ pub struct RedactionCursor {
 /// Redacted output metadata for one detection, used by the artifacts endpoint.
 #[derive(Debug, Clone)]
 pub struct DetectionRedactedOutput {
+    /// Detection run that owns this output.
+    pub detection_id: Uuid,
     /// Redaction pass that produced the output.
     pub redaction_id: Uuid,
     /// Output document id.
@@ -43,6 +45,13 @@ pub struct DetectionRedactedOutput {
 /// have many. Each redaction owns the review audit it applied and the redacted
 /// document it produced.
 pub trait WorkspaceRedactionRepository {
+    /// Lists live outputs for a page of detections, newest first within each run.
+    fn detection_outputs_batch(
+        &mut self,
+        workspace_id: Uuid,
+        detection_ids: &[Uuid],
+    ) -> impl Future<Output = Result<Vec<DetectionRedactedOutput>>> + Send;
+
     /// Lists live redacted output files for a detection, newest first.
     fn detection_outputs(
         &mut self,
@@ -95,6 +104,15 @@ impl WorkspaceRedactionRepository for PgConnection {
         workspace_id: Uuid,
         detection_id: Uuid,
     ) -> Result<Vec<DetectionRedactedOutput>> {
+        self.detection_outputs_batch(workspace_id, &[detection_id])
+            .await
+    }
+
+    async fn detection_outputs_batch(
+        &mut self,
+        workspace_id: Uuid,
+        detection_ids: &[Uuid],
+    ) -> Result<Vec<DetectionRedactedOutput>> {
         use schema::workspace_detections::dsl as detections;
         use schema::workspace_documents::dsl as documents;
         use schema::workspace_redactions::dsl as redactions;
@@ -102,6 +120,9 @@ impl WorkspaceRedactionRepository for PgConnection {
             workspace_blobs, workspace_detections, workspace_documents, workspace_redactions,
         };
 
+        if detection_ids.is_empty() {
+            return Ok(Vec::new());
+        }
         let rows = workspace_redactions::table
             .inner_join(workspace_detections::table)
             .inner_join(
@@ -119,22 +140,24 @@ impl WorkspaceRedactionRepository for PgConnection {
             .filter(workspace_blobs::workspace_id.eq(workspace_id))
             .filter(workspace_blobs::purged_at.is_null())
             .order((redactions::created_at.desc(), redactions::id.desc()))
-            .filter(redactions::detection_id.eq(detection_id))
+            .filter(redactions::detection_id.eq_any(detection_ids))
             .select((
+                redactions::detection_id,
                 redactions::id,
                 documents::id,
                 documents::display_name,
                 documents::file_extension,
                 workspace_blobs::file_size_bytes,
             ))
-            .load::<(Uuid, Uuid, String, String, i64)>(self)
+            .load::<(Uuid, Uuid, Uuid, String, String, i64)>(self)
             .await
             .map_err(Error::from)?;
         Ok(rows
             .into_iter()
             .map(
-                |(redaction_id, document_id, display_name, extension, size)| {
+                |(detection_id, redaction_id, document_id, display_name, extension, size)| {
                     DetectionRedactedOutput {
+                        detection_id,
                         redaction_id,
                         document_id,
                         display_name,

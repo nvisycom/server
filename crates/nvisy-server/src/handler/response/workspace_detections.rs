@@ -158,10 +158,13 @@ impl WorkspaceDetection {
     }
 }
 
-/// File and intermediate metadata belonging to a single detection run.
+/// A detection run with its artifacts: the input, the intermediate, and the
+/// redacted outputs produced from it.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct WorkspaceDetectionArtifacts {
+pub struct DetectionTree {
+    /// Detection run represented by this tree.
+    pub detection_id: DetectionId,
     /// Input document metadata, omitted if the document was deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<DetectionArtifactInput>,
@@ -204,13 +207,16 @@ pub struct DetectionArtifactOutput {
     pub size: i64,
 }
 
-impl From<crate::domain::output::DetectionArtifacts> for WorkspaceDetectionArtifacts {
-    fn from(artifacts: crate::domain::output::DetectionArtifacts) -> Self {
+impl From<nvisy_postgres::query::DetectionTreeRow> for DetectionTree {
+    fn from(artifacts: nvisy_postgres::query::DetectionTreeRow) -> Self {
         Self {
-            input: artifacts.input.map(|document| DetectionArtifactInput {
-                id: document.id,
-                display_name: document.display_name,
-            }),
+            detection_id: DetectionId::from_uuid(artifacts.detection_id),
+            input: artifacts
+                .input_document_name
+                .map(|name| DetectionArtifactInput {
+                    id: artifacts.input_document_id,
+                    display_name: name,
+                }),
             intermediate: DetectionArtifactIntermediate {
                 available: artifacts.intermediate_available,
             },
@@ -230,3 +236,6 @@ impl From<crate::domain::output::DetectionArtifacts> for WorkspaceDetectionArtif
         }
     }
 }
+
+/// Detection trees paginated by detection, with complete children for each root.
+pub type DetectionTreesPage = Page<DetectionTree>;

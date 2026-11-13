@@ -1,5 +1,29 @@
 name: nvisy-dev
 
+# Shared config for the inference services (NER, OCR, STT). Each is published on
+# a loopback host port in the 32xx range — not the service's own 3000, and not
+# the 31xx a standalone elide-runtime stack uses — so the two can coexist. The
+# images carry no model weights: a one-shot `*-init` warmer downloads the model
+# into a shared cache (as root, then hands it to the service uid) and exits; the
+# service gates on it, then runs non-root with the cache read-only and the Hub
+# offline, so request text never leaves the network. All three sit behind
+# profiles, so `make run` skips them; `make run NER=1` brings them up.
+x-inference: &inference
+  restart: unless-stopped
+  networks:
+    - nvisy-dev
+
+# The bentoml images ship no curl/wget, so readiness is probed with the
+# `elide_core.readyz` module shipped in every image (rc.4+). The model loads in
+# __init__, so readiness lags liveness; the start_period covers a cold load
+# without flapping.
+x-readyz: &readyz
+  test: ["CMD", "python", "-m", "elide_core.readyz"]
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 60s
+
 services:
   postgres:
     image: postgres:18
@@ -96,18 +120,13 @@ services:
     networks:
       - nvisy-dev
 
-  # Warms the NER model into the shared Hugging Face cache and exits. The
-  # elide-ner image carries no weights, so this one-shot `elide_ner.warm` run
-  # downloads them first (as root, to populate the fresh named volume, which it
-  # hands to the uid the service runs as); the service gates on it completing.
-  # Not started by `make run`'s default set — bring NER up with the `ner`
-  # profile (`make run-ner`).
+  # GLiNER2 schema-driven NER/PII. The host-run server reaches it at
+  # localhost:3200 (ELIDE_NER_PORT); point the engine config's NER recognizer
+  # there.
   ner-init:
     image: ${ELIDE_NER_IMAGE:-ghcr.io/nvisycom/elide-ner}:${ELIDE_VERSION:-0.1.0-rc.6}
     container_name: nvisy-ner-init-dev
     profiles: ["ner"]
-    # The warmer is the one process that must reach the Hub; the service then
-    # runs offline against the cache it leaves behind.
     user: root
     environment:
       HF_HOME: /cache/huggingface
@@ -120,17 +139,11 @@ services:
     networks:
       - nvisy-dev
 
-  # GLiNER2 schema-driven NER/PII service. The host-run server reaches it at
-  # localhost:3200 (ELIDE_NER_PORT); point the engine config's NER recognizer
-  # there. The host port is 3200, not the service's own 3000, so this coexists
-  # with a standalone elide-runtime stack (which publishes NER on 3100). The
-  # service runs as a non-root uid with the cache read-only and HF_HUB_OFFLINE
-  # on, so request text never reaches the Hub.
   ner:
+    <<: *inference
     image: ${ELIDE_NER_IMAGE:-ghcr.io/nvisycom/elide-ner}:${ELIDE_VERSION:-0.1.0-rc.6}
     container_name: nvisy-ner-dev
     profiles: ["ner"]
-    restart: unless-stopped
     ports:
       - "127.0.0.1:${ELIDE_NER_PORT:-3200}:3000"
     environment:
@@ -143,32 +156,105 @@ services:
       LOG_LEVEL: ${ELIDE_LOG_LEVEL:-INFO}
     volumes:
       - hf_cache:/cache/huggingface:ro
-    # The bentoml image ships no curl/wget, so /readyz is probed with Python.
-    # The model loads in __init__, so readiness lags liveness; the long
-    # start_period covers a cold load without flapping.
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import urllib.request; urllib.request.urlopen('http://localhost:3000/readyz', timeout=5)"
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 120s
+    healthcheck: *readyz
     depends_on:
       ner-init:
         condition: service_completed_successfully
+
+  # docTR OCR (image modality). Reached at localhost:3201 (ELIDE_OCR_PORT).
+  # docTR uses its own cache, not the Hugging Face Hub.
+  ocr-init:
+    image: ${ELIDE_OCR_IMAGE:-ghcr.io/nvisycom/elide-ocr}:${ELIDE_VERSION:-0.1.0-rc.6}
+    container_name: nvisy-ocr-init-dev
+    profiles: ["ocr"]
+    user: root
+    environment:
+      DOCTR_CACHE_DIR: /cache/doctr
+      ELIDE_BENTO_MODEL_NAME: ${ELIDE_OCR_MODEL:-db_resnet50+crnn_vgg16_bn}
+    entrypoint: ["python", "-m", "elide_ocr.warm"]
+    volumes:
+      - doctr_cache:/cache/doctr
     networks:
       - nvisy-dev
+
+  ocr:
+    <<: *inference
+    image: ${ELIDE_OCR_IMAGE:-ghcr.io/nvisycom/elide-ocr}:${ELIDE_VERSION:-0.1.0-rc.6}
+    container_name: nvisy-ocr-dev
+    profiles: ["ocr"]
+    ports:
+      - "127.0.0.1:${ELIDE_OCR_PORT:-3201}:3000"
+    environment:
+      DOCTR_CACHE_DIR: /cache/doctr
+      # Present and non-empty wins over the model id; an operator mounts weights
+      # over /models to override.
+      ELIDE_BENTO_MODEL_PATH: /models
+      ELIDE_BENTO_MODEL_NAME: ${ELIDE_OCR_MODEL:-db_resnet50+crnn_vgg16_bn}
+      LOG_LEVEL: ${ELIDE_LOG_LEVEL:-INFO}
+    volumes:
+      - doctr_cache:/cache/doctr:ro
+    healthcheck: *readyz
+    depends_on:
+      ocr-init:
+        condition: service_completed_successfully
+
+  # faster-whisper speech-to-text (audio modality). Reached at localhost:3202
+  # (ELIDE_STT_PORT). Diarization is off by default (its model is gated on the
+  # Hub); enable it with ELIDE_STT_DIARIZE=true and an ELIDE_STT_HF_TOKEN.
+  stt-init:
+    image: ${ELIDE_STT_IMAGE:-ghcr.io/nvisycom/elide-stt}:${ELIDE_VERSION:-0.1.0-rc.6}
+    container_name: nvisy-stt-init-dev
+    profiles: ["stt"]
+    user: root
+    environment:
+      HF_HOME: /cache/huggingface
+      ELIDE_BENTO_MODEL_NAME: ${ELIDE_STT_MODEL:-large-v3-turbo}
+      ELIDE_BENTO_STT_DIARIZE: ${ELIDE_STT_DIARIZE:-false}
+      ELIDE_BENTO_STT_DIARIZE_MODEL: ${ELIDE_STT_DIARIZE_MODEL:-pyannote/speaker-diarization-community-1}
+      ELIDE_BENTO_STT_HF_TOKEN: ${ELIDE_STT_HF_TOKEN:-}
+    entrypoint: ["python", "-m", "elide_stt.warm"]
+    volumes:
+      - hf_cache:/cache/huggingface
+    networks:
+      - nvisy-dev
+
+  stt:
+    <<: *inference
+    image: ${ELIDE_STT_IMAGE:-ghcr.io/nvisycom/elide-stt}:${ELIDE_VERSION:-0.1.0-rc.6}
+    container_name: nvisy-stt-dev
+    profiles: ["stt"]
+    ports:
+      - "127.0.0.1:${ELIDE_STT_PORT:-3202}:3000"
+    environment:
+      HF_HOME: /cache/huggingface
+      ELIDE_BENTO_MODEL_PATH: /models
+      ELIDE_BENTO_MODEL_NAME: ${ELIDE_STT_MODEL:-large-v3-turbo}
+      ELIDE_BENTO_STT_DEVICE: ${ELIDE_STT_DEVICE:-cpu}
+      ELIDE_BENTO_STT_COMPUTE_TYPE: ${ELIDE_STT_COMPUTE_TYPE:-}
+      ELIDE_BENTO_STT_DIARIZE: ${ELIDE_STT_DIARIZE:-false}
+      ELIDE_BENTO_STT_DIARIZE_MODEL: ${ELIDE_STT_DIARIZE_MODEL:-pyannote/speaker-diarization-community-1}
+      ELIDE_BENTO_STT_HF_TOKEN: ${ELIDE_STT_HF_TOKEN:-}
+      LOG_LEVEL: ${ELIDE_LOG_LEVEL:-INFO}
+    volumes:
+      - hf_cache:/cache/huggingface:ro
+    # Transcription is long-running (up to 900s per request), so the probe gets
+    # a longer timeout than the other two.
+    healthcheck:
+      <<: *readyz
+      timeout: 10s
+    depends_on:
+      stt-init:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:
   nats_data:
   rustfs_data:
-  # Hugging Face cache the NER init container populates and the service mounts
-  # read-only; keeps the model weights out of the image and off repeat pulls.
+  # Hugging Face cache for NER and STT; docTR keeps its own. The init containers
+  # populate them and the services mount them read-only, so model weights stay
+  # out of the images and off repeat pulls.
   hf_cache:
+  doctr_cache:
 
 networks:
   nvisy-dev:
