@@ -116,6 +116,7 @@ reset: ## Resets Docker containers (down -v, then up -d).
 # naming only the services that are up; with none set, the server runs the
 # built-in pattern recognizers only.
 INFERENCE_PROFILES := $(if $(NER),--profile ner) $(if $(OCR),--profile ocr) $(if $(STT),--profile stt)
+INFERENCE_SERVICES := $(if $(NER),ner) $(if $(OCR),ocr) $(if $(STT),stt)
 
 .PHONY: run
 run: ## Runs the server (NATS, Postgres, RustFS first). Set NER=1, OCR=1, and/or STT=1 to also start that inference service.
@@ -125,7 +126,7 @@ run: ## Runs the server (NATS, Postgres, RustFS first). Set NER=1, OCR=1, and/or
 	@docker compose -f ./docker/compose.yaml up --exit-code-from rustfs-init rustfs-init
 ifneq ($(strip $(INFERENCE_PROFILES)),)
 	@$(call log,Starting inference services (first run downloads their models)...)
-	@docker compose -f ./docker/compose.yaml $(INFERENCE_PROFILES) up -d --wait
+	@docker compose -f ./docker/compose.yaml $(INFERENCE_PROFILES) up -d --wait $(INFERENCE_SERVICES)
 endif
 	@$(call log,Starting server... (output also written to latest.log))
 	@# Tee via process substitution rather than a pipe: a pipe would put `tee`
