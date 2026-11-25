@@ -135,7 +135,7 @@ deadpool = { version = "0.13", features = [] }
 pgtrgm = { version = "0.5", features = [] }
 
 # Messaging and object storage (NATS)
-async-nats = { version = "0.50", features = [] }
+async-nats = { version = "0.51", features = [] }
 
 # Cloud object storage
 object_store = { version = "0.14", features = [] }
