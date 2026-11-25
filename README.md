@@ -58,10 +58,10 @@ docker compose -f docker/compose.yaml up -d   # Start Postgres, NATS, RustFS
 make run                                                # Run the server
 ```
 
-To run with the GLiNER2 NER service (pattern recognition otherwise runs alone),
-pass `make run NER=1` — it also starts the `ner` compose profile and points the
-server at `docker/engine.dev.toml`. The first run downloads the model (~1.2 GB)
-into a cached volume.
+To run with the inference services (pattern recognition otherwise runs alone),
+set `NER=1`, `OCR=1`, and/or `STT=1` — e.g. `make run NER=1 OCR=1`. Each starts
+its bento compose profile and is added to a generated engine config matching the
+running stack. The first run of each downloads its model into a cached volume.
 
 The API then serves interactive OpenAPI docs (Scalar UI) at the running server's
 docs path. For self-hosted deployments, see [`docker/`](docker/) for compose
