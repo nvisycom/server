@@ -53,6 +53,19 @@ ignore = [
     # neither operates on attacker-chosen secrets on a shared host. Remove once
     # those dependencies move to `crypto-bigint` >= 0.7.6.
     "RUSTSEC-2026-0387",
+    # `chrono` is unmaintained (no vulnerability). We call it only in the cron
+    # schedule bridge, because `croner` works on chrono datetimes, and it is also
+    # pulled transitively by `oauth2`, `openidconnect`, and `object_store`, so
+    # there is no workspace-level replacement. Remove once those move off chrono.
+    "RUSTSEC-2026-0543",
+    # `humantime` is unmaintained because it wraps chrono (no vulnerability). We
+    # use it to parse CLI durations, and `object_store` depends on it too.
+    # Remove once there is a maintained replacement for both uses.
+    "RUSTSEC-2026-0542",
+    # `astral-tokio-tar` is unmaintained (no vulnerability). It is a dev-only
+    # transitive dep of `testcontainers`, used to build test containers, and
+    # never ships in the server binary. Remove once `testcontainers` replaces it.
+    "RUSTSEC-2026-0440",
 ]
 
 [licenses]
