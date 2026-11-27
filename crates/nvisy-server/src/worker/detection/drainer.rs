@@ -68,6 +68,9 @@ struct DrainPass {
     processed: usize,
     deferred: usize,
     dead_lettered: usize,
+    /// A publish timed out, so NATS is likely down: the pass stopped early and
+    /// no further batch is claimed until the next tick.
+    timed_out: bool,
 }
 
 impl Worker for DetectionOutboxDrainer {
@@ -134,7 +137,9 @@ impl DetectionOutboxDrainer {
                     } else if pass.claimed > 0 {
                         tracing::debug!(target: TRACING_TARGET, processed = pass.processed, "Detection-job drain pass published jobs");
                     }
-                    if i64::try_from(pass.claimed).unwrap_or(i64::MAX) < DRAIN_BATCH {
+                    if pass.timed_out
+                        || i64::try_from(pass.claimed).unwrap_or(i64::MAX) < DRAIN_BATCH
+                    {
                         break;
                     }
                 }
@@ -166,13 +171,15 @@ impl DetectionOutboxDrainer {
                     processed: 0,
                     deferred: 0,
                     dead_lettered: 0,
+                    timed_out: false,
                 };
                 // Detections failed by a dead-lettered job, so their `Failed`
                 // status can be broadcast after the transaction commits.
                 let mut dead_lettered = Vec::new();
 
                 for row in batch {
-                    match self.publish(&row).await {
+                    let attempt = self.publish(&row).await;
+                    match attempt {
                         PublishOutcome::Published => {
                             conn.mark_outbox_processed(&row).await?;
                             pass.processed += 1;
@@ -185,7 +192,9 @@ impl DetectionOutboxDrainer {
                         // transaction) so it does not hang `Pending` forever. The
                         // guard on `Pending` makes it a no-op in the unlikely case a
                         // worker already claimed the detection.
-                        PublishOutcome::Failed if row.attempts + 1 >= MAX_ATTEMPTS => {
+                        PublishOutcome::Failed | PublishOutcome::TimedOut
+                            if row.attempts + 1 >= MAX_ATTEMPTS =>
+                        {
                             tracing::error!(target: TRACING_TARGET, id = %row.id, detection_id = %row.detection_id, attempts = row.attempts + 1, "Dead-lettering detection job after too many failed attempts; failing the detection");
                             conn.mark_outbox_failed(&row).await?;
                             let metadata = DetectionMetadata {
@@ -211,24 +220,22 @@ impl DetectionOutboxDrainer {
                             }
                             pass.dead_lettered += 1;
                         }
-                        PublishOutcome::Failed => {
+                        PublishOutcome::Failed | PublishOutcome::TimedOut => {
                             conn.defer_outbox_attempt(&row, retry_backoff(row.attempts))
                                 .await?;
                             pass.deferred += 1;
                         }
-                        // A publish timeout signals NATS is unavailable or hung. Do
-                        // not burn `PUBLISH_TIMEOUT` on each remaining row — that
-                        // could hold the batch's `FOR UPDATE SKIP LOCKED` locks and
-                        // the pooled connection for `DRAIN_BATCH * PUBLISH_TIMEOUT`.
-                        // Defer this row and stop the pass; the next tick retries
-                        // the rest.
-                        PublishOutcome::TimedOut => {
-                            conn.defer_outbox_attempt(&row, retry_backoff(row.attempts))
-                                .await?;
-                            pass.deferred += 1;
-                            tracing::warn!(target: TRACING_TARGET, id = %row.id, "Detection-job publish timed out; deferring the rest of the batch");
-                            break;
-                        }
+                    }
+                    // A publish timeout signals NATS is unavailable or hung. Do not
+                    // burn `PUBLISH_TIMEOUT` on each remaining row — that could
+                    // hold the batch's `FOR UPDATE SKIP LOCKED` locks and the
+                    // pooled connection for `DRAIN_BATCH * PUBLISH_TIMEOUT`. Stop
+                    // the pass (the row above was deferred or dead-lettered like
+                    // any failure); the next tick retries the rest.
+                    if attempt == PublishOutcome::TimedOut {
+                        pass.timed_out = true;
+                        tracing::warn!(target: TRACING_TARGET, id = %row.id, "Detection-job publish timed out; stopping the pass");
+                        break;
                     }
                 }
 
@@ -274,6 +281,7 @@ impl DetectionOutboxDrainer {
 
 /// The result of one publish attempt: published, failed (decode or NATS error),
 /// or timed out (NATS unavailable/hung — the caller stops the batch).
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum PublishOutcome {
     /// Published to the work-queue.
     Published,

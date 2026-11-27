@@ -57,7 +57,7 @@ pub struct NatsConfig {
 impl fmt::Debug for NatsConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("NatsConfig")
-            .field("nats_url", &self.nats_url)
+            .field("nats_url", &self.redacted_url())
             .field("nats_token", &"<redacted>")
             .field("nats_client_name", &self.nats_client_name)
             .field("nats_connect_timeout", &self.nats_connect_timeout)
@@ -84,6 +84,23 @@ impl NatsConfig {
             nats_request_timeout: None,
             nats_max_reconnects: None,
         }
+    }
+
+    /// The server URL(s) with any embedded credentials (`user:pass@`) masked in
+    /// each comma-separated entry, for logs and `Debug`.
+    #[must_use]
+    pub fn redacted_url(&self) -> String {
+        self.nats_url
+            .split(',')
+            .map(|url| match (url.find("://"), url.rfind('@')) {
+                (Some(scheme), Some(at)) if at > scheme => {
+                    format!("{}<redacted>{}", &url[..scheme + 3], &url[at..])
+                }
+                (None, Some(at)) => format!("<redacted>{}", &url[at..]),
+                _ => url.to_owned(),
+            })
+            .collect::<Vec<_>>()
+            .join(",")
     }
 
     /// Returns the client name, using the default if not set.
@@ -126,6 +143,19 @@ impl NatsConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redacted_url_masks_credentials_in_every_entry() {
+        let config = NatsConfig::new(
+            "nats://user:pass@a:4222,nats://b:4222,tls://tok@c:4222",
+            "token",
+        );
+        assert_eq!(
+            config.redacted_url(),
+            "nats://<redacted>@a:4222,nats://b:4222,tls://<redacted>@c:4222"
+        );
+        assert!(!format!("{config:?}").contains("pass"));
+    }
 
     #[test]
     fn test_new_config() {
