@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::extract::{Json, Path};
 use crate::response::{AvatarImage, Error, ErrorResponse, Result};
-use crate::service::{AvatarService, ServiceState};
+use crate::service::{AvatarOwner, AvatarService, ServiceState};
 
 /// Tracing target for public avatar serving.
 const TRACING_TARGET: &str = "nvisy_server::handler::avatars";
@@ -46,7 +46,7 @@ async fn get_account_avatar(
     tracing::debug!(target: TRACING_TARGET, "Serving account avatar");
 
     let bytes = avatar
-        .account_avatar(params.id, &params.version)
+        .get(AvatarOwner::Account(params.id), &params.version)
         .await?
         .ok_or_else(|| Error::not_found("avatar"))?;
 
@@ -62,7 +62,7 @@ async fn get_workspace_avatar(
     tracing::debug!(target: TRACING_TARGET, "Serving workspace avatar");
 
     let bytes = avatar
-        .workspace_avatar(params.id, &params.version)
+        .get(AvatarOwner::Workspace(params.id), &params.version)
         .await?
         .ok_or_else(|| Error::not_found("avatar"))?;
 

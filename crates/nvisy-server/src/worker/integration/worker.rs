@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use jiff::{Span, Timestamp};
 use nvisy_nats::kv::{SchedulerLockKey, SchedulerLocksBucket};
-use nvisy_nats::stream::{ConnectionSyncStream, EventPublisher, EventSubscriber};
+use nvisy_nats::stream::{ConnectionSyncStream, Delivery, EventPublisher, Settle};
 use nvisy_postgres::model::{
     NewWorkspaceConnectionSync, WorkspaceConnection, WorkspaceConnectionSync,
 };
@@ -31,12 +31,12 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::response::{ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Result};
 use crate::service::{
     ConnectionConfig, ConnectionSyncService, CryptoService, Infra, StandardCronSchedule,
     TransferKind, TransferRequest,
 };
-use crate::worker::Worker;
+use crate::worker::{Worker, every};
 
 /// Tracing target for the connection sync worker.
 const TRACING_TARGET: &str = "nvisy_server::worker::integration";
@@ -50,11 +50,9 @@ const STALE_RUN_AGE_HOURS: i64 = 6;
 /// Fixed KV key for the per-tick scheduler leader-election lock.
 const SCHEDULER_LOCK_KEY: &str = "connection-sync-scheduler";
 
-/// Maximum number of attempts for a scheduled sync before it is left failed.
-const MAX_SYNC_ATTEMPTS: i32 = 3;
-
-/// Base backoff before re-enqueueing a failed scheduled sync. Each attempt
-/// waits this multiplied by the attempt number (linear backoff).
+/// Base backoff before a failed scheduled sync is redelivered. Each attempt
+/// waits this multiplied by the attempt number (linear backoff); the stream's
+/// `MAX_DELIVER` bounds the attempts.
 const RETRY_BACKOFF: Duration = Duration::from_secs(30);
 
 /// A scheduled sync job: enqueued by the scheduler, consumed by any instance.
@@ -67,24 +65,14 @@ pub struct ConnectionSyncJob {
     pub workspace_id: Uuid,
     /// Connection to sync.
     pub connection_id: Uuid,
-    /// 1-based attempt number; a failed run re-enqueues with this incremented,
-    /// up to a bounded maximum.
-    #[serde(default = "first_attempt")]
-    pub attempt: i32,
-}
-
-/// Default attempt for jobs enqueued before this field existed, and for the
-/// first attempt of a new job.
-fn first_attempt() -> i32 {
-    1
 }
 
 /// The connection-sync `JetStream` stream, carrying [`ConnectionSyncJob`] payloads.
 pub type SyncStream = ConnectionSyncStream<ConnectionSyncJob>;
 type JobPublisher = EventPublisher<SyncStream>;
-type JobSubscriber = EventSubscriber<SyncStream>;
 
 /// Background worker driving scheduled connection syncs.
+#[derive(Clone)]
 pub struct ConnectionSyncWorker {
     infra: Infra,
     crypto: CryptoService,
@@ -92,24 +80,35 @@ pub struct ConnectionSyncWorker {
 }
 
 impl Worker for ConnectionSyncWorker {
-    type Output = Result<()>;
+    type Error = Error<'static>;
 
-    fn name(&self) -> &'static str {
-        "connection_sync"
-    }
+    const NAME: &'static str = "connection_sync";
 
-    /// Runs the worker until cancelled, logging its lifecycle (start, stop,
-    /// failure).
+    /// Reaps stale runs, then drives the scheduler tick and the job consumer
+    /// concurrently until cancelled.
     async fn run(&self, cancel: CancellationToken) -> Result<()> {
-        tracing::info!(target: TRACING_TARGET, "Starting connection sync worker");
-
-        let result = self.run_inner(cancel).await;
-
-        if let Err(err) = &result {
-            tracing::error!(target: TRACING_TARGET, error = %err, "Connection sync worker failed");
+        if let Err(err) = self.reap_stale_runs().await {
+            tracing::error!(target: TRACING_TARGET, error = %err, "Failed to reap stale runs");
         }
 
-        result
+        let scheduler = every(TICK_INTERVAL, &cancel, None, async || {
+            if let Err(err) = self.schedule_due().await {
+                tracing::error!(target: TRACING_TARGET, error = %err, "Scheduler tick failed");
+            }
+        });
+        let worker = self.clone();
+        // One sync at a time: a run holds a provider session and streams files.
+        // At-least-once: a job settles after its run; both directions are
+        // idempotent (already-imported keys and already-exported files are
+        // skipped), so a redelivery is safe.
+        let subscriber = self.infra.nats.event_subscriber::<SyncStream>();
+        let consumer = subscriber.consume(1, &cancel, move |job, delivery| {
+            let worker = worker.clone();
+            async move { worker.run_job(job, delivery).await }
+        });
+        let ((), consumer) = tokio::join!(scheduler, consumer);
+        consumer?;
+        Ok(())
     }
 }
 
@@ -124,20 +123,6 @@ impl ConnectionSyncWorker {
         }
     }
 
-    /// Reaps stale runs, then drives the scheduler tick and the job consumer
-    /// concurrently until cancelled.
-    async fn run_inner(&self, cancel: CancellationToken) -> Result<()> {
-        if let Err(err) = self.reap_stale_runs().await {
-            tracing::error!(target: TRACING_TARGET, error = %err, "Failed to reap stale runs");
-        }
-
-        let scheduler = self.run_scheduler(cancel.clone());
-        let consumer = self.run_consumer(cancel);
-        let (scheduler, consumer) = tokio::join!(scheduler, consumer);
-
-        scheduler.and(consumer)
-    }
-
     /// Fails any runs left `Running` by a previously crashed process.
     async fn reap_stale_runs(&self) -> Result<()> {
         let cutoff = Timestamp::now() - Span::new().hours(STALE_RUN_AGE_HOURS);
@@ -145,23 +130,6 @@ impl ConnectionSyncWorker {
         let reaped = conn.fail_stale_running_syncs(cutoff.into()).await?;
         if reaped > 0 {
             tracing::warn!(target: TRACING_TARGET, reaped, "Reaped stale sync runs");
-        }
-        Ok(())
-    }
-
-    /// Scheduler loop: each tick, try to win the leader lock and, if won,
-    /// enqueue due connections.
-    async fn run_scheduler(&self, cancel: CancellationToken) -> Result<()> {
-        let mut ticker = tokio::time::interval(TICK_INTERVAL);
-        loop {
-            tokio::select! {
-                () = cancel.cancelled() => break,
-                _ = ticker.tick() => {
-                    if let Err(err) = self.schedule_due().await {
-                        tracing::error!(target: TRACING_TARGET, error = %err, "Scheduler tick failed");
-                    }
-                }
-            }
         }
         Ok(())
     }
@@ -211,7 +179,7 @@ impl ConnectionSyncWorker {
                 }
                 // Due-ness is measured from the last attempt (success or failure),
                 // not the last success, so a persistently failing connection is not
-                // re-enqueued every tick; retries are owned by maybe_retry.
+                // re-enqueued every tick; retries are the stream's redeliveries.
                 let last_attempt = latest.map(|run| run.started_at.into());
                 if StandardCronSchedule.is_due(&schedule_cron, last_attempt, now) {
                     due.push((connection.workspace_id, connection.id));
@@ -225,7 +193,6 @@ impl ConnectionSyncWorker {
             let job = ConnectionSyncJob {
                 workspace_id,
                 connection_id,
-                attempt: 1,
             };
             if let Err(err) = publisher.publish(&job).await {
                 tracing::error!(
@@ -239,58 +206,26 @@ impl ConnectionSyncWorker {
         Ok(())
     }
 
-    /// Consumer loop: drain the work queue, running each job as a scheduled sync.
-    async fn run_consumer(&self, cancel: CancellationToken) -> Result<()> {
-        let subscriber: JobSubscriber = self.infra.nats.event_subscriber();
-        let mut stream = subscriber.subscribe().await?;
-
-        loop {
-            tokio::select! {
-                () = cancel.cancelled() => {
-                    break;
-                }
-                result = stream.next_with_timeout(Duration::from_secs(5)) => {
-                    match result {
-                        Ok(Some(mut message)) => {
-                            let job = message.payload().clone();
-                            // At-least-once: run first, then ack. A crash before
-                            // ack redelivers the job; both directions are
-                            // idempotent (already-imported keys and already-
-                            // exported files are skipped), so a redelivery is safe.
-                            self.run_job(job, &cancel).await;
-                            if let Err(err) = message.ack().await {
-                                tracing::error!(target: TRACING_TARGET, error = %err, "Failed to ack job");
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(err) => {
-                            tracing::error!(target: TRACING_TARGET, error = %err, "Error receiving job");
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
     /// Runs one scheduled sync job: loads the connection, opens a `Scheduled`
-    /// run, and performs the sync in its scheduled direction.
-    async fn run_job(&self, job: ConnectionSyncJob, cancel: &CancellationToken) {
+    /// run, and performs the sync in its scheduled direction. A failed run is
+    /// redelivered with a linear backoff until the stream's attempts run out;
+    /// everything else is acked.
+    async fn run_job(&self, job: ConnectionSyncJob, delivery: Delivery) -> Settle {
+        let attempt = i32::try_from(delivery.attempt).unwrap_or(i32::MAX);
         let connection = match self.load_connection(&job).await {
             Ok(Some(connection)) => connection,
             Ok(None) => {
                 tracing::warn!(target: TRACING_TARGET, connection_id = %job.connection_id, "Scheduled connection not found");
-                return;
+                return Settle::Ack;
             }
             Err(err) => {
                 tracing::error!(target: TRACING_TARGET, connection_id = %job.connection_id, error = %err, "Failed to load scheduled connection");
-                return;
+                return Settle::Ack;
             }
         };
 
         if !connection.is_active {
-            return;
+            return Settle::Ack;
         }
 
         // A job may be delivered more than once (at-least-once), or a duplicate
@@ -301,109 +236,59 @@ impl ConnectionSyncWorker {
         match self.load_latest_run(&connection).await {
             Ok(Some(run)) if run.status.is_in_progress() => {
                 tracing::debug!(target: TRACING_TARGET, connection_id = %connection.id, "Sync already in progress; skipping duplicate job");
-                return;
+                return Settle::Ack;
             }
             Ok(_) => {}
             Err(err) => {
                 tracing::error!(target: TRACING_TARGET, connection_id = %connection.id, error = %err, "Failed to check in-progress run");
-                return;
+                return Settle::Ack;
             }
         }
 
         let connection_id = connection.id;
-        let request = match self.begin_run(connection, job.attempt).await {
+        let request = match self.begin_run(connection, attempt).await {
             Ok(Some(request)) => request,
             // The connection is no longer scheduled (schedule removed or cron
             // cleared after enqueue); drop the job quietly.
-            Ok(None) => return,
+            Ok(None) => return Settle::Ack,
             // A lost race on the one-active-run index is benign and expected
             // (at-least-once delivery); anything else — a decrypt failure or a
             // mis-scheduled non-sync connection — is a real fault worth surfacing.
             Err(err) if err.kind() == ErrorKind::Conflict => {
                 tracing::debug!(target: TRACING_TARGET, connection_id = %connection_id, "Skipping scheduled run: already active");
-                return;
+                return Settle::Ack;
             }
             Err(err) => {
                 tracing::warn!(target: TRACING_TARGET, connection_id = %connection_id, error = %err, "Failed to open scheduled run");
-                return;
+                return Settle::Ack;
             }
         };
 
         // Capture the identifiers needed after the transfer takes ownership of
         // the request (and its connection). Runs through the shared transfer path.
         let run_id = request.run_id;
-        let workspace_id = request.connection.workspace_id;
         self.sync.run_transfer(request).await;
 
-        self.maybe_retry(workspace_id, connection_id, run_id, job.attempt, cancel)
-            .await;
+        if !delivery.is_final && self.run_failed(run_id).await {
+            tracing::info!(target: TRACING_TARGET, %connection_id, attempt, "Scheduled sync failed; redelivering");
+            return Settle::RetryAfter(RETRY_BACKOFF * u32::try_from(attempt).unwrap_or(1));
+        }
+        Settle::Ack
     }
 
-    /// Re-enqueues a scheduled job after a failed run, up to
-    /// [`MAX_SYNC_ATTEMPTS`]. Reads the run's final status; a run that was
-    /// cancelled or completed is not retried.
-    ///
-    /// The linear backoff runs in a detached task so the consumer can ack and
-    /// move on immediately rather than blocking the whole queue during the wait.
-    /// The task also stops on the worker's cancellation token so a shutdown does
-    /// not leave a sleeping re-enqueue behind.
-    async fn maybe_retry(
-        &self,
-        workspace_id: Uuid,
-        connection_id: Uuid,
-        run_id: Uuid,
-        attempt: i32,
-        cancel: &CancellationToken,
-    ) {
-        if attempt >= MAX_SYNC_ATTEMPTS {
-            return;
-        }
-
-        let failed = {
-            let mut conn = match self.infra.postgres.get_connection().await {
-                Ok(conn) => conn,
-                Err(err) => {
-                    tracing::error!(target: TRACING_TARGET, %run_id, error = %err, "Failed to check run outcome for retry");
-                    return;
-                }
-            };
-            match conn.find_workspace_connection_sync_by_id(run_id).await {
-                Ok(Some(run)) => run.status.is_failed(),
-                Ok(None) => false,
-                Err(err) => {
-                    tracing::error!(target: TRACING_TARGET, %run_id, error = %err, "Failed to check run outcome for retry");
-                    return;
-                }
-            }
+    /// Whether a run ended failed (a cancelled or completed run is not retried).
+    async fn run_failed(&self, run_id: Uuid) -> bool {
+        let found = match self.infra.postgres.get_connection().await {
+            Ok(mut conn) => conn.find_workspace_connection_sync_by_id(run_id).await,
+            Err(err) => Err(err),
         };
-        if !failed {
-            return;
+        match found {
+            Ok(run) => run.is_some_and(|run| run.status.is_failed()),
+            Err(err) => {
+                tracing::error!(target: TRACING_TARGET, %run_id, error = %err, "Failed to check run outcome for retry");
+                false
+            }
         }
-
-        let next_attempt = attempt + 1;
-        let backoff = RETRY_BACKOFF * u32::try_from(attempt).unwrap_or(0);
-        let nats = self.infra.nats.clone();
-        let cancel = cancel.clone();
-        tokio::spawn(async move {
-            // Wait out the backoff, but abandon the retry if the worker is
-            // shutting down so no sleeping task outlives the process.
-            tokio::select! {
-                () = cancel.cancelled() => return,
-                () = tokio::time::sleep(backoff) => {}
-            }
-
-            let job = ConnectionSyncJob {
-                workspace_id,
-                connection_id,
-                attempt: next_attempt,
-            };
-            let publisher: JobPublisher = nats.event_publisher();
-            if let Err(err) = publisher.publish(&job).await {
-                tracing::error!(target: TRACING_TARGET, %connection_id, error = %err, "Failed to re-enqueue failed sync");
-            } else {
-                tracing::info!(target: TRACING_TARGET, %connection_id, attempt = next_attempt, "Re-enqueued failed scheduled sync");
-            }
-        });
     }
 
     /// Loads the connection for a job, scoped to its workspace.

@@ -4,6 +4,7 @@
 //! publishing and subscribing over a stream configured via [`EventStream`].
 
 mod broadcast_stream;
+mod consume;
 pub(crate) mod core;
 mod event_stream;
 mod typed_pub;
@@ -12,7 +13,8 @@ mod typed_sub;
 
 pub use core::EventStream;
 
-pub use broadcast_stream::BroadcastStream;
+pub use broadcast_stream::{BroadcastStream, BroadcastTopic};
+pub use consume::{Delivery, Settle};
 pub use event_stream::{AssistantStream, ConnectionSyncStream, DetectionStream, WebhookStream};
 pub use typed_pub::EventPublisher;
 pub use typed_stream::{TypedMessage, TypedMessageStream};

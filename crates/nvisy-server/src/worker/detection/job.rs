@@ -6,8 +6,10 @@
 //! [`DetectionWorker`]: super::DetectionWorker
 //! [`DetectionOutboxDrainer`]: super::DetectionOutboxDrainer
 
+use std::fmt::Display;
+
 use elide_pipeline::provider::DocumentContext;
-use nvisy_nats::stream::BroadcastStream;
+use nvisy_nats::stream::{BroadcastStream, BroadcastTopic};
 use nvisy_postgres::types::DetectionStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -15,9 +17,6 @@ use uuid::Uuid;
 
 use crate::response::Result;
 use crate::service::Infra;
-
-/// Tracing target for detection enqueue and broadcast primitives.
-const TRACING_TARGET: &str = "nvisy_server::worker::detection";
 
 /// The detection `JetStream` work-queue, carrying [`DetectionJob`] payloads.
 pub type DetectionStream = nvisy_nats::stream::DetectionStream<DetectionJob>;
@@ -44,8 +43,7 @@ pub struct DetectionJob {
     pub policy_ids: Vec<Uuid>,
 }
 
-/// A detection's status change, broadcast on the core-NATS subject
-/// [`detection_subject`].
+/// A detection's status change, broadcast on the detection's status topic.
 ///
 /// Fan-out to any watching SSE connections; the detection row in Postgres remains
 /// the source of truth, so a missed broadcast is recoverable by re-reading it.
@@ -58,10 +56,15 @@ pub struct DetectionStatusEvent {
     pub status: DetectionStatus,
 }
 
-/// The core-NATS subject a detection's status changes are broadcast on.
-#[must_use]
-pub fn detection_subject(detection_id: Uuid) -> String {
-    format!("detections.{detection_id}.status")
+/// The core-NATS topic a detection's status changes are broadcast on.
+pub enum DetectionStatusTopic {}
+
+impl BroadcastTopic for DetectionStatusTopic {
+    type Event = DetectionStatusEvent;
+
+    fn subject(detection_id: &dyn Display) -> String {
+        format!("detections.{detection_id}.status")
+    }
 }
 
 /// Publishes a detection job onto the `DetectionStream` work-queue for the worker
@@ -76,24 +79,17 @@ pub async fn enqueue(infra: &Infra, job: DetectionJob) -> Result<()> {
     Ok(())
 }
 
-/// Broadcasts a detection's status change on its core-NATS subject (best-effort;
-/// the detection row is authoritative, so a dropped broadcast is recoverable).
+/// Broadcasts a detection's status change (best-effort; the detection row is
+/// authoritative, so a dropped broadcast is recoverable).
 pub async fn broadcast_status(infra: &Infra, detection_id: Uuid, status: DetectionStatus) {
     let event = DetectionStatusEvent {
         detection_id,
         status,
     };
-    if let Err(err) = infra
+    infra
         .nats
-        .publish_broadcast(detection_subject(detection_id), &event)
-        .await
-    {
-        tracing::debug!(
-            target: TRACING_TARGET,
-            error = %err,
-            "Failed to broadcast detection status",
-        );
-    }
+        .broadcast::<DetectionStatusTopic>(detection_id, &event)
+        .await;
 }
 
 /// Subscribes to a detection's status broadcasts, yielding each
@@ -107,9 +103,8 @@ pub async fn subscribe_status(
     infra: &Infra,
     detection_id: Uuid,
 ) -> Result<BroadcastStream<DetectionStatusEvent>> {
-    let stream = infra
+    Ok(infra
         .nats
-        .subscribe_broadcast::<DetectionStatusEvent>(detection_subject(detection_id))
-        .await?;
-    Ok(stream)
+        .subscribe_topic::<DetectionStatusTopic>(detection_id)
+        .await?)
 }

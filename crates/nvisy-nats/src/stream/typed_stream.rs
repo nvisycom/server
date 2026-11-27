@@ -143,6 +143,11 @@ pub struct TypedMessage<T> {
 }
 
 impl<T> TypedMessage<T> {
+    /// Splits the message into its payload and the raw message that settles it.
+    pub(crate) fn into_parts(self) -> (T, Message) {
+        (self.payload, self.message)
+    }
+
     /// Get the message subject.
     pub fn subject(&self) -> &str {
         &self.message.subject

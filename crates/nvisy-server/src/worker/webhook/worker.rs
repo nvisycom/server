@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use nvisy_nats::stream::{EventStream, EventSubscriber, TypedMessage};
+use nvisy_nats::stream::{Delivery, Settle};
 use nvisy_postgres::PgConn;
 use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
@@ -20,9 +20,6 @@ use super::{WebhookJob, WebhookStream};
 use crate::service::{CryptoService, Infra};
 use crate::worker::Worker;
 use crate::{Error, Result};
-
-/// Type alias for webhook subscriber.
-type WebhookSubscriber = EventSubscriber<WebhookStream>;
 
 /// Tracing target for webhook worker operations.
 const TRACING_TARGET: &str = "nvisy_server::worker::webhook";
@@ -82,6 +79,7 @@ impl DeliveryOutcome {
 ///
 /// This worker subscribes to the `WEBHOOKS` NATS stream and delivers
 /// webhook payloads to external endpoints with HMAC-SHA256 signatures.
+#[derive(Clone)]
 pub struct WebhookDeliveryWorker {
     infra: Infra,
     crypto: CryptoService,
@@ -89,34 +87,22 @@ pub struct WebhookDeliveryWorker {
 }
 
 impl Worker for WebhookDeliveryWorker {
-    type Output = Result<()>;
+    type Error = Error;
 
-    fn name(&self) -> &'static str {
-        "webhook_delivery"
-    }
+    const NAME: &'static str = "webhook_delivery";
 
-    /// Run the webhook worker until cancelled.
-    ///
-    /// This method will continuously consume webhook jobs from NATS and
-    /// deliver them to the configured endpoints. Logs lifecycle events
-    /// (start, stop, errors) internally.
+    /// Consumes webhook jobs one at a time, delivering each to its endpoint.
     async fn run(&self, cancel: CancellationToken) -> Result<()> {
-        tracing::info!(
-            target: TRACING_TARGET,
-            "Starting webhook worker"
-        );
-
-        let result = self.run_inner(cancel).await;
-
-        if let Err(err) = &result {
-            tracing::error!(
-                target: TRACING_TARGET,
-                error = %err,
-                "Webhook worker failed"
-            );
-        }
-
-        result
+        let worker = self.clone();
+        self.infra
+            .nats
+            .event_subscriber::<WebhookStream>()
+            .consume(1, &cancel, move |job, delivery| {
+                let worker = worker.clone();
+                async move { worker.settle(&job, delivery).await }
+            })
+            .await?;
+        Ok(())
     }
 }
 
@@ -131,54 +117,11 @@ impl WebhookDeliveryWorker {
         }
     }
 
-    /// Internal run loop.
-    async fn run_inner(&self, cancel: CancellationToken) -> Result<()> {
-        let subscriber: WebhookSubscriber = self.infra.nats.event_subscriber::<WebhookStream>();
-
-        let mut stream = subscriber.subscribe().await?;
-
-        loop {
-            tokio::select! {
-                () = cancel.cancelled() => {
-                    break;
-                }
-                result = stream.next_with_timeout(Duration::from_secs(5)) => {
-                    match result {
-                        Ok(Some(mut message)) => {
-                            let job = message.payload().clone();
-                            self.settle(&mut message, &job).await;
-                        }
-                        Ok(None) => {
-                            // Timeout, continue loop
-                        }
-                        Err(err) => {
-                            tracing::error!(
-                                target: TRACING_TARGET,
-                                error = %err,
-                                "Error receiving message from stream"
-                            );
-                            // Brief pause before retrying
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Delivers a job and settles the NATS message: ack on success, permanent
-    /// failure, or skip; nack to retry otherwise. The failure is recorded once
+    /// Delivers a job and decides how its message settles: ack on success,
+    /// permanent failure, or skip; retry otherwise. The failure is recorded once
     /// the retry budget is exhausted so a redelivered event counts once.
-    async fn settle(&self, message: &mut TypedMessage<WebhookJob>, job: &WebhookJob) {
+    async fn settle(&self, job: &WebhookJob, delivery: Delivery) -> Settle {
         let outcome = self.deliver(job).await;
-
-        // The final attempt is the one NATS will not redeliver after.
-        let is_final = matches!(
-            (message.delivery_count(), WebhookStream::MAX_DELIVER),
-            (Ok(count), Some(max)) if i64::try_from(count).unwrap_or(i64::MAX) >= max
-        );
 
         let ack = match outcome {
             DeliveryOutcome::Delivered { webhook } => {
@@ -201,7 +144,7 @@ impl WebhookDeliveryWorker {
                 true
             }
             DeliveryOutcome::Retry { webhook, error } => {
-                if is_final {
+                if delivery.is_final {
                     tracing::error!(
                         target: TRACING_TARGET,
                         webhook_id = %job.webhook_id,
@@ -228,19 +171,7 @@ impl WebhookDeliveryWorker {
             }
         };
 
-        let settled = if ack {
-            message.ack().await
-        } else {
-            message.nack().await
-        };
-        if let Err(err) = settled {
-            tracing::error!(
-                target: TRACING_TARGET,
-                webhook_id = %job.webhook_id,
-                error = %err,
-                "Failed to settle webhook message"
-            );
-        }
+        if ack { Settle::Ack } else { Settle::Retry }
     }
 
     /// Attempts to deliver a webhook job, returning how the job should be
@@ -251,15 +182,13 @@ impl WebhookDeliveryWorker {
     /// run loop records it once the retry disposition is known, so a redelivered
     /// event is not counted as several distinct failures.
     async fn deliver(&self, job: &WebhookJob) -> DeliveryOutcome {
-        let mut conn = match self.infra.postgres.get_connection().await {
-            Ok(conn) => conn,
-            Err(err) => {
-                // The webhook could not even be loaded; retry later.
-                return DeliveryOutcome::retryable(Error::from(err));
-            }
+        // The connection is held only for the lookup, never across the delivery's
+        // network round-trip; a failure to load the webhook is retried later.
+        let loaded = match self.infra.postgres.get_connection().await {
+            Ok(mut conn) => conn.find_workspace_webhook_by_id(job.webhook_id).await,
+            Err(err) => Err(err),
         };
-
-        let webhook = match conn.find_workspace_webhook_by_id(job.webhook_id).await {
+        let webhook = match loaded {
             Ok(Some(webhook)) => webhook,
             Ok(None) => {
                 tracing::debug!(

@@ -25,5 +25,37 @@
 mod reader;
 mod writer;
 
+use nvisy_s3::{AuditKey, BlobStore, Bucket, DocumentKey, IntermediateKey, ObjectKey};
+
+use crate::response::{ErrorKind, Result};
 pub use crate::service::blob::reader::ArtifactReader;
 pub use crate::service::blob::writer::{ArtifactWriter, StagedBlob};
+
+/// Removes a blob's object from whichever store `bucket` names.
+///
+/// An unknown bucket or an unparseable storage path is an error, not a silent
+/// success: the object was not removed, so its blob stays pending. Avatars are
+/// not blob-tracked, so a blob naming that store is an error too.
+pub(crate) async fn delete_object(
+    blobs: &BlobStore,
+    bucket: &str,
+    storage_path: &str,
+) -> Result<()> {
+    async fn delete<K: ObjectKey>(blobs: &BlobStore, storage_path: &str) -> Result<()> {
+        let key = K::from_str(storage_path).map_err(|err| {
+            ErrorKind::InternalServerError
+                .with_message("Invalid blob storage key")
+                .with_context(err.to_string())
+        })?;
+        Ok(blobs.delete(&key).await?)
+    }
+
+    match Bucket::from_name(bucket) {
+        Some(Bucket::Documents) => delete::<DocumentKey>(blobs, storage_path).await,
+        Some(Bucket::Audits) => delete::<AuditKey>(blobs, storage_path).await,
+        Some(Bucket::Intermediates) => delete::<IntermediateKey>(blobs, storage_path).await,
+        Some(Bucket::Avatars) | None => Err(ErrorKind::InternalServerError
+            .with_message("Blob references a store that holds no blobs")
+            .with_context(format!("bucket: {bucket}"))),
+    }
+}

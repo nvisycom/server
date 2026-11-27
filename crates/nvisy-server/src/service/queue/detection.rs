@@ -7,16 +7,14 @@ use uuid::Uuid;
 use crate::response::Result;
 use crate::service::Infra;
 use crate::worker::Coordinator;
-use crate::worker::detection::{
-    DetectionJob, DetectionStatusEvent, broadcast_status, enqueue, subscribe_status,
-};
+use crate::worker::detection::{DetectionStatusEvent, broadcast_status, subscribe_status};
 
-/// Enqueues detection jobs and broadcasts detection-status changes.
+/// Wakes the detection-job outbox drainer and relays detection-status changes.
 ///
 /// Cheaply cloneable (holds the shared [`Infra`] clients and the [`Coordinator`],
 /// all `Arc`-backed).
 #[derive(Clone)]
-#[must_use = "service does nothing unless you enqueue or broadcast with it"]
+#[must_use = "service does nothing unless you wake or broadcast with it"]
 pub struct DetectionQueue {
     infra: Infra,
     coordinator: Coordinator,
@@ -26,16 +24,6 @@ impl DetectionQueue {
     /// Creates a new [`DetectionQueue`].
     pub fn new(infra: Infra, coordinator: Coordinator) -> Self {
         Self { infra, coordinator }
-    }
-
-    /// Enqueues a detection's analysis onto the work-queue for the worker to pick
-    /// up.
-    ///
-    /// # Errors
-    ///
-    /// - A messaging error if publishing the job to NATS fails.
-    pub async fn enqueue(&self, job: DetectionJob) -> Result<()> {
-        enqueue(&self.infra, job).await
     }
 
     /// Wakes the detection-job outbox drainer so a just-committed job is drained

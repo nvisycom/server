@@ -24,7 +24,7 @@ use crate::handler::utility::resolve_account_ref;
 use crate::middleware::UploadConfig;
 use crate::response::{ErrorResponse, Result};
 use crate::service::event::EventOrigin;
-use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState};
+use crate::service::{AvatarOwner, AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState};
 
 /// Tracing target for workspace operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspaces";
@@ -331,11 +331,13 @@ async fn upload_workspace_avatar(
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Uploading workspace avatar");
 
-    // Authorization is enforced by the `Authorized` extractor. `set_workspace_avatar`
-    // does image processing and a NATS put (and acquires its own connection for
-    // the DB update).
+    // Authorization is enforced by the `Authorized` extractor. The avatar
+    // service processes the image, writes the object, and acquires its own
+    // connection for the URL update.
     let workspace = authz.workspace;
-    avatar.set_workspace_avatar(workspace.id, bytes).await?;
+    avatar
+        .set(AvatarOwner::Workspace(workspace.id), bytes)
+        .await?;
 
     tracing::info!(target: TRACING_TARGET, "Workspace avatar set");
     Ok(StatusCode::OK)
@@ -360,7 +362,7 @@ async fn delete_workspace_avatar(
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace avatar");
 
     let workspace = authz.workspace;
-    avatar.delete_workspace_avatar(workspace.id).await?;
+    avatar.delete(AvatarOwner::Workspace(workspace.id)).await?;
     tracing::info!(target: TRACING_TARGET, "Workspace avatar deleted");
     Ok(StatusCode::NO_CONTENT)
 }

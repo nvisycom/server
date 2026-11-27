@@ -1,6 +1,8 @@
 //! In-app notification emitter.
 
-use nvisy_nats::stream::BroadcastStream;
+use std::fmt::Display;
+
+use nvisy_nats::stream::{BroadcastStream, BroadcastTopic};
 use nvisy_postgres::PgConn;
 use nvisy_postgres::model::NewAccountNotification;
 use nvisy_postgres::query::{AccountNotificationRepository, WorkspaceMemberRepository};
@@ -28,10 +30,15 @@ pub struct UnreadCountEvent {
     pub unread_count: i64,
 }
 
-/// The core-NATS subject an account's unread-count changes are broadcast on.
-#[must_use]
-fn unread_subject(account_id: Uuid) -> String {
-    format!("notifications.accounts.{account_id}.unread")
+/// The core-NATS topic an account's unread-count changes are broadcast on.
+enum UnreadCountTopic {}
+
+impl BroadcastTopic for UnreadCountTopic {
+    type Event = UnreadCountEvent;
+
+    fn subject(account_id: &dyn Display) -> String {
+        format!("notifications.accounts.{account_id}.unread")
+    }
 }
 
 /// Creates in-app notifications for domain events.
@@ -65,12 +72,11 @@ impl NotificationEmitter {
         &self,
         account_id: Uuid,
     ) -> crate::response::Result<BroadcastStream<UnreadCountEvent>> {
-        let stream = self
+        Ok(self
             .infra
             .nats
-            .subscribe_broadcast::<UnreadCountEvent>(unread_subject(account_id))
-            .await?;
-        Ok(stream)
+            .subscribe_topic::<UnreadCountTopic>(account_id)
+            .await?)
     }
 
     /// Recomputes an account's unread count and broadcasts it on the account's
@@ -94,19 +100,10 @@ impl NotificationEmitter {
         };
 
         let event = UnreadCountEvent { unread_count };
-        if let Err(err) = self
-            .infra
+        self.infra
             .nats
-            .publish_broadcast(unread_subject(account_id), &event)
-            .await
-        {
-            tracing::debug!(
-                target: TRACING_TARGET,
-                error = %err,
-                %account_id,
-                "Failed to broadcast unread count",
-            );
-        }
+            .broadcast::<UnreadCountTopic>(account_id, &event)
+            .await;
     }
 
     /// Notifies a single account of an event, honoring the recipient's in-app

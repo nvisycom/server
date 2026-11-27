@@ -5,11 +5,10 @@
 //! reconciles source deletions. Stateless beyond its [`Infra`] and connector, so
 //! it is cheap to clone.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io;
 
 use bytes::Bytes;
-use futures::stream::{self, StreamExt};
 use futures::{Stream, TryStreamExt};
 use nvisy_postgres::model::{
     NewBlob, NewWorkspaceDocument, WorkspaceConnection, WorkspaceDocument,
@@ -24,6 +23,7 @@ use tokio_util::io::StreamReader;
 use uuid::Uuid;
 
 use super::connector::Connector;
+use super::count_transferred;
 use super::file_source::{FileSource, SourceEntry};
 use super::naming::{object_basename, object_extension};
 use crate::response::Result;
@@ -86,19 +86,14 @@ impl Importer {
         // root. The listing is reused both to import new objects and to detect
         // ones that have been deleted. Entries are keyed by the object path.
         let entries = source.list().await?;
-        let entries_by_key: HashMap<String, SourceEntry> = entries
-            .into_iter()
-            .map(|entry| (entry.key.clone(), entry))
-            .collect();
-        let remote_keys: HashSet<String> = entries_by_key.keys().cloned().collect();
+        let remote_keys: HashSet<String> = entries.iter().map(|entry| entry.key.clone()).collect();
 
         let already_imported = self.already_imported_keys(connection).await?;
 
         // Import the not-yet-imported entries.
-        let to_import: Vec<SourceEntry> = remote_keys
-            .iter()
-            .filter(|key| !already_imported.contains(*key))
-            .filter_map(|key| entries_by_key.get(key).cloned())
+        let to_import: Vec<SourceEntry> = entries
+            .into_iter()
+            .filter(|entry| !already_imported.contains(&entry.key))
             .collect();
         let imported = self
             .import_entries(&source, connection, account_id, to_import)
@@ -187,27 +182,22 @@ impl Importer {
         entries: Vec<SourceEntry>,
     ) -> Result<u64> {
         let expires_at = self.resolve_import_expiry(connection.workspace_id).await?;
-        let imported = stream::iter(entries)
-            .map(|entry| async move {
-                match self
+        Ok(
+            count_transferred(entries, self.import_concurrency, |entry| async move {
+                let imported = self
                     .import_one(source, connection, account_id, &entry, expires_at)
-                    .await
-                {
-                    Ok(_) => 1u64,
-                    Err(err) => {
-                        tracing::warn!(
-                            target: TRACING_TARGET,
-                            key = %entry.key, error = %err,
-                            "Skipping file that failed to import",
-                        );
-                        0
-                    }
+                    .await;
+                if let Err(err) = &imported {
+                    tracing::warn!(
+                        target: TRACING_TARGET,
+                        key = %entry.key, error = %err,
+                        "Skipping file that failed to import",
+                    );
                 }
+                imported.is_ok()
             })
-            .buffer_unordered(self.import_concurrency)
-            .fold(0u64, |total, imported| std::future::ready(total + imported))
-            .await;
-        Ok(imported)
+            .await,
+        )
     }
 
     /// Removes imported files whose source object no longer exists, per the

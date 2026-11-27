@@ -5,10 +5,10 @@ use std::time::Duration;
 use nvisy_postgres::query::WorkspaceBlobRepository;
 use tokio_util::sync::CancellationToken;
 
-use crate::response::Result;
+use crate::response::{Error, Result};
 use crate::service::Infra;
-use crate::worker::Worker;
 use crate::worker::reaper::reclaimer::{BlobReclaimer, PurgeOutcome};
+use crate::worker::{Worker, every};
 
 /// Tracing target for the blob reaper.
 const TRACING_TARGET: &str = "nvisy_server::worker::reaper";
@@ -27,24 +27,15 @@ pub struct BlobReaper {
 }
 
 impl Worker for BlobReaper {
-    type Output = Result<()>;
+    type Error = Error<'static>;
 
-    fn name(&self) -> &'static str {
-        "blob_reaper"
-    }
+    const NAME: &'static str = "blob_reaper";
 
-    /// Runs the reaper until cancelled, logging its lifecycle.
     async fn run(&self, cancel: CancellationToken) -> Result<()> {
-        tracing::info!(target: TRACING_TARGET, "Starting blob reaper");
-
-        let mut ticker = tokio::time::interval(TICK_INTERVAL);
-        loop {
-            tokio::select! {
-                () = cancel.cancelled() => break,
-                _ = ticker.tick() => self.tick(&cancel).await,
-            }
-        }
-
+        every(TICK_INTERVAL, &cancel, None, async || {
+            self.tick(&cancel).await;
+        })
+        .await;
         Ok(())
     }
 }
@@ -128,8 +119,8 @@ impl BlobReaper {
 
             let fetched = i64::try_from(batch.len()).unwrap_or(i64::MAX);
             let mut reclaimed = 0i64;
+            let mut conn = self.infra.postgres.get_connection().await?;
             for blob in batch {
-                let mut conn = self.infra.postgres.get_connection().await?;
                 let outcome = match sweep {
                     Sweep::Purge => self.blob.purge_blob(&mut conn, &blob).await,
                     Sweep::Reconcile => {

@@ -29,20 +29,21 @@
 //! let data_client = NatsClient::connect(data_config).await?;
 //! ```
 
+use std::fmt::Display;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_nats::connection::State;
 use async_nats::{Client, ConnectOptions, jetstream};
 use nvisy_core::health::{ComponentHealth, HealthCheck};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use tokio::time::timeout;
 
 use super::config::NatsConfig;
 use crate::kv::{KvBucket, KvStore};
 use crate::stream::core::ensure_stream;
-use crate::stream::{BroadcastStream, EventPublisher, EventStream, EventSubscriber};
+use crate::stream::{
+    BroadcastStream, BroadcastTopic, EventPublisher, EventStream, EventSubscriber,
+};
 use crate::{Error, Result, TRACING_TARGET_CLIENT, TRACING_TARGET_CONNECTION};
 
 /// NATS client wrapper with connection management.
@@ -255,48 +256,44 @@ impl NatsClient {
 // truth lives elsewhere (e.g. streaming run-status changes to any number of
 // watching SSE connections; the run row in Postgres is authoritative).
 impl NatsClient {
-    /// Publishes a JSON-serialized message to a core NATS subject.
+    /// Broadcasts `event` about `id` on its topic's core NATS subject.
     ///
     /// Best-effort: delivered to whichever subscribers are connected now, with no
-    /// persistence or acknowledgement.
-    ///
-    /// # Errors
-    ///
-    /// - `Serialization` if `message` cannot be serialized to JSON.
-    /// - `Connection` if the message cannot be handed to the NATS connection
-    ///   (e.g. the client is disconnected).
-    #[tracing::instrument(skip(self, message), target = TRACING_TARGET_CLIENT)]
-    pub async fn publish_broadcast<T>(&self, subject: String, message: &T) -> Result<()>
-    where
-        T: Serialize,
-    {
-        let payload = serde_json::to_vec(message)?;
-        self.inner
-            .client
-            .publish(subject, payload.into())
-            .await
-            .map_err(|e| Error::Connection(Box::new(e)))?;
-        Ok(())
+    /// persistence or acknowledgement, so a failure is only logged. A topic's
+    /// source of truth lives elsewhere, and a watcher recovers a dropped event by
+    /// re-reading it.
+    pub async fn broadcast<T: BroadcastTopic>(&self, id: impl Display, event: &T::Event) {
+        let subject = T::subject(&id);
+        let published = match serde_json::to_vec(event) {
+            Ok(payload) => self
+                .inner
+                .client
+                .publish(subject.clone(), payload.into())
+                .await
+                .map_err(|e| e.to_string()),
+            Err(err) => Err(err.to_string()),
+        };
+        if let Err(error) = published {
+            tracing::debug!(target: TRACING_TARGET_CLIENT, %subject, %error, "Failed to broadcast");
+        }
     }
 
-    /// Subscribes to a core NATS subject, yielding each deserialized message.
-    ///
-    /// The stream ends when the subscription is dropped. Messages that fail to
-    /// deserialize are skipped rather than ending the stream.
+    /// Subscribes to `id`'s events on a topic. Events that fail to deserialize
+    /// are skipped rather than ending the stream, which ends when dropped.
     ///
     /// # Errors
     ///
     /// - `Connection` if the subscription cannot be established (e.g. the client
-    ///   is disconnected or the subject is invalid).
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn subscribe_broadcast<T>(&self, subject: String) -> Result<BroadcastStream<T>>
-    where
-        T: DeserializeOwned + Send + 'static,
-    {
+    ///   is disconnected).
+    #[tracing::instrument(skip(self, id), target = TRACING_TARGET_CLIENT)]
+    pub async fn subscribe_topic<T: BroadcastTopic>(
+        &self,
+        id: impl Display,
+    ) -> Result<BroadcastStream<T::Event>> {
         let subscriber = self
             .inner
             .client
-            .subscribe(subject)
+            .subscribe(T::subject(&id))
             .await
             .map_err(|e| Error::Connection(Box::new(e)))?;
 

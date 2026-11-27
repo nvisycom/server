@@ -6,10 +6,10 @@ use nvisy_postgres::query::WorkspaceRepository;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::response::Result;
+use crate::response::{Error, Result};
 use crate::service::Infra;
-use crate::worker::Worker;
 use crate::worker::purge::PurgeConfig;
+use crate::worker::{Worker, every};
 
 /// Tracing target for the workspace purge worker.
 const TRACING_TARGET: &str = "nvisy_server::worker::purge";
@@ -28,28 +28,17 @@ pub struct WorkspacePurgeWorker {
 }
 
 impl Worker for WorkspacePurgeWorker {
-    type Output = Result<()>;
+    type Error = Error<'static>;
 
-    fn name(&self) -> &'static str {
-        "workspace_purge"
-    }
+    const NAME: &'static str = "workspace_purge";
 
-    /// Runs the purge worker until cancelled, logging its lifecycle.
     async fn run(&self, cancel: CancellationToken) -> Result<()> {
-        tracing::info!(target: TRACING_TARGET, "Starting workspace purge worker");
-
-        let mut ticker = tokio::time::interval(TICK_INTERVAL);
-        loop {
-            tokio::select! {
-                () = cancel.cancelled() => break,
-                _ = ticker.tick() => {
-                    if let Err(err) = self.tick(&cancel).await {
-                        tracing::error!(target: TRACING_TARGET, error = %err, "Workspace purge tick failed");
-                    }
-                }
+        every(TICK_INTERVAL, &cancel, None, async || {
+            if let Err(err) = self.tick(&cancel).await {
+                tracing::error!(target: TRACING_TARGET, error = %err, "Workspace purge tick failed");
             }
-        }
-
+        })
+        .await;
         Ok(())
     }
 }

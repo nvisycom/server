@@ -1,14 +1,12 @@
 //! Read side of the pipeline-run blob store: loading a run's staged outputs.
 
-use std::str::FromStr;
-
 use elide_pipeline::entity::AuditHash;
+use elide_pipeline::file::Document;
 use elide_pipeline::{ArtifactSet, Audit, Engine};
 use nvisy_postgres::PgConn;
-use nvisy_postgres::model::{Blob, WorkspaceDetection, WorkspaceRedaction};
+use nvisy_postgres::model::{Blob, WorkspaceDetection, WorkspaceDocument, WorkspaceRedaction};
 use nvisy_postgres::query::WorkspaceBlobRepository;
-use nvisy_s3::{AuditKey, IntermediateKey};
-use tokio::io::AsyncReadExt;
+use nvisy_s3::{AuditKey, DocumentKey, IntermediateKey, ObjectKey};
 use uuid::Uuid;
 
 use crate::response::{ErrorKind, Result};
@@ -93,31 +91,12 @@ impl ArtifactReader {
         workspace_id: Uuid,
         audit_blob: &Blob,
     ) -> Result<Audit> {
-        let key = AuditKey::from_str(&audit_blob.storage_path).map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Invalid audit storage key")
-                .with_context(err.to_string())
-        })?;
         let expected = recorded_digest(audit_blob)?;
-
-        let data = self.infra.blobs.get(&key).await?.ok_or_else(|| {
-            ErrorKind::InternalServerError.with_message("Audit is missing from storage")
-        })?;
-        let mut reader = data.into_reader();
-        let mut ciphertext = Vec::new();
-        reader.read_to_end(&mut ciphertext).await.map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Failed to read audit")
-                .with_context(err.to_string())
-        })?;
-
         let plaintext = self
-            .crypto
-            .decrypt(workspace_id, &ciphertext)
-            .map_err(|err| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to decrypt audit")
-                    .with_context(err.to_string())
+            .read_decrypted::<AuditKey>(workspace_id, &audit_blob.storage_path, "audit")
+            .await?
+            .ok_or_else(|| {
+                ErrorKind::InternalServerError.with_message("Audit is missing from storage")
             })?;
         engine
             .deserialize_audit(
@@ -181,31 +160,17 @@ impl ArtifactReader {
         workspace_id: Uuid,
         intermediates_blob: &Blob,
     ) -> Result<ArtifactSet> {
-        let key = IntermediateKey::from_str(&intermediates_blob.storage_path).map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Invalid intermediates storage key")
-                .with_context(err.to_string())
-        })?;
         let expected = recorded_digest(intermediates_blob)?;
-
-        let data = self.infra.blobs.get(&key).await?.ok_or_else(|| {
-            ErrorKind::InternalServerError.with_message("Intermediates are missing from storage")
-        })?;
-        let mut reader = data.into_reader();
-        let mut ciphertext = Vec::new();
-        reader.read_to_end(&mut ciphertext).await.map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Failed to read intermediates")
-                .with_context(err.to_string())
-        })?;
-
         let plaintext = self
-            .crypto
-            .decrypt(workspace_id, &ciphertext)
-            .map_err(|err| {
+            .read_decrypted::<IntermediateKey>(
+                workspace_id,
+                &intermediates_blob.storage_path,
+                "intermediates",
+            )
+            .await?
+            .ok_or_else(|| {
                 ErrorKind::InternalServerError
-                    .with_message("Failed to decrypt intermediates")
-                    .with_context(err.to_string())
+                    .with_message("Intermediates are missing from storage")
             })?;
         engine
             .deserialize_artifacts(
@@ -243,6 +208,70 @@ impl ArtifactReader {
             "The review audit for this redaction has been deleted",
         )
         .await
+    }
+
+    /// Reads a document's bytes from its blob and builds an engine [`Document`],
+    /// stamping the run's id as the correlation id.
+    ///
+    /// The document's name is its original filename, and its format is resolved
+    /// from the document's `file_extension` (the trusted, `NOT NULL` column the
+    /// codec dispatches on — the filename may lie about the type). The name is the
+    /// engine's identity for the document: it roots every part path and is how
+    /// `anonymize` matches an audit back to its document, so redaction would
+    /// silently no-op if it differed between passes. Both detect and redact build
+    /// from the same document through here, so the name is identical by
+    /// construction.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the object is missing from storage (its bytes were purged
+    ///   after the blob was looked up).
+    /// - `InternalServerError` if the blob's storage path is not a valid document
+    ///   key, if reading its bytes fails, or if decrypting them with the workspace
+    ///   key fails.
+    /// - A storage error if the object store rejects the read.
+    pub async fn build_document(
+        &self,
+        document: &WorkspaceDocument,
+        blob: &Blob,
+        correlation_id: Uuid,
+    ) -> Result<Document> {
+        let bytes = self
+            .read_decrypted::<DocumentKey>(document.workspace_id, &blob.storage_path, "document")
+            .await?
+            .ok_or_else(|| {
+                ErrorKind::NotFound.with_message("Document content is missing from storage")
+            })?;
+        Ok(Document::new(document.original_filename.clone(), bytes)
+            .with_extension(document.file_extension.clone())
+            .with_correlation_id(correlation_id))
+    }
+
+    /// Reads and decrypts the object at `storage_path` in `K`'s store, or `None`
+    /// if it is missing. `what` names the content in error messages.
+    async fn read_decrypted<K: ObjectKey>(
+        &self,
+        workspace_id: Uuid,
+        storage_path: &str,
+        what: &str,
+    ) -> Result<Option<Vec<u8>>> {
+        let key = K::from_str(storage_path).map_err(|err| {
+            ErrorKind::InternalServerError
+                .with_message(format!("Invalid {what} storage key"))
+                .with_context(err.to_string())
+        })?;
+        let Some(ciphertext) = self.infra.blobs.get_bytes(&key).await? else {
+            return Ok(None);
+        };
+        let plaintext = self
+            .crypto
+            .decrypt(workspace_id, &ciphertext)
+            .map_err(|err| {
+                ErrorKind::InternalServerError
+                    .with_message(format!("Failed to decrypt {what}"))
+                    .with_context(err.to_string())
+            })?;
+        Ok(Some(plaintext))
     }
 
     /// Fetches a blob by its optional id, mapping a reclaimed blob to a 404 with

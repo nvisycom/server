@@ -1,207 +1,84 @@
-//! The event-outbox drainer: projects pending events onto their sinks.
+//! The event-outbox handler: projects pending events onto their sinks.
 //!
-//! A background worker claims batches of due [`WorkspaceEventOutbox`] rows, decodes each
-//! into a [`WorkspaceEvent`], and projects it onto the three sinks — the activity
-//! log, the webhook stream, and notifications. This is the one place the event →
-//! sink projection lives, off the request path.
+//! Each due [`WorkspaceEventOutbox`] row is decoded into a [`WorkspaceEvent`] and
+//! projected onto the three sinks — the activity log, the webhook stream, and
+//! notifications. This is the one place the event → sink projection lives, off
+//! the request path.
 //!
-//! Each batch runs in one transaction: the claim (`FOR UPDATE SKIP LOCKED`), the
-//! durable activity-log write, and the row's completion all commit together, so a
-//! competing drainer never double-projects a row and a crash mid-batch rolls back
-//! cleanly. The activity log is the durable sink and gates the row's completion;
-//! a failed activity write defers the row with a backoff (so a bad row cannot spin
-//! at the head of the queue) instead of blocking the batch. The webhook and
-//! notification sinks are best-effort and fire after the transaction commits — off
-//! the durable events — so their network work never holds a database transaction
-//! open (webhook delivery has its own retry pipeline).
-
-use std::time::Duration;
+//! The activity log is the durable sink: it is written in the drainer's batch
+//! transaction and gates the row's completion, so a failed write defers the row.
+//! The webhook and notification sinks are best-effort and fire after the batch
+//! commits, so their network work never holds a database transaction open
+//! (webhook delivery has its own retry pipeline).
 
 use nvisy_postgres::model::{NewWorkspaceActivity, WorkspaceEventOutbox};
-use nvisy_postgres::query::{OutboxRepository, WorkspaceActivityRepository};
+use nvisy_postgres::query::WorkspaceActivityRepository;
 use nvisy_postgres::types::Json;
 use nvisy_postgres::{AsyncConnection, PgConn};
-use tokio_util::sync::CancellationToken;
+use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::response::{Error, Result};
 use crate::service::event::{Notification, NotifyTarget, WorkspaceEvent};
 use crate::service::{Infra, NotificationEmitter, WebhookEmitter};
-use crate::worker::Worker;
+use crate::worker::outbox::{Handled, OutboxDrainer, OutboxHandler};
 
-/// Tracing target for the outbox drainer.
+/// Tracing target for the event projection.
 const TRACING_TARGET: &str = "nvisy_server::worker::event";
 
-/// How often the drainer polls for due events. Short, since it is the delivery
-/// latency for the activity log, webhooks, and notifications.
-const TICK_INTERVAL: Duration = Duration::from_secs(5);
-
-/// Maximum events drained per tick, bounding the work (and lock hold) per pass.
-const DRAIN_BATCH: i64 = 100;
-
-/// Base unit of the retry backoff (seconds): a failed row's next attempt is
-/// deferred by `RETRY_BACKOFF_BASE_SECS * attempts` (linear), capped at
-/// [`RETRY_BACKOFF_MAX_SECS`].
-const RETRY_BACKOFF_BASE_SECS: i64 = 30;
-
-/// Ceiling on the retry backoff (seconds), so a long-failing row still retries
-/// periodically rather than backing off unboundedly.
-const RETRY_BACKOFF_MAX_SECS: i64 = 60 * 60;
-
-/// How many failed attempts a row gets before the drainer gives up on it and
-/// dead-letters it (marks it `Failed`), so a poison event — one that can never
-/// decode or project — stops consuming drain cycles instead of retrying forever.
-const MAX_ATTEMPTS: i32 = 10;
-
 /// Drains the event outbox, projecting each pending event onto its sinks.
-pub struct EventOutboxDrainer {
-    infra: Infra,
+pub type EventOutboxDrainer = OutboxDrainer<EventProjection>;
+
+/// Projects workspace events onto the activity log (durably, in the batch
+/// transaction), and onto webhooks and notifications (best-effort, after it
+/// commits).
+pub struct EventProjection {
     webhook: WebhookEmitter,
     notification: NotificationEmitter,
 }
 
-/// The tally of one [`drain_batch`](EventOutboxDrainer::drain_batch) pass: of the
-/// rows claimed, how many durably processed, how many were deferred for a later
-/// retry (failing, backing off), and how many were dead-lettered (given up on).
-/// A rising deferred count signals events are struggling to drain; a rising
-/// dead-lettered count signals poison rows.
-struct DrainPass {
-    claimed: usize,
-    processed: usize,
-    deferred: usize,
-    dead_lettered: usize,
+/// A committed event and its origin, handed to the post-commit side effects.
+pub struct ProjectedEvent {
+    workspace_id: Uuid,
+    account_id: Uuid,
+    event: WorkspaceEvent,
 }
 
-impl Worker for EventOutboxDrainer {
-    type Output = Result<()>;
+impl OutboxHandler for EventProjection {
+    type Done = ProjectedEvent;
+    type Row = WorkspaceEventOutbox;
 
-    fn name(&self) -> &'static str {
-        "event_outbox_drainer"
-    }
+    const NAME: &'static str = "event_outbox_drainer";
 
-    async fn run(&self, cancel: CancellationToken) -> Result<()> {
-        tracing::info!(target: TRACING_TARGET, "Starting event-outbox drainer");
-
-        let mut ticker = tokio::time::interval(TICK_INTERVAL);
-        loop {
-            tokio::select! {
-                () = cancel.cancelled() => break,
-                _ = ticker.tick() => self.tick(&cancel).await,
-            }
+    async fn handle(
+        &self,
+        conn: &mut PgConn,
+        row: &WorkspaceEventOutbox,
+    ) -> Handled<ProjectedEvent> {
+        match self.record_activity(conn, row).await {
+            Ok(event) => Handled::Done(Some(ProjectedEvent {
+                workspace_id: row.workspace_id,
+                account_id: row.account_id,
+                event,
+            })),
+            Err(()) => Handled::Failed,
         }
+    }
 
-        Ok(())
+    async fn after_commit(&self, done: Vec<ProjectedEvent>) {
+        for projected in done {
+            self.dispatch_side_effects(projected).await;
+        }
     }
 }
 
-impl EventOutboxDrainer {
-    /// Creates a new [`EventOutboxDrainer`].
+impl EventProjection {
+    /// Creates a new [`EventProjection`].
     #[must_use]
-    pub fn new(infra: Infra) -> Self {
+    pub fn new(infra: &Infra) -> Self {
         Self {
             webhook: WebhookEmitter::new(infra.clone()),
             notification: NotificationEmitter::new(infra.clone()),
-            infra,
         }
-    }
-
-    /// One drain pass: claim and project batches until a short page signals the
-    /// due set is drained, or until cancellation is requested.
-    ///
-    /// The cancellation check between batches keeps shutdown prompt even under a
-    /// sustained backlog: a full due set would otherwise loop here indefinitely,
-    /// starving the caller's `select!` of the chance to observe `cancel`.
-    async fn tick(&self, cancel: &CancellationToken) {
-        loop {
-            if cancel.is_cancelled() {
-                break;
-            }
-            match self.drain_batch().await {
-                Ok(pass) => {
-                    // Deferred (retrying) and dead-lettered (given up on) are
-                    // distinct failure signals — report them separately rather than
-                    // lumping every non-processed row together.
-                    if pass.deferred > 0 || pass.dead_lettered > 0 {
-                        tracing::warn!(
-                            target: TRACING_TARGET,
-                            claimed = pass.claimed,
-                            processed = pass.processed,
-                            deferred = pass.deferred,
-                            dead_lettered = pass.dead_lettered,
-                            "Outbox drain pass had failing events",
-                        );
-                    } else if pass.claimed > 0 {
-                        tracing::debug!(target: TRACING_TARGET, processed = pass.processed, "Outbox drain pass processed events");
-                    }
-                    if i64::try_from(pass.claimed).unwrap_or(i64::MAX) < DRAIN_BATCH {
-                        break;
-                    }
-                }
-                Err(err) => {
-                    tracing::error!(target: TRACING_TARGET, error = %err, "Outbox drain pass failed");
-                    break;
-                }
-            }
-        }
-    }
-
-    /// Drains one batch: claims due rows and writes their durable activity-log
-    /// entries in a single transaction, then dispatches the best-effort side
-    /// effects for the rows that committed. Returns the [`DrainPass`] tally.
-    ///
-    /// The transaction holds the claim's `FOR UPDATE SKIP LOCKED` locks through
-    /// completion, so the claim, each activity write, and each row's state
-    /// transition commit atomically and no other drainer can take the same rows. A
-    /// row whose event cannot decode or whose activity write fails is deferred with
-    /// a backoff rather than blocking the batch.
-    async fn drain_batch(&self) -> Result<DrainPass> {
-        let mut conn = self.infra.postgres.get_connection().await?;
-
-        // The transaction returns the pass tally and the committed events, so the
-        // side effects below run only for rows that durably landed.
-        let (mut pass, committed) = conn
-            .transaction(async |conn| {
-                let batch = conn.claim_outbox_batch::<WorkspaceEventOutbox>(DRAIN_BATCH).await?;
-                let mut pass = DrainPass {
-                    claimed: batch.len(),
-                    processed: 0,
-                    deferred: 0,
-                    dead_lettered: 0,
-                };
-                let mut committed = Vec::with_capacity(pass.claimed);
-
-                for row in batch {
-                    match self.record_activity(conn, &row).await {
-                        Ok(event) => {
-                            conn.mark_outbox_processed(&row).await?;
-                            committed.push((row, event));
-                        }
-                        // `attempts` counts prior failures; this attempt makes it
-                        // `attempts + 1`. Once that reaches the cap, give up on the
-                        // row (dead-letter) instead of deferring it forever.
-                        Err(()) if row.attempts + 1 >= MAX_ATTEMPTS => {
-                            tracing::error!(target: TRACING_TARGET, id = %row.id, attempts = row.attempts + 1, "Dead-lettering outbox event after too many failed attempts");
-                            conn.mark_outbox_failed(&row).await?;
-                            pass.dead_lettered += 1;
-                        }
-                        Err(()) => {
-                            conn.defer_outbox_attempt(&row, retry_backoff(row.attempts))
-                                .await?;
-                            pass.deferred += 1;
-                        }
-                    }
-                }
-
-                Ok::<_, Error>((pass, committed))
-            })
-            .await?;
-
-        pass.processed = committed.len();
-        for (row, event) in committed {
-            self.dispatch_side_effects(&row, &event).await;
-        }
-
-        Ok(pass)
     }
 
     /// Writes the durable activity-log entry for one row, returning its decoded
@@ -218,7 +95,7 @@ impl EventOutboxDrainer {
         conn: &mut PgConn,
         row: &WorkspaceEventOutbox,
     ) -> std::result::Result<WorkspaceEvent, ()> {
-        let event = serde_json::from_value::<WorkspaceEvent>(row.event.clone()).map_err(|err| {
+        let event = WorkspaceEvent::deserialize(&row.event).map_err(|err| {
             tracing::error!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to decode outbox event");
         })?;
 
@@ -244,9 +121,12 @@ impl EventOutboxDrainer {
     /// stream and in-app notifications. Runs after the batch transaction commits,
     /// so these never hold a database transaction open across their network work;
     /// each is at-most-once (webhook delivery has its own retry pipeline).
-    async fn dispatch_side_effects(&self, row: &WorkspaceEventOutbox, event: &WorkspaceEvent) {
-        let workspace_id = row.workspace_id;
-        let actor = row.account_id;
+    async fn dispatch_side_effects(&self, projected: ProjectedEvent) {
+        let ProjectedEvent {
+            workspace_id,
+            account_id: actor,
+            event,
+        } = projected;
 
         // Webhook — only the events the webhook vocabulary carries.
         if let Some(delivery) = event.webhook() {
@@ -267,7 +147,7 @@ impl EventOutboxDrainer {
         }
 
         // Notifications — an event may raise several, each to its own audience.
-        for notification in event.clone().notification() {
+        for notification in event.notification() {
             self.dispatch_notification(workspace_id, notification).await;
         }
     }
@@ -292,15 +172,4 @@ impl EventOutboxDrainer {
             tracing::warn!(target: TRACING_TARGET, error = %err, %workspace_id, "Failed to deliver notification");
         }
     }
-}
-
-/// The delay in seconds before a failed row's next attempt: linear in `attempts`
-/// (the count before this failure), capped at [`RETRY_BACKOFF_MAX_SECS`], so a
-/// transient failure retries soon while a persistently failing row backs off the
-/// queue head.
-fn retry_backoff(attempts: i32) -> i64 {
-    let steps = i64::from(attempts.max(0)) + 1;
-    RETRY_BACKOFF_BASE_SECS
-        .saturating_mul(steps)
-        .min(RETRY_BACKOFF_MAX_SECS)
 }

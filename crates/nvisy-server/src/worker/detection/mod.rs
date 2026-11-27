@@ -7,8 +7,7 @@
 //! [`DetectionWorker`] consumes them, runs the detection's policies against the
 //! document, stores the encrypted audit, and marks the detection `Complete` (or
 //! `Failed`). Each terminal transition is broadcast on the detection's core-NATS
-//! status subject (see [`detection_subject`]) for SSE watchers and emitted as a
-//! webhook event.
+//! status subject for SSE watchers and emitted as a webhook event.
 //!
 //! [`DetectionQueue`]: crate::service::DetectionQueue
 //! [`Coordinator`]: crate::worker::Coordinator
@@ -18,9 +17,8 @@ mod job;
 mod support;
 mod worker;
 
-pub use drainer::DetectionOutboxDrainer;
+pub use drainer::{DetectionJobRelay, DetectionOutboxDrainer};
 pub use job::{
-    DetectionJob, DetectionStatusEvent, DetectionStream, broadcast_status, detection_subject,
-    enqueue, subscribe_status,
+    DetectionJob, DetectionStatusEvent, DetectionStream, broadcast_status, subscribe_status,
 };
 pub use worker::DetectionWorker;

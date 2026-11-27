@@ -9,12 +9,12 @@
 
 use std::iter;
 use std::num::NonZero;
-use std::sync::Arc;
 use std::time::Duration;
 
 use elide_pipeline::ArtifactSet;
 use elide_pipeline::primitive::RasterMode;
 use elide_pipeline::provider::{CodecParams, DocumentContext, RequestContext};
+use nvisy_nats::stream::Settle;
 use nvisy_postgres::model::{UpdateWorkspaceDetection, WorkspaceDetection};
 use nvisy_postgres::query::{
     DetectionPolicyVersionRepository, OutboxRepository, WorkspaceBlobRepository,
@@ -22,16 +22,14 @@ use nvisy_postgres::query::{
 };
 use nvisy_postgres::types::{DetectionStatus, RasterPolicy, RetentionOverride, WorkspaceSettings};
 use nvisy_postgres::{AsyncConnection, DieselError, Error as PgError};
-use tokio::sync::Semaphore;
-use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::job::{DetectionJob, DetectionStream, broadcast_status};
 use super::support::{FailDetection, FailOutcome, fail_detection, resolve_policies_by_ids};
 use crate::extract::SecurityContext;
-use crate::response::{ErrorKind, Result};
-use crate::service::{ArtifactWriter, EngineService, Infra, StagedBlob, event};
+use crate::response::{Error, ErrorKind, Result};
+use crate::service::{ArtifactReader, ArtifactWriter, EngineService, Infra, StagedBlob, event};
 use crate::worker::Worker;
 
 /// Tracing target for detection worker operations.
@@ -52,35 +50,45 @@ const DETECTION_LEASE: Duration = Duration::from_mins(30);
 pub struct DetectionWorker {
     infra: Infra,
     engine: EngineService,
-    blob: ArtifactWriter,
-    /// Bounds how many detection jobs run at once, sized to the deployment's
-    /// available parallelism. Detection analysis is CPU-bound under the default
-    /// lineup, so unbounded concurrency would only oversubscribe cores and grow
-    /// per-job latency; the semaphore keeps in-flight jobs near core count.
-    concurrency: Arc<Semaphore>,
+    reader: ArtifactReader,
+    writer: ArtifactWriter,
+    /// How many detection jobs run at once, sized to the deployment's available
+    /// parallelism. Detection analysis is CPU-bound under the default lineup, so
+    /// unbounded concurrency would only oversubscribe cores and grow per-job
+    /// latency.
+    concurrency: usize,
 }
 
 /// Fallback concurrency when the runtime cannot report available parallelism.
 const DEFAULT_DETECTION_CONCURRENCY: usize = 4;
 
 impl Worker for DetectionWorker {
-    type Output = Result<()>;
+    type Error = Error<'static>;
 
-    fn name(&self) -> &'static str {
-        "detection"
-    }
+    const NAME: &'static str = "detection";
 
-    /// Runs the worker until cancelled, logging its lifecycle.
+    /// At-least-once with an explicit claim: a job is acked once it reaches a
+    /// terminal outcome (complete, or marked failed), and redelivered on a
+    /// transient error (a DB/pool blip before the detection could even be
+    /// claimed), so a detection is never silently stranded in a non-terminal
+    /// state. The claim (`claim_detection`) makes redelivery idempotent: a
+    /// detection already being analyzed under a fresh lease is skipped.
     async fn run(&self, cancel: CancellationToken) -> Result<()> {
-        tracing::info!(target: TRACING_TARGET, "Starting detection worker");
-
-        let result = self.run_inner(cancel).await;
-
-        if let Err(err) = &result {
-            tracing::error!(target: TRACING_TARGET, error = %err, "Detection worker failed");
-        }
-
-        result
+        let worker = self.clone();
+        self.infra
+            .nats
+            .event_subscriber::<DetectionStream>()
+            .consume(self.concurrency, &cancel, move |job, _delivery| {
+                let worker = worker.clone();
+                async move {
+                    // reason: detection job future is inherently large; boxing would only move the allocation
+                    #[allow(clippy::large_futures)]
+                    let settle = worker.run_job(job).await;
+                    settle
+                }
+            })
+            .await?;
+        Ok(())
     }
 }
 
@@ -91,128 +99,39 @@ impl DetectionWorker {
     /// back to a small default when the runtime cannot report it), so in-flight
     /// detections stay near core count.
     #[must_use]
-    pub fn new(infra: Infra, engine: EngineService, blob: ArtifactWriter) -> Self {
+    pub fn new(
+        infra: Infra,
+        engine: EngineService,
+        reader: ArtifactReader,
+        writer: ArtifactWriter,
+    ) -> Self {
         let concurrency = std::thread::available_parallelism()
             .map_or(DEFAULT_DETECTION_CONCURRENCY, NonZero::get);
         Self {
             infra,
             engine,
-            blob,
-            concurrency: Arc::new(Semaphore::new(concurrency)),
+            reader,
+            writer,
+            concurrency,
         }
-    }
-
-    /// Consumes detection jobs until cancelled.
-    ///
-    /// At-least-once with an explicit claim: a job is acked once it reaches a
-    /// terminal outcome (complete, or marked failed), and nacked for redelivery
-    /// on a transient error (a DB/pool blip before the detection could even be
-    /// claimed), so a detection is never silently stranded in a non-terminal
-    /// state. The claim (`claim_detection`) makes redelivery idempotent: a
-    /// detection already being analyzed under a fresh lease is skipped.
-    async fn run_inner(&self, cancel: CancellationToken) -> Result<()> {
-        let subscriber = self.infra.nats.event_subscriber::<DetectionStream>();
-        let mut stream = subscriber.subscribe().await?;
-
-        // In-flight per-job tasks are owned here rather than detached, so shutdown
-        // can wait for them to settle their message (ack/nack) instead of the
-        // worker reporting stopped while a task still runs. `JoinSet` also reaps
-        // finished tasks so the set does not grow unbounded.
-        let mut tasks: JoinSet<()> = JoinSet::new();
-
-        loop {
-            // Acquire a permit before pulling the next job so no more than
-            // `concurrency` detections are ever in flight; the pull, and thus the
-            // stream's redelivery lease, does not advance while every worker slot
-            // is busy. The semaphore is never closed, so acquire only errors on a
-            // closed semaphore — treat that as fatal for the loop.
-            let permit = tokio::select! {
-                () = cancel.cancelled() => {
-                    break;
-                }
-                // Reap completed tasks as they finish, so the set stays bounded by
-                // the number actually in flight rather than by all jobs ever run.
-                Some(_) = tasks.join_next() => continue,
-                permit = self.concurrency.clone().acquire_owned() => match permit {
-                    Ok(permit) => permit,
-                    Err(_) => break,
-                },
-            };
-
-            tokio::select! {
-                () = cancel.cancelled() => {
-                    break;
-                }
-                result = stream.next_with_timeout(Duration::from_secs(5)) => {
-                    match result {
-                        Ok(Some(mut message)) => {
-                            let job = message.payload().clone();
-                            // Run each job on its own task so a slow detection does
-                            // not block the next pull; the permit is moved in and
-                            // released when the task finishes. The worker is cheaply
-                            // cloneable (all services are `Arc`-backed).
-                            let worker = self.clone();
-                            tasks.spawn(async move {
-                                let _permit = permit;
-                                // reason: detection job future is inherently large; boxing would only move the allocation
-                                #[allow(clippy::large_futures)]
-                                let outcome = worker.run_job(job).await;
-                                let ack_result = match outcome {
-                                    JobOutcome::Done => message.ack().await,
-                                    // Transient failure: redeliver instead of
-                                    // dropping the job, so the run is eventually
-                                    // settled.
-                                    JobOutcome::Retry => message.nack().await,
-                                };
-                                if let Err(err) = ack_result {
-                                    tracing::error!(target: TRACING_TARGET, error = %err, ?outcome, "Failed to ack/nack detection job");
-                                }
-                            });
-                        }
-                        // No job before the timeout: drop the permit and pull again.
-                        Ok(None) => drop(permit),
-                        Err(err) => {
-                            drop(permit);
-                            tracing::error!(target: TRACING_TARGET, error = %err, "Error receiving detection job");
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Shutdown: stop pulling new jobs and let the in-flight ones finish so each
-        // settles its message (ack/nack) rather than being abandoned mid-run. The
-        // app-wide shutdown timeout (`WorkerSet::shutdown`) bounds how long this
-        // can take; if it fires, any task still running is aborted and its message
-        // is redelivered, which the claim makes idempotent.
-        if !tasks.is_empty() {
-            tracing::info!(
-                target: TRACING_TARGET,
-                in_flight = tasks.len(),
-                "Draining in-flight detection jobs before stopping",
-            );
-            while tasks.join_next().await.is_some() {}
-        }
-        Ok(())
     }
 
     /// Runs one detection job: claims the detection, analyzes, and records the
     /// result.
     ///
-    /// Returns [`JobOutcome::Retry`] when the job should be redelivered (a
-    /// transient error before the detection was claimed), and [`JobOutcome::Done`]
+    /// Returns [`Settle::Retry`] when the job should be redelivered (a
+    /// transient error before the detection was claimed), and [`Settle::Ack`]
     /// when it reached a terminal outcome or is safe to drop (missing detection,
     /// already claimed, already settled).
     #[tracing::instrument(skip_all, fields(detection_id = %job.detection_id, workspace_id = %job.workspace_id))]
-    async fn run_job(&self, job: DetectionJob) -> JobOutcome {
+    async fn run_job(&self, job: DetectionJob) -> Settle {
         let mut conn = match self.infra.postgres.get_connection().await {
             Ok(conn) => conn,
             Err(err) => {
                 // No connection: the detection is still pending. Redeliver so it
                 // is not stranded in a non-terminal state.
                 tracing::error!(target: TRACING_TARGET, error = %err, "Failed to get connection for detection job");
-                return JobOutcome::Retry;
+                return Settle::Retry;
             }
         };
 
@@ -223,19 +142,19 @@ impl DetectionWorker {
             Ok(Some(detection)) => detection,
             Ok(None) => {
                 tracing::warn!(target: TRACING_TARGET, "Detection job for a missing detection; dropping");
-                return JobOutcome::Done;
+                return Settle::Ack;
             }
             Err(err) => {
                 // Transient load error: redeliver rather than strand the detection.
                 tracing::error!(target: TRACING_TARGET, error = %err, "Failed to load detection for detection job");
-                return JobOutcome::Retry;
+                return Settle::Retry;
             }
         };
 
         // Nothing to do for a detection already past the pending/executing phase.
         if !detection.status.is_detecting() {
             tracing::debug!(target: TRACING_TARGET, status = %detection.status, "Detection is not detecting; dropping");
-            return JobOutcome::Done;
+            return Settle::Ack;
         }
 
         // Atomically claim the detection (pending -> executing). A redelivery
@@ -247,18 +166,18 @@ impl DetectionWorker {
             Ok(Some(claimed)) => claimed,
             Ok(None) => {
                 tracing::debug!(target: TRACING_TARGET, "Detection already claimed by another worker; skipping");
-                return JobOutcome::Done;
+                return Settle::Ack;
             }
             Err(err) => {
                 tracing::error!(target: TRACING_TARGET, error = %err, "Failed to claim detection");
-                return JobOutcome::Retry;
+                return Settle::Retry;
             }
         };
         // The claim stamped `claimed_at`; it fences the finalize (and a failure)
         // against a concurrent re-claim if this analysis outlives the lease.
         let Some(claim_token) = claimed.claimed_at else {
             tracing::error!(target: TRACING_TARGET, "Claimed detection has no claim timestamp; skipping");
-            return JobOutcome::Done;
+            return Settle::Ack;
         };
         let claim_token: jiff::Timestamp = claim_token.into();
 
@@ -279,7 +198,7 @@ impl DetectionWorker {
                     // `Executing` with no queued job, so redeliver to drive it to a
                     // terminal state on a later attempt.
                     tracing::error!(target: TRACING_TARGET, error = %err, "Failed to get connection to fail detection");
-                    return JobOutcome::Retry;
+                    return Settle::Retry;
                 }
             };
             let outcome = fail_detection(
@@ -300,10 +219,10 @@ impl DetectionWorker {
             // later attempt drives it to a terminal state rather than ack'ing a
             // detection that will hang.
             if outcome == FailOutcome::PersistFailed {
-                return JobOutcome::Retry;
+                return Settle::Retry;
             }
         }
-        JobOutcome::Done
+        Settle::Ack
     }
 
     /// Stages a detection's enrichment intermediates, or returns `None` when the
@@ -323,7 +242,7 @@ impl DetectionWorker {
         }
 
         let blob = self
-            .blob
+            .writer
             .stage_intermediates(
                 workspace_id,
                 retention_override,
@@ -408,7 +327,7 @@ impl DetectionWorker {
         // analysis, so keeping it off the async pool lets many detections run at
         // once without starving the rest of the server.
         let engine_document = self
-            .blob
+            .reader
             .build_document(&document, &blob, detection.id)
             .await?;
         let analyzed = self
@@ -445,8 +364,8 @@ impl DetectionWorker {
         )?;
 
         let audit_blob = self
-            .blob
-            .stage_analyzed_document(
+            .writer
+            .stage_audit(
                 detection.workspace_id,
                 retention_override.as_ref(),
                 &settings.retention,
@@ -471,7 +390,7 @@ impl DetectionWorker {
             Ok(staged) => staged,
             Err(err) => {
                 // The audit object is already written and has no blob row yet.
-                self.blob.discard_staged(&[&audit_blob]).await;
+                self.writer.discard_staged(&[&audit_blob]).await;
                 return Err(err);
             }
         };
@@ -483,7 +402,7 @@ impl DetectionWorker {
         let mut conn = match self.infra.postgres.get_connection().await {
             Ok(conn) => conn,
             Err(err) => {
-                self.blob
+                self.writer
                     .discard_staged(&staged_outputs(&audit_blob, intermediates_blob.as_ref()))
                     .await;
                 return Err(err.into());
@@ -554,16 +473,16 @@ impl DetectionWorker {
                 // existing blob is pointed at that blob's stored object, orphaning
                 // the object staged for it. Reclaim the redundant staged objects.
                 if audit_path != staged_audit.blob.storage_path {
-                    self.blob.discard_staged(&[&staged_audit]).await;
+                    self.writer.discard_staged(&[&staged_audit]).await;
                 }
                 if let Some(staged) = &staged_intermediates
                     && intermediate_path.as_deref() != Some(staged.blob.storage_path.as_str())
                 {
-                    self.blob.discard_staged(&[staged]).await;
+                    self.writer.discard_staged(&[staged]).await;
                 }
             }
             Err(PgError::Query(DieselError::RollbackTransaction)) => {
-                self.blob
+                self.writer
                     .discard_staged(&staged_outputs(
                         &staged_audit,
                         staged_intermediates.as_ref(),
@@ -575,7 +494,7 @@ impl DetectionWorker {
             Err(err) => {
                 // The transaction rolled back, so the file rows never committed;
                 // reclaim their objects before surfacing the failure.
-                self.blob
+                self.writer
                     .discard_staged(&staged_outputs(
                         &staged_audit,
                         staged_intermediates.as_ref(),
@@ -590,15 +509,6 @@ impl DetectionWorker {
 
         Ok(())
     }
-}
-
-/// Whether a consumed detection job should be acked (done) or nacked (retry).
-#[derive(Debug, Clone, Copy)]
-enum JobOutcome {
-    /// Reached a terminal outcome or is safe to drop; ack the message.
-    Done,
-    /// Transient error before the detection was claimed; nack for redelivery.
-    Retry,
 }
 
 /// Maps a workspace's raster policy to the engine's per-detection

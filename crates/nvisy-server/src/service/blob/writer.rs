@@ -1,18 +1,17 @@
 //! Write side of the pipeline-run blob store: staging a run's outputs.
 
 use std::io::Cursor;
-use std::str::FromStr;
 
 use bytes::Bytes;
-use elide_pipeline::file::Document;
 use elide_pipeline::{ArtifactSet, Audit};
-use nvisy_postgres::model::{Blob, NewBlob, WorkspaceDocument};
+use nvisy_postgres::model::{NewBlob, WorkspaceDocument};
 use nvisy_postgres::types::{RetentionOverride, RetentionScope, RetentionSettings};
-use nvisy_s3::{AuditKey, Bucket, DocumentKey, IntermediateKey};
+use nvisy_s3::{AuditKey, DocumentKey, IntermediateKey, ObjectKey};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
+use super::delete_object;
 use crate::response::{Error, ErrorKind, Result};
 use crate::service::{CryptoService, Infra};
 
@@ -62,189 +61,47 @@ impl ArtifactWriter {
         Self { infra, crypto }
     }
 
-    /// Reads a document's bytes from its blob and builds an engine [`Document`],
-    /// stamping the run's id as the correlation id.
+    /// Encrypts an audit — a detection's analysis or a redaction's review audit —
+    /// writes it to the audit bucket, and builds the [`StagedBlob`] that will
+    /// hold it, under the audit-logs retention scope.
     ///
-    /// The document's name is its original filename, and its format is resolved
-    /// from the document's `file_extension` (the trusted, `NOT NULL` column the
-    /// codec dispatches on — the filename may lie about the type). The name is the
-    /// engine's identity for the document: it roots every part path and is how
-    /// `anonymize` matches an audit back to its document, so redaction would
-    /// silently no-op if it differed between passes. Both detect and redact build
-    /// from the same document through here, so the name is identical by
-    /// construction.
-    ///
-    /// # Errors
-    ///
-    /// - `NotFound` if the object is missing from storage (its bytes were purged
-    ///   after the blob was looked up).
-    /// - `InternalServerError` if the blob's storage path is not a valid document
-    ///   key, if reading its bytes fails, or if decrypting them with the workspace
-    ///   key fails.
-    /// - A storage error if the object store rejects the read.
-    pub async fn build_document(
-        &self,
-        document: &WorkspaceDocument,
-        blob: &Blob,
-        correlation_id: Uuid,
-    ) -> Result<Document> {
-        let key = DocumentKey::from_str(&blob.storage_path).map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Invalid blob storage path")
-                .with_context(err.to_string())
-        })?;
-
-        let data = self.infra.blobs.get(&key).await?.ok_or_else(|| {
-            ErrorKind::NotFound.with_message("Document content is missing from storage")
-        })?;
-        let mut reader = data.into_reader();
-        let mut ciphertext = Vec::new();
-        reader.read_to_end(&mut ciphertext).await.map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Failed to read document content")
-                .with_context(err.to_string())
-        })?;
-
-        let bytes = self
-            .crypto
-            .decrypt(document.workspace_id, &ciphertext)
-            .map_err(|err| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to decrypt document content")
-                    .with_context(err.to_string())
-            })?;
-
-        Ok(Document::new(document.original_filename.clone(), bytes)
-            .with_extension(document.file_extension.clone())
-            .with_correlation_id(correlation_id))
-    }
-
-    /// Encrypts the analysis, writes it to the audit bucket, and builds the
-    /// [`StagedBlob`] that will hold it — but does not insert the blob.
-    ///
-    /// The analysis is the map of detected PII, so it is encrypted with the
-    /// workspace key before it leaves the process. Its bytes live in the audit
-    /// bucket; the returned expiry goes on the detection, whose pointer the
-    /// reaper releases once it passes.
-    ///
-    /// The object write is not transactional, so it is kept out of the caller's
-    /// database transaction: the bytes are written first, then the returned blob
-    /// is resolved (with the run's other writes) atomically. A rollback therefore
-    /// leaves at worst an orphan object in the bucket, never a blob that points at
-    /// bytes that were never written; the caller reclaims that orphan via
-    /// [`discard_staged`].
-    ///
-    /// [`discard_staged`]: Self::discard_staged
+    /// The audit is the map of detected PII, so it is encrypted with the
+    /// workspace key before it leaves the process. A detection points at its
+    /// analysis (`audit_blob_id`) and a redaction at its review audit
+    /// (`review_audit_blob_id`); both share this scope.
     ///
     /// # Errors
     ///
     /// - `InternalServerError` if serializing or encrypting the audit fails.
     /// - A storage error if the object write fails.
-    pub async fn stage_analyzed_document(
-        &self,
-        workspace_id: Uuid,
-        retention_override: Option<&RetentionOverride>,
-        workspace_settings: &RetentionSettings,
-        analyzed: &Audit,
-    ) -> Result<StagedBlob> {
-        self.stage_audit_blob(
-            workspace_id,
-            retention_override,
-            workspace_settings,
-            analyzed,
-            "encrypt analysis",
-        )
-        .await
-    }
-
-    /// Encrypts a redaction's review audit, writes it to the audit bucket, and
-    /// builds the [`StagedBlob`] that will hold it — without inserting the blob.
-    ///
-    /// The review audit is the post-redaction [`Audit`]: the detection's analysis
-    /// with the reviewer's edits applied and the redaction outcome recorded per
-    /// entity. It shares the audit-logs retention scope with the detection's base
-    /// analysis; it is the blob a redaction points at via `review_audit_blob_id`,
-    /// distinct from the detection's `audit_blob_id`.
-    ///
-    /// # Errors
-    ///
-    /// - `InternalServerError` if serializing or encrypting the audit fails.
-    /// - A storage error if the object write fails.
-    pub async fn stage_review_audit(
-        &self,
-        workspace_id: Uuid,
-        retention_override: Option<&RetentionOverride>,
-        workspace_settings: &RetentionSettings,
-        reviewed: &Audit,
-    ) -> Result<StagedBlob> {
-        self.stage_audit_blob(
-            workspace_id,
-            retention_override,
-            workspace_settings,
-            reviewed,
-            "encrypt review audit",
-        )
-        .await
-    }
-
-    /// Shared audit-blob staging for the detection audit and the redaction review
-    /// audit: both encrypt an [`Audit`] to the audit bucket under the audit-logs
-    /// retention scope and return the blob to resolve.
-    async fn stage_audit_blob(
+    pub async fn stage_audit(
         &self,
         workspace_id: Uuid,
         retention_override: Option<&RetentionOverride>,
         workspace_settings: &RetentionSettings,
         audit: &Audit,
-        encrypt_step: &str,
     ) -> Result<StagedBlob> {
-        let plaintext = serde_json::to_vec(audit).map_err(|error| analysis_serde_error(&error))?;
-        let hash = Sha256::digest(&plaintext).to_vec();
-        let size = i64::try_from(plaintext.len()).unwrap_or(i64::MAX);
-        let ciphertext = self
-            .crypto
-            .encrypt(workspace_id, &plaintext)
-            .map_err(|err| {
-                ErrorKind::InternalServerError
-                    .with_message(format!("Failed to {encrypt_step}"))
-                    .with_context(err.to_string())
-            })?;
-
-        let key = AuditKey::generate(workspace_id);
-        self.infra.blobs.put(&key, Cursor::new(ciphertext)).await?;
-
-        // Retention expiry for the audit scope: the detection's snapshotted
-        // override if any, else the workspace baseline.
+        let plaintext = to_json(audit)?;
         let expires_at = workspace_settings
             .resolve(RetentionScope::AuditLogs, retention_override)
             .expires_at(jiff::Timestamp::now());
-
-        Ok(StagedBlob {
-            blob: NewBlob {
-                workspace_id,
-                content_hash: hash,
-                file_size_bytes: size,
-                storage_path: key.to_string(),
-                storage_bucket: Bucket::Audits.name().to_owned(),
-                audit_digest: Some(audit.digest().as_bytes().to_vec()),
-            },
+        self.stage_encrypted(
+            AuditKey::generate(workspace_id),
+            workspace_id,
+            &plaintext,
             expires_at,
-        })
+            Some(audit.digest().as_bytes().to_vec()),
+        )
+        .await
     }
 
-    /// Serializes a detection's enrichment intermediates (OCR layout, transcript),
-    /// encrypts them with the workspace key, writes them to the intermediates store,
-    /// and builds the [`StagedBlob`] that will hold them — without inserting the blob
-    /// (staged like the analysis, reclaimed on rollback).
-    ///
-    /// The intermediates carry document content, so they are encrypted at rest and
-    /// governed by their own retention scope, resolved here (workspace baseline,
-    /// detection override if set).
+    /// Encrypts a detection's enrichment intermediates (OCR layout, transcript),
+    /// writes them to the intermediates store, and builds the [`StagedBlob`] that
+    /// will hold them, under their own retention scope.
     ///
     /// # Errors
     ///
-    /// - `InternalServerError` if serializing `artifacts` or encrypting them with
-    ///   the workspace key fails.
+    /// - `InternalServerError` if serializing or encrypting `artifacts` fails.
     /// - A storage error if writing the object fails.
     pub async fn stage_intermediates(
         &self,
@@ -253,56 +110,28 @@ impl ArtifactWriter {
         workspace_settings: &RetentionSettings,
         artifacts: &ArtifactSet,
     ) -> Result<StagedBlob> {
-        let plaintext =
-            serde_json::to_vec(artifacts).map_err(|error| analysis_serde_error(&error))?;
-        let hash = Sha256::digest(&plaintext).to_vec();
-        let size = i64::try_from(plaintext.len()).unwrap_or(i64::MAX);
-        let ciphertext = self
-            .crypto
-            .encrypt(workspace_id, &plaintext)
-            .map_err(|err| {
-                ErrorKind::InternalServerError
-                    .with_message("Failed to encrypt intermediates")
-                    .with_context(err.to_string())
-            })?;
-
-        let key = IntermediateKey::generate(workspace_id);
-        self.infra.blobs.put(&key, Cursor::new(ciphertext)).await?;
-
+        let plaintext = to_json(artifacts)?;
         let expires_at = workspace_settings
             .resolve(RetentionScope::Intermediates, retention_override)
             .expires_at(jiff::Timestamp::now());
-
-        Ok(StagedBlob {
-            blob: NewBlob {
-                workspace_id,
-                content_hash: hash,
-                file_size_bytes: size,
-                storage_path: key.to_string(),
-                storage_bucket: Bucket::Intermediates.name().to_owned(),
-                audit_digest: Some(artifacts.digest().as_bytes().to_vec()),
-            },
+        self.stage_encrypted(
+            IntermediateKey::generate(workspace_id),
+            workspace_id,
+            &plaintext,
             expires_at,
-        })
+            Some(artifacts.digest().as_bytes().to_vec()),
+        )
+        .await
     }
 
     /// Encrypts redacted bytes, writes them to the documents bucket, and builds the
     /// [`StagedBlob`] that will hold them together with the redacted output's display
-    /// name — without inserting the blob or the document.
-    ///
-    /// A redaction commits its output document, review-audit row, and redaction
-    /// row together in one transaction, so the output is staged (object written,
-    /// blob returned for the caller to resolve) rather than inserted here, and is
-    /// reclaimed on rollback via [`discard_staged`]. The redacted document
-    /// is a first-class document (a sibling of the source), downloadable through
-    /// the normal document endpoints.
-    ///
-    /// [`discard_staged`]: Self::discard_staged
+    /// name. The redacted document is a first-class document (a sibling of the
+    /// source), downloadable through the normal document endpoints.
     ///
     /// # Errors
     ///
-    /// - `InternalServerError` if encrypting the redacted bytes with the
-    ///   workspace key fails.
+    /// - `InternalServerError` if encrypting the redacted bytes fails.
     /// - A storage error if writing the object fails.
     pub async fn stage_redacted_document(
         &self,
@@ -312,36 +141,22 @@ impl ArtifactWriter {
         bytes: Bytes,
     ) -> Result<(StagedBlob, String)> {
         let workspace_id = source_document.workspace_id;
-        let plaintext_size = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
-        let plaintext_hash = Sha256::digest(&bytes).to_vec();
-        let ciphertext = self.crypto.encrypt(workspace_id, &bytes).map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Failed to encrypt redacted document")
-                .with_context(err.to_string())
-        })?;
-
-        let key = DocumentKey::generate(workspace_id);
-        self.infra.blobs.put(&key, Cursor::new(ciphertext)).await?;
-
         let expires_at = workspace_settings
             .resolve(RetentionScope::RedactedDocuments, retention_override)
             .expires_at(jiff::Timestamp::now());
-
+        let staged = self
+            .stage_encrypted(
+                DocumentKey::generate(workspace_id),
+                workspace_id,
+                &bytes,
+                expires_at,
+                None,
+            )
+            .await?;
         let redacted_name = redacted_display_name(
             &source_document.display_name,
             &source_document.file_extension,
         );
-        let staged = StagedBlob {
-            blob: NewBlob {
-                workspace_id,
-                content_hash: plaintext_hash,
-                file_size_bytes: plaintext_size,
-                storage_path: key.to_string(),
-                storage_bucket: Bucket::Documents.name().to_owned(),
-                audit_digest: None,
-            },
-            expires_at,
-        };
         Ok((staged, redacted_name))
     }
 
@@ -351,15 +166,13 @@ impl ArtifactWriter {
     /// the committing transaction rolls back (or never runs), the object has no
     /// blob and the blob-driven reaper can never find it. Callers pass every
     /// object they staged on that path so the orphans are removed immediately
-    /// instead of accumulating; each is deleted from whichever bucket its blob
-    /// names. A failed delete only leaves that object for a later manual sweep, so
-    /// it is logged and the rest still go.
+    /// instead of accumulating. A failed delete only leaves that object for a
+    /// later manual sweep, so it is logged and the rest still go.
     pub async fn discard_staged(&self, staged: &[&StagedBlob]) {
         for staged in staged {
             let blob = &staged.blob;
-            if let Err(err) = self
-                .delete_object(&blob.storage_bucket, &blob.storage_path)
-                .await
+            if let Err(err) =
+                delete_object(&self.infra.blobs, &blob.storage_bucket, &blob.storage_path).await
             {
                 tracing::warn!(
                     target: TRACING_TARGET,
@@ -371,55 +184,57 @@ impl ArtifactWriter {
         }
     }
 
-    /// Removes an object from whichever store its blob names. An unparseable
-    /// storage key or an unknown store is an error, not a silent success: the
-    /// object was not reclaimed, so the blob stays pending.
-    async fn delete_object(&self, bucket: &str, storage_path: &str) -> Result<()> {
-        let store = Bucket::from_name(bucket).ok_or_else(|| {
-            ErrorKind::InternalServerError
-                .with_message("Blob references an unknown storage bucket")
-                .with_context(format!("bucket: {bucket}"))
-        })?;
+    /// Encrypts `plaintext` with the workspace key, writes it at `key`, and builds
+    /// the [`StagedBlob`] describing it (hashed and sized over the plaintext, so
+    /// identical content shares a blob).
+    ///
+    /// The object write is not transactional, so it stays out of the caller's
+    /// database transaction: the bytes are written first, then the returned blob
+    /// is resolved with the run's other writes. A rollback therefore leaves at
+    /// worst an orphan object, never a blob pointing at bytes that were never
+    /// written; the caller reclaims that orphan via
+    /// [`discard_staged`](Self::discard_staged).
+    async fn stage_encrypted<K: ObjectKey>(
+        &self,
+        key: K,
+        workspace_id: Uuid,
+        plaintext: &[u8],
+        expires_at: jiff::Timestamp,
+        audit_digest: Option<Vec<u8>>,
+    ) -> Result<StagedBlob> {
+        let content_hash = Sha256::digest(plaintext).to_vec();
+        let file_size_bytes = i64::try_from(plaintext.len()).unwrap_or(i64::MAX);
+        let ciphertext = self
+            .crypto
+            .encrypt(workspace_id, plaintext)
+            .map_err(|err| {
+                ErrorKind::InternalServerError
+                    .with_message("Failed to encrypt staged content")
+                    .with_context(err.to_string())
+            })?;
+        self.infra.blobs.put(&key, Cursor::new(ciphertext)).await?;
 
-        // Each store's key type differs, so parse the key for the store this blob
-        // names before deleting.
-        match store {
-            Bucket::Documents => {
-                let key = DocumentKey::from_str(storage_path).map_err(invalid_key)?;
-                self.infra.blobs.delete(&key).await?;
-            }
-            Bucket::Audits => {
-                let key = AuditKey::from_str(storage_path).map_err(invalid_key)?;
-                self.infra.blobs.delete(&key).await?;
-            }
-            Bucket::Intermediates => {
-                let key = IntermediateKey::from_str(storage_path).map_err(invalid_key)?;
-                self.infra.blobs.delete(&key).await?;
-            }
-            Bucket::Avatars => {
-                return Err(ErrorKind::InternalServerError
-                    .with_message(
-                        "Avatar objects are not reclaimed through the blob store's blob purge",
-                    )
-                    .with_context(format!("bucket: {bucket}")));
-            }
-        }
-        Ok(())
+        Ok(StagedBlob {
+            blob: NewBlob {
+                workspace_id,
+                content_hash,
+                file_size_bytes,
+                storage_path: key.to_string(),
+                storage_bucket: K::BUCKET.name().to_owned(),
+                audit_digest,
+            },
+            expires_at,
+        })
     }
 }
 
-/// Wraps a storage-key parse failure as an internal error.
-fn invalid_key(err: impl std::fmt::Display) -> Error<'static> {
-    ErrorKind::InternalServerError
-        .with_message("Invalid blob storage key")
-        .with_context(err.to_string())
-}
-
-/// Maps an analysis (de)serialization failure to an internal error.
-fn analysis_serde_error(error: &serde_json::Error) -> Error<'static> {
-    ErrorKind::InternalServerError
-        .with_message("Failed to process analysis")
-        .with_context(error.to_string())
+/// Serializes an audit or artifact set for staging.
+fn to_json(value: &impl Serialize) -> Result<Vec<u8>> {
+    serde_json::to_vec(value).map_err(|err| -> Error<'static> {
+        ErrorKind::InternalServerError
+            .with_message("Failed to serialize analysis")
+            .with_context(err.to_string())
+    })
 }
 
 /// Builds the redacted document's display name by inserting a `redacted` marker

@@ -235,7 +235,7 @@ async fn mint_desktop_token(
     let account = provisioner
         .load_active(&mut conn, auth_state.account_id)
         .await?;
-    OidcService::gate_account_status(&account)?;
+    AccountProvisioner::ensure_can_sign_in(&account)?;
 
     let api_token = issuer
         .issue_app_token(&mut conn, &account, security)

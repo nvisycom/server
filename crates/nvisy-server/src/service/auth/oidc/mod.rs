@@ -36,10 +36,9 @@ use nvisy_nats::kv::{
     OidcStateBucket as OidcStateKvBucket, OidcStateKey, ReauthProofBucket as ReauthProofKvBucket,
     ReauthProofKey,
 };
-use nvisy_postgres::model::Account;
-use nvisy_postgres::query::{AccountIdentityRepository, AccountRepository};
+use nvisy_postgres::PgClient;
+use nvisy_postgres::query::AccountIdentityRepository;
 use nvisy_postgres::types::IdentityProvider;
-use nvisy_postgres::{PgClient, PgConn};
 use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetadata};
 use openidconnect::{
     AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet, EndpointNotSet,
@@ -654,7 +653,7 @@ impl OidcService {
                     .provisioner
                     .resolve(&mut conn, flow.provider, identity)
                     .await?;
-                Self::gate_account_status(&account)?;
+                AccountProvisioner::ensure_can_sign_in(&account)?;
 
                 // The redirect target decides how the session is delivered. A
                 // desktop deep-link scheme gets a long-lived `app` token in the
@@ -687,7 +686,9 @@ impl OidcService {
             OidcPurpose::Link { account_id } => {
                 // A suspended or deleted account must not add a credential, so gate
                 // its status before linking — mirroring the sign-in path.
-                Self::gate_account_status(&Self::load_account(&mut conn, account_id).await?)?;
+                AccountProvisioner::ensure_can_sign_in(
+                    &self.provisioner.load_active(&mut conn, account_id).await?,
+                )?;
                 self.provisioner
                     .link(&mut conn, account_id, flow.provider, identity)
                     .await?;
@@ -697,7 +698,9 @@ impl OidcService {
                 // A suspended or deleted account must not mint a step-up proof (it
                 // would gate a later credential-adding action anyway), so refuse it
                 // up front.
-                Self::gate_account_status(&Self::load_account(&mut conn, account_id).await?)?;
+                AccountProvisioner::ensure_can_sign_in(
+                    &self.provisioner.load_active(&mut conn, account_id).await?,
+                )?;
 
                 // The verified identity must belong to the account being re-authed:
                 // proving control of *some* provider account is not enough, it must
@@ -714,30 +717,6 @@ impl OidcService {
                 Ok(CallbackOutcome::Reauthed { proof })
             }
         }
-    }
-
-    /// Loads the account for a `Link`/`Reauth` flow (whose `account_id` comes from
-    /// the caller's own session), or a `NotFound` if it is gone.
-    async fn load_account(conn: &mut PgConn, account_id: uuid::Uuid) -> Result<Account> {
-        conn.find_account_by_id(account_id)
-            .await?
-            .ok_or_else(|| ErrorKind::NotFound.with_message("Account not found"))
-    }
-
-    /// Refuses a sign-in for a suspended or deleted account, before any session
-    /// token is minted — mirroring what password login gates on.
-    ///
-    /// # Errors
-    ///
-    /// - `Forbidden` if the account is suspended or deleted.
-    pub fn gate_account_status(account: &Account) -> Result<()> {
-        if account.is_suspended() {
-            return Err(ErrorKind::Forbidden.with_message("Account is suspended"));
-        }
-        if account.is_deleted() {
-            return Err(ErrorKind::Forbidden.with_message("Account has been deleted"));
-        }
-        Ok(())
     }
 
     /// Mints and stores a single-use step-up proof for `account_id`, returning its

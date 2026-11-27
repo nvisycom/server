@@ -64,6 +64,9 @@ where
     const CONSUMER_NAME: &'static str = "connection-sync-worker";
     const DESCRIPTION: &'static str = "Connection sync jobs";
     const MAX_AGE: Option<Duration> = Some(Duration::from_hours(1));
+    // A failed scheduled sync is redelivered with a backoff; three attempts in
+    // all, then it is left failed.
+    const MAX_DELIVER: Option<i64> = Some(3);
     const NAME: &'static str = "CONNECTION_SYNCS";
     const SUBJECT: &'static str = "connection.sync.jobs";
 }
