@@ -16,27 +16,29 @@
 name = "bento-ner"
 kind = "bento"
 base_url = "http://ner:3000"
-model = "en_core_web_trf"
+model = "fastino/gliner2-privacy-filter-PII-multi"
 
 # LLM recognizer lineup. Each entry runs on every request whose modality is in
-# its `modalities` list. An empty lineup means LLM is unavailable.
-[[recognizers.llm]]
-name = "anthropic-llm"
-kind = "anthropic"
-api_key = "sk-ant-xxxxxxxx"
-model = "claude-3-5-sonnet-20241022"
-modalities = ["text"]
+# its `modalities` list. An empty lineup means LLM is unavailable. Off by
+# default, since it sends document text to the provider: uncomment and set a
+# real key to enable it.
+# [[recognizers.llm]]
+# name = "anthropic-llm"
+# kind = "anthropic"
+# api_key = "sk-ant-..."
+# model = "claude-sonnet-5-5"
+# modalities = ["text"]
 
 # OCR enricher lineup (image modality).
 [[enrichers.ocr]]
 name = "bento-ocr"
 kind = "bento"
 base_url = "http://ocr:3000"
-model = "paddleocr"
+model = "db_resnet50+Felix92/onnxtr-parseq-multilingual-v1@7d7329948dbcff02637a3eb9c14ae0c4440c5ed0"
 
 # STT enricher lineup (audio modality).
 [[enrichers.stt]]
 name = "bento-stt"
 kind = "bento"
 base_url = "http://stt:3000"
-model = "whisper-large-v3"
+model = "large-v3-turbo"

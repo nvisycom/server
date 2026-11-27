@@ -153,7 +153,7 @@ impl WorkspaceWebhookService {
             check_webhook_url(url)?;
         }
 
-        let update_data = input.into_model(existing.status)?;
+        let update_data = input.into_model()?;
         let webhook_name = update_data
             .display_name
             .clone()

@@ -59,8 +59,9 @@ ignore = [
     # there is no workspace-level replacement. Remove once those move off chrono.
     "RUSTSEC-2026-0543",
     # `humantime` is unmaintained because it wraps chrono (no vulnerability). We
-    # use it to parse CLI durations, and `object_store` depends on it too.
-    # Remove once there is a maintained replacement for both uses.
+    # parse durations with jiff; it is pulled transitively by `object_store` and
+    # by `lance` (through `lancedb` and `lance-namespace-impls`). Remove once
+    # neither path brings it into the graph.
     "RUSTSEC-2026-0542",
     # `astral-tokio-tar` is unmaintained (no vulnerability). It is a dev-only
     # transitive dep of `testcontainers`, used to build test containers, and

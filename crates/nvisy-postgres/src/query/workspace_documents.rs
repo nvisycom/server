@@ -3,9 +3,10 @@
 //! A document is the human-facing file: an uploaded/imported original or a
 //! redacted output. Its bytes live in a [`Blob`], shared and ref-counted;
 //! creating a document records a reference to its blob and soft-deleting one drops
-//! that reference, both in the same transaction as the document write. Retention
-//! and object reclamation live on the blob, so this module has no expiry sweep —
-//! [`WorkspaceBlobRepository`] owns that.
+//! that reference, both in the same transaction as the document write. Each
+//! document carries its own retention expiry, released past its window by the
+//! reaper's referrer cleanup; object reclamation lives on the blob, which
+//! [`WorkspaceBlobRepository`] owns.
 //!
 //! [`Blob`]: crate::model::Blob
 //! [`WorkspaceBlobRepository`]: crate::query::WorkspaceBlobRepository
@@ -103,6 +104,18 @@ pub trait WorkspaceDocumentRepository {
     ///
     /// Provides workspace-scoped access control at the database level.
     fn find_document_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        document_id: Uuid,
+    ) -> impl Future<Output = Result<Option<WorkspaceDocument>>> + Send;
+
+    /// Finds a live document within a workspace and locks its row until the
+    /// transaction ends (`FOR UPDATE`).
+    ///
+    /// The reaper's document sweep skips locked rows, so a caller that starts
+    /// work on the document (a detection) can re-check its bytes under the lock
+    /// and commit before the sweep can release them.
+    fn lock_document_in_workspace(
         &mut self,
         workspace_id: Uuid,
         document_id: Uuid,
@@ -301,6 +314,25 @@ impl WorkspaceDocumentRepository for PgConnection {
             .map_err(Error::from)?;
 
         Ok(document)
+    }
+
+    async fn lock_document_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        document_id: Uuid,
+    ) -> Result<Option<WorkspaceDocument>> {
+        use schema::workspace_documents::{self, dsl};
+
+        workspace_documents::table
+            .filter(dsl::id.eq(document_id))
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspaceDocument::as_select())
+            .for_update()
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)
     }
 
     async fn find_document_in_workspace_with_creator(

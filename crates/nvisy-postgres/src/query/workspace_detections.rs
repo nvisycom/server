@@ -9,10 +9,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::model::{
-    DetectionCallRecord, NewWorkspaceDetection, NewWorkspaceDetectionCall,
-    NewWorkspaceDetectionCallMeter, UpdateWorkspaceDetection, WorkspaceDetection,
-};
+use crate::model::{NewWorkspaceDetection, UpdateWorkspaceDetection, WorkspaceDetection};
 use crate::query::search::ilike_contains;
 use crate::query::{DetectionRedactedOutput, WorkspaceRedactionRepository};
 use crate::schema::{
@@ -299,15 +296,6 @@ pub trait WorkspaceDetectionRepository {
         expected_rev: i32,
         edit_set: Option<Json<serde_json::Value>>,
     ) -> impl Future<Output = Result<EditWriteOutcome>> + Send;
-
-    /// Records a detection's inference usage: one call row per model call, with
-    /// the meters each spent. A no-op for an empty slice (a deterministic
-    /// detection makes no model calls). Written once, at analyze time, inside the
-    /// caller's finalize transaction.
-    fn record_detection_usage(
-        &mut self,
-        calls: Vec<DetectionCallRecord>,
-    ) -> impl Future<Output = Result<()>> + Send;
 }
 
 impl WorkspaceDetectionRepository for PgConnection {
@@ -724,55 +712,6 @@ impl WorkspaceDetectionRepository for PgConnection {
 
         Ok(rows_affected == 1)
     }
-
-    async fn record_detection_usage(&mut self, calls: Vec<DetectionCallRecord>) -> Result<()> {
-        use schema::{workspace_detection_call, workspace_detection_call_meter};
-
-        if calls.is_empty() {
-            return Ok(());
-        }
-
-        // Two bulk inserts, not a per-call loop: each call already carries its own
-        // id (assigned at record construction), so every meter row can reference
-        // its call without reading a generated key back. Flatten the records into
-        // the call rows and the meter rows up front, then insert the calls and
-        // their meters in one statement each. The caller runs this inside the
-        // finalize transaction, so both inserts commit with the rest of finalize.
-        let mut meter_rows: Vec<NewWorkspaceDetectionCallMeter> = Vec::new();
-        let call_rows: Vec<NewWorkspaceDetectionCall> = calls
-            .into_iter()
-            .map(|DetectionCallRecord { call, meters }| {
-                let call_id = call.id;
-                meter_rows.extend(meters.into_iter().map(|(meter, amount)| {
-                    NewWorkspaceDetectionCallMeter {
-                        call_id,
-                        meter,
-                        amount,
-                    }
-                }));
-                call
-            })
-            .collect();
-
-        // Calls first so the meters' `call_id` foreign key resolves.
-        diesel::insert_into(workspace_detection_call::table)
-            .values(&call_rows)
-            .execute(self)
-            .await
-            .map_err(Error::from)?;
-
-        // A detection may make calls that billed nothing (e.g. failures), so the
-        // meter set can be empty even when there are calls.
-        if !meter_rows.is_empty() {
-            diesel::insert_into(workspace_detection_call_meter::table)
-                .values(&meter_rows)
-                .execute(self)
-                .await
-                .map_err(Error::from)?;
-        }
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -1107,7 +1046,6 @@ mod tests {
             new.intermediate_blob_id = Some(intermediate.id);
             new.metadata = Some(Json::encode(&crate::types::DetectionMetadata {
                 error: Some("example failure".into()),
-                usage: Some(serde_json::json!({"large": "detail"})),
                 ..Default::default()
             }));
             let detection = conn.create_workspace_detection(new).await?;
@@ -1382,16 +1320,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn record_detection_usage_is_a_noop_for_no_calls() -> anyhow::Result<()> {
-        let db = TestDatabase::start().await;
-        let mut conn = db.client.get_connection().await?;
-
-        // No calls writes nothing and does not error.
-        conn.record_detection_usage(Vec::new()).await?;
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn expired_intermediate_is_nulled_and_its_blob_becomes_reclaimable() -> anyhow::Result<()>
     {
         use crate::model::NewBlob;
@@ -1413,9 +1341,9 @@ mod tests {
         // Attach an intermediate blob the way the worker does: resolve the blob
         // (recording a reference), then finalize the claimed detection pointing at
         // it.
-        let mut new_blob = NewBlob::test(seeded.workspace_id);
-        new_blob.expires_at = Some((Timestamp::now() + Span::new().hours(1)).into());
-        let blob = conn.find_or_create_blob(new_blob).await?;
+        let blob = conn
+            .find_or_create_blob(NewBlob::test(seeded.workspace_id))
+            .await?;
         assert_eq!(blob.ref_count, 1);
 
         let claimed = conn
@@ -1434,10 +1362,9 @@ mod tests {
             .await?;
         assert!(finalized);
 
-        backdate::blob_span(
+        backdate::detection_intermediate_expiry(
             &mut conn,
-            blob.id,
-            Timestamp::now() - Span::new().hours(2),
+            detection.id,
             Timestamp::now() - Span::new().hours(1),
         )
         .await?;

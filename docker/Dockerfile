@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1.9
 
-ARG RUST_VERSION=1.83
+ARG RUST_VERSION=1.99.1
 ARG DEBIAN_VERSION=bookworm
 
-FROM lukemathwalker/cargo-chef:latest-rust-${RUST_VERSION} AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-${RUST_VERSION}-${DEBIAN_VERSION} AS chef
 WORKDIR /app
 
 FROM chef AS planner
@@ -24,12 +24,15 @@ RUN cargo chef cook --release --recipe-path recipe.json
 
 COPY . .
 
-RUN cargo build --release --bin nvisy-server
-RUN strip target/release/nvisy-server
+RUN cargo build --release --bin nvisy-cli
+RUN strip target/release/nvisy-cli
 
 FROM debian:${DEBIAN_VERSION}-slim AS runtime
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Apply the base image's pending security updates first, so a fix Debian has
+# shipped since the base was published lands in every build.
+RUN apt-get update && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
     libpq5 \
@@ -39,24 +42,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY --from=builder /app/target/release/nvisy-server /usr/local/bin/nvisy-server
+COPY --from=builder /app/target/release/nvisy-cli /usr/local/bin/nvisy-cli
 
 RUN chown -R nvisy:nvisy /app
 
 LABEL org.opencontainers.image.title="Nvisy API Server" \
     org.opencontainers.image.description="Document processing and AI services API" \
     org.opencontainers.image.vendor="Nvisy" \
-    org.opencontainers.image.licenses="MIT" \
+    org.opencontainers.image.licenses="Apache-2.0" \
     org.opencontainers.image.source="https://github.com/nvisycom/server"
 
 EXPOSE 8080
 
-ENV RUST_LOG=info \
+ENV HOST=0.0.0.0 \
+    RUST_LOG=info \
     RUST_BACKTRACE=0
 
 USER nvisy
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -sf http://localhost:8080/health/ || exit 1
+    CMD curl -sf http://localhost:8080/health/ready || exit 1
 
-ENTRYPOINT ["/usr/local/bin/nvisy-server"]
+ENTRYPOINT ["/usr/local/bin/nvisy-cli"]

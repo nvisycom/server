@@ -27,7 +27,7 @@ pub struct NatsConfig {
         arg(
             long = "nats-connect-timeout",
             env = "NATS_CONNECT_TIMEOUT",
-            value_parser = humantime::parse_duration,
+            value_parser = nvisy_core::parse_duration,
         )
     )]
     pub nats_connect_timeout: Option<Duration>,
@@ -38,7 +38,7 @@ pub struct NatsConfig {
         arg(
             long = "nats-request-timeout",
             env = "NATS_REQUEST_TIMEOUT",
-            value_parser = humantime::parse_duration,
+            value_parser = nvisy_core::parse_duration,
         )
     )]
     pub nats_request_timeout: Option<Duration>,

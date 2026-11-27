@@ -16,7 +16,7 @@ own richer error type, stay in the crate that owns them.
 
 ## Documentation
 
-See [`docs/`](../../docs/) for architecture, security, and API documentation.
+See [docs.nvisy.com](https://docs.nvisy.com) for architecture, security, and API documentation.
 
 ## Changelog
 

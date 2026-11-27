@@ -32,7 +32,7 @@ pub struct HealthConfig {
             long = "health-cache-duration",
             env = "HEALTH_CACHE_DURATION",
             default_value = "30s",
-            value_parser = humantime::parse_duration,
+            value_parser = nvisy_core::parse_duration,
         )
     )]
     pub cache_duration: Duration,

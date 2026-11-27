@@ -26,4 +26,4 @@ mod reader;
 mod writer;
 
 pub use crate::service::blob::reader::ArtifactReader;
-pub use crate::service::blob::writer::ArtifactWriter;
+pub use crate::service::blob::writer::{ArtifactWriter, StagedBlob};

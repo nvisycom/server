@@ -54,7 +54,7 @@ pub struct PgConfig {
             long = "postgres-connection-timeout",
             env = "POSTGRES_CONNECTION_TIMEOUT",
             default_value = "10s",
-            value_parser = humantime::parse_duration,
+            value_parser = nvisy_core::parse_duration,
         )
     )]
     pub postgres_connection_timeout: Option<Duration>,
@@ -65,7 +65,7 @@ pub struct PgConfig {
         arg(
             long = "postgres-idle-timeout",
             env = "POSTGRES_IDLE_TIMEOUT",
-            value_parser = humantime::parse_duration,
+            value_parser = nvisy_core::parse_duration,
         )
     )]
     pub postgres_idle_timeout: Option<Duration>,

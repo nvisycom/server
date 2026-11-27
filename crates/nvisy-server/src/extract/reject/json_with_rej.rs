@@ -6,6 +6,7 @@
 use aide::generate::GenContext;
 use aide::openapi::Operation;
 use aide::{OperationInput, OperationOutput};
+use axum::body::{Body, Bytes};
 use axum::extract::rejection::{BytesRejection, FailedToBufferBody, JsonRejection};
 use axum::extract::{FromRequest, Json as AxumJson, OptionalFromRequest, Request};
 use axum::response::{IntoResponse, Response};
@@ -51,10 +52,23 @@ where
     type Rejection = Error<'static>;
 
     async fn from_request(req: Request, state: &S) -> Result<Option<Self>, Self::Rejection> {
-        // Delegate to axum's optional JSON extraction, which distinguishes a
-        // genuinely absent body (no Content-Type → `None`) from a present-but-broken
-        // one (wrong content-type or malformed JSON → error). A broken body is
+        // A zero-length body is absent, whatever the headers say: a client that
+        // sends `Content-Type: application/json` and no payload means "nothing",
+        // not malformed JSON. Buffering goes through axum's `Bytes` extractor, so
+        // the router's body limit still applies.
+        let (parts, body) = req.into_parts();
+        let bytes = Bytes::from_request(Request::from_parts(parts.clone(), body), state)
+            .await
+            .map_err(|rejection| Error::from(JsonRejection::from(rejection)))?;
+        if bytes.is_empty() {
+            return Ok(None);
+        }
+
+        // Otherwise delegate to axum's optional JSON extraction, which still
+        // distinguishes no Content-Type (`None`) from a present-but-broken body
+        // (wrong content-type or malformed JSON → error). A broken body is
         // propagated as our `Error`, not silently treated as absent.
+        let req = Request::from_parts(parts, Body::from(bytes));
         <AxumJson<T> as OptionalFromRequest<S>>::from_request(req, state)
             .await
             .map(|opt| opt.map(|AxumJson(value)| Self(value)))
@@ -153,5 +167,37 @@ where
         operation: &mut Operation,
     ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
         AxumJson::<T>::inferred_responses(ctx, operation)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::header::CONTENT_TYPE;
+    use serde::Deserialize;
+
+    use super::*;
+
+    #[derive(Deserialize)]
+    struct Payload {}
+
+    fn json_request(body: &'static str) -> Request {
+        Request::builder()
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(body))
+            .unwrap()
+    }
+
+    async fn optional(body: &'static str) -> Result<Option<Json<Payload>>, Error<'static>> {
+        <Json<Payload> as OptionalFromRequest<()>>::from_request(json_request(body), &()).await
+    }
+
+    #[tokio::test]
+    async fn an_empty_body_is_absent_even_with_a_json_content_type() {
+        assert!(optional("").await.unwrap().is_none());
+        assert!(optional("{}").await.unwrap().is_some());
+        assert!(
+            optional("{").await.is_err(),
+            "malformed JSON is still rejected"
+        );
     }
 }

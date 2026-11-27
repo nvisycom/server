@@ -20,7 +20,7 @@ pub struct PurgeConfig {
             long = "workspace-purge-grace",
             env = "WORKSPACE_PURGE_GRACE",
             default_value = "30d",
-            value_parser = humantime::parse_duration,
+            value_parser = nvisy_core::parse_duration,
         )
     )]
     pub grace: Duration,

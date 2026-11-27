@@ -24,6 +24,10 @@ CREATE TABLE workspace_redactions (
     -- blob. NULL once the bytes are reclaimed on retention (the redaction row — a
     -- ledger record — is kept). Served as the redaction's review view.
     review_audit_blob_id UUID               DEFAULT NULL REFERENCES workspace_blobs (id) ON DELETE SET NULL,
+    -- When the review audit's bytes are released, from the audit-logs retention.
+    -- Kept on the referrer, not the blob: identical bytes share a blob across
+    -- referrers with different retention.
+    review_audit_expires_at TIMESTAMPTZ     DEFAULT NULL,
 
     -- Timing
     created_at      TIMESTAMPTZ             NOT NULL DEFAULT current_timestamp,
@@ -51,12 +55,18 @@ CREATE INDEX workspace_redactions_review_audit_blob_idx
     ON workspace_redactions (review_audit_blob_id)
     WHERE review_audit_blob_id IS NOT NULL;
 
+-- The reaper's walk for redactions whose review-audit retention has passed.
+CREATE INDEX workspace_redactions_review_audit_expiry_idx
+    ON workspace_redactions (review_audit_expires_at)
+    WHERE review_audit_blob_id IS NOT NULL;
+
 COMMENT ON TABLE workspace_redactions IS 'Redactions: one redact pass over a detection, with its own reviewer edits, review audit, and output.';
 COMMENT ON COLUMN workspace_redactions.id IS 'Unique redaction identifier';
 COMMENT ON COLUMN workspace_redactions.detection_id IS 'Detection this redaction was produced from';
 COMMENT ON COLUMN workspace_redactions.account_id IS 'Account that requested the redaction';
 COMMENT ON COLUMN workspace_redactions.output_document_id IS 'Redacted document this redaction produced';
 COMMENT ON COLUMN workspace_redactions.review_audit_blob_id IS 'Review analysis (findings after reviewer edits) blob; NULL once the bytes are reclaimed on retention (the row is kept)';
+COMMENT ON COLUMN workspace_redactions.review_audit_expires_at IS 'When the review analysis bytes are released (audit-logs retention)';
 COMMENT ON COLUMN workspace_redactions.created_at IS 'When the redaction was created';
 COMMENT ON COLUMN workspace_redactions.deleted_at IS 'Soft-deletion timestamp; NULL means live. The row is kept as a ledger record; only its blob bytes are reclaimed';
 

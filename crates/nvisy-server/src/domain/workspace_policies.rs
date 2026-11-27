@@ -1,5 +1,5 @@
-//! Workspace policy domain logic: create (authored or derived), read, list,
-//! update, promote (derived → authored), and delete.
+//! Workspace policy domain logic: create (authored), find-or-create (derived),
+//! read, list, update, promote (derived → authored), and delete.
 //!
 //! Holds the policy rules — derived content-addressing, the authored/derived
 //! split, and derived-policy immutability — in one place, factored out of the handler
@@ -8,13 +8,13 @@
 use elide_pipeline::governance::policy::Policy;
 use nvisy_postgres::model::{NewWorkspacePolicy, WorkspacePolicy, WorkspacePolicyVersion};
 use nvisy_postgres::query::{
-    PolicyCursor, WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
+    PolicyCursor, PolicyWithVersion, WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
 };
 use nvisy_postgres::types::{CursorPage, CursorPagination, PolicyKind, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, model};
 use uuid::Uuid;
 
-use crate::domain::input::{CreatePolicyInput, PolicyBodyInput, UpdatePolicyInput};
+use crate::domain::input::{CreatePolicyInput, DerivedPolicyInput, UpdatePolicyInput};
 use crate::domain::output::ResolvedPolicy;
 use crate::response::{Error, ErrorKind, Result};
 use crate::service::event;
@@ -42,13 +42,9 @@ impl WorkspacePolicyService {
         Self { postgres }
     }
 
-    /// Creates a policy from a create request.
-    ///
-    /// A labels body is content-addressed: it mints — or reuses an identical live
-    /// one — a derived policy with a hash-derived name (`created` is false on
-    /// reuse). A template or inline body is an editable authored policy the caller
-    /// names. The policy, its first version, and the creation event commit
-    /// together.
+    /// Creates an authored (template or inline) policy: a new editable row the
+    /// caller names, with its first version and a creation event, in one
+    /// transaction.
     ///
     /// # Errors
     ///
@@ -58,26 +54,9 @@ impl WorkspacePolicyService {
         &self,
         origin: event::EventOrigin<'_>,
         input: CreatePolicyInput,
-    ) -> Result<ResolvedPolicy> {
+    ) -> Result<PolicyWithVersion> {
         let mut conn = self.postgres.get_connection().await?;
-        match input.body.derived_content_hash() {
-            Some(content_hash) => {
-                self.create_derived(&mut conn, origin, input.body, content_hash)
-                    .await
-            }
-            None => self.create_authored(&mut conn, origin, input).await,
-        }
-    }
-
-    /// Creates an authored (template or inline) policy: a new editable row with
-    /// its first version and a creation event, in one transaction.
-    async fn create_authored(
-        &self,
-        conn: &mut PgConn,
-        origin: event::EventOrigin<'_>,
-        input: CreatePolicyInput,
-    ) -> Result<ResolvedPolicy> {
-        let definition = input.body.into_definition("");
+        let definition = input.body.into_definition();
         let display_name = input
             .display_name
             .unwrap_or_else(|| definition.name.to_string());
@@ -111,66 +90,7 @@ impl WorkspacePolicyService {
             .await?;
 
         tracing::info!(target: TRACING_TARGET, policy_id = %created.policy.id, "Policy created");
-        Ok(ResolvedPolicy {
-            policy: created.policy,
-            version: created.version,
-            created: true,
-        })
-    }
-
-    /// Creates or reuses a derived policy from a labels body, content-addressed by
-    /// `content_hash`: an identical live derived policy is reused rather than
-    /// duplicated, and a fresh one is created with a neutral hash-based name (see
-    /// [`derived_display_name`]) plus a creation event, all in one transaction.
-    async fn create_derived(
-        &self,
-        conn: &mut PgConn,
-        origin: event::EventOrigin<'_>,
-        body: PolicyBodyInput,
-        content_hash: Vec<u8>,
-    ) -> Result<ResolvedPolicy> {
-        let display_name = derived_display_name(&content_hash);
-
-        let definition = body.into_definition(&display_name);
-        let definition_json = definition_to_json(&definition)?;
-
-        let new_policy = NewWorkspacePolicy {
-            workspace_id: origin.workspace_id,
-            account_id: origin.account_id,
-            display_name,
-            description: None,
-            kind: PolicyKind::Derived,
-            content_hash: Some(content_hash.clone()),
-            metadata: None,
-        };
-
-        let resolved = conn
-            .transaction(async |conn| {
-                let resolved = conn
-                    .find_or_create_derived_policy(new_policy, content_hash, definition_json, None)
-                    .await?;
-                if resolved.created {
-                    conn.emit_event(
-                        origin,
-                        event::WorkspaceEvent::PolicyCreated(event::PolicyCreated {
-                            policy_id: resolved.policy.policy.id,
-                        }),
-                    )
-                    .await?;
-                }
-                Ok::<_, Error>(resolved)
-            })
-            .await?;
-
-        if resolved.created {
-            tracing::info!(target: TRACING_TARGET, policy_id = %resolved.policy.policy.id, "Derived policy created");
-        }
-
-        Ok(ResolvedPolicy {
-            policy: resolved.policy.policy,
-            version: resolved.policy.version,
-            created: resolved.created,
-        })
+        Ok(created)
     }
 
     /// Lists a workspace's policies, newest first. `kind` narrows to a single
@@ -460,12 +380,72 @@ fn hex_prefix(content_hash: &[u8], bytes: usize) -> String {
         })
 }
 
+/// Finds or creates the derived policy for a label set on `conn`, content-addressed
+/// by the labels: an identical live derived policy is reused (`created` is false)
+/// rather than duplicated, and a fresh one is created with a neutral hash-based
+/// name plus a creation event, in one transaction (a savepoint when `conn` is
+/// already in one, so a caller can commit it with its own writes).
+///
+/// # Errors
+///
+/// - `InternalServerError` if the policy definition cannot be serialized.
+/// - A database error if the query fails.
+pub(crate) async fn resolve_derived_policy(
+    conn: &mut PgConn,
+    origin: event::EventOrigin<'_>,
+    input: DerivedPolicyInput,
+) -> Result<ResolvedPolicy> {
+    let content_hash = input.content_hash();
+    let display_name = derived_display_name(&content_hash);
+
+    let definition = input.into_definition(&display_name);
+    let definition_json = definition_to_json(&definition)?;
+
+    let new_policy = NewWorkspacePolicy {
+        workspace_id: origin.workspace_id,
+        account_id: origin.account_id,
+        display_name,
+        description: None,
+        kind: PolicyKind::Derived,
+        content_hash: Some(content_hash.clone()),
+        metadata: None,
+    };
+
+    let resolved = conn
+        .transaction(async |conn| {
+            let resolved = conn
+                .find_or_create_derived_policy(new_policy, content_hash, definition_json, None)
+                .await?;
+            if resolved.created {
+                conn.emit_event(
+                    origin,
+                    event::WorkspaceEvent::PolicyCreated(event::PolicyCreated {
+                        policy_id: resolved.policy.policy.id,
+                    }),
+                )
+                .await?;
+            }
+            Ok::<_, Error>(resolved)
+        })
+        .await?;
+
+    if resolved.created {
+        tracing::info!(target: TRACING_TARGET, policy_id = %resolved.policy.policy.id, "Derived policy created");
+    }
+
+    Ok(ResolvedPolicy {
+        policy: resolved.policy.policy,
+        version: resolved.policy.version,
+        created: resolved.created,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use nvisy_postgres::test_util::TestDatabase;
 
     use super::*;
-    use crate::domain::input::PolicyDraftInput;
+    use crate::domain::input::{PolicyBodyInput, PolicyDraftInput};
     use crate::extract::SecurityContext;
 
     fn security() -> SecurityContext {
@@ -488,14 +468,20 @@ mod tests {
         }
     }
 
-    fn derived_request(labels: &[&str]) -> CreatePolicyInput {
-        CreatePolicyInput {
-            display_name: None,
-            description: None,
-            body: PolicyBodyInput::Labels {
-                labels: labels.iter().map(|l| (*l).to_owned()).collect(),
-            },
+    fn derived_request(labels: &[&str]) -> DerivedPolicyInput {
+        DerivedPolicyInput {
+            labels: labels.iter().map(|l| (*l).to_owned()).collect(),
         }
+    }
+
+    /// Finds or creates the derived policy for `labels`, as a detection does.
+    async fn derive(
+        db: &TestDatabase,
+        origin: event::EventOrigin<'_>,
+        labels: &[&str],
+    ) -> anyhow::Result<ResolvedPolicy> {
+        let mut conn = db.client.get_connection().await?;
+        Ok(resolve_derived_policy(&mut conn, origin, derived_request(labels)).await?)
     }
 
     #[tokio::test]
@@ -512,7 +498,6 @@ mod tests {
         let resolved = service
             .create(origin, authored_request("audit-policy"))
             .await?;
-        assert!(resolved.created);
         assert_eq!(resolved.policy.kind, PolicyKind::Authored);
         assert!(resolved.policy.content_hash.is_none());
         assert_eq!(resolved.version.version_number, 1);
@@ -523,7 +508,6 @@ mod tests {
     async fn derived_dedups_identical_content() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
-        let service = WorkspacePolicyService::new(db.client.clone());
         let security = security();
         let origin = || event::EventOrigin {
             workspace_id: seeded.workspace_id,
@@ -531,16 +515,12 @@ mod tests {
             security: &security,
         };
 
-        let first = service
-            .create(origin(), derived_request(&["person_name"]))
-            .await?;
+        let first = derive(&db, origin(), &["person_name"]).await?;
         assert!(first.created);
         assert_eq!(first.policy.kind, PolicyKind::Derived);
 
         // The same labels reuse the row rather than minting a second one.
-        let second = service
-            .create(origin(), derived_request(&["person_name"]))
-            .await?;
+        let second = derive(&db, origin(), &["person_name"]).await?;
         assert!(!second.created);
         assert_eq!(second.policy.id, first.policy.id);
         assert_eq!(second.version.id, first.version.id);
@@ -559,9 +539,7 @@ mod tests {
             security: &security,
         };
 
-        let derived = service
-            .create(origin(), derived_request(&["person_name"]))
-            .await?;
+        let derived = derive(&db, origin(), &["person_name"]).await?;
         let policy_id = derived.policy.id;
 
         // A label-only edit is rejected: a derived policy is immutable.
@@ -646,9 +624,7 @@ mod tests {
             security: &security,
         };
 
-        let derived = service
-            .create(origin(), derived_request(&["person_name"]))
-            .await?;
+        let derived = derive(&db, origin(), &["person_name"]).await?;
         let policy_id = derived.policy.id;
         assert_eq!(derived.policy.kind, PolicyKind::Derived);
         assert!(derived.policy.content_hash.is_some());
@@ -695,9 +671,7 @@ mod tests {
         };
 
         // A derived policy for a label set carries a neutral hash name.
-        let derived = service
-            .create(origin(), derived_request(&["person_name"]))
-            .await?;
+        let derived = derive(&db, origin(), &["person_name"]).await?;
         let first_id = derived.policy.id;
         let hash_name = derived.policy.display_name.clone();
 
@@ -711,9 +685,7 @@ mod tests {
 
         // Re-creating a derived policy for the same labels succeeds (mints a fresh
         // row reclaiming the vacated hash name), not a unique-index deadlock.
-        let recreated = service
-            .create(origin(), derived_request(&["person_name"]))
-            .await?;
+        let recreated = derive(&db, origin(), &["person_name"]).await?;
         assert!(recreated.created, "a fresh derived policy is minted");
         assert_ne!(recreated.policy.id, first_id);
         assert_eq!(recreated.policy.kind, PolicyKind::Derived);

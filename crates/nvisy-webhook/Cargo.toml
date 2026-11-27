@@ -34,7 +34,7 @@ schema = ["dep:schemars"]
 
 # CLI support: derives clap::Args on config structs so the binary can parse them
 # from flags/env directly, keeping the dependency optional for library users.
-cli = ["dep:clap", "dep:humantime"]
+cli = ["dep:clap", "nvisy-core/cli"]
 
 [dependencies]
 # Internal crates
@@ -59,7 +59,6 @@ hex = { workspace = true, optional = true, features = [] }
 
 # CLI
 clap = { workspace = true, features = ["derive", "env"], optional = true }
-humantime = { workspace = true, features = [], optional = true }
 
 # Observability
 tracing = { workspace = true }

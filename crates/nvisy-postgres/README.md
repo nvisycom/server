@@ -15,7 +15,7 @@ embedded in the binary and applied on startup; the schema is generated to
 
 ## Documentation
 
-See [`docs/`](../../docs/) for architecture, security, and API documentation.
+See [docs.nvisy.com](https://docs.nvisy.com) for architecture, security, and API documentation.
 
 ## Changelog
 

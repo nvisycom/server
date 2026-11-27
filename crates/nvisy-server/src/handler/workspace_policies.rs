@@ -14,6 +14,7 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
+use nvisy_postgres::query::PolicyWithVersion;
 
 use crate::domain;
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
@@ -29,11 +30,11 @@ use crate::service::{ServiceState, event};
 /// Tracing target for workspace policy operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::policies";
 
-/// Creates a new workspace policy.
+/// Creates a new authored workspace policy.
 ///
-/// The request body carries a structured policy definition; its name and
-/// description drive the stored record unless overridden. A labels body creates
-/// (or reuses) a derived policy. Requires `ManagePolicies` permission.
+/// The request body carries a template or an inline definition; its name and
+/// description drive the stored record unless overridden. Requires
+/// `ManagePolicies` permission.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -58,37 +59,24 @@ async fn create_policy(
         account_id,
         security: &security,
     };
-    let domain::output::ResolvedPolicy {
-        policy,
-        version,
-        created,
-    } = policies.create(origin, request.into()).await?;
+    let PolicyWithVersion { policy, version } = policies.create(origin, request.into()).await?;
 
     let mut conn = pg_client.get_connection().await?;
     let creator = resolve_account_ref(&mut conn, account_id).await?;
     let response =
         WorkspacePolicy::from_model(policy, version, workspace.id, workspace.handle, creator)?;
 
-    // A derived body reuses an identical live policy (200) rather than minting a
-    // duplicate; everything else creates a new policy (201).
-    let status = if created {
-        StatusCode::CREATED
-    } else {
-        StatusCode::OK
-    };
-    Ok((status, Json(response)))
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 fn create_policy_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Create policy")
         .description(
-            "Creates a structured redaction policy for the workspace. A labels body \
-             creates (or reuses) a derived policy and returns 200 when an identical \
-             one already exists; a template or inline body always creates a new \
-             policy and returns 201.",
+            "Creates an authored redaction policy for the workspace from a template \
+             or an inline definition. To detect by a list of labels without \
+             authoring a policy, start a detection with a `labels` source instead.",
         )
         .response::<201, Json<WorkspacePolicy>>()
-        .response::<200, Json<WorkspacePolicy>>()
         .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()

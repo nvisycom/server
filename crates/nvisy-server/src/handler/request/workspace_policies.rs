@@ -1,6 +1,5 @@
 //! Policy request types.
 
-use elide_pipeline::entity::{LabelCatalog, LabelRef};
 use elide_pipeline::governance::policy::{LabelScope, PolicyRule};
 use elide_pipeline::governance::redaction::ModalityRedactions;
 use elide_pipeline::template::PolicyTemplate;
@@ -81,9 +80,9 @@ impl From<PolicyDraft> for PolicyDraftInput {
 /// Where a new policy's body comes from: exactly one source, enforced by the
 /// type so neither-nor-both is unrepresentable.
 ///
-/// Tagged by `source`: `{ "source": "template", "template": { ... } }`,
-/// `{ "source": "inline", "definition": { ... } }`, or
-/// `{ "source": "labels", "labels": [ ... ] }`.
+/// Tagged by `source`: `{ "source": "template", "template": { ... } }` or
+/// `{ "source": "inline", "definition": { ... } }`. A derived (labels) policy is
+/// not created here: a detection over labels mints it.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "source", rename_all = "camelCase")]
 pub enum PolicyBody {
@@ -103,14 +102,6 @@ pub enum PolicyBody {
         /// template id, and most requests use a template.
         definition: Box<PolicyDraft>,
     },
-    /// A derived body: a bare list of labels, each erased. The created policy is
-    /// content-addressed and deduplicated (an identical one is reused) and is
-    /// immutable once minted. This is the ad-hoc redact flow.
-    Labels {
-        /// The built-in labels to detect and erase (e.g. `person_name`,
-        /// `email_address`).
-        labels: Vec<String>,
-    },
 }
 
 impl From<PolicyBody> for PolicyBodyInput {
@@ -120,7 +111,6 @@ impl From<PolicyBody> for PolicyBodyInput {
             PolicyBody::Inline { definition } => PolicyBodyInput::Inline {
                 definition: Box::new((*definition).into()),
             },
-            PolicyBody::Labels { labels } => PolicyBodyInput::Labels { labels },
         }
     }
 }
@@ -134,8 +124,7 @@ impl From<PolicyBody> for PolicyBodyInput {
 #[serde(rename_all = "camelCase")]
 #[garde(allow_unvalidated)]
 pub struct CreateWorkspacePolicy {
-    /// Optional display name override. Defaults to the policy's own name. Ignored
-    /// for a derived (labels) body, whose name is generated.
+    /// Optional display name override. Defaults to the policy's own name.
     #[garde(length(chars, min = 1, max = 255))]
     pub display_name: Option<String>,
     /// Optional description override. Defaults to the policy's own description.
@@ -143,7 +132,6 @@ pub struct CreateWorkspacePolicy {
     pub description: Option<String>,
     /// The source of the policy body.
     #[serde(flatten)]
-    #[garde(custom(validate_body))]
     pub body: PolicyBody,
 }
 
@@ -155,33 +143,6 @@ impl From<CreateWorkspacePolicy> for CreatePolicyInput {
             body: request.body.into(),
         }
     }
-}
-
-/// A derived (labels) body must name at least one label and no more than 128.
-// reason: signature is fixed by garde's custom validator interface.
-#[allow(clippy::trivially_copy_pass_by_ref)]
-fn validate_body(body: &PolicyBody, _: &()) -> garde::Result {
-    if let PolicyBody::Labels { labels } = body {
-        if labels.is_empty() {
-            return Err(garde::Error::new("at least one label is required"));
-        }
-        if labels.len() > 128 {
-            return Err(garde::Error::new("at most 128 labels are allowed"));
-        }
-        let catalog = LabelCatalog::with_builtins();
-        let unknown: Vec<&str> = labels
-            .iter()
-            .filter(|id| !catalog.contains(&LabelRef::new(id.as_str())))
-            .map(String::as_str)
-            .collect();
-        if !unknown.is_empty() {
-            return Err(garde::Error::new(format!(
-                "unknown labels: {}",
-                unknown.join(", ")
-            )));
-        }
-    }
-    Ok(())
 }
 
 /// Request payload for updating an existing workspace policy.
@@ -224,23 +185,4 @@ pub struct PromoteWorkspacePolicy {
     /// Human-readable display name for the promoted policy (1-255 characters).
     #[garde(length(chars, min = 1, max = 255), custom(validate_non_blank))]
     pub display_name: String,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn validate_body_accepts_known_labels_and_rejects_unknown() {
-        let known = PolicyBody::Labels {
-            labels: vec!["person_name".to_owned(), "email_address".to_owned()],
-        };
-        assert!(validate_body(&known, &()).is_ok());
-
-        let unknown = PolicyBody::Labels {
-            labels: vec!["person_name".to_owned(), "not_a_real_label".to_owned()],
-        };
-        let err = validate_body(&unknown, &()).expect_err("unknown label is rejected");
-        assert!(err.to_string().contains("not_a_real_label"));
-    }
 }

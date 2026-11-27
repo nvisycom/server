@@ -27,6 +27,7 @@ use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::Jsonb;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde_json::{Map, Value};
 
 /// A `JSONB` column holding a value of type `T`.
 ///
@@ -127,13 +128,62 @@ impl<T: DeserializeOwned> Json<T> {
 }
 
 impl<T: DeserializeOwned + Default> Json<T> {
-    /// Decodes the stored value into `T`, falling back to `T::default()` when it
-    /// does not match — for configuration that must stay usable across shape
-    /// changes rather than error or surface a raw blob.
+    /// Decodes the stored value into `T`, falling back to defaults where it does
+    /// not match — for configuration that must stay usable across shape changes
+    /// rather than error or surface a raw blob.
+    ///
+    /// The fallback is per field, at any depth: when the whole object does not
+    /// decode, every stored field that still decodes is kept, descending into
+    /// nested objects, and only the ones that do not are left to `T`'s defaults.
+    /// One stale setting therefore resets only itself, never a sibling. A stored
+    /// value that is not an object falls back to `T::default()` whole.
     #[must_use]
     pub fn or_default(&self) -> T {
-        serde_json::from_value(self.value.clone()).unwrap_or_default()
+        if let Ok(value) = serde_json::from_value(self.value.clone()) {
+            return value;
+        }
+        let Value::Object(stored) = &self.value else {
+            return T::default();
+        };
+
+        let decodes = |object: &Map<String, Value>| {
+            serde_json::from_value::<T>(Value::Object(object.clone())).is_ok()
+        };
+        serde_json::from_value(Value::Object(salvage(stored, &decodes))).unwrap_or_default()
     }
+}
+
+/// The fields of `stored` that keep the enclosing value decoding, as judged by
+/// `decodes` on a candidate object at this level. A field that does not decode
+/// whole but is an object is salvaged field by field in turn, when an empty
+/// object in its place still decodes; anything else is left out, to the type's
+/// default.
+fn salvage(
+    stored: &Map<String, Value>,
+    decodes: &dyn Fn(&Map<String, Value>) -> bool,
+) -> Map<String, Value> {
+    let mut kept = Map::new();
+    for (key, field) in stored {
+        kept.insert(key.clone(), field.clone());
+        if decodes(&kept) {
+            continue;
+        }
+        kept.remove(key);
+
+        let Value::Object(inner) = field else {
+            continue;
+        };
+        let siblings = kept.clone();
+        let nested = |object: &Map<String, Value>| {
+            let mut candidate = siblings.clone();
+            candidate.insert(key.clone(), Value::Object(object.clone()));
+            decodes(&candidate)
+        };
+        if nested(&Map::new()) {
+            kept.insert(key.clone(), Value::Object(salvage(inner, &nested)));
+        }
+    }
+    kept
 }
 
 impl<T> ToSql<Jsonb, Pg> for Json<T> {

@@ -12,6 +12,7 @@ use elide_pipeline::{
 
 use super::config::{self, EngineConfig};
 use super::error::UnknownFormatToken;
+use super::modality::{DocumentModality, format_modality};
 use crate::Result;
 
 /// The redaction engine, injectable via [`State`].
@@ -160,7 +161,9 @@ impl EngineService {
             }
             let mut matched = false;
             for format in registry.iter() {
-                if super::format_modality(format.id().as_str()) == Some(token.as_str()) {
+                if format_modality(format.id().as_str()).map(DocumentModality::as_str)
+                    == Some(token.as_str())
+                {
                     matched = true;
                     for ext in format.extensions() {
                         push_unique(&mut out, &mut seen, ext.as_ref());

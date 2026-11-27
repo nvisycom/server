@@ -27,8 +27,9 @@ use nvisy_postgres::types::{CursorPage, CursorPagination, DetectionFilter, Detec
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
-use crate::domain::input::CreateDetectionInput;
+use crate::domain::input::{CreateDetectionInput, DerivedPolicyInput, DetectionSourceInput};
 use crate::domain::output::CreatedDetection;
+use crate::domain::workspace_policies::resolve_derived_policy;
 use crate::response::{Error, ErrorKind, Result};
 use crate::service::event::EventEmitter;
 use crate::service::{ArtifactReader, DetectionQueue, EngineService, event};
@@ -49,7 +50,17 @@ struct CommitDetection {
     /// Effective document scope for the analysis job.
     scope: Option<DocumentContext>,
     /// Policies the analysis job resolves.
-    policy_ids: Vec<Uuid>,
+    policies: CommitPolicies,
+}
+
+/// The policies a detection commits with: ids already validated, or a label set
+/// whose derived policy is found or created inside the commit transaction, so a
+/// detection that fails to commit leaves no derived policy behind.
+enum CommitPolicies {
+    /// Validated policy ids.
+    Named(Vec<Uuid>),
+    /// A label set, run as its derived policy.
+    Derived(DerivedPolicyInput),
 }
 
 /// Creates and enqueues detections, and reads them back.
@@ -90,16 +101,18 @@ impl WorkspaceDetectionService {
     /// row, its start event, its review thread, and its analysis job in one
     /// transaction, then broadcasts `Pending` and wakes the drainer.
     ///
-    /// Starts a detection against an explicit policy list over a document.
+    /// Starts a detection over a document, against named policies or a label list.
     ///
-    /// Validates the document and every named policy synchronously, then commits and
-    /// enqueues the detection. An idempotency key that matches an existing detection
-    /// replays it instead of creating a new one.
+    /// Validates the document and every named policy synchronously, or finds or
+    /// creates the derived policy for a label list, then commits and enqueues the
+    /// detection. An idempotency key that matches an existing detection replays it
+    /// instead of creating a new one.
     ///
     /// # Errors
     ///
     /// - `NotFound` if the input document or any named policy does not exist in the
     ///   workspace.
+    /// - `Conflict` if the input document's bytes are no longer available.
     /// - A database error if a connection or the create transaction fails.
     pub async fn create(
         &self,
@@ -124,18 +137,29 @@ impl WorkspaceDetectionService {
             .find_document_in_workspace(workspace_id, input.document_id)
             .await?
             .ok_or_else(|| Error::not_found("document"))?;
-
-        // Every named policy must resolve to a live policy (any kind) in the
-        // workspace, so an unknown id is a 404 now rather than a worker failure.
-        for policy_id in &input.policy_ids {
-            if conn
-                .find_policy_in_workspace_by_id(workspace_id, *policy_id)
-                .await?
-                .is_none()
-            {
-                return Err(Error::not_found("policy"));
-            }
+        if document.blob_id.is_none() {
+            return Err(Error::document_content_gone());
         }
+
+        let policies = match input.source {
+            // Every named policy must resolve to a live policy (any kind) in the
+            // workspace, so an unknown id is a 404 now rather than a worker failure.
+            DetectionSourceInput::Policies { policy_ids } => {
+                for policy_id in &policy_ids {
+                    if conn
+                        .find_policy_in_workspace_by_id(workspace_id, *policy_id)
+                        .await?
+                        .is_none()
+                    {
+                        return Err(Error::not_found("policy"));
+                    }
+                }
+                CommitPolicies::Named(policy_ids)
+            }
+            // A label list runs as its derived policy (reused when an identical one
+            // exists), resolved inside the commit transaction.
+            DetectionSourceInput::Labels(derived) => CommitPolicies::Derived(derived),
+        };
 
         let retention_override = input.retention_override.map(|over| Json::encode(&over));
         let new_detection = NewWorkspaceDetection {
@@ -156,7 +180,7 @@ impl WorkspaceDetectionService {
                     workspace_id,
                     new_detection,
                     scope: input.scope,
-                    policy_ids: input.policy_ids,
+                    policies,
                 },
             )
             .await?;
@@ -280,7 +304,8 @@ impl WorkspaceDetectionService {
     /// The edits are validated against the detection's base analysis before being
     /// stored — an edit naming an unknown target or the wrong modality is rejected
     /// here (`BadRequest`), so an invalid set is never persisted to wedge a later
-    /// redaction. Clearing (no edits) needs no analysis and skips this.
+    /// redaction. The trial apply records `account_id` as the reviewer. Clearing
+    /// (no edits) needs no analysis and skips this.
     ///
     /// # Errors
     ///
@@ -294,6 +319,7 @@ impl WorkspaceDetectionService {
         &self,
         workspace_id: Uuid,
         detection_id: Uuid,
+        account_id: Uuid,
         expected_rev: i32,
         edits: Option<EditSet>,
     ) -> Result<WorkspaceDetectionModel> {
@@ -307,7 +333,7 @@ impl WorkspaceDetectionService {
             edits.validate(&audit.report)?;
             // Trial-apply on the loaded audit to surface landing failures validation
             // alone does not (e.g. a modality mismatch); the audit is then discarded.
-            edits.apply(&mut audit.report)?;
+            edits.apply(&mut audit.report, &account_id.to_string())?;
         }
 
         let mut conn = self.postgres.get_connection().await?;
@@ -415,6 +441,30 @@ impl WorkspaceDetectionService {
         detection: CommitDetection,
     ) -> Result<WorkspaceDetectionModel> {
         conn.transaction(async |conn| {
+            // Lock the input document and re-check its bytes: the reaper's document
+            // sweep skips locked rows, and once this commits the pending detection
+            // keeps the bytes, so they cannot be released in between.
+            let input = conn
+                .lock_document_in_workspace(
+                    detection.workspace_id,
+                    detection.new_detection.input_document_id,
+                )
+                .await?;
+            if input.is_none_or(|document| document.blob_id.is_none()) {
+                return Err(Error::document_content_gone());
+            }
+
+            let policy_ids = match detection.policies {
+                CommitPolicies::Named(policy_ids) => policy_ids,
+                CommitPolicies::Derived(derived) => {
+                    vec![
+                        resolve_derived_policy(conn, origin, derived)
+                            .await?
+                            .policy
+                            .id,
+                    ]
+                }
+            };
             let detection_row = conn
                 .create_workspace_detection(detection.new_detection)
                 .await?;
@@ -433,7 +483,7 @@ impl WorkspaceDetectionService {
                 workspace_id: detection.workspace_id,
                 detection_id: detection_row.id,
                 scope: detection.scope,
-                policy_ids: detection.policy_ids,
+                policy_ids,
             };
             conn.insert_detection_job(NewWorkspaceDetectionJob {
                 detection_id: detection_row.id,

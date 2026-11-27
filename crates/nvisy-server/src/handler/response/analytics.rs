@@ -4,40 +4,18 @@
 //! feed them straight to a chart, and every enum value is present — zero-filled
 //! when it has no data — so a series never has a missing bar.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use jiff::ToSpan;
 use jiff::civil::Date;
 use nvisy_postgres::query::{AnalyticsSnapshot, DetectionDayPoint};
-use nvisy_postgres::types::{DetectionStatus, DocumentKind, UsageMeter};
+use nvisy_postgres::types::{DetectionStatus, DocumentKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 
-/// Converts a per-meter map into its API form: keyed by the meter's camelCase
-/// name (`tokensInput`, `seconds`, …), carrying only the meters present.
-fn meter_map(meters: &HashMap<UsageMeter, f64>) -> BTreeMap<String, f64> {
-    meters
-        .iter()
-        .map(|(meter, amount)| (meter_key(*meter).to_owned(), *amount))
-        .collect()
-}
-
-/// The camelCase API key for a meter.
-fn meter_key(meter: UsageMeter) -> &'static str {
-    match meter {
-        UsageMeter::TokensInput => "tokensInput",
-        UsageMeter::TokensOutput => "tokensOutput",
-        UsageMeter::TokensTotal => "tokensTotal",
-        UsageMeter::Seconds => "seconds",
-        UsageMeter::Pages => "pages",
-        UsageMeter::Images => "images",
-        UsageMeter::Characters => "characters",
-    }
-}
-
-/// Aggregate analytics for a workspace: what it stores, how its detections fare,
-/// and the inference usage they metered.
+/// Aggregate analytics for a workspace: what it stores and how its detections
+/// fare.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceAnalytics {
@@ -45,38 +23,6 @@ pub struct WorkspaceAnalytics {
     pub storage: WorkspaceStorageAnalytics,
     /// Detection health: volume, status mix, and durations.
     pub detections: WorkspaceDetectionAnalytics,
-    /// Inference usage: per-meter workspace totals and a per-model breakdown.
-    pub usage: WorkspaceUsageAnalytics,
-}
-
-/// Inference usage across a workspace's detections.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceUsageAnalytics {
-    /// Workspace-wide total per meter, keyed by meter name (`tokensInput`,
-    /// `seconds`, …). Only meters actually reported appear.
-    pub meters: BTreeMap<String, f64>,
-    /// Total model calls across all detections.
-    pub calls: i64,
-    /// How many of those calls failed.
-    pub errors: i64,
-    /// Per-model breakdown, one entry per model used, in a stable order.
-    pub by_model: Vec<WorkspaceModelUsageEntry>,
-}
-
-/// One model's usage across a workspace's detections.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceModelUsageEntry {
-    /// The model.
-    pub model: String,
-    /// Summed amount per meter for this model, keyed by meter name. Only meters
-    /// this model reported appear; a value may be fractional (seconds).
-    pub meters: BTreeMap<String, f64>,
-    /// Calls made to this model.
-    pub calls: i64,
-    /// How many of those calls failed.
-    pub errors: i64,
 }
 
 /// Storage totals across a workspace's live files.
@@ -148,7 +94,6 @@ impl WorkspaceAnalytics {
             storage,
             detections,
             durations,
-            usage,
         } = snapshot;
         let by_kind: Vec<WorkspaceStorageKindEntry> = DocumentKind::iter()
             .map(|kind| {
@@ -179,29 +124,6 @@ impl WorkspaceAnalytics {
         let terminal = completed + failed;
         let error_rate = (terminal > 0).then(|| failed as f64 / terminal as f64);
 
-        let by_model: Vec<WorkspaceModelUsageEntry> = usage
-            .into_iter()
-            .map(|u| WorkspaceModelUsageEntry {
-                model: u.model,
-                meters: meter_map(&u.meters),
-                calls: u.calls,
-                errors: u.errors,
-            })
-            .collect();
-        // Workspace totals: sum each meter and the call/error counts across models.
-        let mut meters: BTreeMap<String, f64> = BTreeMap::new();
-        for entry in &by_model {
-            for (name, amount) in &entry.meters {
-                *meters.entry(name.clone()).or_default() += amount;
-            }
-        }
-        let usage = WorkspaceUsageAnalytics {
-            meters,
-            calls: by_model.iter().map(|m| m.calls).sum(),
-            errors: by_model.iter().map(|m| m.errors).sum(),
-            by_model,
-        };
-
         Self {
             storage: WorkspaceStorageAnalytics {
                 total_bytes,
@@ -215,7 +137,6 @@ impl WorkspaceAnalytics {
                 avg_duration_ms: durations.avg_ms,
                 p95_duration_ms: durations.p95_ms,
             },
-            usage,
         }
     }
 }
@@ -248,16 +169,12 @@ pub struct WorkspaceDetectionDayEntry {
     /// 95th-percentile completed-detection duration (milliseconds) this day; omitted if none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub p95_duration_ms: Option<i64>,
-    /// Amount per meter spent by this day's detections, keyed by meter name.
-    /// Empty on a day with no metered usage.
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub meters: BTreeMap<String, f64>,
 }
 
 impl WorkspaceDetectionTimeSeries {
     /// Builds a dense daily series over `[from, to]` from the sparse per-day rows
     /// the query returns. Every day in the window is emitted in order; a day with
-    /// no detections reports `detections: 0` and omits the rate/duration/token
+    /// no detections reports `detections: 0` and omits the rate and duration
     /// fields. The query only produces days that had a detection, so gap-filling
     /// happens here.
     // reason: an error rate is inherently floating-point; the operands are small detection counts.
@@ -282,7 +199,6 @@ impl WorkspaceDetectionTimeSeries {
                     error_rate: (p.terminal > 0).then(|| p.failed as f64 / p.terminal as f64),
                     avg_duration_ms: p.avg_ms,
                     p95_duration_ms: p.p95_ms,
-                    meters: meter_map(&p.meters),
                 },
                 None => WorkspaceDetectionDayEntry {
                     date,
@@ -290,7 +206,6 @@ impl WorkspaceDetectionTimeSeries {
                     error_rate: None,
                     avg_duration_ms: None,
                     p95_duration_ms: None,
-                    meters: BTreeMap::new(),
                 },
             });
             let Ok(next) = date.checked_add(1.days()) else {
@@ -313,9 +228,7 @@ fn count_of(by_status: &[WorkspaceDetectionStatusEntry], status: DetectionStatus
 
 #[cfg(test)]
 mod tests {
-    use nvisy_postgres::query::{
-        DetectionDurations, DetectionStatusCount, StorageByKind, UsageByModel,
-    };
+    use nvisy_postgres::query::{DetectionDurations, DetectionStatusCount, StorageByKind};
 
     use super::*;
 
@@ -343,31 +256,10 @@ mod tests {
             p95_ms: Some(56_000),
         };
 
-        let usage = vec![
-            UsageByModel {
-                model: "gpt-4".to_string(),
-                meters: HashMap::from([
-                    (UsageMeter::TokensInput, 130.0),
-                    (UsageMeter::TokensOutput, 60.0),
-                ]),
-                calls: 2,
-                errors: 0,
-            },
-            UsageByModel {
-                model: "claude".to_string(),
-                meters: HashMap::from([
-                    (UsageMeter::TokensInput, 200.0),
-                    (UsageMeter::TokensTotal, 250.0),
-                ]),
-                calls: 1,
-                errors: 1,
-            },
-        ];
         let a = WorkspaceAnalytics::from_snapshot(AnalyticsSnapshot {
             storage,
             detections,
             durations,
-            usage,
         });
 
         // Every DocumentKind / DetectionStatus is present (zero-filled), so the
@@ -394,16 +286,6 @@ mod tests {
         // error_rate = failed / (completed + failed) = 1 / 4.
         assert_eq!(a.detections.error_rate, Some(0.25));
         assert_eq!(a.detections.avg_duration_ms, Some(30_000));
-
-        // Usage: per-model entries preserved; workspace meter totals sum each
-        // meter across models (only reported meters appear), and call/error
-        // counts sum too.
-        assert_eq!(a.usage.by_model.len(), 2);
-        assert_eq!(a.usage.meters.get("tokensInput"), Some(&330.0)); // 130 + 200
-        assert_eq!(a.usage.meters.get("tokensOutput"), Some(&60.0)); // 60 (gpt-4 only)
-        assert_eq!(a.usage.meters.get("tokensTotal"), Some(&250.0)); // 250 (claude only)
-        assert_eq!(a.usage.calls, 3);
-        assert_eq!(a.usage.errors, 1);
     }
 
     #[test]
@@ -424,10 +306,6 @@ mod tests {
             failed: 1,
             avg_ms: Some(20_000),
             p95_ms: Some(28_000),
-            meters: HashMap::from([
-                (UsageMeter::TokensInput, 1000.0),
-                (UsageMeter::TokensOutput, 400.0),
-            ]),
         }];
 
         let series = WorkspaceDetectionTimeSeries::from_window(
@@ -441,20 +319,17 @@ mod tests {
         assert_eq!(series.points[0].date, date("2026-01-05"));
         assert_eq!(series.points[2].date, date("2026-01-07"));
 
-        // Active day: derived error rate + meters carried through.
+        // Active day: derived error rate and durations carried through.
         let d5 = &series.points[0];
         assert_eq!(d5.detections, 3);
         assert_eq!(d5.error_rate, Some(1.0 / 3.0));
         assert_eq!(d5.avg_duration_ms, Some(20_000));
-        assert_eq!(d5.meters.get("tokensInput"), Some(&1000.0));
-        assert!(!d5.meters.contains_key("tokensTotal"));
 
-        // Gap-filled days: detections 0, everything else omitted (empty meters).
+        // Gap-filled days: detections 0, everything else omitted.
         let d6 = &series.points[1];
         assert_eq!(d6.detections, 0);
         assert_eq!(d6.error_rate, None);
         assert_eq!(d6.avg_duration_ms, None);
-        assert!(d6.meters.is_empty());
     }
 
     #[test]
@@ -471,7 +346,6 @@ mod tests {
                 avg_ms: None,
                 p95_ms: None,
             },
-            usage: Vec::new(),
         });
 
         assert_eq!(a.detections.error_rate, None);

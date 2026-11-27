@@ -118,7 +118,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::types::Json;
+    use crate::types::{Json, Retention};
 
     /// Wraps a raw JSON value as a settings column for `or_default` testing.
     fn column(value: serde_json::Value) -> Json<WorkspaceSettings> {
@@ -130,6 +130,29 @@ mod tests {
         let settings = column(json!({})).or_default();
         assert_eq!(settings.raster, RasterPolicy::Auto);
         assert_eq!(settings.retention, RetentionSettings::default());
+    }
+
+    #[test]
+    fn a_stale_field_falls_back_alone() {
+        let settings = column(json!({
+            "review": { "minApprovals": 3 },
+            "retention": {
+                "originalDocuments": { "mode": "persistent", "days": 30 },
+                "auditLogs": { "mode": "fixed", "days": 30 },
+            },
+        }))
+        .or_default();
+        assert_eq!(settings.review.min_approvals, 3, "valid fields are kept");
+        assert_eq!(
+            settings.retention.original_documents,
+            Retention::Persistent { days: 30 },
+            "a valid sibling scope is kept",
+        );
+        assert_eq!(
+            settings.retention.audit_logs,
+            Retention::default(),
+            "only the stale scope resets",
+        );
     }
 
     #[test]

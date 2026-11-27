@@ -2,8 +2,9 @@
 --
 -- A blob is content-addressed, shared, and ref-counted: identical bytes are
 -- stored once and referenced by every document, audit, or intermediate that
--- needs them. A blob owns its data-retention window; the reaper reclaims a blob
--- only once nothing references it (ref_count = 0) and its window has elapsed.
+-- needs them. The reaper reclaims a blob as soon as nothing references it
+-- (ref_count = 0). Retention is enforced on the referrers: each releases its
+-- reference when its own window passes (or when it is deleted).
 --
 -- A document is a human-facing file — an original the user uploaded or a redacted
 -- output — pointing at its blob. Machine byproducts (detection audits, review
@@ -28,20 +29,26 @@ CREATE TABLE workspace_blobs (
     CONSTRAINT blobs_storage_path_not_empty CHECK (trim(storage_path) <> ''),
     CONSTRAINT blobs_storage_bucket_not_empty CHECK (trim(storage_bucket) <> ''),
 
+    -- The engine's 32-byte BLAKE3 digest of an audit or intermediates blob,
+    -- recorded when the blob is written. Reading the blob back checks its
+    -- decoded content against this, so a change to the stored bytes is caught.
+    -- NULL for blobs the engine does not read back (documents, avatars).
+    audit_digest            BYTEA            DEFAULT NULL,
+    CONSTRAINT blobs_audit_digest_length CHECK (audit_digest IS NULL OR octet_length(audit_digest) = 32),
+
     -- How many live rows reference this blob. The reaper reclaims a blob only at
     -- zero. Never negative.
     ref_count               INTEGER          NOT NULL DEFAULT 0,
     CONSTRAINT blobs_ref_count_min CHECK (ref_count >= 0),
 
-    -- Lifecycle: created, retention window, and object reclamation. Reclamation is
+    -- Lifecycle: created and object reclamation. Retention lives on the referrers,
+    -- not here: the blob is reclaimed once none is left. Reclamation is
     -- two-phase: purged_at claims the blob (committed before the object delete, so
     -- it stops deduplicating onto missing content), reclaimed_at confirms the
     -- object was removed. A claimed-but-not-reclaimed blob is retried by reconcile.
     created_at              TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
-    expires_at              TIMESTAMPTZ      DEFAULT NULL,
     purged_at               TIMESTAMPTZ      DEFAULT NULL,
     reclaimed_at            TIMESTAMPTZ      DEFAULT NULL,
-    CONSTRAINT blobs_expires_after_created CHECK (expires_at IS NULL OR expires_at >= created_at),
     CONSTRAINT blobs_purged_after_created CHECK (purged_at IS NULL OR purged_at >= created_at),
     CONSTRAINT blobs_reclaimed_after_purged CHECK (reclaimed_at IS NULL OR purged_at IS NOT NULL)
 );
@@ -55,11 +62,10 @@ CREATE UNIQUE INDEX blobs_dedup_idx
     ON workspace_blobs (workspace_id, content_hash, file_size_bytes, storage_bucket)
     WHERE purged_at IS NULL;
 
--- Data-retention sweep: the reclaimable set — unreferenced, expired, not yet
--- claimed.
+-- Purge sweep: the reclaimable set — unreferenced, not yet claimed.
 CREATE INDEX blobs_reclaimable_idx
-    ON workspace_blobs (expires_at)
-    WHERE ref_count = 0 AND expires_at IS NOT NULL AND purged_at IS NULL;
+    ON workspace_blobs (created_at)
+    WHERE ref_count = 0 AND purged_at IS NULL;
 
 -- Reconcile sweep: blobs claimed for purge whose object delete has not been
 -- confirmed, retried until reclaimed_at is stamped.
@@ -67,16 +73,16 @@ CREATE INDEX blobs_pending_reclaim_idx
     ON workspace_blobs (purged_at)
     WHERE purged_at IS NOT NULL AND reclaimed_at IS NULL;
 
-COMMENT ON TABLE workspace_blobs IS 'Content-addressed, ref-counted raw bytes shared across documents, audits, and intermediates; owns the data-retention window.';
+COMMENT ON TABLE workspace_blobs IS 'Content-addressed, ref-counted raw bytes shared across documents, audits, and intermediates; reclaimed once unreferenced.';
 COMMENT ON COLUMN workspace_blobs.id IS 'Unique blob identifier';
 COMMENT ON COLUMN workspace_blobs.workspace_id IS 'Owning workspace (scopes encryption and dedup)';
 COMMENT ON COLUMN workspace_blobs.content_hash IS 'SHA256 content hash';
 COMMENT ON COLUMN workspace_blobs.file_size_bytes IS 'Plaintext size in bytes';
 COMMENT ON COLUMN workspace_blobs.storage_path IS 'Object key in the store';
 COMMENT ON COLUMN workspace_blobs.storage_bucket IS 'Storage bucket/container';
+COMMENT ON COLUMN workspace_blobs.audit_digest IS 'Engine digest (32-byte BLAKE3) an audit or intermediates blob is checked against on read; NULL for other blobs';
 COMMENT ON COLUMN workspace_blobs.ref_count IS 'Number of live rows referencing this blob; reclaimed at zero';
 COMMENT ON COLUMN workspace_blobs.created_at IS 'Creation timestamp';
-COMMENT ON COLUMN workspace_blobs.expires_at IS 'Data-retention expiry (NULL = keep indefinitely)';
 COMMENT ON COLUMN workspace_blobs.purged_at IS 'When the blob was claimed for purge (excluded from dedup); NULL means still live';
 COMMENT ON COLUMN workspace_blobs.reclaimed_at IS 'When the backing object was confirmed removed; NULL means the delete is still pending';
 
@@ -94,8 +100,8 @@ CREATE TABLE workspace_documents (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- References. `blob_id` is nullable: the bytes are reclaimable, and once the
-    -- blob's retention window passes the reference is released and the pointer is
-    -- nulled while the document row (the ledger record) is kept.
+    -- document's retention window passes the reference is released and the pointer
+    -- is nulled while the document row (the ledger record) is kept.
     workspace_id            UUID             NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     account_id              UUID             NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
     blob_id                 UUID             DEFAULT NULL REFERENCES workspace_blobs (id),
@@ -121,7 +127,13 @@ CREATE TABLE workspace_documents (
     updated_at              TIMESTAMPTZ      NOT NULL DEFAULT current_timestamp,
     deleted_at              TIMESTAMPTZ      DEFAULT NULL,
     CONSTRAINT workspace_documents_updated_after_created CHECK (updated_at >= created_at),
-    CONSTRAINT workspace_documents_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
+    CONSTRAINT workspace_documents_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at),
+
+    -- When this document's bytes are released, from its own retention rule. Kept
+    -- on the document, not the blob: identical files share one blob, and each
+    -- document releases its reference at its own expiry. NULL keeps the bytes
+    -- until the document is deleted.
+    expires_at              TIMESTAMPTZ      DEFAULT NULL
 );
 
 -- Keep updated_at current on every row modification.
@@ -142,6 +154,11 @@ CREATE INDEX workspace_documents_blob_idx
     ON workspace_documents (blob_id)
     WHERE deleted_at IS NULL;
 
+-- The reaper's walk for live documents whose retention window has passed.
+CREATE INDEX workspace_documents_expiry_idx
+    ON workspace_documents (expires_at)
+    WHERE deleted_at IS NULL AND blob_id IS NOT NULL AND expires_at IS NOT NULL;
+
 -- Fuzzy display-name search over live documents.
 CREATE INDEX workspace_documents_display_name_trgm_idx
     ON workspace_documents USING gin (display_name gin_trgm_ops)
@@ -160,6 +177,7 @@ COMMENT ON COLUMN workspace_documents.metadata IS 'Extended metadata (JSON)';
 COMMENT ON COLUMN workspace_documents.created_at IS 'Creation timestamp';
 COMMENT ON COLUMN workspace_documents.updated_at IS 'Last modification timestamp';
 COMMENT ON COLUMN workspace_documents.deleted_at IS 'Soft-deletion timestamp; NULL means live';
+COMMENT ON COLUMN workspace_documents.expires_at IS 'When the document''s bytes are released (its retention window); NULL keeps them until deletion';
 
 -- Document lifecycle events feed the activity log and webhooks.
 ALTER TYPE ACTIVITY_TYPE ADD VALUE IF NOT EXISTS 'document.created';

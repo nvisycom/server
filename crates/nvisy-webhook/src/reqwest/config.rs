@@ -26,7 +26,7 @@ pub struct ReqwestConfig {
     /// HTTP request timeout (e.g. `30s`); falls back to the default when unset.
     #[cfg_attr(
         feature = "cli",
-        arg(long = "http-timeout", env = "HTTP_TIMEOUT", value_parser = humantime::parse_duration)
+        arg(long = "http-timeout", env = "HTTP_TIMEOUT", value_parser = nvisy_core::parse_duration)
     )]
     pub http_timeout: Option<Duration>,
 
@@ -55,7 +55,7 @@ pub struct ReqwestConfig {
             long = "http-min-retry-interval",
             env = "HTTP_MIN_RETRY_INTERVAL",
             default_value = "500ms",
-            value_parser = humantime::parse_duration,
+            value_parser = nvisy_core::parse_duration,
         )
     )]
     pub min_retry_interval: Duration,
@@ -67,7 +67,7 @@ pub struct ReqwestConfig {
             long = "http-max-retry-interval",
             env = "HTTP_MAX_RETRY_INTERVAL",
             default_value = "30s",
-            value_parser = humantime::parse_duration,
+            value_parser = nvisy_core::parse_duration,
         )
     )]
     pub max_retry_interval: Duration,

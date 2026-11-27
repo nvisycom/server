@@ -98,7 +98,7 @@ registry_token!(
 registry_token!(
     /// A modality filter token (`text`, `tabular`, `image`, `audio`).
     ModalityToken => "A supported document modality.",
-    |format| format_modality(format.id().as_str()).map(ToOwned::to_owned)
+    |format| format_modality(format.id().as_str()).map(|modality| modality.as_str().to_owned())
 );
 
 /// Query parameters for listing documents.

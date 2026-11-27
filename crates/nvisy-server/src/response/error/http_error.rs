@@ -45,6 +45,13 @@ impl Error<'static> {
     pub fn not_found(resource: &'static str) -> Self {
         Self::new(ErrorKind::NotFound).with_message(format!("{resource} not found"))
     }
+
+    /// Creates the [`Conflict`](ErrorKind::Conflict) raised when a document's
+    /// bytes are gone before the detection or redaction that needs them: released
+    /// on retention, or the document deleted.
+    pub fn document_content_gone() -> Self {
+        Self::new(ErrorKind::Conflict).with_message("The document's content is no longer available")
+    }
 }
 
 impl<'a> Error<'a> {

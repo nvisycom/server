@@ -44,6 +44,9 @@ pub struct WorkspaceDocument {
     pub updated_at: Timestamp,
     /// When the document was soft-deleted.
     pub deleted_at: Option<Timestamp>,
+    /// When the document's bytes are released, from its retention rule; `None`
+    /// keeps them until the document is deleted.
+    pub expires_at: Option<Timestamp>,
 }
 
 /// Data for creating a new document.
@@ -68,6 +71,9 @@ pub struct NewWorkspaceDocument {
     pub file_extension: Option<String>,
     /// Metadata.
     pub metadata: Option<serde_json::Value>,
+    /// When the document's bytes are released, from its retention rule; `None`
+    /// keeps them until the document is deleted.
+    pub expires_at: Option<Timestamp>,
 }
 
 impl NewWorkspaceDocument {

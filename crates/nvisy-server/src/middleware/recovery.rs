@@ -37,7 +37,7 @@ pub struct RecoveryConfig {
     /// with a timeout message.
     #[cfg_attr(
         feature = "cli",
-        arg(long, env = "REQUEST_TIMEOUT", default_value = "30s", value_parser = humantime::parse_duration)
+        arg(long, env = "REQUEST_TIMEOUT", default_value = "30s", value_parser = nvisy_core::parse_duration)
     )]
     pub request_timeout: Duration,
 }

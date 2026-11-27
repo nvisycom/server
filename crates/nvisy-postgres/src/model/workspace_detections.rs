@@ -32,9 +32,13 @@ pub struct WorkspaceDetection {
     /// tokenized text). `None` until analysis writes it, and stays `None` when the
     /// analysis ran no enricher. A blob reference, not a document.
     pub intermediate_blob_id: Option<Uuid>,
+    /// When the intermediate's bytes are released (intermediates retention).
+    pub intermediate_expires_at: Option<Timestamp>,
     /// Base-analysis (findings set) blob. `None` before analysis commits and once
     /// the bytes are reclaimed on retention (the row is kept). A blob reference.
     pub audit_blob_id: Option<Uuid>,
+    /// When the base analysis's bytes are released (audit-logs retention).
+    pub audit_expires_at: Option<Timestamp>,
     /// Current detection status.
     pub status: DetectionStatus,
     /// Detect idempotency key (dedupes retries).
@@ -116,8 +120,12 @@ pub struct UpdateWorkspaceDetection {
     pub status: Option<DetectionStatus>,
     /// Intermediate blob holding the encrypted enrichment.
     pub intermediate_blob_id: Option<Option<Uuid>>,
+    /// When the intermediate's bytes are released.
+    pub intermediate_expires_at: Option<Option<Timestamp>>,
     /// Base-analysis (findings set) blob, set when the analysis commits.
     pub audit_blob_id: Option<Option<Uuid>>,
+    /// When the base analysis's bytes are released.
+    pub audit_expires_at: Option<Option<Timestamp>>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<Json<DetectionMetadata>>,
     /// Accumulated reviewer edits; outer `None` leaves it, inner `None` clears it.

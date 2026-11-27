@@ -2,12 +2,12 @@
 //! deployment offers, independent of any workspace.
 //!
 //! Exposes the label taxonomy (the categories of sensitive data policies can
-//! target), the recognizers the engine has registered, which connectors can be
-//! created, and which sign-in methods are available. All are deployment-owned
-//! reference data, not persisted rows: labels come from the runtime's built-in
-//! [`LabelCatalog`], recognizers from the configured [`Engine`] lineup, connector
-//! availability from the host's configuration, and sign-in methods from the
-//! configured auth providers.
+//! target), the recognizers the engine has registered, the file formats it can
+//! process, which connectors can be created, and which sign-in methods are
+//! available. All are deployment-owned reference data, not persisted rows: labels
+//! come from the runtime's built-in [`LabelCatalog`], recognizers and formats from
+//! the configured [`Engine`], connector availability from the host's
+//! configuration, and sign-in methods from the configured auth providers.
 //!
 //! [`Engine`]: elide_pipeline::Engine
 
@@ -25,7 +25,7 @@ use serde::Serialize;
 use crate::extract::{AuthState, Json};
 use crate::handler::response::RecognizerCatalog;
 use crate::response::ErrorResponse;
-use crate::service::{EngineService, OidcService, ServiceState};
+use crate::service::{DocumentModality, EngineService, OidcService, ServiceState, format_modality};
 
 /// Lists the deployment's supported labels (the built-in taxonomy).
 async fn list_labels(_: AuthState) -> Json<LabelCatalog> {
@@ -178,6 +178,78 @@ fn list_connectors_docs(op: TransformOperation) -> TransformOperation {
         .response::<401, Json<ErrorResponse>>()
 }
 
+/// One file format the engine can process.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SupportedFormat {
+    /// The engine's format id (e.g. `elide.document.pdf`).
+    pub id: String,
+    /// The modality the format decodes to.
+    pub modality: DocumentModality,
+    /// The file extensions that resolve to this format, lowercased with no dot.
+    pub extensions: Vec<String>,
+    /// The MIME content types that resolve to this format.
+    pub content_types: Vec<String>,
+}
+
+/// The file formats this deployment can process.
+///
+/// Uploads and imports of any other format are rejected, so a client builds its
+/// file picker's accept list from this rather than a list of its own.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FormatCapabilities {
+    /// The supported formats, in the engine's registration order.
+    pub formats: Vec<SupportedFormat>,
+}
+
+/// Reports the file formats the engine can process.
+async fn list_formats(
+    State(engine): State<EngineService>,
+    _: AuthState,
+) -> Json<FormatCapabilities> {
+    Json(format_capabilities(&engine))
+}
+
+/// The user-facing formats in the engine's registry: those with a modality a
+/// document can be (metadata-only and test formats are left out).
+fn format_capabilities(engine: &EngineService) -> FormatCapabilities {
+    let formats = engine
+        .engine()
+        .formats()
+        .iter()
+        .filter_map(|format| {
+            let id = format.id().as_str();
+            Some(SupportedFormat {
+                modality: format_modality(id)?,
+                id: id.to_owned(),
+                extensions: format
+                    .extensions()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+                content_types: format
+                    .content_types()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            })
+        })
+        .collect();
+    FormatCapabilities { formats }
+}
+
+fn list_formats_docs(op: TransformOperation) -> TransformOperation {
+    op.summary("List supported file formats")
+        .description(
+            "Returns the file formats this deployment can process, each with its modality, \
+             file extensions, and content types. Uploading or importing any other format is \
+             rejected, so build a file picker's accept list from this.",
+        )
+        .response::<200, Json<FormatCapabilities>>()
+        .response::<401, Json<ErrorResponse>>()
+}
+
 /// The sign-in methods this deployment offers.
 ///
 /// Lets a client render the login screen without probing: one ordered list of
@@ -212,7 +284,7 @@ fn list_auth_docs(op: TransformOperation) -> TransformOperation {
 }
 
 /// Authenticated capability routes: the deployment reference data a signed-in
-/// client reads (labels, recognizers, connectors).
+/// client reads (labels, recognizers, formats, connectors).
 pub fn private_routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::get_with;
 
@@ -224,6 +296,10 @@ pub fn private_routes() -> ApiRouter<ServiceState> {
         .api_route(
             "/capabilities/recognizers",
             get_with(list_recognizers, list_recognizers_docs),
+        )
+        .api_route(
+            "/capabilities/formats",
+            get_with(list_formats, list_formats_docs),
         )
         .api_route(
             "/capabilities/connectors",
@@ -289,5 +365,31 @@ mod tests {
         assert!(!providers.dropbox);
         assert!(!providers.one_drive);
         assert!(!providers.box_provider);
+    }
+
+    #[tokio::test]
+    async fn formats_report_what_the_engine_decodes() {
+        use crate::service::{EngineConfig, EngineService};
+
+        let engine = EngineService::from_config(EngineConfig { config_path: None })
+            .await
+            .expect("default engine builds");
+        let capabilities = super::format_capabilities(&engine);
+        let audio: Vec<&str> = capabilities
+            .formats
+            .iter()
+            .filter(|format| format.modality == DocumentModality::Audio)
+            .flat_map(|format| format.extensions.iter().map(String::as_str))
+            .collect();
+        // WAV is the only audio codec built in: MP3 is opt-in upstream
+        // (`codec-mp3`), and there is no Ogg codec.
+        assert_eq!(audio, ["wav"]);
+        assert!(
+            !capabilities
+                .formats
+                .iter()
+                .any(|format| format.extensions.iter().any(|ext| ext == "ogg")),
+            "ogg has no codec, so it must not be advertised",
+        );
     }
 }

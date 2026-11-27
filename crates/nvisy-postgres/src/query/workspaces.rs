@@ -50,24 +50,19 @@ pub trait WorkspaceRepository {
         limit: i64,
     ) -> impl Future<Output = Result<Vec<Uuid>>> + Send;
 
-    /// Tears down a soft-deleted workspace's blob references and marks the freed
-    /// blobs expired, so the reaper reclaims their bytes.
+    /// Tears down a soft-deleted workspace's blob references, so the reaper
+    /// reclaims their bytes once nothing else references them.
     ///
     /// Soft-deletes the workspace's blob-holding entities (documents, detections,
-    /// redactions), drops the reference each held — the same reference-drop the
-    /// per-entity delete paths do, in bulk — and stamps `expires_at = now()` on
-    /// those blobs. The expiry stamp is the one deliberate exception to "the
-    /// workspace never touches blob state": once the grace window is up and the
-    /// workspace is being destroyed, its data's retention no longer applies, and a
-    /// blob kept indefinitely (`expires_at IS NULL`) would otherwise never become
-    /// reclaimable and strand the workspace forever. It sets only the retention
-    /// *flag*, never an object — the reaper still does all object deletion. Returns
-    /// how many references were dropped. Idempotent: an already-soft-deleted entity
-    /// is skipped, so it never double-drops.
+    /// redactions) and drops the reference each held — the same reference-drop the
+    /// per-entity delete paths do, in bulk. It never touches an object: the reaper
+    /// still does all object deletion. Returns how many references were dropped.
+    /// Idempotent: an already-soft-deleted entity is skipped, so it never
+    /// double-drops.
     ///
     /// Call only for a workspace past its grace window (recoverability during the
     /// grace window depends on this not running before then).
-    fn release_and_expire_workspace_blobs(
+    fn release_workspace_blobs(
         &mut self,
         workspace_id: Uuid,
     ) -> impl Future<Output = Result<usize>> + Send;
@@ -181,16 +176,16 @@ impl WorkspaceRepository for PgConnection {
             .map_err(Error::from)
     }
 
-    async fn release_and_expire_workspace_blobs(&mut self, workspace_id: Uuid) -> Result<usize> {
+    async fn release_workspace_blobs(&mut self, workspace_id: Uuid) -> Result<usize> {
         use diesel_async::AsyncConnection;
         use schema::workspace_blobs::dsl as blobs;
         use schema::{
             workspace_blobs, workspace_detections, workspace_documents, workspace_redactions,
         };
 
-        // Soft-delete the workspace's blob-holding entities, drop the reference each
-        // still holds, and expire the freed blobs so the reaper reclaims their
-        // bytes. Runs in one transaction so it all commits together.
+        // Soft-delete the workspace's blob-holding entities and drop the reference
+        // each still holds, so the reaper reclaims the freed bytes. Runs in one
+        // transaction so it all commits together.
         //
         // Blob references live on documents (`blob_id`), detections
         // (`intermediate_blob_id` and `audit_blob_id`), and redactions
@@ -263,24 +258,6 @@ impl WorkspaceRepository for PgConnection {
                 .await
                 .map_err(Error::from)?;
             }
-
-            // Expire the freed blobs so the reaper reclaims their bytes even when
-            // retention was indefinite (`expires_at IS NULL`): the workspace is
-            // being destroyed, so its data's retention no longer applies. This sets
-            // only the retention flag; the reaper still does all object deletion.
-            // Kept at or before the existing window so a blob due sooner is never
-            // pushed later. A blob already claimed for purge (`purged_at`) is left
-            // to the reaper.
-            diesel::update(
-                workspace_blobs::table
-                    .filter(blobs::id.eq_any(&refs))
-                    .filter(blobs::purged_at.is_null())
-                    .filter(blobs::expires_at.is_null().or(blobs::expires_at.gt(now))),
-            )
-            .set(blobs::expires_at.eq(now))
-            .execute(conn)
-            .await
-            .map_err(Error::from)?;
 
             Ok(refs.len())
         })
@@ -428,25 +405,11 @@ mod tests {
             .await?;
         assert!(due.contains(&seeded.workspace_id), "the workspace is due");
 
-        // The seeded blob has indefinite retention (`expires_at IS NULL`), so
-        // without the purge's expire step it would never become reclaimable.
-        assert!(
-            conn.find_blob_by_id(blob_id)
-                .await?
-                .unwrap()
-                .expires_at
-                .is_none(),
-            "the blob starts with indefinite retention"
-        );
-
-        // Phase 1: release the references the workspace's entities hold and expire
-        // the freed blobs. The document is soft-deleted, its blob reference dropped
-        // (ref_count -> 0), and the blob marked expired — so an indefinitely-kept
-        // blob still becomes reclaimable. The blob row still exists, so the
+        // Phase 1: release the references the workspace's entities hold. The
+        // document is soft-deleted and its blob reference dropped (ref_count -> 0),
+        // so the blob becomes reclaimable. The blob row still exists, so the
         // workspace is NOT yet ready to hard-delete.
-        let released = conn
-            .release_and_expire_workspace_blobs(seeded.workspace_id)
-            .await?;
+        let released = conn.release_workspace_blobs(seeded.workspace_id).await?;
         assert_eq!(released, 1, "the document's one blob reference is dropped");
         assert!(
             conn.find_document_in_workspace(seeded.workspace_id, seeded.document_id)
@@ -459,14 +422,12 @@ mod tests {
             0,
             "the blob reference was released"
         );
-        // The deadlock fix: the freed blob is now due for purge despite its
-        // originally-indefinite retention.
         assert!(
             conn.blobs_due_for_purge(50)
                 .await?
                 .iter()
                 .any(|b| b.id == blob_id),
-            "the expired, unreferenced blob is now reclaimable"
+            "the unreferenced blob is now reclaimable"
         );
         assert!(
             !conn.workspace_blobs_reclaimed(seeded.workspace_id).await?,

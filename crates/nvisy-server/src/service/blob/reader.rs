@@ -2,6 +2,7 @@
 
 use std::str::FromStr;
 
+use elide_pipeline::entity::AuditHash;
 use elide_pipeline::{ArtifactSet, Audit, Engine};
 use nvisy_postgres::PgConn;
 use nvisy_postgres::model::{Blob, WorkspaceDetection, WorkspaceRedaction};
@@ -76,13 +77,15 @@ impl ArtifactReader {
     /// The `engine` reconstructs the audit's report from its serialized form: an
     /// [`Audit`] serializes but does not `Deserialize`, since its report tags each
     /// entity group by modality name and only the engine's registry can map those
-    /// back to concrete types.
+    /// back to concrete types. The decoded audit is checked against the digest
+    /// recorded on the blob when it was written.
     ///
     /// # Errors
     ///
     /// - `InternalServerError` if the blob's storage path is not a valid audit
-    ///   key, if the object is missing from storage, if reading its bytes fails,
-    ///   if decrypting them fails, or if the engine cannot decode the audit.
+    ///   key, if the blob has no valid recorded digest, if the object is missing
+    ///   from storage, if reading its bytes fails, if decrypting them fails, or if
+    ///   the engine cannot decode the audit or it does not match its digest.
     /// - A storage error if the object store rejects the read.
     pub async fn load_audit(
         &self,
@@ -95,6 +98,7 @@ impl ArtifactReader {
                 .with_message("Invalid audit storage key")
                 .with_context(err.to_string())
         })?;
+        let expected = recorded_digest(audit_blob)?;
 
         let data = self.infra.blobs.get(&key).await?.ok_or_else(|| {
             ErrorKind::InternalServerError.with_message("Audit is missing from storage")
@@ -116,7 +120,10 @@ impl ArtifactReader {
                     .with_context(err.to_string())
             })?;
         engine
-            .deserialize_audit(&mut serde_json::Deserializer::from_slice(&plaintext))
+            .deserialize_audit(
+                &expected,
+                &mut serde_json::Deserializer::from_slice(&plaintext),
+            )
             .map_err(|err| {
                 ErrorKind::InternalServerError
                     .with_message("Failed to decode audit")
@@ -163,9 +170,10 @@ impl ArtifactReader {
     /// # Errors
     ///
     /// - `InternalServerError` if the blob's storage path is not a valid
-    ///   intermediates key, if the object is missing from storage, if reading its
-    ///   bytes fails, if decrypting them fails, or if the engine cannot decode the
-    ///   artifacts.
+    ///   intermediates key, if the blob has no valid recorded digest, if the
+    ///   object is missing from storage, if reading its bytes fails, if decrypting
+    ///   them fails, or if the engine cannot decode the artifacts or they do not
+    ///   match their digest.
     /// - A storage error if the object store rejects the read.
     pub async fn load_intermediates(
         &self,
@@ -178,6 +186,7 @@ impl ArtifactReader {
                 .with_message("Invalid intermediates storage key")
                 .with_context(err.to_string())
         })?;
+        let expected = recorded_digest(intermediates_blob)?;
 
         let data = self.infra.blobs.get(&key).await?.ok_or_else(|| {
             ErrorKind::InternalServerError.with_message("Intermediates are missing from storage")
@@ -199,7 +208,10 @@ impl ArtifactReader {
                     .with_context(err.to_string())
             })?;
         engine
-            .deserialize_artifacts(&mut serde_json::Deserializer::from_slice(&plaintext))
+            .deserialize_artifacts(
+                &expected,
+                &mut serde_json::Deserializer::from_slice(&plaintext),
+            )
             .map_err(|err| {
                 ErrorKind::InternalServerError
                     .with_message("Failed to decode intermediates")
@@ -249,4 +261,22 @@ impl ArtifactReader {
             .await?
             .ok_or_else(|| ErrorKind::NotFound.with_message(gone_message))
     }
+}
+
+/// The engine digest recorded on an audit or intermediates blob when it was
+/// written, which the decoded content must match.
+///
+/// # Errors
+///
+/// `InternalServerError` if the blob has no digest or it is not a valid one.
+fn recorded_digest(blob: &Blob) -> Result<AuditHash> {
+    let digest = blob.audit_digest.as_deref().ok_or_else(|| {
+        ErrorKind::InternalServerError.with_message("Stored analysis has no recorded digest")
+    })?;
+    let bytes = <[u8; 32]>::try_from(digest).map_err(|_| {
+        ErrorKind::InternalServerError
+            .with_message("Stored analysis has an invalid recorded digest")
+            .with_context(format!("expected 32 bytes, found {}", digest.len()))
+    })?;
+    Ok(AuditHash::from_bytes(bytes))
 }

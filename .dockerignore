@@ -23,7 +23,6 @@ coverage/
 # Documentation
 *.md
 !README.md
-docs/
 
 # Development
 .env

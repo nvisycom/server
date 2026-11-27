@@ -97,6 +97,8 @@ pub struct UpdateWorkspaceWebhook {
     pub headers: Option<Json<WebhookHeaders>>,
     /// Updated status.
     pub status: Option<WebhookStatus>,
+    /// Updated count of consecutive delivery failures.
+    pub consecutive_failures: Option<i32>,
     /// Soft deletion timestamp.
     pub deleted_at: Option<Option<Timestamp>>,
 }

@@ -9,7 +9,7 @@ pub enum WorkspacePolicyConstraints {
     NameLength,
     #[strum(serialize = "workspace_policies_description_length")]
     DescriptionLength,
-    #[strum(serialize = "workspace_policies_definition_size")]
+    #[strum(serialize = "workspace_policy_versions_definition_size")]
     DefinitionSize,
     #[strum(serialize = "workspace_policies_metadata_size")]
     MetadataSize,

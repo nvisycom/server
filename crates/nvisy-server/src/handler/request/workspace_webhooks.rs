@@ -67,8 +67,8 @@ pub struct UpdateWorkspaceWebhook {
     pub events: Option<Vec<WebhookEvent>>,
     /// Updated custom headers to include in webhook requests.
     pub headers: Option<HashMap<String, String>>,
-    /// Updated status (enabled or disabled). Ignored while the webhook is
-    /// system-suspended.
+    /// Updated status (enabled or disabled). Setting `enabled` re-enables a
+    /// webhook the system suspended after repeated delivery failures.
     pub status: Option<WebhookStatus>,
 }
 

@@ -34,8 +34,9 @@ impl From<WorkspaceBlobConstraints> for Error<'static> {
             | WorkspaceBlobConstraints::StoragePathNotEmpty
             | WorkspaceBlobConstraints::StorageBucketNotEmpty
             | WorkspaceBlobConstraints::RefCountMin
-            | WorkspaceBlobConstraints::ExpiresAfterCreated
-            | WorkspaceBlobConstraints::PurgedAfterCreated => {
+            | WorkspaceBlobConstraints::AuditDigestLength
+            | WorkspaceBlobConstraints::PurgedAfterCreated
+            | WorkspaceBlobConstraints::ReclaimedAfterPurged => {
                 ErrorKind::InternalServerError.with_message("Invalid blob state")
             }
         }

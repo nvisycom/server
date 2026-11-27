@@ -25,11 +25,17 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+      # A SemVer prerelease tag (v0.1.0-rc.1) is published as a prerelease, so
+      # GitHub does not show it as "Latest". docker.yml applies the same rule
+      # to the `latest` image tag.
       - name: Create release
         run: |
-          gh release create ${{ steps.version.outputs.VERSION }} \
-            --title "Release ${{ steps.version.outputs.VERSION }}" \
-            --generate-notes
+          version="${{ steps.version.outputs.VERSION }}"
+          prerelease=""
+          case "$version" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$version" \
+            --title "Release $version" \
+            --generate-notes $prerelease
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -65,13 +71,13 @@ jobs:
           key: release-${{ matrix.target }}
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} --bin nvisy-server
+        run: cargo build --release --target ${{ matrix.target }} --bin nvisy-cli
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf nvisy-server-${{ matrix.target }}.tar.gz nvisy-server
+          tar czf nvisy-server-${{ matrix.target }}.tar.gz nvisy-cli
           mv nvisy-server-${{ matrix.target }}.tar.gz ${{ github.workspace }}
 
       - name: Package (Windows)
@@ -79,7 +85,7 @@ jobs:
         shell: pwsh
         run: |
           cd target/${{ matrix.target }}/release
-          Compress-Archive -Path nvisy-server.exe -DestinationPath nvisy-server-${{ matrix.target }}.zip
+          Compress-Archive -Path nvisy-cli.exe -DestinationPath nvisy-server-${{ matrix.target }}.zip
           Move-Item nvisy-server-${{ matrix.target }}.zip ${{ github.workspace }}
 
       - name: Upload (Unix)

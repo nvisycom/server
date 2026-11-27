@@ -92,14 +92,13 @@ impl WorkspacePurgeWorker {
     }
 
     /// Advances a single workspace through the purge: release the references its
-    /// entities hold and expire the freed blobs, then hard-delete it once its
+    /// entities hold, then hard-delete it once its
     /// blobs have been reclaimed. Idempotent, so a workspace whose blobs are not
     /// yet reclaimed is left for a later tick.
     async fn purge_one(conn: &mut nvisy_postgres::PgConn, workspace_id: Uuid) -> Result<()> {
-        // Release the references the workspace's entities hold and expire the freed
-        // blobs, so the reaper reclaims their bytes (even blobs kept indefinitely).
-        conn.release_and_expire_workspace_blobs(workspace_id)
-            .await?;
+        // Release the references the workspace's entities hold, so the reaper
+        // reclaims the freed bytes.
+        conn.release_workspace_blobs(workspace_id).await?;
 
         // Hard-delete only once every blob is gone, so the cascade never strands an
         // object; otherwise leave the workspace for a later tick.

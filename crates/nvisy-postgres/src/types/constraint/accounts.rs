@@ -21,8 +21,6 @@ pub enum AccountConstraints {
     TimezoneFormat,
     #[strum(serialize = "accounts_locale_format")]
     LocaleFormat,
-    #[strum(serialize = "accounts_suspended_not_admin")]
-    SuspendedNotAdmin,
     #[strum(serialize = "accounts_username_unique_idx")]
     UsernameUnique,
     #[strum(serialize = "accounts_email_address_unique_idx")]

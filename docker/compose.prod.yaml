@@ -1,5 +1,10 @@
 name: nvisy
 
+# The inference services (NER, OCR, STT) come from compose.inference.yaml. They
+# sit behind profiles — choose them with COMPOSE_PROFILES (for example
+# `ner,ocr,stt`, any subset) or `--profile` flags — and are reachable only on the
+# private network, at the URLs engine.example.toml uses.
+
 services:
   postgres:
     image: postgres:18
@@ -12,7 +17,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-nvisy}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # PostgreSQL 18 keeps its data under a versioned directory below
+      # /var/lib/postgresql, so the volume mounts the parent.
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: [
         "CMD-SHELL",
@@ -32,9 +39,12 @@ services:
     ports:
       - "${NATS_PORT:-4222}:4222"
       - "${NATS_MONITOR_PORT:-8222}:8222"
+    # Clients authenticate with NATS_TOKEN; the server presents the same token.
     command:
       - "-c"
       - "/etc/nats/nats.conf"
+      - "--auth"
+      - "${NATS_TOKEN:?NATS_TOKEN is required}"
     volumes:
       - nats_data:/data
       - ./nats/nats.conf:/etc/nats/nats.conf:ro
@@ -94,11 +104,72 @@ services:
     networks:
       - nvisy
 
+  # Inference services, from compose.inference.yaml (profiles ner, ocr, stt).
+  ner-init:
+    extends:
+      file: compose.inference.yaml
+      service: ner-init
+    container_name: nvisy-ner-init
+    networks:
+      - nvisy
+
+  ner:
+    extends:
+      file: compose.inference.yaml
+      service: ner
+    container_name: nvisy-ner
+    networks:
+      - nvisy
+    depends_on:
+      ner-init:
+        condition: service_completed_successfully
+
+  ocr-init:
+    extends:
+      file: compose.inference.yaml
+      service: ocr-init
+    container_name: nvisy-ocr-init
+    networks:
+      - nvisy
+
+  ocr:
+    extends:
+      file: compose.inference.yaml
+      service: ocr
+    container_name: nvisy-ocr
+    networks:
+      - nvisy
+    depends_on:
+      ocr-init:
+        condition: service_completed_successfully
+
+  stt-init:
+    extends:
+      file: compose.inference.yaml
+      service: stt-init
+    container_name: nvisy-stt-init
+    networks:
+      - nvisy
+
+  stt:
+    extends:
+      file: compose.inference.yaml
+      service: stt
+    container_name: nvisy-stt
+    networks:
+      - nvisy
+    depends_on:
+      stt-init:
+        condition: service_completed_successfully
+
   server:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: nvisy/server:${VERSION:-latest}
+    # VERSION names a published release to pull from ghcr.io (pin it; there is
+    # no `latest` while releases are prereleases), or any local tag together
+    # with `--build` to build this checkout.
+    image: ghcr.io/nvisycom/server:${VERSION:?set VERSION to a published release, or a local tag with --build}
     container_name: nvisy-server
     restart: unless-stopped
     ports:
@@ -110,6 +181,7 @@ services:
       SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-30s}
       POSTGRES_URL: postgresql://${POSTGRES_USER:-nvisy}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-nvisy}
       NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:?NATS_TOKEN is required}
       S3_BUCKET: ${S3_BUCKET:-nvisy}
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_ENDPOINT: http://rustfs:9000
@@ -125,6 +197,10 @@ services:
       HEALTH_CACHE_DURATION: ${HEALTH_CACHE_DURATION:-30s}
       RUST_LOG: ${RUST_LOG:-info}
       RUST_BACKTRACE: ${RUST_BACKTRACE:-0}
+    # The auth key pair, the encryption key, and engine.toml. The image runs as
+    # uid 1000, which must be able to read every file here.
+    volumes:
+      - ${NVISY_CONFIG_DIR:-./config}:/etc/nvisy:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -134,6 +210,17 @@ services:
         condition: service_healthy
       rustfs-init:
         condition: service_completed_successfully
+      # Started only with their profiles; when they are, the server waits for
+      # them to be ready.
+      ner:
+        condition: service_healthy
+        required: false
+      ocr:
+        condition: service_healthy
+        required: false
+      stt:
+        condition: service_healthy
+        required: false
     networks:
       - nvisy
 
@@ -141,6 +228,11 @@ volumes:
   postgres_data:
   nats_data:
   rustfs_data:
+  # Model caches, populated by the init containers and mounted read-only by the
+  # services, so weights stay out of the images and off repeat pulls.
+  ner_cache:
+  ocr_cache:
+  stt_cache:
 
 networks:
   nvisy:

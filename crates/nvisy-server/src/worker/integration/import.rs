@@ -165,7 +165,7 @@ impl Importer {
         Ok(conn
             .find_workspace_by_id(workspace_id)
             .await?
-            .and_then(|workspace| {
+            .map(|workspace| {
                 workspace
                     .settings
                     .or_default()
@@ -347,15 +347,16 @@ impl Importer {
         let filename = object_basename(&entry.name);
         let extension = object_extension(&entry.name);
 
-        // The content-addressed fields (size, hash) and retention live on the blob;
-        // the human-facing name, extension, and creator live on the document.
+        // The content-addressed fields (size, hash) live on the blob; the
+        // human-facing name, extension, creator, and retention live on the
+        // document.
         let new_blob = NewBlob {
             workspace_id: connection.workspace_id,
             content_hash: measurements.sha256().to_vec(),
             file_size_bytes: i64::try_from(measurements.bytes()).unwrap_or(i64::MAX),
             storage_path: file_key.to_string(),
             storage_bucket: Bucket::Documents.name().to_owned(),
-            expires_at: expires_at.map(Into::into),
+            audit_digest: None,
         };
         let new_document = NewWorkspaceDocument {
             workspace_id: connection.workspace_id,
@@ -366,6 +367,7 @@ impl Importer {
             original_filename: Some(filename),
             file_extension: extension,
             metadata: None,
+            expires_at: expires_at.map(Into::into),
         };
         let document = conn
             .record_imported_document(new_document, new_blob, connection.id, entry.key.clone())

@@ -4,18 +4,34 @@ use std::io::Cursor;
 use std::str::FromStr;
 
 use bytes::Bytes;
-use elide_pipeline::Audit;
 use elide_pipeline::file::Document;
+use elide_pipeline::{ArtifactSet, Audit};
 use nvisy_postgres::model::{Blob, NewBlob, WorkspaceDocument};
 use nvisy_postgres::types::{RetentionOverride, RetentionScope, RetentionSettings};
 use nvisy_s3::{AuditKey, Bucket, DocumentKey, IntermediateKey};
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
 use crate::response::{Error, ErrorKind, Result};
 use crate::service::{CryptoService, Infra};
+
+/// Tracing target for blob staging.
+const TRACING_TARGET: &str = "nvisy_server::service::blob::writer";
+
+/// A staged object: its blob, not yet inserted, and when the referrer that will
+/// point at it releases the bytes.
+///
+/// The expiry belongs to the referrer (a document, detection, or redaction row),
+/// not the blob, since identical bytes share one blob across referrers with
+/// different retention.
+#[derive(Debug, Clone)]
+pub struct StagedBlob {
+    /// The blob to resolve (share or insert) in the committing transaction.
+    pub blob: NewBlob,
+    /// When the referrer's retention window for these bytes ends.
+    pub expires_at: jiff::Timestamp,
+}
 
 /// Stages a pipeline run's outputs into the first-party blob store: encrypts and
 /// writes documents, audits, and enrichment intermediates, returning the
@@ -60,9 +76,11 @@ impl ArtifactWriter {
     ///
     /// # Errors
     ///
+    /// - `NotFound` if the object is missing from storage (its bytes were purged
+    ///   after the blob was looked up).
     /// - `InternalServerError` if the blob's storage path is not a valid document
-    ///   key, if the object is missing from storage, if reading its bytes fails,
-    ///   or if decrypting them with the workspace key fails.
+    ///   key, if reading its bytes fails, or if decrypting them with the workspace
+    ///   key fails.
     /// - A storage error if the object store rejects the read.
     pub async fn build_document(
         &self,
@@ -77,7 +95,7 @@ impl ArtifactWriter {
         })?;
 
         let data = self.infra.blobs.get(&key).await?.ok_or_else(|| {
-            ErrorKind::InternalServerError.with_message("Document content is missing from storage")
+            ErrorKind::NotFound.with_message("Document content is missing from storage")
         })?;
         let mut reader = data.into_reader();
         let mut ciphertext = Vec::new();
@@ -102,21 +120,21 @@ impl ArtifactWriter {
     }
 
     /// Encrypts the analysis, writes it to the audit bucket, and builds the
-    /// [`NewBlob`] that will hold it — but does not insert the blob.
+    /// [`StagedBlob`] that will hold it — but does not insert the blob.
     ///
     /// The analysis is the map of detected PII, so it is encrypted with the
     /// workspace key before it leaves the process. Its bytes live in the audit
-    /// bucket; retention is stamped on the blob (`expires_at`), so the reaper's
-    /// blob sweep expires it.
+    /// bucket; the returned expiry goes on the detection, whose pointer the
+    /// reaper releases once it passes.
     ///
     /// The object write is not transactional, so it is kept out of the caller's
     /// database transaction: the bytes are written first, then the returned blob
     /// is resolved (with the run's other writes) atomically. A rollback therefore
     /// leaves at worst an orphan object in the bucket, never a blob that points at
     /// bytes that were never written; the caller reclaims that orphan via
-    /// [`discard_staged_object`].
+    /// [`discard_staged`].
     ///
-    /// [`discard_staged_object`]: Self::discard_staged_object
+    /// [`discard_staged`]: Self::discard_staged
     ///
     /// # Errors
     ///
@@ -128,7 +146,7 @@ impl ArtifactWriter {
         retention_override: Option<&RetentionOverride>,
         workspace_settings: &RetentionSettings,
         analyzed: &Audit,
-    ) -> Result<NewBlob> {
+    ) -> Result<StagedBlob> {
         self.stage_audit_blob(
             workspace_id,
             retention_override,
@@ -140,7 +158,7 @@ impl ArtifactWriter {
     }
 
     /// Encrypts a redaction's review audit, writes it to the audit bucket, and
-    /// builds the [`NewBlob`] that will hold it — without inserting the blob.
+    /// builds the [`StagedBlob`] that will hold it — without inserting the blob.
     ///
     /// The review audit is the post-redaction [`Audit`]: the detection's analysis
     /// with the reviewer's edits applied and the redaction outcome recorded per
@@ -158,7 +176,7 @@ impl ArtifactWriter {
         retention_override: Option<&RetentionOverride>,
         workspace_settings: &RetentionSettings,
         reviewed: &Audit,
-    ) -> Result<NewBlob> {
+    ) -> Result<StagedBlob> {
         self.stage_audit_blob(
             workspace_id,
             retention_override,
@@ -179,7 +197,7 @@ impl ArtifactWriter {
         workspace_settings: &RetentionSettings,
         audit: &Audit,
         encrypt_step: &str,
-    ) -> Result<NewBlob> {
+    ) -> Result<StagedBlob> {
         let plaintext = serde_json::to_vec(audit).map_err(|error| analysis_serde_error(&error))?;
         let hash = Sha256::digest(&plaintext).to_vec();
         let size = i64::try_from(plaintext.len()).unwrap_or(i64::MAX);
@@ -201,19 +219,22 @@ impl ArtifactWriter {
             .resolve(RetentionScope::AuditLogs, retention_override)
             .expires_at(jiff::Timestamp::now());
 
-        Ok(NewBlob {
-            workspace_id,
-            content_hash: hash,
-            file_size_bytes: size,
-            storage_path: key.to_string(),
-            storage_bucket: Bucket::Audits.name().to_owned(),
-            expires_at: expires_at.map(Into::into),
+        Ok(StagedBlob {
+            blob: NewBlob {
+                workspace_id,
+                content_hash: hash,
+                file_size_bytes: size,
+                storage_path: key.to_string(),
+                storage_bucket: Bucket::Audits.name().to_owned(),
+                audit_digest: Some(audit.digest().as_bytes().to_vec()),
+            },
+            expires_at,
         })
     }
 
     /// Serializes a detection's enrichment intermediates (OCR layout, transcript),
     /// encrypts them with the workspace key, writes them to the intermediates store,
-    /// and builds the [`NewBlob`] that will hold them — without inserting the blob
+    /// and builds the [`StagedBlob`] that will hold them — without inserting the blob
     /// (staged like the analysis, reclaimed on rollback).
     ///
     /// The intermediates carry document content, so they are encrypted at rest and
@@ -225,13 +246,13 @@ impl ArtifactWriter {
     /// - `InternalServerError` if serializing `artifacts` or encrypting them with
     ///   the workspace key fails.
     /// - A storage error if writing the object fails.
-    pub async fn stage_intermediates<T: Serialize>(
+    pub async fn stage_intermediates(
         &self,
         workspace_id: Uuid,
         retention_override: Option<&RetentionOverride>,
         workspace_settings: &RetentionSettings,
-        artifacts: &T,
-    ) -> Result<NewBlob> {
+        artifacts: &ArtifactSet,
+    ) -> Result<StagedBlob> {
         let plaintext =
             serde_json::to_vec(artifacts).map_err(|error| analysis_serde_error(&error))?;
         let hash = Sha256::digest(&plaintext).to_vec();
@@ -252,28 +273,31 @@ impl ArtifactWriter {
             .resolve(RetentionScope::Intermediates, retention_override)
             .expires_at(jiff::Timestamp::now());
 
-        Ok(NewBlob {
-            workspace_id,
-            content_hash: hash,
-            file_size_bytes: size,
-            storage_path: key.to_string(),
-            storage_bucket: Bucket::Intermediates.name().to_owned(),
-            expires_at: expires_at.map(Into::into),
+        Ok(StagedBlob {
+            blob: NewBlob {
+                workspace_id,
+                content_hash: hash,
+                file_size_bytes: size,
+                storage_path: key.to_string(),
+                storage_bucket: Bucket::Intermediates.name().to_owned(),
+                audit_digest: Some(artifacts.digest().as_bytes().to_vec()),
+            },
+            expires_at,
         })
     }
 
     /// Encrypts redacted bytes, writes them to the documents bucket, and builds the
-    /// [`NewBlob`] that will hold them together with the redacted output's display
+    /// [`StagedBlob`] that will hold them together with the redacted output's display
     /// name — without inserting the blob or the document.
     ///
     /// A redaction commits its output document, review-audit row, and redaction
     /// row together in one transaction, so the output is staged (object written,
     /// blob returned for the caller to resolve) rather than inserted here, and is
-    /// reclaimed on rollback via [`discard_staged_object`]. The redacted document
+    /// reclaimed on rollback via [`discard_staged`]. The redacted document
     /// is a first-class document (a sibling of the source), downloadable through
     /// the normal document endpoints.
     ///
-    /// [`discard_staged_object`]: Self::discard_staged_object
+    /// [`discard_staged`]: Self::discard_staged
     ///
     /// # Errors
     ///
@@ -286,7 +310,7 @@ impl ArtifactWriter {
         retention_override: Option<&RetentionOverride>,
         workspace_settings: &RetentionSettings,
         bytes: Bytes,
-    ) -> Result<(NewBlob, String)> {
+    ) -> Result<(StagedBlob, String)> {
         let workspace_id = source_document.workspace_id;
         let plaintext_size = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
         let plaintext_hash = Sha256::digest(&bytes).to_vec();
@@ -307,36 +331,44 @@ impl ArtifactWriter {
             &source_document.display_name,
             &source_document.file_extension,
         );
-        let blob = NewBlob {
-            workspace_id,
-            content_hash: plaintext_hash,
-            file_size_bytes: plaintext_size,
-            storage_path: key.to_string(),
-            storage_bucket: Bucket::Documents.name().to_owned(),
-            expires_at: expires_at.map(Into::into),
+        let staged = StagedBlob {
+            blob: NewBlob {
+                workspace_id,
+                content_hash: plaintext_hash,
+                file_size_bytes: plaintext_size,
+                storage_path: key.to_string(),
+                storage_bucket: Bucket::Documents.name().to_owned(),
+                audit_digest: None,
+            },
+            expires_at,
         };
-        Ok((blob, redacted_name))
+        Ok((staged, redacted_name))
     }
 
-    /// Deletes a staged object whose blob was never resolved.
+    /// Deletes staged objects whose blobs were never resolved, best effort.
     ///
     /// The `stage_*` methods write an object before its `workspace_blobs` row; if
-    /// the committing transaction rolls back, the object has no blob and the
-    /// blob-driven reaper can never find it. The caller invokes this on that path
-    /// so the orphan is removed immediately instead of accumulating. It deletes
-    /// from whichever bucket the staged blob names, so it reclaims a staged audit,
-    /// review audit, intermediate, or redacted document alike. Best effort: a
-    /// failure here only leaves the object for a later manual sweep, so callers log
-    /// rather than propagate.
-    ///
-    /// # Errors
-    ///
-    /// - `InternalServerError` if the staged blob names an unknown or non-purgeable
-    ///   bucket, or its storage key does not parse.
-    /// - A storage error if the object delete fails.
-    pub async fn discard_staged_object(&self, staged: &NewBlob) -> Result<()> {
-        self.delete_object(&staged.storage_bucket, &staged.storage_path)
-            .await
+    /// the committing transaction rolls back (or never runs), the object has no
+    /// blob and the blob-driven reaper can never find it. Callers pass every
+    /// object they staged on that path so the orphans are removed immediately
+    /// instead of accumulating; each is deleted from whichever bucket its blob
+    /// names. A failed delete only leaves that object for a later manual sweep, so
+    /// it is logged and the rest still go.
+    pub async fn discard_staged(&self, staged: &[&StagedBlob]) {
+        for staged in staged {
+            let blob = &staged.blob;
+            if let Err(err) = self
+                .delete_object(&blob.storage_bucket, &blob.storage_path)
+                .await
+            {
+                tracing::warn!(
+                    target: TRACING_TARGET,
+                    error = %err,
+                    storage_path = %blob.storage_path,
+                    "Failed to reclaim orphaned staged object; left for a later sweep",
+                );
+            }
+        }
     }
 
     /// Removes an object from whichever store its blob names. An unparseable

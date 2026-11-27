@@ -25,7 +25,10 @@ pub use notification_params::{
     DetectionCompletedParams, DetectionFailedParams, MemberJoinedParams, NotificationPayload,
     RedactionCreatedParams, ReviewAssignedParams,
 };
-pub use retention::{Retention, RetentionOverride, RetentionScope, RetentionSettings};
+pub use retention::{
+    EPHEMERAL_WINDOW_HOURS, MAX_RETENTION_DAYS, Retention, RetentionOverride, RetentionScope,
+    RetentionSettings,
+};
 pub use typed_json::Json;
 pub use webhook_headers::{InvalidHeader, WebhookHeaders};
 pub use workspace_metadata::WorkspaceMetadata;

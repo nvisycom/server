@@ -30,7 +30,6 @@ default = []
 # from flags/env directly, keeping the dependency optional for library users.
 cli = [
     "dep:clap",
-    "dep:humantime",
     "nvisy-core/cli",
     "nvisy-s3/cli",
     "nvisy-postgres/cli",
@@ -114,7 +113,6 @@ tracing = { workspace = true, features = [] }
 
 # CLI
 clap = { workspace = true, features = ["derive", "env"], optional = true }
-humantime = { workspace = true, features = [], optional = true }
 
 # (De)serialization
 csv = { workspace = true, features = [] }
@@ -138,7 +136,6 @@ uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
 time = { workspace = true, features = [] }
 ipnet = { workspace = true, features = [] }
-bigdecimal = { workspace = true, features = [] }
 
 # Image processing
 image = { workspace = true }

@@ -169,6 +169,14 @@ mod tests {
             ))
         );
 
+        // The definition size is checked on the versions table.
+        assert_eq!(
+            ConstraintViolation::new("workspace_policy_versions_definition_size"),
+            Some(ConstraintViolation::WorkspacePolicy(
+                WorkspacePolicyConstraints::DefinitionSize
+            ))
+        );
+
         assert_eq!(ConstraintViolation::new("unknown_constraint"), None);
     }
 }

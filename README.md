@@ -72,16 +72,8 @@ Run `make help` to list the available commands.
 
 ## Documentation
 
-[`docs/`](docs/) covers the architecture, one document per concern.
-
-| Document                            | Subject                                                               |
-| ----------------------------------- | --------------------------------------------------------------------- |
-| [Architecture](docs/ARCHITECTURE.md) | The crates, the detect/redact pipeline, and how they fit together.    |
-| [Intelligence](docs/INTELLIGENCE.md) | Detection capabilities and the in-process redaction engine.           |
-| [Providers](docs/PROVIDERS.md)       | Inference and object-store provider design.                           |
-| [Security](docs/SECURITY.md)         | The encryption, authentication, and isolation model.                  |
-
-API documentation lives at [docs.nvisy.com](https://docs.nvisy.com).
+Architecture, security, and API documentation live at
+[docs.nvisy.com](https://docs.nvisy.com).
 
 ## Project
 

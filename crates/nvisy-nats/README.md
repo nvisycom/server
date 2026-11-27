@@ -14,7 +14,7 @@ and retry-aware error handling.
 
 ## Documentation
 
-See [`docs/`](../../docs/) for architecture, security, and API documentation.
+See [docs.nvisy.com](https://docs.nvisy.com) for architecture, security, and API documentation.
 
 ## Changelog
 

@@ -37,14 +37,14 @@ use crate::extract::{
     Authorized, IdempotencyKey, Json, Path, Query, SecurityContext, ValidateJson, markers,
 };
 use crate::handler::request::{
-    CreateWorkspaceDetection, CursorPagination, EditWorkspaceDetection,
+    CreateWorkspaceDetection, CursorPagination, EditWorkspaceDetection, RedactWorkspaceDetection,
     WorkspaceDetectionPathParams, WorkspaceDetectionsQuery,
 };
 use crate::handler::response::{
     DetectionTreesPage, WorkspaceDetection, WorkspaceDetectionSummary, WorkspaceDetectionsPage,
     WorkspaceRedactionResult,
 };
-use crate::handler::utility::resolve_account_ref;
+use crate::handler::utility::{RedactionKey, resolve_account_ref};
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, SseResponse};
 use crate::service::event::EventEmitter;
 use crate::service::{
@@ -120,8 +120,10 @@ async fn create_detection(
 fn create_detection_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Start a detection")
         .description(
-            "Starts analysis for a document against an explicit list of policies and \
-             returns 202 with the detection in the `pending` state; the analysis runs \
+            "Starts analysis for a document against named policies (a `policies` \
+             source) or a list of built-in labels (a `labels` source, run as a derived \
+             policy that an identical label list reuses), and returns 202 with the \
+             detection in the `pending` state; the analysis runs \
              in the background. Watch the detection's status via the SSE stream at \
              `.../detections/{detectionId}/events` (or re-read the detection) and \
              fetch the findings from `.../detections/{detectionId}/analysis/` once it \
@@ -409,13 +411,6 @@ fn status_event(event: &DetectionStatusEvent) -> Event {
         .unwrap_or_else(|_| Event::default().event("status"))
 }
 
-/// The 409 raised when a redaction's source document (or its bytes) is gone: the
-/// document row was deleted, or its blob reference cleared. Named once so the
-/// document-lookup and blob-lookup paths surface the same message.
-fn source_document_gone() -> Error<'static> {
-    ErrorKind::Conflict.with_message("The detection's source document is no longer available")
-}
-
 /// The pre-flight inputs a redaction reads under a connection before releasing it
 /// for the slow analysis and staging work.
 struct RedactInputs {
@@ -453,6 +448,7 @@ async fn redact_detection(
     authz: Authorized<markers::RunRedactions>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
     security: SecurityContext,
+    request: Option<ValidateJson<RedactWorkspaceDetection>>,
 ) -> Result<(StatusCode, Json<WorkspaceRedactionResult>)> {
     tracing::debug!(target: TRACING_TARGET, "Redacting detection");
 
@@ -492,11 +488,11 @@ async fn redact_detection(
         let document = conn
             .find_document_in_workspace(workspace.id, detection.input_document_id)
             .await?
-            .ok_or_else(source_document_gone)?;
+            .ok_or_else(Error::document_content_gone)?;
         let source_blob = conn
-            .find_blob_by_id(document.blob_id.ok_or_else(source_document_gone)?)
+            .find_blob_by_id(document.blob_id.ok_or_else(Error::document_content_gone)?)
             .await?
-            .ok_or_else(source_document_gone)?;
+            .ok_or_else(Error::document_content_gone)?;
 
         // The detection's base analysis blob, loaded to seed the working audit.
         // A completed detection with a NULL pointer had its bytes reclaimed (404);
@@ -548,18 +544,31 @@ async fn redact_detection(
                 .with_context(err.to_string())
         })?;
         edits.validate(&reviewed.report)?;
-        edits.apply(&mut reviewed.report)?;
+        // The requester applies the stored edits, so the review records them as
+        // the reviewer.
+        edits.apply(&mut reviewed.report, &authz.account_id.to_string())?;
     }
 
+    // The bytes can be purged between the blob lookup and this read (the
+    // reaper released them as their window passed); that is the same "source
+    // gone" outcome as a cleared pointer.
     let document = writer
         .build_document(&inputs.document, &inputs.source_blob, inputs.detection.id)
-        .await?;
+        .await
+        .map_err(|err| match err.kind() {
+            ErrorKind::NotFound => Error::document_content_gone(),
+            _ => err,
+        })?;
 
-    // No per-request key: the server does not yet drive keyed operators
-    // (HMAC/encrypt), whose `KeyConfig` would be supplied here. The codec params
-    // and document context are read back from the audit, recorded at detect time.
+    // The keyed operators (HMAC, encrypt) run with the caller's key; a policy
+    // using one without a key fails here as a 400. The codec params and document
+    // context are read back from the audit, recorded at detect time.
+    // The body is optional: without one there is no key.
+    let key = request
+        .and_then(|ValidateJson(request)| request.key)
+        .map(RedactionKey::into_key_config);
     let redacted = engine
-        .anonymize(document, &inputs.policies, &mut reviewed, None)
+        .anonymize(document, &inputs.policies, &mut reviewed, key.as_ref())
         .await?;
 
     // Stage both produced objects (redacted document + review audit) outside the
@@ -576,7 +585,7 @@ async fn redact_detection(
         .retention_override
         .as_ref()
         .map(nvisy_postgres::types::Json::or_default);
-    let staged_output = writer
+    let (staged_output, output_name) = writer
         .stage_redacted_document(
             &inputs.document,
             retention_override.as_ref(),
@@ -597,7 +606,7 @@ async fn redact_detection(
     {
         Ok(staged) => staged,
         Err(err) => {
-            writer.discard_staged_object(&staged_output.0).await.ok();
+            writer.discard_staged(&[&staged_output]).await;
             return Err(err);
         }
     };
@@ -609,8 +618,9 @@ async fn redact_detection(
     let mut conn = match pg_client.get_connection().await {
         Ok(conn) => conn,
         Err(err) => {
-            writer.discard_staged_object(&staged_output.0).await.ok();
-            writer.discard_staged_object(&staged_review).await.ok();
+            writer
+                .discard_staged(&[&staged_output, &staged_review])
+                .await;
             return Err(err.into());
         }
     };
@@ -625,24 +635,26 @@ async fn redact_detection(
                         account_id: authz.account_id,
                         blob_id: Uuid::nil(),
                         kind: Some(DocumentKind::Redacted),
-                        display_name: Some(staged_output.1.clone()),
+                        display_name: Some(output_name.clone()),
                         original_filename: Some(inputs.document.original_filename.clone()),
                         file_extension: Some(inputs.document.file_extension.clone()),
                         metadata: None,
+                        expires_at: Some(staged_output.expires_at.into()),
                     },
-                    staged_output.0.clone(),
+                    staged_output.blob.clone(),
                 )
                 .await?;
             // The review analysis is a blob-ref on the redaction: resolve (share or
             // insert) its blob to record the reference, then point the redaction at
             // it via `review_audit_blob_id`.
-            let review_resolved = conn.find_or_create_blob(staged_review.clone()).await?;
+            let review_resolved = conn.find_or_create_blob(staged_review.blob.clone()).await?;
             let redaction = conn
                 .create_redaction(NewWorkspaceRedaction {
                     detection_id: inputs.detection.id,
                     account_id: authz.account_id,
                     output_document_id: Some(output_document.id),
                     review_audit_blob_id: Some(review_resolved.id),
+                    review_audit_expires_at: Some(staged_review.expires_at.into()),
                 })
                 .await?;
             conn.emit_event(
@@ -683,8 +695,9 @@ async fn redact_detection(
         Err(err) => {
             // The rows rolled back, so their staged objects are orphans: reclaim
             // both (best effort — a failure only leaves them for a later sweep).
-            writer.discard_staged_object(&staged_output.0).await.ok();
-            writer.discard_staged_object(&staged_review).await.ok();
+            writer
+                .discard_staged(&[&staged_output, &staged_review])
+                .await;
             return Err(err);
         }
     };
@@ -692,11 +705,11 @@ async fn redact_detection(
     // A committed blob whose content deduplicated onto an existing object leaves
     // the object staged for it orphaned (no row references it). Reclaim each
     // redundant staged object; best effort, a failure only defers it to a sweep.
-    if output_path.as_deref() != Some(staged_output.0.storage_path.as_str()) {
-        writer.discard_staged_object(&staged_output.0).await.ok();
+    if output_path.as_deref() != Some(staged_output.blob.storage_path.as_str()) {
+        writer.discard_staged(&[&staged_output]).await;
     }
-    if review_path.as_deref() != Some(staged_review.storage_path.as_str()) {
-        writer.discard_staged_object(&staged_review).await.ok();
+    if review_path.as_deref() != Some(staged_review.blob.storage_path.as_str()) {
+        writer.discard_staged(&[&staged_review]).await;
     }
 
     tracing::info!(
@@ -725,7 +738,10 @@ fn redact_detection_docs(op: TransformOperation) -> TransformOperation {
             "Applies the detection's policies to its stored analysis — with the \
              detection's accumulated reviewer edits layered on first (set via the edit endpoint) \
              — and produces a new redaction: a redacted document plus a review audit recording \
-             what was redacted. A detection can be redacted more than once. Requires \
+             what was redacted. A detection can be redacted more than once. The body is \
+             optional; a policy using the `encrypt` or `hmac_hash` operator needs its `key` \
+             (32 bytes, base64), which is used for this request only and never stored, so \
+             only its holder can decrypt the values or match the pseudonyms. Requires \
              RunRedactions.",
         )
         .response::<201, Json<WorkspaceRedactionResult>>()
@@ -766,6 +782,7 @@ async fn edit_detection(
         .set_edits(
             workspace.id,
             detection_id,
+            authz.account_id,
             request.edit_set_rev,
             request.edits,
         )

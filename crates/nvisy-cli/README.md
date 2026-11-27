@@ -14,7 +14,7 @@ features enable HTTPS via rustls (`tls`) and loading configuration from
 
 ## Documentation
 
-See [`docs/`](../../docs/) for architecture, security, and API documentation.
+See [docs.nvisy.com](https://docs.nvisy.com) for architecture, security, and API documentation.
 
 ## Changelog
 

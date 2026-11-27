@@ -63,7 +63,7 @@ pub struct ServerConfig {
         long,
         env = "SHUTDOWN_TIMEOUT",
         default_value = "30s",
-        value_parser = humantime::parse_duration,
+        value_parser = nvisy_core::parse_duration,
     )]
     pub shutdown_timeout: Duration,
 

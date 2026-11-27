@@ -149,7 +149,7 @@ pub struct CorsConfig {
     /// Maximum age for CORS preflight caching (e.g. `1h`).
     #[cfg_attr(
         feature = "cli",
-        arg(long, env = "CORS_MAX_AGE", default_value = "1h", value_parser = humantime::parse_duration)
+        arg(long, env = "CORS_MAX_AGE", default_value = "1h", value_parser = nvisy_core::parse_duration)
     )]
     pub max_age: Duration,
 
