@@ -230,8 +230,9 @@ volumes:
   rustfs_data:
   # Model caches, populated by the init containers and mounted read-only by the
   # services, so weights stay out of the images and off repeat pulls.
-  hf_cache:
+  ner_cache:
   ocr_cache:
+  stt_cache:
 
 networks:
   nvisy:

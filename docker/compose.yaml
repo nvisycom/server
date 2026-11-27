@@ -171,11 +171,12 @@ volumes:
   postgres_data:
   nats_data:
   rustfs_data:
-  # Model caches (hf_cache for NER and STT, ocr_cache for OCR), populated by the
-  # init containers and mounted read-only by the services, so model weights stay
-  # out of the images and off repeat pulls.
-  hf_cache:
+  # One model cache per inference service, populated by its init container and
+  # mounted read-only by the service, so model weights stay out of the images and
+  # off repeat pulls.
+  ner_cache:
   ocr_cache:
+  stt_cache:
 
 networks:
   nvisy-dev:

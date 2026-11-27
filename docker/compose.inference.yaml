@@ -7,10 +7,11 @@
 #
 # The images carry no model weights. Each service has a one-shot `*-init`
 # warmer, running the service's own image, that downloads the model into a
-# shared cache (as root, then hands it to the service uid) and exits; the
-# service gates on it, then runs non-root with the cache read-only and the Hub
-# offline, so request text never leaves the network. All sit behind profiles
-# (`ner`, `ocr`, `stt`), so a stack starts them only when asked.
+# cache volume it shares with that service alone (as root, then hands it to the
+# service uid) and exits; the service gates on it, then runs non-root with the
+# cache read-only and the Hub offline, so request text never leaves the network.
+# All sit behind profiles (`ner`, `ocr`, `stt`), so a stack starts them only
+# when asked.
 
 # The images ship no curl/wget, so readiness is probed with the module every
 # image includes. /readyz answers only once the model has loaded; 60s is a wide
@@ -46,7 +47,7 @@ services:
       ELIDE_BENTO_NER_MODEL: *ner-model
     entrypoint: ["python", "-m", "elide_ner.warm"]
     volumes:
-      - hf_cache:/cache/huggingface
+      - ner_cache:/cache/huggingface
 
   ner:
     image: ${ELIDE_NER_IMAGE:-ghcr.io/nvisycom/elide-ner}:${ELIDE_VERSION:-0.1.0-rc.7}
@@ -61,12 +62,11 @@ services:
       ELIDE_BENTO_NER_MAX_TOKENS: ${ELIDE_NER_MAX_TOKENS:-512}
       LOG_LEVEL: ${ELIDE_LOG_LEVEL:-INFO}
     volumes:
-      - hf_cache:/cache/huggingface:ro
+      - ner_cache:/cache/huggingface:ro
     healthcheck: *readyz
 
   # OnnxTR OCR (image modality and scanned pages). Its cache holds both OnnxTR's
-  # own (built-in architectures) and a Hugging Face cache (Hub models), in its
-  # own volume, so its warmer never writes where another service reads.
+  # own (built-in architectures) and a Hugging Face cache (Hub models).
   ocr-init:
     image: ${ELIDE_OCR_IMAGE:-ghcr.io/nvisycom/elide-ocr}:${ELIDE_VERSION:-0.1.0-rc.7}
     profiles: ["ocr"]
@@ -113,7 +113,7 @@ services:
       ELIDE_BENTO_STT_HF_TOKEN: ${ELIDE_STT_HF_TOKEN:-}
     entrypoint: ["python", "-m", "elide_stt.warm"]
     volumes:
-      - hf_cache:/cache/huggingface
+      - stt_cache:/cache/huggingface
 
   stt:
     image: ${ELIDE_STT_IMAGE:-ghcr.io/nvisycom/elide-stt}:${ELIDE_VERSION:-0.1.0-rc.7}
@@ -130,13 +130,17 @@ services:
       ELIDE_BENTO_STT_HF_TOKEN: ${ELIDE_STT_HF_TOKEN:-}
       LOG_LEVEL: ${ELIDE_LOG_LEVEL:-INFO}
     volumes:
-      - hf_cache:/cache/huggingface:ro
+      - stt_cache:/cache/huggingface:ro
     # Transcription is long-running (the service allows a 900s request), so the
     # probe gets a longer timeout than the other two.
     healthcheck:
       <<: *readyz
       timeout: 10s
 
+# One cache volume per service, written only by that service's warmer: two
+# warmers sharing a volume could run at once, and each hands its whole cache to
+# the service uid, so one could trip over a file the other is still moving.
 volumes:
-  hf_cache:
+  ner_cache:
   ocr_cache:
+  stt_cache:
