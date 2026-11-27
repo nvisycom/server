@@ -71,7 +71,9 @@ Run these from the `docker/` directory. Every command passes
 
 1. Put the server's key files and engine config in `docker/config/` (or another
    folder named by `NVISY_CONFIG_DIR`), which is mounted read-only at
-   `/etc/nvisy`:
+   `/etc/nvisy`.
+
+   For a **new** deployment, generate the keys there:
 
    ```bash
    mkdir -p config
@@ -79,6 +81,11 @@ Run these from the `docker/` directory. Every command passes
    cp engine.example.toml config/engine.toml   # then edit it
    sudo chown -R 1000:1000 config              # the image runs as uid 1000
    ```
+
+   For an **existing** deployment, keep the keys you have and never regenerate
+   them: `make generate-keys` replaces the files, and a new `encryption.key`
+   cannot decrypt anything written with the old one. Back up `config/` with the
+   database.
 
 2. Create `docker/.env` with the values compose requires. Don't copy the
    repository's `.env.example`: its key paths point at the working directory
@@ -104,6 +111,21 @@ Run these from the `docker/` directory. Every command passes
    ```bash
    docker compose -f compose.prod.yaml up -d --build
    ```
+
+4. Add the detection models. Without them only the built-in pattern
+   recognizers run: no named-entity recognition, no OCR, and no speech-to-text.
+   Each sits behind a profile, so start any subset:
+
+   ```bash
+   docker compose -f compose.prod.yaml --profile ner --profile ocr --profile stt up -d
+   ```
+
+   The services are reachable only on the private network, at the URLs
+   `engine.example.toml` already uses, so `config/engine.toml` copied from it
+   needs no URL changes; drop the entries for a profile you do not run. Its LLM
+   recognizer is commented out, since it sends document text to the provider;
+   uncomment it and set a real key to use one. The first start downloads each
+   model into a cache volume; later starts reuse it.
 
 The production compose file starts every service on a private bridge network.
 The server waits for the PostgreSQL, NATS, and RustFS health checks to pass,

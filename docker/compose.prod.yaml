@@ -1,5 +1,9 @@
 name: nvisy
 
+# The inference services (NER, OCR, STT) come from compose.inference.yaml. They
+# sit behind profiles — start them with `--profile ner --profile ocr --profile
+# stt` (any subset) — and are reachable only on the private network, at the URLs
+# engine.example.toml uses.
 services:
   postgres:
     image: postgres:18
@@ -12,7 +16,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-nvisy}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # PostgreSQL 18 keeps its data under a versioned directory below
+      # /var/lib/postgresql, so the volume mounts the parent.
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: [
         "CMD-SHELL",
@@ -97,6 +103,64 @@ services:
     networks:
       - nvisy
 
+  # Inference services, from compose.inference.yaml (profiles ner, ocr, stt).
+  ner-init:
+    extends:
+      file: compose.inference.yaml
+      service: ner-init
+    container_name: nvisy-ner-init
+    networks:
+      - nvisy
+
+  ner:
+    extends:
+      file: compose.inference.yaml
+      service: ner
+    container_name: nvisy-ner
+    networks:
+      - nvisy
+    depends_on:
+      ner-init:
+        condition: service_completed_successfully
+
+  ocr-init:
+    extends:
+      file: compose.inference.yaml
+      service: ocr-init
+    container_name: nvisy-ocr-init
+    networks:
+      - nvisy
+
+  ocr:
+    extends:
+      file: compose.inference.yaml
+      service: ocr
+    container_name: nvisy-ocr
+    networks:
+      - nvisy
+    depends_on:
+      ocr-init:
+        condition: service_completed_successfully
+
+  stt-init:
+    extends:
+      file: compose.inference.yaml
+      service: stt-init
+    container_name: nvisy-stt-init
+    networks:
+      - nvisy
+
+  stt:
+    extends:
+      file: compose.inference.yaml
+      service: stt
+    container_name: nvisy-stt
+    networks:
+      - nvisy
+    depends_on:
+      stt-init:
+        condition: service_completed_successfully
+
   server:
     build:
       context: ..
@@ -145,6 +209,17 @@ services:
         condition: service_healthy
       rustfs-init:
         condition: service_completed_successfully
+      # Started only with their profiles; when they are, the server waits for
+      # them to be ready.
+      ner:
+        condition: service_healthy
+        required: false
+      ocr:
+        condition: service_healthy
+        required: false
+      stt:
+        condition: service_healthy
+        required: false
     networks:
       - nvisy
 
@@ -152,6 +227,10 @@ volumes:
   postgres_data:
   nats_data:
   rustfs_data:
+  # Model caches, populated by the init containers and mounted read-only by the
+  # services, so weights stay out of the images and off repeat pulls.
+  hf_cache:
+  doctr_cache:
 
 networks:
   nvisy:

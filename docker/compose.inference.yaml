@@ -1,0 +1,122 @@
+# The inference services (NER, OCR, STT), shared by compose.yaml (development)
+# and compose.prod.yaml (production). Each stack pulls them in with `extends` and
+# adds what differs: its network, container names, and, in development, a
+# loopback port. Bump ELIDE_VERSION's default here to move both stacks.
+#
+# The images carry no model weights: a one-shot `*-init` warmer downloads the
+# model into a shared cache (as root, then hands it to the service uid) and
+# exits; the service gates on it, then runs non-root with the cache read-only
+# and the Hub offline, so request text never leaves the network. All sit behind
+# profiles (`ner`, `ocr`, `stt`), so a stack starts them only when asked.
+
+# The images ship no curl/wget, so readiness is probed with the module every
+# image includes. The model loads at start, so readiness lags liveness; the
+# start_period covers a cold load without flapping.
+x-readyz: &readyz
+  test: ["CMD", "python", "-m", "elide_core.readyz"]
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 120s
+
+services:
+  # GLiNER2 NER (text modality): names, organizations, and the other entity
+  # labels pattern matching cannot find.
+  ner-init:
+    image: ${ELIDE_NER_IMAGE:-ghcr.io/nvisycom/elide-ner}:${ELIDE_VERSION:-0.1.0-rc.7}
+    profiles: ["ner"]
+    user: root
+    environment:
+      HF_HOME: /cache/huggingface
+      HF_HUB_OFFLINE: "0"
+      TRANSFORMERS_OFFLINE: "0"
+      ELIDE_BENTO_NER_MODEL: ${ELIDE_NER_MODEL:-fastino/gliner2-privacy-filter-PII-multi}
+    entrypoint: ["python", "-m", "elide_ner.warm"]
+    volumes:
+      - hf_cache:/cache/huggingface
+
+  ner:
+    image: ${ELIDE_NER_IMAGE:-ghcr.io/nvisycom/elide-ner}:${ELIDE_VERSION:-0.1.0-rc.7}
+    profiles: ["ner"]
+    restart: unless-stopped
+    environment:
+      HF_HOME: /cache/huggingface
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      ELIDE_BENTO_NER_MODEL: ${ELIDE_NER_MODEL:-fastino/gliner2-privacy-filter-PII-multi}
+      ELIDE_BENTO_NER_QUANTIZE: ${ELIDE_NER_QUANTIZE:-}
+      ELIDE_BENTO_NER_MAX_TOKENS: ${ELIDE_NER_MAX_TOKENS:-512}
+      LOG_LEVEL: ${ELIDE_LOG_LEVEL:-INFO}
+    volumes:
+      - hf_cache:/cache/huggingface:ro
+    healthcheck: *readyz
+
+  # docTR OCR (image modality and scanned pages). docTR keeps its own cache, not
+  # the Hugging Face Hub's.
+  ocr-init:
+    image: ${ELIDE_OCR_IMAGE:-ghcr.io/nvisycom/elide-ocr}:${ELIDE_VERSION:-0.1.0-rc.7}
+    profiles: ["ocr"]
+    user: root
+    environment:
+      DOCTR_CACHE_DIR: /cache/doctr
+      ELIDE_BENTO_MODEL_NAME: ${ELIDE_OCR_MODEL:-db_resnet50+crnn_vgg16_bn}
+    entrypoint: ["python", "-m", "elide_ocr.warm"]
+    volumes:
+      - doctr_cache:/cache/doctr
+
+  ocr:
+    image: ${ELIDE_OCR_IMAGE:-ghcr.io/nvisycom/elide-ocr}:${ELIDE_VERSION:-0.1.0-rc.7}
+    profiles: ["ocr"]
+    restart: unless-stopped
+    environment:
+      DOCTR_CACHE_DIR: /cache/doctr
+      # Present and non-empty wins over the model id; an operator mounts weights
+      # over /models to override.
+      ELIDE_BENTO_MODEL_PATH: /models
+      ELIDE_BENTO_MODEL_NAME: ${ELIDE_OCR_MODEL:-db_resnet50+crnn_vgg16_bn}
+      LOG_LEVEL: ${ELIDE_LOG_LEVEL:-INFO}
+    volumes:
+      - doctr_cache:/cache/doctr:ro
+    healthcheck: *readyz
+
+  # faster-whisper speech-to-text (audio modality). Diarization is off by
+  # default (its model is gated on the Hub); enable it with ELIDE_STT_DIARIZE=true
+  # and an ELIDE_STT_HF_TOKEN.
+  stt-init:
+    image: ${ELIDE_STT_IMAGE:-ghcr.io/nvisycom/elide-stt}:${ELIDE_VERSION:-0.1.0-rc.7}
+    profiles: ["stt"]
+    user: root
+    environment:
+      HF_HOME: /cache/huggingface
+      ELIDE_BENTO_MODEL_NAME: ${ELIDE_STT_MODEL:-large-v3-turbo}
+      ELIDE_BENTO_STT_DIARIZE: ${ELIDE_STT_DIARIZE:-false}
+      ELIDE_BENTO_STT_DIARIZE_MODEL: ${ELIDE_STT_DIARIZE_MODEL:-pyannote/speaker-diarization-community-1}
+      ELIDE_BENTO_STT_HF_TOKEN: ${ELIDE_STT_HF_TOKEN:-}
+    entrypoint: ["python", "-m", "elide_stt.warm"]
+    volumes:
+      - hf_cache:/cache/huggingface
+
+  stt:
+    image: ${ELIDE_STT_IMAGE:-ghcr.io/nvisycom/elide-stt}:${ELIDE_VERSION:-0.1.0-rc.7}
+    profiles: ["stt"]
+    restart: unless-stopped
+    environment:
+      HF_HOME: /cache/huggingface
+      ELIDE_BENTO_MODEL_PATH: /models
+      ELIDE_BENTO_MODEL_NAME: ${ELIDE_STT_MODEL:-large-v3-turbo}
+      ELIDE_BENTO_STT_DEVICE: ${ELIDE_STT_DEVICE:-cpu}
+      ELIDE_BENTO_STT_COMPUTE_TYPE: ${ELIDE_STT_COMPUTE_TYPE:-}
+      ELIDE_BENTO_STT_DIARIZE: ${ELIDE_STT_DIARIZE:-false}
+      ELIDE_BENTO_STT_DIARIZE_MODEL: ${ELIDE_STT_DIARIZE_MODEL:-pyannote/speaker-diarization-community-1}
+      ELIDE_BENTO_STT_HF_TOKEN: ${ELIDE_STT_HF_TOKEN:-}
+      LOG_LEVEL: ${ELIDE_LOG_LEVEL:-INFO}
+    volumes:
+      - hf_cache:/cache/huggingface:ro
+    # Transcription is long-running, so the probe gets a longer timeout.
+    healthcheck:
+      <<: *readyz
+      timeout: 10s
+
+volumes:
+  hf_cache:
+  doctr_cache:

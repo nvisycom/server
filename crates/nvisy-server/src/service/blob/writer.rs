@@ -16,6 +16,9 @@ use uuid::Uuid;
 use crate::response::{Error, ErrorKind, Result};
 use crate::service::{CryptoService, Infra};
 
+/// Tracing target for blob staging.
+const TRACING_TARGET: &str = "nvisy_server::service::blob::writer";
+
 /// A staged object: its blob, not yet inserted, and when the referrer that will
 /// point at it releases the bytes.
 ///
@@ -129,9 +132,9 @@ impl ArtifactWriter {
     /// is resolved (with the run's other writes) atomically. A rollback therefore
     /// leaves at worst an orphan object in the bucket, never a blob that points at
     /// bytes that were never written; the caller reclaims that orphan via
-    /// [`discard_staged_object`].
+    /// [`discard_staged`].
     ///
-    /// [`discard_staged_object`]: Self::discard_staged_object
+    /// [`discard_staged`]: Self::discard_staged
     ///
     /// # Errors
     ///
@@ -290,11 +293,11 @@ impl ArtifactWriter {
     /// A redaction commits its output document, review-audit row, and redaction
     /// row together in one transaction, so the output is staged (object written,
     /// blob returned for the caller to resolve) rather than inserted here, and is
-    /// reclaimed on rollback via [`discard_staged_object`]. The redacted document
+    /// reclaimed on rollback via [`discard_staged`]. The redacted document
     /// is a first-class document (a sibling of the source), downloadable through
     /// the normal document endpoints.
     ///
-    /// [`discard_staged_object`]: Self::discard_staged_object
+    /// [`discard_staged`]: Self::discard_staged
     ///
     /// # Errors
     ///
@@ -342,25 +345,30 @@ impl ArtifactWriter {
         Ok((staged, redacted_name))
     }
 
-    /// Deletes a staged object whose blob was never resolved.
+    /// Deletes staged objects whose blobs were never resolved, best effort.
     ///
     /// The `stage_*` methods write an object before its `workspace_blobs` row; if
-    /// the committing transaction rolls back, the object has no blob and the
-    /// blob-driven reaper can never find it. The caller invokes this on that path
-    /// so the orphan is removed immediately instead of accumulating. It deletes
-    /// from whichever bucket the staged blob names, so it reclaims a staged audit,
-    /// review audit, intermediate, or redacted document alike. Best effort: a
-    /// failure here only leaves the object for a later manual sweep, so callers log
-    /// rather than propagate.
-    ///
-    /// # Errors
-    ///
-    /// - `InternalServerError` if the staged blob names an unknown or non-purgeable
-    ///   bucket, or its storage key does not parse.
-    /// - A storage error if the object delete fails.
-    pub async fn discard_staged_object(&self, staged: &NewBlob) -> Result<()> {
-        self.delete_object(&staged.storage_bucket, &staged.storage_path)
-            .await
+    /// the committing transaction rolls back (or never runs), the object has no
+    /// blob and the blob-driven reaper can never find it. Callers pass every
+    /// object they staged on that path so the orphans are removed immediately
+    /// instead of accumulating; each is deleted from whichever bucket its blob
+    /// names. A failed delete only leaves that object for a later manual sweep, so
+    /// it is logged and the rest still go.
+    pub async fn discard_staged(&self, staged: &[&StagedBlob]) {
+        for staged in staged {
+            let blob = &staged.blob;
+            if let Err(err) = self
+                .delete_object(&blob.storage_bucket, &blob.storage_path)
+                .await
+            {
+                tracing::warn!(
+                    target: TRACING_TARGET,
+                    error = %err,
+                    storage_path = %blob.storage_path,
+                    "Failed to reclaim orphaned staged object; left for a later sweep",
+                );
+            }
+        }
     }
 
     /// Removes an object from whichever store its blob names. An unparseable

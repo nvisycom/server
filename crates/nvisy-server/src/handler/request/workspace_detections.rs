@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::input::{CreateDetectionInput, DerivedPolicyInput, DetectionSourceInput};
+use crate::handler::utility::RedactionKey;
 
 /// Query parameters for listing detections across a workspace.
 ///
@@ -149,6 +150,21 @@ impl From<CreateWorkspaceDetection> for CreateDetectionInput {
             retention_override: request.retention_override,
         }
     }
+}
+
+/// Request payload to redact a detection. The body is optional: omitting it
+/// redacts with no key.
+#[must_use]
+#[derive(Debug, Default, Deserialize, JsonSchema, Validate)]
+#[serde(rename_all = "camelCase")]
+#[garde(allow_unvalidated)]
+pub struct RedactWorkspaceDetection {
+    /// The key the `encrypt` and `hmac_hash` operators run with, required when a
+    /// policy uses either. It is used for this request only and never stored:
+    /// encrypted values decrypt, and HMAC pseudonyms match, only under the same
+    /// key, so keep it to re-redact consistently.
+    #[serde(default)]
+    pub key: Option<RedactionKey>,
 }
 
 /// Request payload to set a detection's accumulated reviewer edits.

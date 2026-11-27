@@ -109,6 +109,18 @@ pub trait WorkspaceDocumentRepository {
         document_id: Uuid,
     ) -> impl Future<Output = Result<Option<WorkspaceDocument>>> + Send;
 
+    /// Finds a live document within a workspace and locks its row until the
+    /// transaction ends (`FOR UPDATE`).
+    ///
+    /// The reaper's document sweep skips locked rows, so a caller that starts
+    /// work on the document (a detection) can re-check its bytes under the lock
+    /// and commit before the sweep can release them.
+    fn lock_document_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        document_id: Uuid,
+    ) -> impl Future<Output = Result<Option<WorkspaceDocument>>> + Send;
+
     /// Finds a document by id within a workspace, paired with its backing blob and
     /// the handle and avatar of the account that created it.
     ///
@@ -302,6 +314,25 @@ impl WorkspaceDocumentRepository for PgConnection {
             .map_err(Error::from)?;
 
         Ok(document)
+    }
+
+    async fn lock_document_in_workspace(
+        &mut self,
+        workspace_id: Uuid,
+        document_id: Uuid,
+    ) -> Result<Option<WorkspaceDocument>> {
+        use schema::workspace_documents::{self, dsl};
+
+        workspace_documents::table
+            .filter(dsl::id.eq(document_id))
+            .filter(dsl::workspace_id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspaceDocument::as_select())
+            .for_update()
+            .first(self)
+            .await
+            .optional()
+            .map_err(Error::from)
     }
 
     async fn find_document_in_workspace_with_creator(

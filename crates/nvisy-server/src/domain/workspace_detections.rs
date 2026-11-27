@@ -112,6 +112,7 @@ impl WorkspaceDetectionService {
     ///
     /// - `NotFound` if the input document or any named policy does not exist in the
     ///   workspace.
+    /// - `Conflict` if the input document's bytes are no longer available.
     /// - A database error if a connection or the create transaction fails.
     pub async fn create(
         &self,
@@ -136,6 +137,9 @@ impl WorkspaceDetectionService {
             .find_document_in_workspace(workspace_id, input.document_id)
             .await?
             .ok_or_else(|| Error::not_found("document"))?;
+        if document.blob_id.is_none() {
+            return Err(Error::document_content_gone());
+        }
 
         let policies = match input.source {
             // Every named policy must resolve to a live policy (any kind) in the
@@ -437,6 +441,19 @@ impl WorkspaceDetectionService {
         detection: CommitDetection,
     ) -> Result<WorkspaceDetectionModel> {
         conn.transaction(async |conn| {
+            // Lock the input document and re-check its bytes: the reaper's document
+            // sweep skips locked rows, and once this commits the pending detection
+            // keeps the bytes, so they cannot be released in between.
+            let input = conn
+                .lock_document_in_workspace(
+                    detection.workspace_id,
+                    detection.new_detection.input_document_id,
+                )
+                .await?;
+            if input.is_none_or(|document| document.blob_id.is_none()) {
+                return Err(Error::document_content_gone());
+            }
+
             let policy_ids = match detection.policies {
                 CommitPolicies::Named(policy_ids) => policy_ids,
                 CommitPolicies::Derived(derived) => {

@@ -37,9 +37,6 @@ impl From<AccountConstraints> for Error<'static> {
             AccountConstraints::LocaleFormat => {
                 ErrorKind::BadRequest.with_message("Invalid locale format")
             }
-            AccountConstraints::SuspendedNotAdmin => {
-                ErrorKind::BadRequest.with_message("Admin accounts cannot be suspended")
-            }
         }
     }
 }

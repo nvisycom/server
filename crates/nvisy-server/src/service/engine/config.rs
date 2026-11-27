@@ -57,7 +57,8 @@ mod tests {
         let text = include_str!("../../../../../docker/engine.example.toml");
         let config = parse(text).expect("example engine config parses");
         assert_eq!(config.recognizers().ner.len(), 1);
-        assert_eq!(config.recognizers().llm.len(), 1);
+        // The LLM entry ships commented out: it sends text off the network.
+        assert!(config.recognizers().llm.is_empty());
         assert_eq!(config.enrichers().ocr.len(), 1);
         assert_eq!(config.enrichers().stt.len(), 1);
     }

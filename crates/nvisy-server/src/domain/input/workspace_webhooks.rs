@@ -73,28 +73,26 @@ pub struct UpdateWebhookInput {
     pub events: Option<Vec<WebhookEvent>>,
     /// Updated custom headers.
     pub headers: Option<HashMap<String, String>>,
-    /// Updated status. Ignored while the webhook is system-suspended.
+    /// Updated status. Re-enables a system-suspended webhook.
     pub status: Option<WebhookStatus>,
 }
 
 impl UpdateWebhookInput {
-    /// Builds an [`UpdateWorkspaceWebhookModel`], honoring the system-suspended
-    /// state.
+    /// Builds an [`UpdateWorkspaceWebhookModel`].
     ///
-    /// While `current_status` is `Suspended` (system-set), the status field is
-    /// ignored. A caller-supplied `Suspended` is coerced to `Disabled`.
+    /// A caller-supplied status always applies, so a system-suspended webhook is
+    /// re-enabled by setting `Enabled`; `Suspended` itself is system-only and is
+    /// coerced to `Disabled`. Setting a status restarts the failure streak, so a
+    /// re-enabled webhook is not suspended again by its next single failure.
     ///
     /// # Errors
     ///
     /// - `BadRequest` if a supplied header name or value is malformed.
-    pub fn into_model(self, current_status: WebhookStatus) -> Result<UpdateWorkspaceWebhookModel> {
+    pub fn into_model(self) -> Result<UpdateWorkspaceWebhookModel> {
         let events = self.events.map(|e| e.into_iter().map(Some).collect());
         let headers = validate_headers(self.headers)?;
-        let status = if current_status.is_suspended() {
-            None
-        } else {
-            self.status.map(coerce_status)
-        };
+        let status = self.status.map(coerce_status);
+        let consecutive_failures = status.map(|_| 0);
 
         Ok(UpdateWorkspaceWebhookModel {
             display_name: self.display_name,
@@ -103,6 +101,7 @@ impl UpdateWebhookInput {
             events,
             headers,
             status,
+            consecutive_failures,
             ..Default::default()
         })
     }
@@ -131,4 +130,35 @@ fn validate_headers(
             .with_context(err.to_string())
     })?;
     Ok(headers.into_column())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn update(status: Option<WebhookStatus>) -> UpdateWebhookInput {
+        UpdateWebhookInput {
+            display_name: None,
+            description: None,
+            url: None,
+            events: None,
+            headers: None,
+            status,
+        }
+    }
+
+    #[test]
+    fn setting_a_status_restarts_the_failure_streak() {
+        let enabled = update(Some(WebhookStatus::Enabled)).into_model().unwrap();
+        assert_eq!(enabled.status, Some(WebhookStatus::Enabled));
+        assert_eq!(enabled.consecutive_failures, Some(0));
+
+        // Suspension is system-only: a caller asking for it gets the off switch.
+        let suspended = update(Some(WebhookStatus::Suspended)).into_model().unwrap();
+        assert_eq!(suspended.status, Some(WebhookStatus::Disabled));
+
+        let unchanged = update(None).into_model().unwrap();
+        assert_eq!(unchanged.status, None);
+        assert_eq!(unchanged.consecutive_failures, None);
+    }
 }

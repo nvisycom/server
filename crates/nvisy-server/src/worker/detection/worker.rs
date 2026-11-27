@@ -7,6 +7,7 @@
 //! detection's core-NATS status subject (for SSE watchers) and emitted as a
 //! webhook event.
 
+use std::iter;
 use std::num::NonZero;
 use std::sync::Arc;
 use std::time::Duration;
@@ -305,19 +306,6 @@ impl DetectionWorker {
         JobOutcome::Done
     }
 
-    /// Best-effort reclaim of a staged object whose blob did not commit. A failure
-    /// only defers cleanup, so it is logged, never propagated.
-    async fn discard_staged(&self, staged: &StagedBlob) {
-        if let Err(err) = self.blob.discard_staged_object(&staged.blob).await {
-            tracing::warn!(
-                target: TRACING_TARGET,
-                error = %err,
-                storage_path = %staged.blob.storage_path,
-                "Failed to reclaim orphaned staged object; left for a later sweep",
-            );
-        }
-    }
-
     /// Stages a detection's enrichment intermediates, or returns `None` when the
     /// analysis enriched no part (its artifact set is empty). Skipping the empty
     /// case avoids an intermediates blob that a client would fetch only to find
@@ -436,42 +424,11 @@ impl DetectionWorker {
             .retention_override
             .as_ref()
             .map(nvisy_postgres::types::Json::or_default);
-        let audit_blob = self
-            .blob
-            .stage_analyzed_document(
-                detection.workspace_id,
-                retention_override.as_ref(),
-                &settings.retention,
-                audit,
-            )
-            .await?;
-
-        // Stage the enrichment intermediates (OCR layout, transcript, tokenized
-        // text) beside the audit, so the client can read them and add entities the
-        // analysis missed. An analysis that ran no enricher produces an empty
-        // artifact set — nothing is stored and the detection carries no
-        // intermediates reference.
-        let intermediates_blob = self
-            .stage_intermediates(
-                detection.workspace_id,
-                retention_override.as_ref(),
-                &settings,
-                &analyzed.artifacts,
-            )
-            .await?;
-
-        // Persist the audit file row and the detection's transition to
-        // `Complete` atomically: a partial failure would otherwise strand an
-        // audit pointer on a detection still marked `Executing`. The finalize is
-        // fenced on our claim; if it went stale (another worker re-claimed the
-        // detection past the lease), the whole transaction rolls back so we do
-        // not stamp over the new owner's work or leak audit rows for a detection
-        // we lost. Kept to reclaim the just-staged object if the transaction does not commit: on rollback its
-        // `workspace_blobs` row never lands, so the blob-driven reaper could never
-        // find the object otherwise. Build the outbox row here so the finalize
-        // transaction is `PgError`-typed for its rollback sentinel, and insert it
-        // alongside the finalize so the `Complete` event commits atomically with
-        // the detection.
+        // The `Complete` event is built before anything is staged, so the only
+        // failures between the first object write and the finalize are the ones
+        // that discard what was staged. It is inserted alongside the finalize so
+        // the event commits atomically with the detection, which also keeps the
+        // finalize transaction `PgError`-typed for its rollback sentinel.
         let completed_event =
             event::WorkspaceEvent::DetectionCompleted(event::DetectionCompleted {
                 detection_id: detection.id,
@@ -487,9 +444,58 @@ impl DetectionWorker {
             &completed_event,
         )?;
 
+        let audit_blob = self
+            .blob
+            .stage_analyzed_document(
+                detection.workspace_id,
+                retention_override.as_ref(),
+                &settings.retention,
+                audit,
+            )
+            .await?;
+
+        // Stage the enrichment intermediates (OCR layout, transcript, tokenized
+        // text) beside the audit, so the client can read them and add entities the
+        // analysis missed. An analysis that ran no enricher produces an empty
+        // artifact set — nothing is stored and the detection carries no
+        // intermediates reference.
+        let intermediates_blob = match self
+            .stage_intermediates(
+                detection.workspace_id,
+                retention_override.as_ref(),
+                &settings,
+                &analyzed.artifacts,
+            )
+            .await
+        {
+            Ok(staged) => staged,
+            Err(err) => {
+                // The audit object is already written and has no blob row yet.
+                self.blob.discard_staged(&[&audit_blob]).await;
+                return Err(err);
+            }
+        };
+
         // Phase 3: re-acquire a connection only for the fenced finalize
-        // transaction, so the pool was free during the analysis above.
-        let mut conn = self.infra.postgres.get_connection().await?;
+        // transaction, so the pool was free during the analysis above. Without one
+        // the staged objects have no blob row for the reaper to find, so discard
+        // them before returning.
+        let mut conn = match self.infra.postgres.get_connection().await {
+            Ok(conn) => conn,
+            Err(err) => {
+                self.blob
+                    .discard_staged(&staged_outputs(&audit_blob, intermediates_blob.as_ref()))
+                    .await;
+                return Err(err.into());
+            }
+        };
+        // Persist the audit file row and the detection's transition to
+        // `Complete` atomically: a partial failure would otherwise strand an
+        // audit pointer on a detection still marked `Executing`. The finalize is
+        // fenced on our claim; if it went stale (another worker re-claimed the
+        // detection past the lease), the whole transaction rolls back so we do
+        // not stamp over the new owner's work or leak audit rows for a detection
+        // we lost.
         // Kept to reclaim the staged objects if the transaction does not commit:
         // on rollback their `workspace_blobs` rows never land, so the blob-driven
         // reaper could never find the objects otherwise.
@@ -548,29 +554,33 @@ impl DetectionWorker {
                 // existing blob is pointed at that blob's stored object, orphaning
                 // the object staged for it. Reclaim the redundant staged objects.
                 if audit_path != staged_audit.blob.storage_path {
-                    self.discard_staged(&staged_audit).await;
+                    self.blob.discard_staged(&[&staged_audit]).await;
                 }
                 if let Some(staged) = &staged_intermediates
                     && intermediate_path.as_deref() != Some(staged.blob.storage_path.as_str())
                 {
-                    self.discard_staged(staged).await;
+                    self.blob.discard_staged(&[staged]).await;
                 }
             }
             Err(PgError::Query(DieselError::RollbackTransaction)) => {
-                self.discard_staged(&staged_audit).await;
-                if let Some(staged) = &staged_intermediates {
-                    self.discard_staged(staged).await;
-                }
+                self.blob
+                    .discard_staged(&staged_outputs(
+                        &staged_audit,
+                        staged_intermediates.as_ref(),
+                    ))
+                    .await;
                 tracing::warn!(target: TRACING_TARGET, detection_id = %detection.id, "Claim went stale before finalize; another worker owns the detection");
                 return Ok(());
             }
             Err(err) => {
                 // The transaction rolled back, so the file rows never committed;
                 // reclaim their objects before surfacing the failure.
-                self.discard_staged(&staged_audit).await;
-                if let Some(staged) = &staged_intermediates {
-                    self.discard_staged(staged).await;
-                }
+                self.blob
+                    .discard_staged(&staged_outputs(
+                        &staged_audit,
+                        staged_intermediates.as_ref(),
+                    ))
+                    .await;
                 return Err(err.into());
             }
         }
@@ -601,6 +611,15 @@ fn raster_mode_of(settings: &WorkspaceSettings) -> RasterMode {
     }
 }
 
+/// The objects a detection staged: its audit, and its intermediates when the
+/// analysis produced any.
+fn staged_outputs<'a>(
+    audit: &'a StagedBlob,
+    intermediates: Option<&'a StagedBlob>,
+) -> Vec<&'a StagedBlob> {
+    iter::once(audit).chain(intermediates).collect()
+}
+
 /// Builds the [`RequestContext`] for one detect run.
 ///
 /// Recognition is entirely engine-owned (the built-in pattern set plus the
@@ -610,10 +629,9 @@ fn raster_mode_of(settings: &WorkspaceSettings) -> RasterMode {
 /// caller-set. The engine records the context and codec params on the audit so
 /// redaction re-decodes and re-compiles against exactly what detection used.
 /// Deduplication and calibration are engine-owned defaults; the label catalog is
-/// derived from the run's policies at detect time.
-///
-/// No key is set: the server does not yet drive keyed operators
-/// (`HmacHash`/`Encrypt`), whose `KeyConfig` would be supplied here.
+/// derived from the run's policies at detect time. No key is set: the keyed
+/// operators (`HmacHash`, `Encrypt`) only run at redaction, with the key the
+/// redact request supplies.
 fn request_context(
     document_context: Option<DocumentContext>,
     raster_mode: RasterMode,
