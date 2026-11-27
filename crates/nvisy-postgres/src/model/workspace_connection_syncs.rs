@@ -79,21 +79,3 @@ impl NewWorkspaceConnectionSync {
         }
     }
 }
-
-/// Data for updating a workspace connection sync.
-#[derive(Debug, Clone, Default, AsChangeset)]
-#[diesel(table_name = workspace_connection_syncs)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-#[must_use]
-pub struct UpdateWorkspaceConnectionSync {
-    /// Sync status.
-    pub status: Option<SyncStatus>,
-    /// Number of records processed.
-    pub records_synced: Option<i64>,
-    /// Failure detail when status is failed.
-    pub error_message: Option<Option<String>>,
-    /// Non-encrypted metadata for filtering/display.
-    pub metadata: Option<JsonValue>,
-    /// When the sync finished.
-    pub completed_at: Option<Option<Timestamp>>,
-}

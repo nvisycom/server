@@ -5,24 +5,14 @@ use std::future::Future;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use jiff::Timestamp;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceActivity, WorkspaceActivity};
 use crate::types::{
-    AccountRefRow, ActivityType, CursorPage, CursorPagination, WithAccountRef, keyset,
+    AccountRefRow, ActivityType, CursorPage, CursorPagination, TimeCursor, WithAccountRef, keyset,
+    total,
 };
-use crate::{Error, PgConnection, Result, schema};
-
-/// Keyset for paginating a workspace's activity log: newest first by `created_at`,
-/// `id` as the tiebreaker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActivityCursor {
-    /// When the activity was recorded.
-    pub created_at: Timestamp,
-    /// Activity id (tiebreaker).
-    pub id: uuid::Uuid,
-}
+use crate::{PgConnection, Result, schema};
 
 /// Predicates that narrow an activity listing, all optional (an empty filter
 /// matches every activity in the workspace). Shared by the paginated feed and the
@@ -59,7 +49,7 @@ pub trait WorkspaceActivityRepository {
         &mut self,
         workspace_id: Uuid,
         filter: ActivityFilter,
-        pagination: CursorPagination<ActivityCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceActivity>>>> + Send;
 
     /// Lists a workspace's filtered activities oldest first (the natural order for
@@ -79,79 +69,46 @@ impl WorkspaceActivityRepository for PgConnection {
     async fn log_activity(&mut self, activity: NewWorkspaceActivity) -> Result<WorkspaceActivity> {
         use schema::workspace_activities;
 
-        let activity = diesel::insert_into(workspace_activities::table)
+        Ok(diesel::insert_into(workspace_activities::table)
             .values(&activity)
             .returning(WorkspaceActivity::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(activity)
+            .await?)
     }
 
     async fn cursor_list_workspace_activity(
         &mut self,
         workspace_id: Uuid,
         filter: ActivityFilter,
-        pagination: CursorPagination<ActivityCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> Result<CursorPage<WithAccountRef<WorkspaceActivity>>> {
-        use diesel::dsl::count_star;
         use schema::workspace_activities::dsl;
         use schema::{accounts, workspace_activities};
 
-        // Count over the same filter, only when requested.
-        let total = if pagination.include_count {
-            let count_query = workspace_activities::table
-                .filter(dsl::workspace_id.eq(workspace_id))
-                .into_boxed();
-            Some(
-                apply_activity_filter(count_query, &filter)
-                    .select(count_star())
-                    .get_result(self)
-                    .await
-                    .map_err(Error::from)?,
+        let scoped = || {
+            apply_activity_filter(
+                workspace_activities::table
+                    .filter(dsl::workspace_id.eq(workspace_id))
+                    .into_boxed(),
+                &filter,
             )
-        } else {
-            None
         };
+        let total = total!(pagination, self, scoped().count());
+        let query = scoped().inner_join(accounts::table);
 
-        let query = apply_activity_filter(
-            workspace_activities::table
-                .filter(dsl::workspace_id.eq(workspace_id))
-                .into_boxed(),
-            &filter,
-        )
-        .inner_join(accounts::table);
-
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let after = pagination.after_pair();
         let rows: Vec<(WorkspaceActivity, AccountRefRow)> =
             keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
-                .select((
-                    WorkspaceActivity::as_select(),
-                    (
-                        accounts::id,
-                        accounts::username,
-                        accounts::display_name,
-                        accounts::avatar_url,
-                    ),
-                ))
+                .select((WorkspaceActivity::as_select(), AccountRefRow::as_select()))
                 .limit(pagination.fetch_limit())
                 .load(self)
-                .await
-                .map_err(Error::from)?;
+                .await?;
 
-        let items: Vec<WithAccountRef<WorkspaceActivity>> = rows
-            .into_iter()
-            .map(|(item, account)| WithAccountRef { item, account })
-            .collect();
+        let items: Vec<WithAccountRef<WorkspaceActivity>> =
+            rows.into_iter().map(WithAccountRef::from).collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
-            ActivityCursor {
-                created_at: wc.item.created_at.into(),
-                id: wc.item.id,
-            }
+            TimeCursor::new(wc.item.created_at, wc.item.id)
         }))
     }
 
@@ -173,25 +130,13 @@ impl WorkspaceActivityRepository for PgConnection {
 
         let rows: Vec<(WorkspaceActivity, AccountRefRow)> = query
             .inner_join(accounts::table)
-            .select((
-                WorkspaceActivity::as_select(),
-                (
-                    accounts::id,
-                    accounts::username,
-                    accounts::display_name,
-                    accounts::avatar_url,
-                ),
-            ))
+            .select((WorkspaceActivity::as_select(), AccountRefRow::as_select()))
             .order((dsl::created_at.asc(), dsl::id.asc()))
             .limit(limit)
             .load(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|(item, account)| WithAccountRef { item, account })
-            .collect())
+        Ok(rows.into_iter().map(WithAccountRef::from).collect())
     }
 }
 

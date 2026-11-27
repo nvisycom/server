@@ -69,7 +69,7 @@ impl<T> Json<T> {
     ///
     /// This is how a stored blob enters the type (mirroring `FromSql`); a value
     /// that does not match `T` is caught later by the chosen read policy
-    /// (`strict`/`or_default`/`typed`), never here.
+    /// (`strict`/`or_default`/`optional`), never here.
     #[must_use]
     pub fn from_raw(value: serde_json::Value) -> Self {
         Self {

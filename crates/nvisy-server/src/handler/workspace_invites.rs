@@ -287,8 +287,8 @@ fn generate_invite_code_docs(op: TransformOperation) -> TransformOperation {
 /// Previews a workspace invitation before joining.
 ///
 /// Returns basic workspace information for an invite code, allowing users to see
-/// what workspace they're about to join before accepting. This endpoint does not
-/// require authentication.
+/// what workspace they're about to join before accepting. Requires an
+/// authenticated caller, though not membership of the workspace.
 #[tracing::instrument(skip_all)]
 async fn preview_invite_code(
     State(invites): State<domain::WorkspaceInviteService>,
@@ -309,9 +309,10 @@ async fn preview_invite_code(
 
 fn preview_invite_code_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Preview invite")
-        .description("Returns workspace information for an invite code, allowing users to preview the workspace before joining. Does not require authentication.")
+        .description("Returns workspace information for an invite code, allowing users to preview the workspace before joining. Requires authentication but not workspace membership.")
         .response::<200, Json<InvitePreview>>()
         .response::<400, Json<ErrorResponse>>()
+        .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
 

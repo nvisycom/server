@@ -19,11 +19,13 @@ use nvisy_postgres::model::{
     NewWorkspaceDetection, NewWorkspaceDetectionJob, WorkspaceDetection as WorkspaceDetectionModel,
 };
 use nvisy_postgres::query::{
-    DetectionCursor, DetectionDocuments, DetectionJobOutboxRepository, DetectionListRow,
-    DetectionPolicyVersionRepository, EditWriteOutcome, WorkspaceDetectionRepository,
-    WorkspaceDocumentRepository, WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
+    DetectionDocuments, DetectionListRow, DetectionPolicyVersionRepository, EditWriteOutcome,
+    OutboxRepository, WorkspaceDetectionRepository, WorkspaceDocumentRepository,
+    WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
 };
-use nvisy_postgres::types::{CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Json};
+use nvisy_postgres::types::{
+    CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Json, TimeCursor,
+};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
@@ -147,7 +149,7 @@ impl WorkspaceDetectionService {
             DetectionSourceInput::Policies { policy_ids } => {
                 for policy_id in &policy_ids {
                     if conn
-                        .find_policy_in_workspace_by_id(workspace_id, *policy_id)
+                        .find_policy_in_workspace_with_creator(workspace_id, *policy_id)
                         .await?
                         .is_none()
                     {
@@ -225,7 +227,7 @@ impl WorkspaceDetectionService {
     pub async fn list_for_workspace(
         &self,
         workspace_id: Uuid,
-        pagination: CursorPagination<DetectionCursor>,
+        pagination: CursorPagination<TimeCursor>,
         filter: &DetectionFilter,
     ) -> Result<CursorPage<DetectionListRow>> {
         let mut conn = self.postgres.get_connection().await?;
@@ -243,7 +245,7 @@ impl WorkspaceDetectionService {
     pub async fn list_trees(
         &self,
         workspace_id: Uuid,
-        pagination: CursorPagination<DetectionCursor>,
+        pagination: CursorPagination<TimeCursor>,
         filter: &DetectionFilter,
     ) -> Result<CursorPage<nvisy_postgres::query::DetectionTreeRow>> {
         let mut conn = self.postgres.get_connection().await?;
@@ -485,7 +487,7 @@ impl WorkspaceDetectionService {
                 scope: detection.scope,
                 policy_ids,
             };
-            conn.insert_detection_job(NewWorkspaceDetectionJob {
+            conn.insert_outbox(NewWorkspaceDetectionJob {
                 detection_id: detection_row.id,
                 job: serde_json::to_value(&job).map_err(|err| {
                     ErrorKind::InternalServerError

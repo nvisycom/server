@@ -16,8 +16,10 @@
 //! [`Direction`]: crate::types::Direction
 
 use base64::prelude::*;
-use serde::Serialize;
+use jiff::Timestamp;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::types::Direction;
 
@@ -33,6 +35,23 @@ pub const MAX_LIMIT: i64 = 100;
 pub trait CursorKey: Serialize + DeserializeOwned {}
 
 impl<K> CursorKey for K where K: Serialize + DeserializeOwned {}
+
+/// The keyset shared by every list ordered by a timestamp with the row id as the
+/// tiebreaker (created, started, or issued time, depending on the list).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeCursor {
+    /// The row's ordering timestamp.
+    pub at: Timestamp,
+    /// The row's id (tiebreaker).
+    pub id: Uuid,
+}
+
+impl TimeCursor {
+    /// The keyset of a row ordered by `at`, tiebroken by `id`.
+    pub fn new(at: impl Into<Timestamp>, id: Uuid) -> Self {
+        Self { at: at.into(), id }
+    }
+}
 
 /// An opaque position in a keyset-paginated result set: the [`CursorKey`] of the
 /// last row of the previous page.
@@ -136,6 +155,16 @@ impl<K: CursorKey> CursorPagination<K> {
     }
 }
 
+impl CursorPagination<TimeCursor> {
+    /// The `(timestamp, id)` pair to continue after, in the column types the
+    /// [`keyset`](crate::keyset) macro compares against.
+    #[must_use]
+    pub fn after_pair(&self) -> Option<(jiff_diesel::Timestamp, Uuid)> {
+        self.after_key()
+            .map(|k| (jiff_diesel::Timestamp::from(k.at), k.id))
+    }
+}
+
 /// A page of keyset-paginated rows: the items, an optional total, and the opaque
 /// cursor for the next page (present only when more rows exist).
 #[derive(Debug, Clone)]
@@ -206,6 +235,24 @@ impl<T> CursorPage<T> {
     }
 }
 
+/// Runs a list's `COUNT(*)` query only when the total was requested:
+/// `total!(pagination, conn, scoped().count())` evaluates to `Option<i64>`, so a
+/// list states its filters once (in a `scoped` closure) and counts through them.
+///
+/// Expands to an `.await?`, so it is used inside an async fn returning the
+/// crate's `Result`, with `diesel_async::RunQueryDsl` in scope.
+macro_rules! total {
+    ($pagination:expr, $conn:expr, $count:expr) => {
+        if $pagination.include_count {
+            Some($count.get_result::<i64>($conn).await?)
+        } else {
+            None
+        }
+    };
+}
+
+pub(crate) use total;
+
 /// Applies keyset ordering, the after-cursor comparison, and the fetch limit to a
 /// boxed Diesel query, in one place, so no call site hand-writes the comparison.
 ///
@@ -218,7 +265,7 @@ impl<T> CursorPage<T> {
 /// Generic over the sort column's type: `sort_col` may be any orderable column
 /// (a timestamp, a text field, …) and `after`'s first element is its comparable
 /// value — nothing here assumes a timestamp. `direction` is a [`Direction`];
-/// `after` is typically `pagination.after_key().map(|k| (k.field.into(), k.id))`.
+/// `after` is typically `pagination.after_pair()` for a [`TimeCursor`] keyset.
 ///
 /// Exported for peer repository crates (e.g. `nvisy-cloud-postgres`) that build
 /// their own keyset queries; it expands to Diesel query-builder calls, so the

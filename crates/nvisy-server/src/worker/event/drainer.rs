@@ -18,7 +18,7 @@
 use std::time::Duration;
 
 use nvisy_postgres::model::{NewWorkspaceActivity, WorkspaceEventOutbox};
-use nvisy_postgres::query::{EventOutboxRepository, WorkspaceActivityRepository};
+use nvisy_postgres::query::{OutboxRepository, WorkspaceActivityRepository};
 use nvisy_postgres::types::Json;
 use nvisy_postgres::{AsyncConnection, PgConn};
 use tokio_util::sync::CancellationToken;
@@ -49,7 +49,7 @@ const RETRY_BACKOFF_BASE_SECS: i64 = 30;
 const RETRY_BACKOFF_MAX_SECS: i64 = 60 * 60;
 
 /// How many failed attempts a row gets before the drainer gives up on it and
-/// dead-letters it (stamps `failed_at`), so a poison event — one that can never
+/// dead-letters it (marks it `Failed`), so a poison event — one that can never
 /// decode or project — stops consuming drain cycles instead of retrying forever.
 const MAX_ATTEMPTS: i32 = 10;
 
@@ -161,7 +161,7 @@ impl EventOutboxDrainer {
         // side effects below run only for rows that durably landed.
         let (mut pass, committed) = conn
             .transaction(async |conn| {
-                let batch = conn.claim_outbox_batch(DRAIN_BATCH).await?;
+                let batch = conn.claim_outbox_batch::<WorkspaceEventOutbox>(DRAIN_BATCH).await?;
                 let mut pass = DrainPass {
                     claimed: batch.len(),
                     processed: 0,
@@ -173,7 +173,7 @@ impl EventOutboxDrainer {
                 for row in batch {
                     match self.record_activity(conn, &row).await {
                         Ok(event) => {
-                            conn.mark_outbox_processed(row.id).await?;
+                            conn.mark_outbox_processed(&row).await?;
                             committed.push((row, event));
                         }
                         // `attempts` counts prior failures; this attempt makes it
@@ -181,11 +181,11 @@ impl EventOutboxDrainer {
                         // row (dead-letter) instead of deferring it forever.
                         Err(()) if row.attempts + 1 >= MAX_ATTEMPTS => {
                             tracing::error!(target: TRACING_TARGET, id = %row.id, attempts = row.attempts + 1, "Dead-lettering outbox event after too many failed attempts");
-                            conn.mark_outbox_failed(row.id).await?;
+                            conn.mark_outbox_failed(&row).await?;
                             pass.dead_lettered += 1;
                         }
                         Err(()) => {
-                            conn.defer_outbox_attempt(row.id, retry_backoff(row.attempts))
+                            conn.defer_outbox_attempt(&row, retry_backoff(row.attempts))
                                 .await?;
                             pass.deferred += 1;
                         }

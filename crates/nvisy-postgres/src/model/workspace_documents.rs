@@ -102,6 +102,4 @@ pub struct UpdateWorkspaceDocument {
     pub kind: Option<DocumentKind>,
     /// Metadata.
     pub metadata: Option<serde_json::Value>,
-    /// Soft delete timestamp.
-    pub deleted_at: Option<Option<Timestamp>>,
 }

@@ -45,9 +45,7 @@ pub use workspace_blobs::{Blob, NewBlob};
 pub use workspace_connection_schedule::{
     NewWorkspaceConnectionSchedule, WorkspaceConnectionSchedule,
 };
-pub use workspace_connection_syncs::{
-    NewWorkspaceConnectionSync, UpdateWorkspaceConnectionSync, WorkspaceConnectionSync,
-};
+pub use workspace_connection_syncs::{NewWorkspaceConnectionSync, WorkspaceConnectionSync};
 pub use workspace_connections::{
     NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection,
 };
@@ -56,8 +54,8 @@ pub use workspace_detection_policy_versions::DetectionPolicyVersion;
 pub use workspace_detections::{
     NewWorkspaceDetection, UpdateWorkspaceDetection, WorkspaceDetection,
 };
-pub use workspace_document_exports::{NewWorkspaceDocumentExport, WorkspaceDocumentExport};
-pub use workspace_document_imports::{NewWorkspaceDocumentImport, WorkspaceDocumentImport};
+pub use workspace_document_exports::NewWorkspaceDocumentExport;
+pub use workspace_document_imports::NewWorkspaceDocumentImport;
 pub use workspace_documents::{NewWorkspaceDocument, UpdateWorkspaceDocument, WorkspaceDocument};
 pub use workspace_event_outbox::{NewWorkspaceEventOutbox, WorkspaceEventOutbox};
 pub use workspace_invites::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};

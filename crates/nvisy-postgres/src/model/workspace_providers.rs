@@ -108,6 +108,4 @@ pub struct UpdateWorkspaceProvider {
     pub is_active: Option<bool>,
     /// Non-encrypted metadata for filtering/display.
     pub metadata: Option<JsonValue>,
-    /// Soft delete timestamp.
-    pub deleted_at: Option<Option<Timestamp>>,
 }

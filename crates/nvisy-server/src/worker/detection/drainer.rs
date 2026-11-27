@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use nvisy_postgres::AsyncConnection;
 use nvisy_postgres::model::{UpdateWorkspaceDetection, WorkspaceDetectionJob};
-use nvisy_postgres::query::{DetectionJobOutboxRepository, WorkspaceDetectionRepository};
+use nvisy_postgres::query::{OutboxRepository, WorkspaceDetectionRepository};
 use nvisy_postgres::types::{DetectionMetadata, DetectionStatus, Json};
 use tokio_util::sync::CancellationToken;
 
@@ -68,6 +68,9 @@ struct DrainPass {
     processed: usize,
     deferred: usize,
     dead_lettered: usize,
+    /// A publish timed out, so NATS is likely down: the pass stopped early and
+    /// no further batch is claimed until the next tick.
+    timed_out: bool,
 }
 
 impl Worker for DetectionOutboxDrainer {
@@ -134,7 +137,9 @@ impl DetectionOutboxDrainer {
                     } else if pass.claimed > 0 {
                         tracing::debug!(target: TRACING_TARGET, processed = pass.processed, "Detection-job drain pass published jobs");
                     }
-                    if i64::try_from(pass.claimed).unwrap_or(i64::MAX) < DRAIN_BATCH {
+                    if pass.timed_out
+                        || i64::try_from(pass.claimed).unwrap_or(i64::MAX) < DRAIN_BATCH
+                    {
                         break;
                     }
                 }
@@ -160,21 +165,23 @@ impl DetectionOutboxDrainer {
 
         let outcome = conn
             .transaction(async |conn| {
-                let batch = conn.claim_detection_job_batch(DRAIN_BATCH).await?;
+                let batch = conn.claim_outbox_batch::<WorkspaceDetectionJob>(DRAIN_BATCH).await?;
                 let mut pass = DrainPass {
                     claimed: batch.len(),
                     processed: 0,
                     deferred: 0,
                     dead_lettered: 0,
+                    timed_out: false,
                 };
                 // Detections failed by a dead-lettered job, so their `Failed`
                 // status can be broadcast after the transaction commits.
                 let mut dead_lettered = Vec::new();
 
                 for row in batch {
-                    match self.publish(&row).await {
-                        Ok(()) => {
-                            conn.mark_detection_job_processed(row.id).await?;
+                    let attempt = self.publish(&row).await;
+                    match attempt {
+                        PublishOutcome::Published => {
+                            conn.mark_outbox_processed(&row).await?;
                             pass.processed += 1;
                         }
                         // `attempts` counts prior failures; this attempt makes it
@@ -185,16 +192,18 @@ impl DetectionOutboxDrainer {
                         // transaction) so it does not hang `Pending` forever. The
                         // guard on `Pending` makes it a no-op in the unlikely case a
                         // worker already claimed the detection.
-                        Err(()) if row.attempts + 1 >= MAX_ATTEMPTS => {
+                        PublishOutcome::Failed | PublishOutcome::TimedOut
+                            if row.attempts + 1 >= MAX_ATTEMPTS =>
+                        {
                             tracing::error!(target: TRACING_TARGET, id = %row.id, detection_id = %row.detection_id, attempts = row.attempts + 1, "Dead-lettering detection job after too many failed attempts; failing the detection");
-                            conn.mark_detection_job_failed(row.id).await?;
+                            conn.mark_outbox_failed(&row).await?;
                             let metadata = DetectionMetadata {
                                 error: Some(DEAD_LETTER_REASON.to_owned()),
                                 ..Default::default()
                             };
                             // Only broadcast `Failed` if this actually transitioned
-                            // the detection. A publish timeout does not prove the job
-                            // never reached a worker, so a worker may already own the
+                            // the detection. A failed publish (e.g. a lost ack) does not
+                            // prove the job never reached a worker, so one may own the
                             // detection (no longer `Pending`); the guard then no-ops
                             // and we must not announce a false terminal status.
                             let failed = conn
@@ -211,11 +220,22 @@ impl DetectionOutboxDrainer {
                             }
                             pass.dead_lettered += 1;
                         }
-                        Err(()) => {
-                            conn.defer_detection_job_attempt(row.id, retry_backoff(row.attempts))
+                        PublishOutcome::Failed | PublishOutcome::TimedOut => {
+                            conn.defer_outbox_attempt(&row, retry_backoff(row.attempts))
                                 .await?;
                             pass.deferred += 1;
                         }
+                    }
+                    // A publish timeout signals NATS is unavailable or hung. Do not
+                    // burn `PUBLISH_TIMEOUT` on each remaining row — that could
+                    // hold the batch's `FOR UPDATE SKIP LOCKED` locks and the
+                    // pooled connection for `DRAIN_BATCH * PUBLISH_TIMEOUT`. Stop
+                    // the pass (the row above was deferred or dead-lettered like
+                    // any failure); the next tick retries the rest.
+                    if attempt == PublishOutcome::TimedOut {
+                        pass.timed_out = true;
+                        tracing::warn!(target: TRACING_TARGET, id = %row.id, "Detection-job publish timed out; stopping the pass");
+                        break;
                     }
                 }
 
@@ -235,27 +255,40 @@ impl DetectionOutboxDrainer {
         Ok(pass)
     }
 
-    /// Decodes a row's job and publishes it to the work-queue. Returns `Err` if the
-    /// payload cannot decode or the publish fails, so the caller defers or
-    /// dead-letters it.
-    async fn publish(&self, row: &WorkspaceDetectionJob) -> std::result::Result<(), ()> {
-        let job = serde_json::from_value::<DetectionJob>(row.job.clone()).map_err(|err| {
-            tracing::error!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to decode detection job");
-        })?;
+    /// Decodes a row's job and publishes it to the work-queue. A decode error or
+    /// NATS error is [`Failed`](PublishOutcome::Failed); exceeding
+    /// [`PUBLISH_TIMEOUT`] is [`TimedOut`](PublishOutcome::TimedOut).
+    async fn publish(&self, row: &WorkspaceDetectionJob) -> PublishOutcome {
+        let job = match serde_json::from_value::<DetectionJob>(row.job.clone()) {
+            Ok(job) => job,
+            Err(err) => {
+                tracing::error!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to decode detection job");
+                return PublishOutcome::Failed;
+            }
+        };
         // Bound the publish so a hung NATS cannot hold the batch transaction's
-        // locks open; a timeout is a failed attempt like any other.
+        // locks open; a timeout stops the whole pass (see the caller).
         match tokio::time::timeout(PUBLISH_TIMEOUT, enqueue(&self.infra, job)).await {
-            Ok(Ok(())) => Ok(()),
+            Ok(Ok(())) => PublishOutcome::Published,
             Ok(Err(err)) => {
                 tracing::warn!(target: TRACING_TARGET, error = %err, id = %row.id, "Failed to publish detection job; deferring");
-                Err(())
+                PublishOutcome::Failed
             }
-            Err(_elapsed) => {
-                tracing::warn!(target: TRACING_TARGET, id = %row.id, "Detection-job publish timed out; deferring");
-                Err(())
-            }
+            Err(_elapsed) => PublishOutcome::TimedOut,
         }
     }
+}
+
+/// The result of one publish attempt: published, failed (decode or NATS error),
+/// or timed out (NATS unavailable/hung — the caller stops the batch).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PublishOutcome {
+    /// Published to the work-queue.
+    Published,
+    /// The payload could not decode or NATS rejected the publish.
+    Failed,
+    /// The publish exceeded [`PUBLISH_TIMEOUT`]; NATS is likely down.
+    TimedOut,
 }
 
 /// The delay in seconds before a failed row's next attempt: linear in `attempts`

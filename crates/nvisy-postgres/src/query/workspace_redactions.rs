@@ -4,23 +4,11 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::Timestamp;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceRedaction, WorkspaceRedaction};
-use crate::types::{CursorPage, CursorPagination, RedactionFilter, keyset};
-use crate::{Error, PgConnection, Result, schema};
-
-/// Keyset for paginating a detection's redactions: newest first by `created_at`,
-/// `id` as the tiebreaker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RedactionCursor {
-    /// When the redaction was created.
-    pub created_at: Timestamp,
-    /// Redaction id (tiebreaker).
-    pub id: uuid::Uuid,
-}
+use crate::types::{CursorPage, CursorPagination, RedactionFilter, TimeCursor, keyset, total};
+use crate::{PgConnection, Result, schema};
 
 /// Redacted output metadata for one detection, used by the artifacts endpoint.
 #[derive(Debug, Clone)]
@@ -52,13 +40,6 @@ pub trait WorkspaceRedactionRepository {
         detection_ids: &[Uuid],
     ) -> impl Future<Output = Result<Vec<DetectionRedactedOutput>>> + Send;
 
-    /// Lists live redacted output files for a detection, newest first.
-    fn detection_outputs(
-        &mut self,
-        workspace_id: Uuid,
-        detection_id: Uuid,
-    ) -> impl Future<Output = Result<Vec<DetectionRedactedOutput>>> + Send;
-
     /// Creates a new workspace redaction record.
     fn create_redaction(
         &mut self,
@@ -82,7 +63,7 @@ pub trait WorkspaceRedactionRepository {
     fn cursor_list_detection_redactions(
         &mut self,
         detection_id: Uuid,
-        pagination: CursorPagination<RedactionCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> impl Future<Output = Result<CursorPage<WorkspaceRedaction>>> + Send;
 
     /// Lists a workspace's redactions with cursor pagination, newest first,
@@ -93,21 +74,12 @@ pub trait WorkspaceRedactionRepository {
     fn cursor_list_workspace_redactions(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<RedactionCursor>,
+        pagination: CursorPagination<TimeCursor>,
         filter: &RedactionFilter,
     ) -> impl Future<Output = Result<CursorPage<WorkspaceRedaction>>> + Send;
 }
 
 impl WorkspaceRedactionRepository for PgConnection {
-    async fn detection_outputs(
-        &mut self,
-        workspace_id: Uuid,
-        detection_id: Uuid,
-    ) -> Result<Vec<DetectionRedactedOutput>> {
-        self.detection_outputs_batch(workspace_id, &[detection_id])
-            .await
-    }
-
     async fn detection_outputs_batch(
         &mut self,
         workspace_id: Uuid,
@@ -150,8 +122,7 @@ impl WorkspaceRedactionRepository for PgConnection {
                 workspace_blobs::file_size_bytes,
             ))
             .load::<(Uuid, Uuid, Uuid, String, String, i64)>(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
         Ok(rows
             .into_iter()
             .map(
@@ -175,14 +146,11 @@ impl WorkspaceRedactionRepository for PgConnection {
     ) -> Result<WorkspaceRedaction> {
         use schema::workspace_redactions;
 
-        let redaction = diesel::insert_into(workspace_redactions::table)
+        Ok(diesel::insert_into(workspace_redactions::table)
             .values(&new_redaction)
             .returning(WorkspaceRedaction::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(redaction)
+            .await?)
     }
 
     async fn find_redaction_in_workspace(
@@ -196,7 +164,7 @@ impl WorkspaceRedactionRepository for PgConnection {
 
         // Redactions carry no workspace column; scope through the detection's own
         // workspace so the id resolves only within its workspace.
-        let redaction = workspace_redactions::table
+        Ok(workspace_redactions::table
             .inner_join(workspace_detections::table)
             .filter(redactions::id.eq(redaction_id))
             .filter(redactions::deleted_at.is_null())
@@ -205,16 +173,13 @@ impl WorkspaceRedactionRepository for PgConnection {
             .select(WorkspaceRedaction::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(redaction)
+            .optional()?)
     }
 
     async fn cursor_list_detection_redactions(
         &mut self,
         detection_id: Uuid,
-        pagination: CursorPagination<RedactionCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> Result<CursorPage<WorkspaceRedaction>> {
         use schema::workspace_redactions::{self, dsl};
 
@@ -222,26 +187,14 @@ impl WorkspaceRedactionRepository for PgConnection {
             .filter(dsl::detection_id.eq(detection_id))
             .filter(dsl::deleted_at.is_null());
 
-        let total = if pagination.include_count {
-            Some(
-                base_query
-                    .count()
-                    .get_result::<i64>(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
+        let total = total!(pagination, self, base_query.count());
 
         let scoped = workspace_redactions::table
             .filter(dsl::detection_id.eq(detection_id))
             .filter(dsl::deleted_at.is_null())
             .into_boxed();
 
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let after = pagination.after_pair();
         let items: Vec<WorkspaceRedaction> = keyset!(
             scoped,
             dsl::created_at,
@@ -252,21 +205,17 @@ impl WorkspaceRedactionRepository for PgConnection {
         .select(WorkspaceRedaction::as_select())
         .limit(pagination.fetch_limit())
         .load(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
-            RedactionCursor {
-                created_at: row.created_at.into(),
-                id: row.id,
-            }
+            TimeCursor::new(row.created_at, row.id)
         }))
     }
 
     async fn cursor_list_workspace_redactions(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<RedactionCursor>,
+        pagination: CursorPagination<TimeCursor>,
         filter: &RedactionFilter,
     ) -> Result<CursorPage<WorkspaceRedaction>> {
         use schema::workspace_detections::dsl as detections;
@@ -294,21 +243,9 @@ impl WorkspaceRedactionRepository for PgConnection {
             query
         };
 
-        let total = if pagination.include_count {
-            Some(
-                scoped()
-                    .count()
-                    .get_result::<i64>(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
+        let total = total!(pagination, self, scoped().count());
 
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let after = pagination.after_pair();
         let items: Vec<WorkspaceRedaction> = keyset!(
             scoped(),
             redactions::created_at,
@@ -319,14 +256,10 @@ impl WorkspaceRedactionRepository for PgConnection {
         .select(WorkspaceRedaction::as_select())
         .limit(pagination.fetch_limit())
         .load(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
-            RedactionCursor {
-                created_at: row.created_at.into(),
-                id: row.id,
-            }
+            TimeCursor::new(row.created_at, row.id)
         }))
     }
 }
@@ -361,26 +294,28 @@ mod tests {
         redaction.output_document_id = Some(document.id);
         let redaction = conn.create_redaction(redaction).await?;
 
-        let outputs = conn.detection_outputs(workspace_id, detection_id).await?;
+        let outputs = conn
+            .detection_outputs_batch(workspace_id, &[detection_id])
+            .await?;
         assert_eq!(outputs.len(), 1);
         assert_eq!(outputs[0].document_id, document.id);
         assert_eq!(outputs[0].redaction_id, redaction.id);
         assert_eq!(outputs[0].display_name, "redacted.txt");
         assert_eq!(outputs[0].extension, "txt");
         assert!(
-            conn.detection_outputs(Uuid::new_v4(), detection_id)
+            conn.detection_outputs_batch(Uuid::new_v4(), &[detection_id])
                 .await?
                 .is_empty()
         );
         assert!(
-            conn.detection_outputs(workspace_id, Uuid::new_v4())
+            conn.detection_outputs_batch(workspace_id, &[Uuid::new_v4()])
                 .await?
                 .is_empty()
         );
 
         conn.delete_workspace_document(document.id).await?;
         assert!(
-            conn.detection_outputs(workspace_id, detection_id)
+            conn.detection_outputs_batch(workspace_id, &[detection_id])
                 .await?
                 .is_empty()
         );

@@ -5,22 +5,11 @@ use std::future::Future;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use jiff::Timestamp;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{AccountNotification, NewAccountNotification, UpdateAccountNotification};
-use crate::types::{CursorPage, CursorPagination, keyset};
-use crate::{Error, PgConnection, Result, schema};
-
-/// Keyset for paginating an account's notifications: newest first by
-/// `created_at`, `id` as the tiebreaker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NotificationCursor {
-    /// When the notification was created.
-    pub created_at: Timestamp,
-    /// Notification id (tiebreaker).
-    pub id: uuid::Uuid,
-}
+use crate::types::{CursorPage, CursorPagination, TimeCursor, keyset, total};
+use crate::{PgConnection, Result, schema};
 
 /// Repository for account notification database operations.
 ///
@@ -46,7 +35,7 @@ pub trait AccountNotificationRepository {
     fn cursor_list_account_notifications(
         &mut self,
         account_id: Uuid,
-        pagination: CursorPagination<NotificationCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> impl Future<Output = Result<CursorPage<AccountNotification>>> + Send;
 
     /// Marks all unread account notifications as read.
@@ -83,12 +72,11 @@ impl AccountNotificationRepository for PgConnection {
     ) -> Result<AccountNotification> {
         use schema::account_notifications;
 
-        diesel::insert_into(account_notifications::table)
+        Ok(diesel::insert_into(account_notifications::table)
             .values(&new_notification)
             .returning(AccountNotification::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)
+            .await?)
     }
 
     async fn create_account_notifications(
@@ -101,17 +89,16 @@ impl AccountNotificationRepository for PgConnection {
             return Ok(0);
         }
 
-        diesel::insert_into(account_notifications::table)
+        Ok(diesel::insert_into(account_notifications::table)
             .values(&new_notifications)
             .execute(self)
-            .await
-            .map_err(Error::from)
+            .await?)
     }
 
     async fn cursor_list_account_notifications(
         &mut self,
         acct_id: Uuid,
-        pagination: CursorPagination<NotificationCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> Result<CursorPage<AccountNotification>> {
         use diesel::dsl::{count_star, now};
         use schema::account_notifications::{self, dsl};
@@ -120,38 +107,27 @@ impl AccountNotificationRepository for PgConnection {
             .eq(acct_id)
             .and(dsl::expires_at.is_null().or(dsl::expires_at.gt(now)));
 
-        let total = if pagination.include_count {
-            Some(
-                account_notifications::table
-                    .filter(base_filter)
-                    .select(count_star())
-                    .get_result(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
+        let total = total!(
+            pagination,
+            self,
+            account_notifications::table
+                .filter(base_filter)
+                .select(count_star())
+        );
 
         let query = account_notifications::table
             .filter(base_filter)
             .into_boxed();
 
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let after = pagination.after_pair();
         let items = keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
             .limit(pagination.fetch_limit())
             .select(AccountNotification::as_select())
             .load(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
         Ok(CursorPage::new(items, total, pagination.limit, |n| {
-            NotificationCursor {
-                created_at: n.created_at.into(),
-                id: n.id,
-            }
+            TimeCursor::new(n.created_at, n.id)
         }))
     }
 
@@ -162,15 +138,14 @@ impl AccountNotificationRepository for PgConnection {
             read_at: Some(Some(jiff_diesel::Timestamp::from(Timestamp::now()))),
         };
 
-        diesel::update(
+        Ok(diesel::update(
             account_notifications::table
                 .filter(dsl::account_id.eq(account_id))
                 .filter(dsl::read_at.is_null()),
         )
         .set(&update_data)
         .execute(self)
-        .await
-        .map_err(Error::from)
+        .await?)
     }
 
     async fn mark_account_notification_as_read(
@@ -194,8 +169,7 @@ impl AccountNotificationRepository for PgConnection {
         )
         .set(&update_data)
         .execute(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(updated > 0)
     }
@@ -204,14 +178,13 @@ impl AccountNotificationRepository for PgConnection {
         use diesel::dsl::{count_star, now};
         use schema::account_notifications::{self, dsl};
 
-        account_notifications::table
+        Ok(account_notifications::table
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::read_at.is_null())
             .filter(dsl::expires_at.is_null().or(dsl::expires_at.gt(now)))
             .select(count_star())
             .get_result(self)
-            .await
-            .map_err(Error::from)
+            .await?)
     }
 }
 

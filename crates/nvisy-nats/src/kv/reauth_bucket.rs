@@ -28,7 +28,7 @@ use super::core::{InvalidKvKey, KvBucket, KvKey, validate_kv_key};
 /// alphanumeric characters KV allows — so a malformed value is rejected before it
 /// reaches the store.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Display)]
-pub struct ReauthProofKey(pub String);
+pub struct ReauthProofKey(String);
 
 impl FromStr for ReauthProofKey {
     type Err = InvalidKvKey;

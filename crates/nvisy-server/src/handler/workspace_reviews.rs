@@ -475,10 +475,10 @@ async fn list_review_timeline(
     entries.extend(comments.into_iter().map(|row| {
         WorkspaceReviewEntry::Comment(WorkspaceComment::from_model(row.item, row.account.into()))
     }));
-    entries.extend(events.into_iter().map(|(event, actor)| {
+    entries.extend(events.into_iter().map(|row| {
         WorkspaceReviewEntry::Event(WorkspaceReviewEvent::from_model(
-            event,
-            actor.map(Into::into),
+            row.item,
+            row.account.map(Into::into),
         ))
     }));
     entries.sort_by_key(WorkspaceReviewEntry::sort_key);
@@ -544,7 +544,7 @@ async fn list_review_events(
     let items = page
         .items
         .into_iter()
-        .map(|row| WorkspaceReviewEvent::from_model(row.item, row.actor.map(AccountRef::from)))
+        .map(|row| WorkspaceReviewEvent::from_model(row.item, row.account.map(AccountRef::from)))
         .collect();
 
     let response = WorkspaceReviewTimelinePage {

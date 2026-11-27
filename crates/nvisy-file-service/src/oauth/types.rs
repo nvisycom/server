@@ -21,7 +21,8 @@ pub struct OAuthProvider {
 }
 
 /// The OAuth application's credentials and redirect, supplied by configuration.
-#[derive(Debug, Clone)]
+/// The client secret is masked in the [`Debug`] output.
+#[derive(Clone)]
 pub struct OAuthApp {
     /// The OAuth client id.
     pub client_id: String,
@@ -29,6 +30,16 @@ pub struct OAuthApp {
     pub client_secret: String,
     /// The redirect URI registered with the provider; the callback route.
     pub redirect_uri: String,
+}
+
+impl fmt::Debug for OAuthApp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OAuthApp")
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"<redacted>")
+            .field("redirect_uri", &self.redirect_uri)
+            .finish()
+    }
 }
 
 /// A persisted OAuth token set. Stored encrypted with the rest of a

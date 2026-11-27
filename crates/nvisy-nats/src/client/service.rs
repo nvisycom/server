@@ -73,7 +73,7 @@ impl NatsClient {
     ///   deadline (bad URL, auth rejected, server unreachable).
     #[tracing::instrument(skip(config))]
     pub async fn connect(config: NatsConfig) -> Result<Self> {
-        tracing::info!("Connecting to NATS servers: {}", config.nats_url);
+        tracing::info!("Connecting to NATS servers: {}", config.redacted_url());
 
         let mut connect_opts = ConnectOptions::new()
             .name(config.name())

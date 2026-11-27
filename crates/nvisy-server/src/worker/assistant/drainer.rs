@@ -12,7 +12,7 @@ use std::time::Duration;
 use nvisy_nats::stream::EventPublisher;
 use nvisy_postgres::AsyncConnection;
 use nvisy_postgres::model::WorkspaceAssistantJob;
-use nvisy_postgres::query::AssistantJobOutboxRepository;
+use nvisy_postgres::query::OutboxRepository;
 use tokio_util::sync::CancellationToken;
 
 use super::job::{AssistantJob, AssistantStream};
@@ -63,6 +63,9 @@ struct DrainPass {
     processed: usize,
     deferred: usize,
     dead_lettered: usize,
+    /// A publish timed out, so NATS is likely down: the pass stopped early and
+    /// no further batch is claimed until the next tick.
+    timed_out: bool,
 }
 
 impl Worker for AssistantOutboxDrainer {
@@ -124,7 +127,9 @@ impl AssistantOutboxDrainer {
                     } else if pass.claimed > 0 {
                         tracing::debug!(target: TRACING_TARGET, processed = pass.processed, "Assistant-job drain pass published jobs");
                     }
-                    if i64::try_from(pass.claimed).unwrap_or(i64::MAX) < DRAIN_BATCH {
+                    if pass.timed_out
+                        || i64::try_from(pass.claimed).unwrap_or(i64::MAX) < DRAIN_BATCH
+                    {
                         break;
                     }
                 }
@@ -152,46 +157,49 @@ impl AssistantOutboxDrainer {
         let publisher = self.infra.nats.event_publisher::<AssistantStream>();
 
         conn.transaction(async |conn| {
-            let batch = conn.claim_assistant_job_batch(DRAIN_BATCH).await?;
+            let batch = conn.claim_outbox_batch::<WorkspaceAssistantJob>(DRAIN_BATCH).await?;
             let mut pass = DrainPass {
                 claimed: batch.len(),
                 processed: 0,
                 deferred: 0,
                 dead_lettered: 0,
+                timed_out: false,
             };
 
             for row in batch {
-                match publish(&publisher, &row).await {
+                let attempt = publish(&publisher, &row).await;
+                match attempt {
                     PublishOutcome::Published => {
-                        conn.mark_assistant_job_processed(row.id).await?;
+                        conn.mark_outbox_processed(&row).await?;
                         pass.processed += 1;
                     }
                     // `attempts` counts prior failures; this attempt makes it
                     // `attempts + 1`. Once that reaches the cap, dead-letter the row
                     // instead of deferring it forever. A dead-lettered reply job just
                     // means the assistant never answers this message.
-                    PublishOutcome::Failed if row.attempts + 1 >= MAX_ATTEMPTS => {
+                    PublishOutcome::Failed | PublishOutcome::TimedOut
+                        if row.attempts + 1 >= MAX_ATTEMPTS =>
+                    {
                         tracing::error!(target: TRACING_TARGET, id = %row.id, comment_id = %row.comment_id, attempts = row.attempts + 1, "Dead-lettering assistant job after too many failed attempts");
-                        conn.mark_assistant_job_failed(row.id).await?;
+                        conn.mark_outbox_failed(&row).await?;
                         pass.dead_lettered += 1;
                     }
-                    PublishOutcome::Failed => {
-                        conn.defer_assistant_job_attempt(row.id, retry_backoff(row.attempts))
+                    PublishOutcome::Failed | PublishOutcome::TimedOut => {
+                        conn.defer_outbox_attempt(&row, retry_backoff(row.attempts))
                             .await?;
                         pass.deferred += 1;
                     }
-                    // A publish timeout signals NATS is unavailable or hung. Do not
-                    // burn `PUBLISH_TIMEOUT` on each remaining row — that could hold
-                    // the batch's `FOR UPDATE SKIP LOCKED` locks and the pooled
-                    // connection for `DRAIN_BATCH * PUBLISH_TIMEOUT`. Defer this row
-                    // and stop the pass; the next tick retries the rest.
-                    PublishOutcome::TimedOut => {
-                        conn.defer_assistant_job_attempt(row.id, retry_backoff(row.attempts))
-                            .await?;
-                        pass.deferred += 1;
-                        tracing::warn!(target: TRACING_TARGET, id = %row.id, "Assistant-job publish timed out; deferring the rest of the batch");
-                        break;
-                    }
+                }
+                // A publish timeout signals NATS is unavailable or hung. Do not burn
+                // `PUBLISH_TIMEOUT` on each remaining row — that could hold the
+                // batch's `FOR UPDATE SKIP LOCKED` locks and the pooled connection
+                // for `DRAIN_BATCH * PUBLISH_TIMEOUT`. Stop the pass (the row above
+                // was deferred or dead-lettered like any failure); the next tick
+                // retries the rest.
+                if attempt == PublishOutcome::TimedOut {
+                    pass.timed_out = true;
+                    tracing::warn!(target: TRACING_TARGET, id = %row.id, "Assistant-job publish timed out; stopping the pass");
+                    break;
                 }
             }
 
@@ -203,6 +211,7 @@ impl AssistantOutboxDrainer {
 
 /// The result of one publish attempt: published, failed (decode or NATS error),
 /// or timed out (NATS unavailable/hung — the caller stops the batch).
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum PublishOutcome {
     /// Published to the work-queue.
     Published,

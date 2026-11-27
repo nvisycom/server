@@ -13,8 +13,8 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceReviewEvent, WorkspaceReview, WorkspaceReviewEvent};
-use crate::types::{AccountRefRow, ReviewEventKind};
-use crate::{Error, PgConnection, Result, schema};
+use crate::types::{AccountRefRow, ReviewEventKind, WithAccountRef};
+use crate::{PgConnection, Result, schema};
 
 /// Which of the two timeline streams an entry came from. Its order is the
 /// tiebreak between an event and a comment that share a `created_at`: an event
@@ -85,13 +85,6 @@ pub(crate) enum StreamBound {
 
 /// Read operations on a review's timeline events.
 pub trait WorkspaceReviewEventRepository {
-    /// Lists a review's timeline events, oldest first, each paired with the
-    /// actor's account reference when the actor still exists.
-    fn list_review_events(
-        &mut self,
-        review_id: Uuid,
-    ) -> impl Future<Output = Result<Vec<(WorkspaceReviewEvent, Option<AccountRefRow>)>>> + Send;
-
     /// Lists up to `limit` of a review's timeline events at or after a cursor
     /// position, oldest first, each with its actor's account reference. Backs the
     /// merged, paginated timeline; the caller interleaves these with the comments.
@@ -100,44 +93,18 @@ pub trait WorkspaceReviewEventRepository {
         review_id: Uuid,
         after: Option<&TimelineCursor>,
         limit: i64,
-    ) -> impl Future<Output = Result<Vec<(WorkspaceReviewEvent, Option<AccountRefRow>)>>> + Send;
+    ) -> impl Future<
+        Output = Result<Vec<WithAccountRef<WorkspaceReviewEvent, Option<AccountRefRow>>>>,
+    > + Send;
 }
 
 impl WorkspaceReviewEventRepository for PgConnection {
-    async fn list_review_events(
-        &mut self,
-        review_id: Uuid,
-    ) -> Result<Vec<(WorkspaceReviewEvent, Option<AccountRefRow>)>> {
-        use schema::accounts;
-        use schema::workspace_review_events::{self, dsl};
-
-        // The actor is nullable (SET NULL on account removal), so left-join it and
-        // load the account-ref column group as an `Option`.
-        workspace_review_events::table
-            .left_join(accounts::table.on(dsl::actor_account_id.eq(accounts::id.nullable())))
-            .filter(dsl::review_id.eq(review_id))
-            .select((
-                WorkspaceReviewEvent::as_select(),
-                (
-                    accounts::id,
-                    accounts::username,
-                    accounts::display_name,
-                    accounts::avatar_url,
-                )
-                    .nullable(),
-            ))
-            .order((dsl::created_at.asc(), dsl::id.asc()))
-            .load(self)
-            .await
-            .map_err(Error::from)
-    }
-
     async fn list_review_events_after(
         &mut self,
         review_id: Uuid,
         after: Option<&TimelineCursor>,
         limit: i64,
-    ) -> Result<Vec<(WorkspaceReviewEvent, Option<AccountRefRow>)>> {
+    ) -> Result<Vec<WithAccountRef<WorkspaceReviewEvent, Option<AccountRefRow>>>> {
         use schema::accounts;
         use schema::workspace_review_events::{self, dsl};
 
@@ -168,22 +135,16 @@ impl WorkspaceReviewEventRepository for PgConnection {
             }
         }
 
-        query
+        Ok(query
             .select((
                 WorkspaceReviewEvent::as_select(),
-                (
-                    accounts::id,
-                    accounts::username,
-                    accounts::display_name,
-                    accounts::avatar_url,
-                )
-                    .nullable(),
+                Option::<AccountRefRow>::as_select(),
             ))
             .order((dsl::created_at.asc(), dsl::id.asc()))
             .limit(limit)
-            .load(self)
+            .load::<(WorkspaceReviewEvent, Option<AccountRefRow>)>(self)
             .await
-            .map_err(Error::from)
+            .map(|rows| rows.into_iter().map(WithAccountRef::from).collect())?)
     }
 }
 
@@ -206,8 +167,7 @@ pub(crate) async fn record_event(
             target,
         })
         .execute(conn)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
     Ok(())
 }

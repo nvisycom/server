@@ -568,7 +568,9 @@ impl OidcService {
             purpose,
         };
         let store = self.nats.kv_store::<OidcStateBucket>().await?;
-        store.put(&OidcStateKey(csrf_state), &flow).await?;
+        store
+            .put(&csrf_state.parse::<OidcStateKey>()?, &flow)
+            .await?;
 
         Ok(authorize_url)
     }
@@ -745,7 +747,10 @@ impl OidcService {
         let proof = generate_proof_token();
         let store = self.nats.kv_store::<ReauthProofBucket>().await?;
         store
-            .put(&ReauthProofKey(proof.clone()), &ReauthProof { account_id })
+            .put(
+                &proof.parse::<ReauthProofKey>()?,
+                &ReauthProof { account_id },
+            )
             .await?;
         Ok(proof)
     }

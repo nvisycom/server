@@ -10,7 +10,7 @@ use object_store::gcp::GoogleCloudStorageBuilder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{Client, redact};
+use super::{Client, REDACTED};
 use crate::client::ObjectStoreClient;
 use crate::error::Error;
 
@@ -25,12 +25,10 @@ use crate::error::Error;
 pub struct GcsCredentials {
     /// GCS bucket name.
     pub bucket: String,
-    /// Path to a service account key JSON file on the local filesystem.
-    #[serde(default)]
-    pub service_account_path: Option<String>,
-    /// Inline service account key JSON (the file contents, not a path).
-    #[serde(default)]
-    pub service_account_key_json: Option<String>,
+    /// Service account key JSON (the key file's contents). Required: without
+    /// it the builder would fall back to the server's own application-default
+    /// or instance-metadata credentials.
+    pub service_account_key: String,
     /// Custom endpoint URL (for testing with a fake GCS server).
     #[serde(default)]
     pub endpoint: Option<String>,
@@ -40,11 +38,7 @@ impl fmt::Debug for GcsCredentials {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GcsCredentials")
             .field("bucket", &self.bucket)
-            .field("service_account_path", &self.service_account_path)
-            .field(
-                "service_account_key_json",
-                &redact(self.service_account_key_json.as_deref()),
-            )
+            .field("service_account_key", &REDACTED)
             .field("endpoint", &self.endpoint)
             .finish()
     }
@@ -60,15 +54,9 @@ impl Client for GcsProvider {
     const ID: &str = "gcs";
 
     async fn connect(creds: &Self::Credentials, policy: EndpointPolicy) -> Result<Self, Error> {
-        let mut builder = GoogleCloudStorageBuilder::new().with_bucket_name(&creds.bucket);
-
-        if let Some(path) = &creds.service_account_path {
-            builder = builder.with_service_account_path(path);
-        }
-
-        if let Some(key_json) = &creds.service_account_key_json {
-            builder = builder.with_service_account_key(key_json);
-        }
+        let mut builder = GoogleCloudStorageBuilder::new()
+            .with_bucket_name(&creds.bucket)
+            .with_service_account_key(&creds.service_account_key);
 
         if let Some(endpoint) = &creds.endpoint {
             // Validate the custom endpoint: only http(s), and plaintext http only

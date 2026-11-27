@@ -34,6 +34,7 @@ impl From<ConstraintViolation> for Error<'static> {
             ConstraintViolation::WorkspaceConnection(c) => c.into(),
             ConstraintViolation::WorkspaceConnectionSync(c) => c.into(),
             ConstraintViolation::WorkspacePolicy(c) => c.into(),
+            ConstraintViolation::WorkspaceProvider(c) => c.into(),
         }
     }
 }

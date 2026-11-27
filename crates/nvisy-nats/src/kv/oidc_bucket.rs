@@ -25,7 +25,7 @@ use super::core::{InvalidKvKey, KvBucket, KvKey, validate_kv_key};
 /// and alphanumeric characters KV allows — so a malformed value is rejected
 /// before it reaches the store (a URL-safe OAuth state always passes).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Display)]
-pub struct OidcStateKey(pub String);
+pub struct OidcStateKey(String);
 
 impl FromStr for OidcStateKey {
     type Err = InvalidKvKey;

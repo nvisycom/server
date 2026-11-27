@@ -220,7 +220,7 @@ impl PgClient {
     ///
     /// This is intended for internal use by the migration module.
     pub(crate) async fn get_pooled_connection(&self) -> Result<PooledConnection> {
-        let conn = self.inner.pool.get().await.map_err(Error::from)?;
+        let conn = self.inner.pool.get().await?;
         Ok(conn)
     }
 

@@ -1,8 +1,8 @@
-//! Detection-, connection-, and policy-related constraint violation error handlers.
+//! Detection-, connection-, policy-, and provider-related constraint violation error handlers.
 
 use nvisy_postgres::types::{
     WorkspaceConnectionConstraints, WorkspaceConnectionSyncConstraints,
-    WorkspaceDetectionConstraints, WorkspacePolicyConstraints,
+    WorkspaceDetectionConstraints, WorkspacePolicyConstraints, WorkspaceProviderConstraints,
 };
 
 use super::{Error, ErrorKind};
@@ -37,9 +37,6 @@ impl From<WorkspaceConnectionConstraints> for Error<'static> {
             }
             WorkspaceConnectionConstraints::ScheduleCronLength => {
                 ErrorKind::BadRequest.with_message("Connection schedule cron length is invalid")
-            }
-            WorkspaceConnectionConstraints::WorkspaceIdIdUnique => {
-                ErrorKind::Conflict.with_message("A connection with this identifier already exists")
             }
             WorkspaceConnectionConstraints::NameUnique => {
                 ErrorKind::Conflict.with_message("A connection with this name already exists")
@@ -76,11 +73,33 @@ impl From<WorkspacePolicyConstraints> for Error<'static> {
             WorkspacePolicyConstraints::MetadataSize => {
                 ErrorKind::BadRequest.with_message("Policy metadata size exceeds maximum limit")
             }
+            WorkspacePolicyConstraints::VersionUnique => ErrorKind::Conflict
+                .with_message("The policy was changed concurrently; reload it and try again"),
             WorkspacePolicyConstraints::NameUnique => {
                 ErrorKind::Conflict.with_message("A policy with this name already exists")
             }
             WorkspacePolicyConstraints::WorkspaceIdIdUnique => {
                 ErrorKind::Conflict.with_message("A policy with this identifier already exists")
+            }
+        }
+    }
+}
+
+impl From<WorkspaceProviderConstraints> for Error<'static> {
+    fn from(c: WorkspaceProviderConstraints) -> Self {
+        match c {
+            WorkspaceProviderConstraints::NameLength => ErrorKind::BadRequest
+                .with_message("Provider name must be between 1 and 255 characters"),
+            WorkspaceProviderConstraints::ProviderLength => ErrorKind::BadRequest
+                .with_message("Provider kind must be between 1 and 64 characters"),
+            WorkspaceProviderConstraints::DataSize => {
+                ErrorKind::BadRequest.with_message("Provider data size exceeds maximum limit")
+            }
+            WorkspaceProviderConstraints::MetadataSize => {
+                ErrorKind::BadRequest.with_message("Provider metadata size exceeds maximum limit")
+            }
+            WorkspaceProviderConstraints::NameUnique => {
+                ErrorKind::Conflict.with_message("A provider with this name already exists")
             }
         }
     }

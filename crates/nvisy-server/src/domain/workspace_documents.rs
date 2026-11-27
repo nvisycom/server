@@ -12,8 +12,8 @@
 use std::collections::BTreeSet;
 
 use nvisy_postgres::model::WorkspaceDocument as DocumentModel;
-use nvisy_postgres::query::{DocumentCursor, DocumentWithBlob, WorkspaceDocumentRepository};
-use nvisy_postgres::types::{CursorPage, CursorPagination, WithAccountRef};
+use nvisy_postgres::query::{DocumentWithBlob, WorkspaceDocumentRepository};
+use nvisy_postgres::types::{CursorPage, CursorPagination, TimeCursor, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
@@ -58,7 +58,7 @@ impl WorkspaceDocumentService {
     pub async fn list(
         &self,
         workspace_id: Uuid,
-        pagination: CursorPagination<DocumentCursor>,
+        pagination: CursorPagination<TimeCursor>,
         query: ListDocumentsInput,
     ) -> Result<CursorPage<WithAccountRef<DocumentWithBlob>>> {
         let filter = query.to_filter(&self.engine).map_err(|err| {

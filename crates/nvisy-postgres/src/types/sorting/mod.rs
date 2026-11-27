@@ -1,10 +1,8 @@
 //! Sorting options for database queries.
 
-mod files;
 mod invites;
 mod members;
 
-pub use files::{FileSortBy, FileSortField};
 pub use invites::{InviteSortBy, InviteSortField};
 pub use members::{MemberSortBy, MemberSortField};
 use serde::{Deserialize, Serialize};
@@ -65,17 +63,5 @@ impl<F> SortBy<F> {
             field,
             order: Direction::Descending,
         }
-    }
-
-    /// Returns whether the sort order is ascending.
-    #[inline]
-    pub fn is_asc(&self) -> bool {
-        matches!(self.order, Direction::Ascending)
-    }
-
-    /// Returns whether the sort order is descending.
-    #[inline]
-    pub fn is_desc(&self) -> bool {
-        matches!(self.order, Direction::Descending)
     }
 }

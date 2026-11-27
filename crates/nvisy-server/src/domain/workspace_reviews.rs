@@ -17,13 +17,13 @@ use nvisy_postgres::model::{
     WorkspaceReviewEvent,
 };
 use nvisy_postgres::query::{
-    AssistantJobOutboxRepository, DocumentReviewCursor, ReviewEventCursor, WithActor,
-    WithReviewers, WorkspaceDetectionRepository, WorkspaceDocumentRepository,
+    OutboxRepository, WithReviewers, WorkspaceDetectionRepository, WorkspaceDocumentRepository,
     WorkspaceMemberRepository, WorkspaceRedactionRepository, WorkspaceRepository,
     WorkspaceReviewCommentRepository, WorkspaceReviewRepository,
 };
 use nvisy_postgres::types::{
-    CursorPage, CursorPagination, DocumentReviewFilter, Handle, ReviewSettings, ReviewStatus,
+    AccountRefRow, CursorPage, CursorPagination, DocumentReviewFilter, Handle, ReviewSettings,
+    ReviewStatus, TimeCursor, WithAccountRef,
 };
 use nvisy_postgres::{ASSISTANT_ACCOUNT_ID, ASSISTANT_HANDLE, AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
@@ -136,7 +136,7 @@ impl WorkspaceReviewService {
     pub async fn list(
         &self,
         workspace_id: Uuid,
-        pagination: CursorPagination<DocumentReviewCursor>,
+        pagination: CursorPagination<TimeCursor>,
         filter: &DocumentReviewFilter,
     ) -> Result<CursorPage<WithReviewers<WorkspaceReview>>> {
         let mut conn = self.postgres.get_connection().await?;
@@ -183,8 +183,8 @@ impl WorkspaceReviewService {
         &self,
         workspace_id: Uuid,
         review_id: Uuid,
-        pagination: CursorPagination<ReviewEventCursor>,
-    ) -> Result<CursorPage<WithActor<WorkspaceReviewEvent>>> {
+        pagination: CursorPagination<TimeCursor>,
+    ) -> Result<CursorPage<WithAccountRef<WorkspaceReviewEvent, Option<AccountRefRow>>>> {
         let mut conn = self.postgres.get_connection().await?;
         find_review(&mut conn, workspace_id, review_id).await?;
         conn.cursor_list_review_events(review_id, pagination)
@@ -917,7 +917,7 @@ async fn enqueue_assistant_if_addressed(
             .with_message("Failed to encode assistant job")
             .with_context(err.to_string())
     })?;
-    conn.insert_assistant_job(NewWorkspaceAssistantJob {
+    conn.insert_outbox(NewWorkspaceAssistantJob {
         comment_id,
         job: payload,
     })

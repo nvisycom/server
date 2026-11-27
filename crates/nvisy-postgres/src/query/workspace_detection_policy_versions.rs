@@ -11,7 +11,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::DetectionPolicyVersion;
-use crate::{Error, PgConnection, Result, schema};
+use crate::{PgConnection, Result, schema};
 
 /// Repository for the detection policy-version pin table.
 pub trait DetectionPolicyVersionRepository {
@@ -58,8 +58,7 @@ impl DetectionPolicyVersionRepository for PgConnection {
             .values(&rows)
             .on_conflict_do_nothing()
             .execute(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
         Ok(())
     }
@@ -67,12 +66,11 @@ impl DetectionPolicyVersionRepository for PgConnection {
     async fn list_detection_policy_versions(&mut self, detection_id: Uuid) -> Result<Vec<Uuid>> {
         use schema::workspace_detection_policy_versions::{self, dsl};
 
-        workspace_detection_policy_versions::table
+        Ok(workspace_detection_policy_versions::table
             .filter(dsl::detection_id.eq(detection_id))
             .select(dsl::policy_version_id)
             .load(self)
-            .await
-            .map_err(Error::from)
+            .await?)
     }
 }
 

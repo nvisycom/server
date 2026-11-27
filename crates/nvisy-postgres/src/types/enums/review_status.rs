@@ -30,32 +30,12 @@ db_enum! {
     }
 }
 
-impl ReviewStatus {
-    /// Whether the review is fully signed off.
-    #[inline]
-    #[must_use]
-    pub fn is_approved(self) -> bool {
-        matches!(self, ReviewStatus::Approved)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::ReviewStatus::{
-        self, Approved, ChangesRequested, Draft, InReview, PartiallyApproved,
-    };
+    use super::ReviewStatus::{self, Draft};
 
     #[test]
     fn default_is_draft() {
         assert_eq!(ReviewStatus::default(), Draft);
-    }
-
-    #[test]
-    fn is_approved_only_for_approved() {
-        assert!(!Draft.is_approved());
-        assert!(!InReview.is_approved());
-        assert!(!ChangesRequested.is_approved());
-        assert!(!PartiallyApproved.is_approved());
-        assert!(Approved.is_approved());
     }
 }

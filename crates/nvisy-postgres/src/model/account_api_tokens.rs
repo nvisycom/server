@@ -112,6 +112,4 @@ pub struct UpdateAccountApiToken {
     pub is_remembered: Option<bool>,
     /// Timestamp when the token expires and becomes invalid.
     pub expired_at: Option<Option<Timestamp>>,
-    /// Timestamp when the token was soft-deleted.
-    pub deleted_at: Option<Option<Timestamp>>,
 }

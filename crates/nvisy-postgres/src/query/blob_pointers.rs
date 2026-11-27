@@ -17,7 +17,7 @@ use diesel_async::{AsyncConnection, RunQueryDsl};
 use uuid::Uuid;
 
 use crate::query::WorkspaceBlobRepository;
-use crate::{Error, PgConnection, Result};
+use crate::{PgConnection, Result};
 
 /// Generates a `clear_expired_*` sweep for one nullable blob-pointer column.
 ///
@@ -65,8 +65,7 @@ macro_rules! clear_expired_blob_pointer {
                     .for_update()
                     .skip_locked()
                     .load(conn)
-                    .await
-                    .map_err(Error::from)?;
+                    .await?;
 
                 let mut dropped = 0usize;
                 for (row_id, blob_id) in &expired {
@@ -81,8 +80,7 @@ macro_rules! clear_expired_blob_pointer {
                     )
                     .set($table::$column.eq(None::<Uuid>))
                     .execute(conn)
-                    .await
-                    .map_err(Error::from)?;
+                    .await?;
                     if cleared == 1 {
                         conn.decrement_ref(*blob_id).await?;
                         dropped += 1;
@@ -143,13 +141,29 @@ mod tests {
 
     use super::*;
     use crate::PgConn;
-    use crate::model::{NewBlob, NewWorkspaceDetection, NewWorkspaceRedaction};
+    use crate::model::{NewBlob, NewWorkspaceDetection, NewWorkspaceRedaction, WorkspaceDocument};
     use crate::query::{
         WorkspaceBlobRepository, WorkspaceDetectionRepository, WorkspaceDocumentRepository,
         WorkspaceRedactionRepository,
     };
     use crate::test_util::{TestDatabase, backdate};
     use crate::types::{DetectionStatus, Retention};
+
+    /// Loads a live document by id, unscoped (tests only).
+    async fn document(
+        conn: &mut PgConn,
+        document_id: Uuid,
+    ) -> anyhow::Result<Option<WorkspaceDocument>> {
+        use crate::schema::workspace_documents::dsl;
+
+        Ok(dsl::workspace_documents
+            .filter(dsl::id.eq(document_id))
+            .filter(dsl::deleted_at.is_null())
+            .select(WorkspaceDocument::as_select())
+            .first(conn)
+            .await
+            .optional()?)
+    }
 
     /// Moves a document to a default-retention window that began `hours_ago`,
     /// returning its blob's id.
@@ -158,8 +172,7 @@ mod tests {
         document_id: Uuid,
         hours_ago: i64,
     ) -> anyhow::Result<Uuid> {
-        let blob_id = conn
-            .find_workspace_document_by_id(document_id)
+        let blob_id = document(conn, document_id)
             .await?
             .and_then(|document| document.blob_id)
             .expect("seeded document has bytes");
@@ -288,8 +301,7 @@ mod tests {
             .await?;
         assert_eq!(clear_expired_document_blobs(&mut conn, 50).await?, 1);
 
-        let document = conn
-            .find_workspace_document_by_id(seeded.document_id)
+        let document = document(&mut conn, seeded.document_id)
             .await?
             .expect("the document row survives");
         assert!(document.blob_id.is_none(), "the bytes pointer is nulled");
@@ -311,7 +323,14 @@ mod tests {
 
         let blob_id = age_document_blob(&mut conn, seeded.document_id, 25).await?;
         // A second live referrer of the same bytes.
-        conn.increment_ref(blob_id).await?;
+        {
+            use crate::schema::workspace_blobs::dsl;
+
+            diesel::update(dsl::workspace_blobs.filter(dsl::id.eq(blob_id)))
+                .set(dsl::ref_count.eq(dsl::ref_count + 1))
+                .execute(&mut conn)
+                .await?;
+        }
         conn.delete_workspace_document(seeded.document_id).await?;
         assert_eq!(conn.find_blob_by_id(blob_id).await?.unwrap().ref_count, 1);
 
@@ -363,8 +382,7 @@ mod tests {
 
         // Only the first copy is released; the bytes stay for the second.
         assert_eq!(clear_expired_document_blobs(&mut conn, 50).await?, 1);
-        let kept = conn
-            .find_workspace_document_by_id(second.id)
+        let kept = document(&mut conn, second.id)
             .await?
             .expect("second copy survives");
         assert_eq!(kept.blob_id, Some(blob_id));

@@ -1,7 +1,6 @@
 //! Pagination request types for API endpoints.
 //!
-//! This module re-exports pagination types from nvisy-postgres and provides
-//! API-specific wrappers with validation for HTTP query parameters.
+//! API-specific wrappers over the nvisy-postgres pagination types.
 
 use garde::Validate;
 use nvisy_postgres::types;
@@ -12,50 +11,6 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_LIMIT: u32 = 20;
 /// Maximum pagination limit.
 const MAX_LIMIT: u32 = 100;
-/// Maximum offset for offset-based pagination.
-const MAX_OFFSET: u32 = 100_000;
-
-/// Offset-based pagination query parameters.
-///
-/// Use this for admin dashboards or when users need to jump to specific pages.
-/// For infinite scroll or API iteration, prefer [`CursorPagination`].
-#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, Validate)]
-#[serde(rename_all = "camelCase")]
-#[garde(allow_unvalidated)]
-pub struct OffsetPagination {
-    /// The number of records to skip before starting to return results.
-    #[garde(range(max = 100_000))]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub offset: Option<u32>,
-
-    /// The maximum number of records to return (1-100, default: 20).
-    #[garde(range(min = 1, max = 100))]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit: Option<u32>,
-}
-
-impl OffsetPagination {
-    /// Returns the pagination offset.
-    #[inline]
-    #[must_use]
-    pub fn offset(&self) -> u32 {
-        self.offset.unwrap_or(0).min(MAX_OFFSET)
-    }
-
-    /// Returns the pagination limit.
-    #[inline]
-    #[must_use]
-    pub fn limit(&self) -> u32 {
-        self.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT)
-    }
-}
-
-impl From<OffsetPagination> for types::OffsetPagination {
-    fn from(query: OffsetPagination) -> Self {
-        Self::new(i64::from(query.limit()), i64::from(query.offset()))
-    }
-}
-
 /// Cursor-based pagination query parameters.
 ///
 /// This is the preferred pagination method for API endpoints. It provides:

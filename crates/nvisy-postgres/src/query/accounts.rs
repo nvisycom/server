@@ -130,25 +130,23 @@ impl AccountRepository for PgConnection {
         }
         new_account.email_address = new_account.email_address.trim().to_lowercase();
 
-        diesel::insert_into(accounts::table)
+        Ok(diesel::insert_into(accounts::table)
             .values(&new_account)
             .returning(Account::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)
+            .await?)
     }
 
     async fn find_account_by_id(&mut self, account_id: Uuid) -> Result<Option<Account>> {
         use schema::accounts::{self, dsl};
 
-        accounts::table
+        Ok(accounts::table
             .filter(dsl::id.eq(account_id))
             .filter(dsl::deleted_at.is_null())
             .select(Account::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)
+            .optional()?)
     }
 
     async fn find_accounts_by_ids(&mut self, account_ids: &[Uuid]) -> Result<Vec<Account>> {
@@ -158,39 +156,36 @@ impl AccountRepository for PgConnection {
             return Ok(Vec::new());
         }
 
-        accounts::table
+        Ok(accounts::table
             .filter(dsl::id.eq_any(account_ids))
             .filter(dsl::deleted_at.is_null())
             .select(Account::as_select())
             .load(self)
-            .await
-            .map_err(Error::from)
+            .await?)
     }
 
     async fn find_account_by_email(&mut self, email: &str) -> Result<Option<Account>> {
         use schema::accounts::{self, dsl};
 
-        accounts::table
+        Ok(accounts::table
             .filter(dsl::email_address.eq(email.trim().to_lowercase()))
             .filter(dsl::deleted_at.is_null())
             .select(Account::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)
+            .optional()?)
     }
 
     async fn find_account_by_username(&mut self, username: &Handle) -> Result<Option<Account>> {
         use schema::accounts::{self, dsl};
 
-        accounts::table
+        Ok(accounts::table
             .filter(dsl::username.eq(username.as_str()))
             .filter(dsl::deleted_at.is_null())
             .select(Account::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)
+            .optional()?)
     }
 
     async fn find_account_by_identifier(&mut self, identifier: &str) -> Result<Option<Account>> {
@@ -215,24 +210,6 @@ impl AccountRepository for PgConnection {
     ) -> Result<Account> {
         use schema::accounts::{self, dsl};
 
-        // An all-`None` changeset would make Diesel emit an empty `SET`, which
-        // Postgres rejects. Reject it up front so a caller with nothing to change
-        // gets a clear error rather than a raw SQL failure.
-        if updates.username.is_none()
-            && updates.display_name.is_none()
-            && updates.email_address.is_none()
-            && updates.avatar_url.is_none()
-            && updates.timezone.is_none()
-            && updates.locale.is_none()
-            && updates.is_verified.is_none()
-            && updates.is_suspended.is_none()
-            && updates.password_changed_at.is_none()
-        {
-            return Err(Error::unexpected(
-                "update_account called with no fields to update",
-            ));
-        }
-
         // Normalize fields: trim whitespace
         // Some(None) clears, Some(Some(value)) sets, None skips
         if let Some(Some(name)) = updates.display_name.as_mut() {
@@ -242,7 +219,12 @@ impl AccountRepository for PgConnection {
             *email = email.trim().to_lowercase();
         }
 
-        diesel::update(accounts::table.filter(dsl::id.eq(account_id)))
+        // Scope to a live row: a concurrently deleted account yields `NotFound`
+        // instead of being written to. An all-`None` changeset is rejected by
+        // Diesel (`EmptyChangeset`) before reaching Postgres.
+        diesel::update(accounts::table)
+            .filter(dsl::id.eq(account_id))
+            .filter(dsl::deleted_at.is_null())
             .set(&updates)
             .returning(Account::as_returning())
             .get_result(self)
@@ -269,8 +251,7 @@ impl AccountRepository for PgConnection {
                 .returning(Account::as_returning())
                 .get_result(conn)
                 .await
-                .optional()
-                .map_err(Error::from)?;
+                .optional()?;
 
             // Only clear identities when an account was actually tombstoned.
             if account.is_some() {
@@ -278,8 +259,7 @@ impl AccountRepository for PgConnection {
                     account_identities::table.filter(account_identities::account_id.eq(account_id)),
                 )
                 .execute(conn)
-                .await
-                .map_err(Error::from)?;
+                .await?;
             }
 
             Ok::<_, Error>(account)
@@ -295,8 +275,7 @@ impl AccountRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .count()
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
         Ok(count > 0)
     }
@@ -314,8 +293,7 @@ impl AccountRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .count()
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
         Ok(count > 0)
     }
@@ -328,8 +306,7 @@ impl AccountRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .count()
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
         Ok(count > 0)
     }
@@ -347,8 +324,7 @@ impl AccountRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .count()
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
         Ok(count > 0)
     }

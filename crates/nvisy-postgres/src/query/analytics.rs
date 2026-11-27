@@ -18,7 +18,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::types::{DetectionStatus, DocumentKind};
-use crate::{Error, PgConnection, Result, schema};
+use crate::{PgConnection, Result, schema};
 
 /// Per-day detection counts and durations, as loaded from the grouped detection
 /// query.
@@ -201,8 +201,7 @@ async fn load_storage_by_kind(
         .group_by(documents::kind)
         .select((documents::kind, count_star(), sum(blobs::file_size_bytes)))
         .load(conn)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
     // Byte totals are converted to i64 at the boundary so callers do not depend
     // on BigDecimal. NULL (an empty group) and the physically impossible i64
@@ -228,13 +227,12 @@ async fn load_detections_by_status(
     use schema::workspace_detections;
     use schema::workspace_detections::dsl as detections;
 
-    workspace_detections::table
+    Ok(workspace_detections::table
         .filter(detections::workspace_id.eq(workspace_id))
         .group_by(detections::status)
         .select((detections::status, count_star()))
         .load(conn)
-        .await
-        .map_err(Error::from)
+        .await?)
 }
 
 /// Mean and 95th-percentile duration (milliseconds) of the workspace's completed
@@ -271,8 +269,7 @@ async fn load_detection_durations(
         .filter(detections::status.eq(DetectionStatus::Complete))
         .select((avg_ms, p95_ms))
         .first(conn)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
     Ok(DetectionDurations { avg_ms, p95_ms })
 }
@@ -318,7 +315,7 @@ async fn load_detection_day_counts(
          - workspace_detections.started_at))){COMPLETE_FILTER} * 1000)::bigint"
     ));
 
-    workspace_detections::table
+    Ok(workspace_detections::table
         .filter(detections::workspace_id.eq(workspace_id))
         .filter(detections::started_at.ge(from))
         .filter(detections::started_at.lt(to))
@@ -339,8 +336,7 @@ async fn load_detection_day_counts(
             p95_ms,
         ))
         .load(conn)
-        .await
-        .map_err(Error::from)
+        .await?)
 }
 
 #[cfg(test)]

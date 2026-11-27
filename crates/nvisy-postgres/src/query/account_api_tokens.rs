@@ -5,23 +5,13 @@ use std::time::Duration;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::Timestamp;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
-use crate::types::{ApiTokenType, CursorPage, CursorPagination, keyset, session};
+use crate::types::{
+    ApiTokenType, CursorPage, CursorPagination, TimeCursor, keyset, session, total,
+};
 use crate::{Error, PgConnection, Result, schema};
-
-/// Keyset for paginating an account's API tokens: newest first by `issued_at`,
-/// `id` as the tiebreaker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApiTokenCursor {
-    /// When the token was issued.
-    pub issued_at: Timestamp,
-    /// Token id (tiebreaker).
-    pub id: uuid::Uuid,
-}
 
 /// Repository for account API token database operations.
 ///
@@ -99,12 +89,6 @@ pub trait AccountApiTokenRepository {
         token_id: Uuid,
     ) -> impl Future<Output = Result<bool>> + Send;
 
-    /// Soft deletes all account API tokens for an account.
-    fn delete_all_account_api_tokens(
-        &mut self,
-        account_id: Uuid,
-    ) -> impl Future<Output = Result<i64>> + Send;
-
     /// Caps the number of live (`deleted_at IS NULL`) `app` session tokens for an
     /// account to the `keep` newest by `issued_at`, soft-deleting the rest.
     ///
@@ -122,7 +106,7 @@ pub trait AccountApiTokenRepository {
     fn cursor_list_account_api_tokens(
         &mut self,
         account_id: Uuid,
-        pagination: CursorPagination<ApiTokenCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> impl Future<Output = Result<CursorPage<AccountApiToken>>> + Send;
 
     /// Soft-deletes all expired account API tokens system-wide.
@@ -136,12 +120,11 @@ impl AccountApiTokenRepository for PgConnection {
     ) -> Result<AccountApiToken> {
         use schema::account_api_tokens;
 
-        diesel::insert_into(account_api_tokens::table)
+        Ok(diesel::insert_into(account_api_tokens::table)
             .values(&new_token)
             .returning(AccountApiToken::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)
+            .await?)
     }
 
     async fn find_account_api_token_by_id(
@@ -150,14 +133,13 @@ impl AccountApiTokenRepository for PgConnection {
     ) -> Result<Option<AccountApiToken>> {
         use schema::account_api_tokens::{self, dsl};
 
-        account_api_tokens::table
+        Ok(account_api_tokens::table
             .filter(dsl::id.eq(token_id))
             .filter(dsl::deleted_at.is_null())
             .select(AccountApiToken::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)
+            .optional()?)
     }
 
     async fn account_api_token_is_active(
@@ -182,7 +164,7 @@ impl AccountApiTokenRepository for PgConnection {
             .bind::<BigInt, _>(max_age_secs)
             .sql(" * interval '1 second')");
 
-        select(exists(
+        Ok(select(exists(
             account_api_tokens::table
                 .filter(dsl::id.eq(token_id))
                 .filter(dsl::account_id.eq(account_id))
@@ -195,8 +177,7 @@ impl AccountApiTokenRepository for PgConnection {
                 ),
         ))
         .get_result(self)
-        .await
-        .map_err(Error::from)
+        .await?)
     }
 
     async fn slide_account_api_token(
@@ -262,8 +243,7 @@ impl AccountApiTokenRepository for PgConnection {
             dsl::last_used_at.eq(diesel::dsl::now),
         ))
         .execute(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(rows > 0)
     }
@@ -275,7 +255,7 @@ impl AccountApiTokenRepository for PgConnection {
     ) -> Result<AccountApiToken> {
         use schema::account_api_tokens::{self, dsl};
 
-        diesel::update(
+        Ok(diesel::update(
             account_api_tokens::table
                 .filter(dsl::id.eq(token_id))
                 .filter(dsl::deleted_at.is_null()),
@@ -283,8 +263,7 @@ impl AccountApiTokenRepository for PgConnection {
         .set(&updates)
         .returning(AccountApiToken::as_returning())
         .get_result(self)
-        .await
-        .map_err(Error::from)
+        .await?)
     }
 
     async fn delete_account_api_token(&mut self, token_id: Uuid) -> Result<bool> {
@@ -300,26 +279,9 @@ impl AccountApiTokenRepository for PgConnection {
         )
         .set(dsl::deleted_at.eq(now))
         .execute(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(rows_affected > 0)
-    }
-
-    async fn delete_all_account_api_tokens(&mut self, account_id: Uuid) -> Result<i64> {
-        use diesel::dsl::now;
-        use schema::account_api_tokens::{self, dsl};
-
-        diesel::update(
-            account_api_tokens::table
-                .filter(dsl::account_id.eq(account_id))
-                .filter(dsl::deleted_at.is_null()),
-        )
-        .set(dsl::deleted_at.eq(now))
-        .execute(self)
-        .await
-        .map_err(Error::from)
-        .map(|rows| i64::try_from(rows).unwrap_or(i64::MAX))
     }
 
     async fn prune_app_tokens(&mut self, account_id: Uuid, keep: usize) -> Result<i64> {
@@ -344,8 +306,7 @@ impl AccountApiTokenRepository for PgConnection {
                 .limit(i64::try_from(keep).unwrap_or(i64::MAX))
                 .select(dsl::issued_at)
                 .load(conn)
-                .await
-                .map_err(Error::from)?;
+                .await?;
 
             let Some(cutoff) = kept_issued_at.last().copied() else {
                 return Ok(0);
@@ -366,8 +327,7 @@ impl AccountApiTokenRepository for PgConnection {
             )
             .set(dsl::deleted_at.eq(now))
             .execute(conn)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
             Ok::<_, Error>(i64::try_from(deleted).unwrap_or(i64::MAX))
         })
@@ -377,7 +337,7 @@ impl AccountApiTokenRepository for PgConnection {
     async fn cursor_list_account_api_tokens(
         &mut self,
         account_id: Uuid,
-        pagination: CursorPagination<ApiTokenCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> Result<CursorPage<AccountApiToken>> {
         use diesel::dsl::{count_star, now};
         use schema::account_api_tokens::{self, dsl};
@@ -391,21 +351,9 @@ impl AccountApiTokenRepository for PgConnection {
                 .into_boxed()
         };
 
-        let total = if pagination.include_count {
-            Some(
-                scoped()
-                    .select(count_star())
-                    .get_result(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
+        let total = total!(pagination, self, scoped().select(count_star()));
 
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.issued_at), k.id));
+        let after = pagination.after_pair();
         let items = keyset!(
             scoped(),
             dsl::issued_at,
@@ -416,14 +364,10 @@ impl AccountApiTokenRepository for PgConnection {
         .select(AccountApiToken::as_select())
         .limit(pagination.fetch_limit())
         .load(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(CursorPage::new(items, total, pagination.limit, |t| {
-            ApiTokenCursor {
-                issued_at: t.issued_at.into(),
-                id: t.id,
-            }
+            TimeCursor::new(t.issued_at, t.id)
         }))
     }
 
