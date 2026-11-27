@@ -58,6 +58,9 @@ jobs:
       # Loaded into the runner's daemon rather than pushed, so the scan below
       # sees the image before anything is published. The GitHub Actions cache
       # keeps the cargo-chef dependency layer between runs, per architecture.
+      # A release rebuilds the runtime stage uncached, so its `apt-get upgrade`
+      # always applies the security fixes Debian has shipped since the layer was
+      # last built; pull requests keep it cached.
       - name: Build image
         uses: docker/build-push-action@v7
         with:
@@ -67,6 +70,7 @@ jobs:
           tags: nvisy-server:${{ github.sha }}
           cache-from: type=gha,scope=server-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=server-${{ matrix.arch }}
+          no-cache-filters: ${{ startsWith(github.ref, 'refs/tags/v') && 'runtime' || '' }}
 
       # Scanned on pull requests too, so a vulnerable dependency surfaces on the
       # change that introduces it.

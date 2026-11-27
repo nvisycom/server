@@ -367,13 +367,19 @@ impl WebhookDeliveryWorker {
             return;
         }
 
-        match conn.suspend_webhook(webhook.id).await {
-            Ok(_) => tracing::warn!(
+        match conn
+            .suspend_failing_webhook(webhook.id, MAX_CONSECUTIVE_FAILURES)
+            .await
+        {
+            Ok(Some(_)) => tracing::warn!(
                 target: TRACING_TARGET,
                 webhook_id = %webhook.id,
                 consecutive_failures = updated.consecutive_failures,
                 "Auto-suspended webhook after repeated delivery failures"
             ),
+            // The owner changed its status, or a success reset the streak, since
+            // this failure was recorded: leave it as it now is.
+            Ok(None) => {}
             Err(err) => tracing::error!(
                 target: TRACING_TARGET,
                 webhook_id = %webhook.id,

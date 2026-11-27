@@ -34,7 +34,7 @@ model = "fastino/gliner2-privacy-filter-PII-multi"
 name = "bento-ocr"
 kind = "bento"
 base_url = "http://ocr:3000"
-model = "db_resnet50+crnn_vgg16_bn"
+model = "db_resnet50+Felix92/onnxtr-parseq-multilingual-v1@7d7329948dbcff02637a3eb9c14ae0c4440c5ed0"
 
 # STT enricher lineup (audio modality).
 [[enrichers.stt]]

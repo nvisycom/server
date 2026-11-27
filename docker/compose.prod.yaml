@@ -1,9 +1,10 @@
 name: nvisy
 
 # The inference services (NER, OCR, STT) come from compose.inference.yaml. They
-# sit behind profiles — start them with `--profile ner --profile ocr --profile
-# stt` (any subset) — and are reachable only on the private network, at the URLs
-# engine.example.toml uses.
+# sit behind profiles — choose them with COMPOSE_PROFILES (for example
+# `ner,ocr,stt`, any subset) or `--profile` flags — and are reachable only on the
+# private network, at the URLs engine.example.toml uses.
+
 services:
   postgres:
     image: postgres:18
@@ -230,7 +231,7 @@ volumes:
   # Model caches, populated by the init containers and mounted read-only by the
   # services, so weights stay out of the images and off repeat pulls.
   hf_cache:
-  doctr_cache:
+  ocr_cache:
 
 networks:
   nvisy:

@@ -33,7 +33,9 @@ use crate::{Error, PgConnection, Result};
 /// `expiring_on` names the row's own expiry column for that pointer: retention
 /// lives on the referrer, since identical bytes share one blob across referrers
 /// with different retention. An optional `keep_while` guard is a condition on
-/// `$table`: a row it matches keeps its pointer even past its window.
+/// `$table`: a row it matches keeps its pointer even past its window. It is
+/// checked both when selecting and again when clearing, since a guarded fact (a
+/// detection starting on a document) can commit between the two.
 macro_rules! clear_expired_blob_pointer {
     (
         $(#[$meta:meta])* $vis:vis fn $name:ident on $table:ident . $column:ident,
@@ -68,10 +70,14 @@ macro_rules! clear_expired_blob_pointer {
 
                 let mut dropped = 0usize;
                 for (row_id, blob_id) in &expired {
+                    // The guard is checked again here: the selection's snapshot
+                    // predates its row locks, so a row it guards can have changed
+                    // in between, and this statement sees what has committed since.
                     let cleared = diesel::update(
                         $table::table
                             .filter($table::id.eq(row_id))
-                            .filter($table::$column.eq(blob_id)),
+                            .filter($table::$column.eq(blob_id))
+                            $(.filter(diesel::dsl::not($guard)))?,
                     )
                     .set($table::$column.eq(None::<Uuid>))
                     .execute(conn)

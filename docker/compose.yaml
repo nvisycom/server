@@ -171,11 +171,11 @@ volumes:
   postgres_data:
   nats_data:
   rustfs_data:
-  # Hugging Face cache for NER and STT; docTR keeps its own. The init containers
-  # populate them and the services mount them read-only, so model weights stay
+  # Model caches (hf_cache for NER and STT, ocr_cache for OCR), populated by the
+  # init containers and mounted read-only by the services, so model weights stay
   # out of the images and off repeat pulls.
   hf_cache:
-  doctr_cache:
+  ocr_cache:
 
 networks:
   nvisy-dev:

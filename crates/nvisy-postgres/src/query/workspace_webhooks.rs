@@ -82,11 +82,18 @@ pub trait WorkspaceWebhookRepository {
         webhook_id: Uuid,
     ) -> impl Future<Output = Result<WorkspaceWebhook>> + Send;
 
-    /// Suspends a webhook (system-set, e.g. after repeated failures).
-    fn suspend_webhook(
+    /// Suspends a webhook after repeated delivery failures, but only while it is
+    /// still enabled and still has at least `min_failures` consecutive failures.
+    ///
+    /// The conditions are checked in the same statement, so a status the owner
+    /// set, or a failure streak reset by a success, after the failure that
+    /// prompted this is never overwritten. Returns the suspended webhook, or
+    /// `None` when the conditions no longer hold.
+    fn suspend_failing_webhook(
         &mut self,
         webhook_id: Uuid,
-    ) -> impl Future<Output = Result<WorkspaceWebhook>> + Send;
+        min_failures: i32,
+    ) -> impl Future<Output = Result<Option<WorkspaceWebhook>>> + Send;
 
     /// Finds all enabled webhooks for a workspace that are subscribed to a specific event.
     ///
@@ -302,18 +309,25 @@ impl WorkspaceWebhookRepository for PgConnection {
         Ok(webhook)
     }
 
-    async fn suspend_webhook(&mut self, webhook_id: Uuid) -> Result<WorkspaceWebhook> {
-        use schema::workspace_webhooks::dsl::{id, status, workspace_webhooks};
+    async fn suspend_failing_webhook(
+        &mut self,
+        webhook_id: Uuid,
+        min_failures: i32,
+    ) -> Result<Option<WorkspaceWebhook>> {
+        use schema::workspace_webhooks::dsl::{
+            consecutive_failures, id, status, workspace_webhooks,
+        };
 
-        let webhook = diesel::update(workspace_webhooks)
+        diesel::update(workspace_webhooks)
             .filter(id.eq(webhook_id))
+            .filter(status.eq(WebhookStatus::Enabled))
+            .filter(consecutive_failures.ge(min_failures))
             .set(status.eq(WebhookStatus::Suspended))
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await
-            .map_err(Error::from)?;
-
-        Ok(webhook)
+            .optional()
+            .map_err(Error::from)
     }
 
     async fn find_webhooks_for_event(
@@ -421,6 +435,34 @@ mod tests {
         Ok(())
     }
 
+    /// Suspension holds back when the webhook changed after the failure that
+    /// prompted it: below the threshold, or no longer enabled.
+    #[tokio::test]
+    async fn suspension_only_applies_while_still_failing_and_enabled() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_account_and_workspace().await;
+        let mut conn = db.client.get_connection().await?;
+
+        let webhook = conn
+            .create_workspace_webhook(NewWorkspaceWebhook::test(
+                seeded.workspace_id,
+                seeded.account_id,
+                vec![WebhookEvent::DocumentCreated],
+            ))
+            .await?;
+        conn.record_webhook_failure(webhook.id).await?;
+        conn.record_webhook_failure(webhook.id).await?;
+
+        // Below the threshold: left enabled.
+        assert!(conn.suspend_failing_webhook(webhook.id, 3).await?.is_none());
+
+        // At the threshold: suspended, once.
+        let suspended = conn.suspend_failing_webhook(webhook.id, 2).await?;
+        assert_eq!(suspended.map(|w| w.status), Some(WebhookStatus::Suspended));
+        assert!(conn.suspend_failing_webhook(webhook.id, 2).await?.is_none());
+        Ok(())
+    }
+
     #[tokio::test]
     async fn find_for_event_requires_enabled_subscribed_and_live() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
@@ -451,7 +493,9 @@ mod tests {
                 vec![WebhookEvent::DocumentCreated],
             ))
             .await?;
-        let _ = conn.suspend_webhook(suspended.id).await?;
+        conn.suspend_failing_webhook(suspended.id, 0)
+            .await?
+            .expect("an enabled webhook is suspended");
         // Subscribed but soft-deleted: excluded.
         let deleted = conn
             .create_workspace_webhook(NewWorkspaceWebhook::test(
