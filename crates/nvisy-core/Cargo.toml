@@ -29,8 +29,9 @@ default = []
 # manual schema implementations, while keeping the dependency optional
 schema = ["dep:schemars"]
 
-# CLI support: derives clap value/arg types on core config types.
-cli = ["dep:clap"]
+# CLI support: derives clap value/arg types on core config types and provides
+# the duration parser config flags use.
+cli = ["dep:clap", "dep:jiff"]
 
 [dependencies]
 # Async runtime
@@ -48,6 +49,7 @@ schemars = { workspace = true, optional = true }
 thiserror = { workspace = true, features = [] }
 
 # Primitive datatypes
+jiff = { workspace = true, features = [], optional = true }
 url = { workspace = true, features = [] }
 
 [dev-dependencies]

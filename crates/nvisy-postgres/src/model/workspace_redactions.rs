@@ -31,6 +31,8 @@ pub struct WorkspaceRedaction {
     /// Review-analysis (findings after reviewer edits) blob. `None` once the bytes
     /// are reclaimed on retention (the row is kept). A blob reference.
     pub review_audit_blob_id: Option<Uuid>,
+    /// When the review audit's bytes are released (audit-logs retention).
+    pub review_audit_expires_at: Option<Timestamp>,
     /// When the redaction was created.
     pub created_at: Timestamp,
     /// When the redaction was soft-deleted; `None` means live (the row is kept as
@@ -52,6 +54,8 @@ pub struct NewWorkspaceRedaction {
     pub output_document_id: Option<Uuid>,
     /// Review-analysis (findings after reviewer edits) blob this redaction produced.
     pub review_audit_blob_id: Option<Uuid>,
+    /// When the review audit's bytes are released.
+    pub review_audit_expires_at: Option<Timestamp>,
 }
 
 impl NewWorkspaceRedaction {
@@ -64,6 +68,7 @@ impl NewWorkspaceRedaction {
             account_id,
             output_document_id: None,
             review_audit_blob_id: None,
+            review_audit_expires_at: None,
         }
     }
 }

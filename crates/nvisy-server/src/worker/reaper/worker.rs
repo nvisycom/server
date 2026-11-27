@@ -66,25 +66,26 @@ impl BlobReaper {
         if let Err(err) = self.release_expired_referrers(cancel).await {
             tracing::error!(target: TRACING_TARGET, error = %err, "Referrer cleanup failed");
         }
-        if let Err(err) = self.sweep(Sweep::Expire, cancel).await {
-            tracing::error!(target: TRACING_TARGET, error = %err, "Expiry sweep failed");
+        if let Err(err) = self.sweep(Sweep::Purge, cancel).await {
+            tracing::error!(target: TRACING_TARGET, error = %err, "Purge sweep failed");
         }
         if let Err(err) = self.sweep(Sweep::Reconcile, cancel).await {
             tracing::error!(target: TRACING_TARGET, error = %err, "Reconcile sweep failed");
         }
     }
 
-    /// Releases the references machine byproducts hold on their blobs once past
-    /// retention: nulls the blob pointer on expired detection intermediates,
-    /// detection base-analysis (audit) blobs, and redaction review-analysis blobs,
-    /// keeping the rows and each dropping one blob reference. Pages through all
-    /// three until a pass clears nothing, so the following Expire sweep sees the
+    /// Releases the references rows hold on their blobs once past retention:
+    /// nulls the blob pointer on expired documents (originals and redacted
+    /// outputs, except while a detection on them is in progress), detection
+    /// intermediates, detection base-analysis (audit) blobs, and redaction
+    /// review-analysis blobs, keeping the rows and each dropping one blob
+    /// reference. Pages through all four until a pass clears nothing, so the following Purge sweep sees the
     /// now-unreferenced blobs. Stops early on cancellation so shutdown is not held
     /// up by a backlog.
     async fn release_expired_referrers(&self, cancel: &CancellationToken) -> Result<()> {
         use nvisy_postgres::query::{
             clear_expired_detection_audits, clear_expired_detection_intermediates,
-            clear_expired_review_audits,
+            clear_expired_document_blobs, clear_expired_review_audits,
         };
 
         loop {
@@ -92,11 +93,12 @@ impl BlobReaper {
                 break;
             }
             let mut conn = self.infra.postgres.get_connection().await?;
+            let documents = clear_expired_document_blobs(&mut conn, SWEEP_BATCH).await?;
             let intermediates =
                 clear_expired_detection_intermediates(&mut conn, SWEEP_BATCH).await?;
             let detection_audits = clear_expired_detection_audits(&mut conn, SWEEP_BATCH).await?;
             let review_audits = clear_expired_review_audits(&mut conn, SWEEP_BATCH).await?;
-            if intermediates == 0 && detection_audits == 0 && review_audits == 0 {
+            if documents == 0 && intermediates == 0 && detection_audits == 0 && review_audits == 0 {
                 break;
             }
         }
@@ -106,7 +108,7 @@ impl BlobReaper {
     /// Reclaims a sweep's blobs in `SWEEP_BATCH`-sized pages.
     ///
     /// A confirmed reclaim takes the blob out of the sweep's result set (the
-    /// Expire sweep by claiming it, the Reconcile sweep by stamping
+    /// Purge sweep by claiming it, the Reconcile sweep by stamping
     /// `reclaimed_at`), so the loop advances on *confirmed* reclaims rather than
     /// rows fetched: it stops once a page is short (nothing more due) or a full
     /// page made no progress (every blob in it failed), logging a stuck batch once
@@ -119,7 +121,7 @@ impl BlobReaper {
             let batch = {
                 let mut conn = self.infra.postgres.get_connection().await?;
                 match sweep {
-                    Sweep::Expire => conn.blobs_due_for_purge(SWEEP_BATCH).await?,
+                    Sweep::Purge => conn.blobs_due_for_purge(SWEEP_BATCH).await?,
                     Sweep::Reconcile => conn.blobs_pending_reclaim(SWEEP_BATCH).await?,
                 }
             };
@@ -129,7 +131,7 @@ impl BlobReaper {
             for blob in batch {
                 let mut conn = self.infra.postgres.get_connection().await?;
                 let outcome = match sweep {
-                    Sweep::Expire => self.blob.purge_blob(&mut conn, &blob).await,
+                    Sweep::Purge => self.blob.purge_blob(&mut conn, &blob).await,
                     Sweep::Reconcile => {
                         Ok(self.blob.reclaim_claimed_object(&mut conn, &blob).await)
                     }
@@ -169,8 +171,8 @@ impl BlobReaper {
 /// Which set of blobs a sweep reclaims.
 #[derive(Debug, Clone, Copy)]
 enum Sweep {
-    /// Unreferenced blobs past their retention window.
-    Expire,
+    /// Unreferenced blobs.
+    Purge,
     /// Blobs claimed for purge whose object delete was never confirmed.
     Reconcile,
 }
@@ -179,7 +181,7 @@ impl Sweep {
     /// Short label for structured logs.
     fn label(self) -> &'static str {
         match self {
-            Sweep::Expire => "expire",
+            Sweep::Purge => "purge",
             Sweep::Reconcile => "reconcile",
         }
     }

@@ -51,11 +51,11 @@ pub use account_notifications::{AccountNotificationRepository, NotificationCurso
 pub use accounts::AccountRepository;
 pub use analytics::{
     AnalyticsSnapshot, DetectionDayPoint, DetectionDurations, DetectionStatusCount, StorageByKind,
-    UsageByModel, WorkspaceAnalyticsRepository,
+    WorkspaceAnalyticsRepository,
 };
 pub use blob_pointers::{
     clear_expired_detection_audits, clear_expired_detection_intermediates,
-    clear_expired_review_audits,
+    clear_expired_document_blobs, clear_expired_review_audits,
 };
 pub use workspace_activities::{ActivityCursor, ActivityFilter, WorkspaceActivityRepository};
 pub use workspace_assistant_jobs::AssistantJobOutboxRepository;

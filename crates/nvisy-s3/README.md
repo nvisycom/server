@@ -13,7 +13,7 @@ only ever holds ciphertext.
 
 ## Documentation
 
-See [`docs/`](../../docs/) for architecture, security, and API documentation.
+See [docs.nvisy.com](https://docs.nvisy.com) for architecture, security, and API documentation.
 
 ## Changelog
 

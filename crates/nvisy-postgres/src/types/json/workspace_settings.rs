@@ -133,6 +133,17 @@ mod tests {
     }
 
     #[test]
+    fn a_stale_field_falls_back_alone() {
+        let settings = column(json!({
+            "review": { "minApprovals": 3 },
+            "retention": { "originalDocuments": { "mode": "fixed", "days": 30 } },
+        }))
+        .or_default();
+        assert_eq!(settings.review.min_approvals, 3, "valid fields are kept");
+        assert_eq!(settings.retention, RetentionSettings::default());
+    }
+
+    #[test]
     fn malformed_settings_blob_falls_back_to_default() {
         let settings = column(json!({ "retention": "nonsense" })).or_default();
         assert_eq!(settings.raster, RasterPolicy::Auto);

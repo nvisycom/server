@@ -32,9 +32,12 @@ services:
     ports:
       - "${NATS_PORT:-4222}:4222"
       - "${NATS_MONITOR_PORT:-8222}:8222"
+    # Clients authenticate with NATS_TOKEN; the server presents the same token.
     command:
       - "-c"
       - "/etc/nats/nats.conf"
+      - "--auth"
+      - "${NATS_TOKEN:?NATS_TOKEN is required}"
     volumes:
       - nats_data:/data
       - ./nats/nats.conf:/etc/nats/nats.conf:ro
@@ -98,7 +101,10 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: nvisy/server:${VERSION:-latest}
+    # VERSION names a published release to pull from ghcr.io (pin it; there is
+    # no `latest` while releases are prereleases), or any local tag together
+    # with `--build` to build this checkout.
+    image: ghcr.io/nvisycom/server:${VERSION:?set VERSION to a published release, or a local tag with --build}
     container_name: nvisy-server
     restart: unless-stopped
     ports:
@@ -110,6 +116,7 @@ services:
       SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-30s}
       POSTGRES_URL: postgresql://${POSTGRES_USER:-nvisy}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-nvisy}
       NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:?NATS_TOKEN is required}
       S3_BUCKET: ${S3_BUCKET:-nvisy}
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_ENDPOINT: http://rustfs:9000
@@ -125,6 +132,10 @@ services:
       HEALTH_CACHE_DURATION: ${HEALTH_CACHE_DURATION:-30s}
       RUST_LOG: ${RUST_LOG:-info}
       RUST_BACKTRACE: ${RUST_BACKTRACE:-0}
+    # The auth key pair, the encryption key, and engine.toml. The image runs as
+    # uid 1000, which must be able to read every file here.
+    volumes:
+      - ${NVISY_CONFIG_DIR:-./config}:/etc/nvisy:ro
     depends_on:
       postgres:
         condition: service_healthy

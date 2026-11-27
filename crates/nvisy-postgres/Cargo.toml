@@ -33,7 +33,7 @@ schema = ["dep:schemars"]
 
 # CLI support: derives clap::Args on config structs so the binary can parse them
 # from flags/env directly, keeping the dependency optional for library users.
-cli = ["dep:clap", "dep:humantime"]
+cli = ["dep:clap", "nvisy-core/cli"]
 
 # Test utilities: an ephemeral-container database fixture and test-only
 # constructors (e.g. `Handle::test`), so downstream crates can reuse the same
@@ -69,7 +69,6 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 schemars = { workspace = true, features = [], optional = true }
 clap = { workspace = true, features = ["derive", "env"], optional = true }
-humantime = { workspace = true, features = [], optional = true }
 
 # Text processing
 slug = { workspace = true, features = [] }

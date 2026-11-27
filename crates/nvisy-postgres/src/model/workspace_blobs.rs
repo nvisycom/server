@@ -2,9 +2,9 @@
 //!
 //! A blob is a content-addressed lump of stored bytes. It is shared: two
 //! documents, audits, or intermediates with identical bytes point at the same
-//! blob, and `ref_count` tracks how many references it has. Retention lives here
-//! too — the reaper purges a blob's backing object once `ref_count` reaches zero
-//! and its `expires_at` has passed.
+//! blob, and `ref_count` tracks how many references it has. The reaper purges a
+//! blob's backing object once `ref_count` reaches zero; retention is enforced by
+//! each referrer releasing its reference when its window passes.
 
 use diesel::prelude::*;
 use jiff_diesel::Timestamp;
@@ -29,13 +29,15 @@ pub struct Blob {
     pub storage_path: String,
     /// Object-store bucket the bytes live in.
     pub storage_bucket: String,
+    /// The engine's 32-byte digest of an audit or intermediates blob, checked
+    /// when the blob is read back. `None` for blobs the engine does not read
+    /// back (documents, avatars).
+    pub audit_digest: Option<Vec<u8>>,
     /// Number of live references to this blob. The reaper reclaims the object
-    /// only when this reaches zero and `expires_at` has passed.
+    /// once this reaches zero.
     pub ref_count: i32,
     /// When the blob was created.
     pub created_at: Timestamp,
-    /// Data-retention expiry (`None` = keep indefinitely).
-    pub expires_at: Option<Timestamp>,
     /// When the blob was claimed for purge. Once set the blob no longer
     /// deduplicates, so a claim can be committed before its object is deleted.
     /// `None` means the blob is still live.
@@ -65,8 +67,9 @@ pub struct NewBlob {
     pub storage_path: String,
     /// Object-store bucket.
     pub storage_bucket: String,
-    /// Data-retention expiry (`None` = keep indefinitely).
-    pub expires_at: Option<Timestamp>,
+    /// The engine's 32-byte digest of an audit or intermediates blob; `None` for
+    /// other blobs.
+    pub audit_digest: Option<Vec<u8>>,
 }
 
 impl NewBlob {

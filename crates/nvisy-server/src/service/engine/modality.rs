@@ -13,6 +13,36 @@
 //! (`elide.<segment>.<name>`), which is stable; the matching extensions are read
 //! from the engine's registry, so the server never reinvents elide's spellings.
 
+use schemars::JsonSchema;
+use serde::Serialize;
+
+/// A user-facing document modality bucket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum DocumentModality {
+    /// Text, including documents that decode to a text body (`pdf`, `docx`).
+    Text,
+    /// Tables (`csv`, `xlsx`).
+    Tabular,
+    /// Images.
+    Image,
+    /// Audio.
+    Audio,
+}
+
+impl DocumentModality {
+    /// The bucket's wire name, as a list filter token spells it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Tabular => "tabular",
+            Self::Image => "image",
+            Self::Audio => "audio",
+        }
+    }
+}
+
 /// The modality bucket a format id belongs to for the document-list filter, or
 /// `None` for a format that is not user-filterable (metadata sidecars, test
 /// fixtures).
@@ -25,13 +55,13 @@
 ///
 /// [`FormatId`]: elide_pipeline::FormatRegistry
 #[must_use]
-pub fn format_modality(format_id: &str) -> Option<&'static str> {
+pub fn format_modality(format_id: &str) -> Option<DocumentModality> {
     // `elide.<segment>.<name>`: the segment is the stable grouping key.
     match format_id.split('.').nth(1)? {
-        "text" | "document" => Some("text"),
-        "tabular" => Some("tabular"),
-        "image" => Some("image"),
-        "audio" => Some("audio"),
+        "text" | "document" => Some(DocumentModality::Text),
+        "tabular" => Some(DocumentModality::Tabular),
+        "image" => Some(DocumentModality::Image),
+        "audio" => Some(DocumentModality::Audio),
         // `office` (docprops) is metadata, `test` is fixtures: not user buckets.
         _ => None,
     }

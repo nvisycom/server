@@ -52,26 +52,42 @@ pub enum PolicyBodyInput {
         /// The client-authored policy body.
         definition: Box<PolicyDraftInput>,
     },
-    /// A derived policy body: a bare list of labels, each erased.
-    Labels {
-        /// The built-in labels to detect and erase.
-        labels: Vec<String>,
-    },
 }
 
 impl PolicyBodyInput {
-    /// The content-address hash of a derived policy body, or `None` for template/inline.
+    /// Resolves the body source into a concrete policy definition with a fresh
+    /// `id`. An inline body carries no template origin; a template body keeps the
+    /// template's own origin.
+    #[must_use]
+    pub fn into_definition(self) -> Policy {
+        match self {
+            PolicyBodyInput::Inline { definition } => definition.into_definition(None),
+            PolicyBodyInput::Template { template } => Policy {
+                id: Uuid::now_v7(),
+                ..template.build().policy
+            },
+        }
+    }
+}
+
+/// A derived policy: a bare list of built-in labels, each removed. Minted (or
+/// reused) when a detection runs over labels rather than named policies.
+#[derive(Clone)]
+pub struct DerivedPolicyInput {
+    /// The built-in labels to detect and remove.
+    pub labels: Vec<String>,
+}
+
+impl DerivedPolicyInput {
+    /// The content-address hash of the label set.
     ///
     /// A derived policy is identified by its label set (every derived policy
-    /// erases, so the action is not part of the identity). Labels are sorted and
+    /// removes, so the action is not part of the identity). Labels are sorted and
     /// deduplicated so the same set hashes equally regardless of order, letting an
     /// identical derived policy be reused rather than duplicated. The minted
     /// definition `id` is not part of the hash.
-    pub fn derived_content_hash(&self) -> Option<Vec<u8>> {
-        let PolicyBodyInput::Labels { labels } = self else {
-            return None;
-        };
-        let mut ids: Vec<&str> = labels.iter().map(String::as_str).collect();
+    pub fn content_hash(&self) -> Vec<u8> {
+        let mut ids: Vec<&str> = self.labels.iter().map(String::as_str).collect();
         ids.sort_unstable();
         ids.dedup();
 
@@ -80,39 +96,29 @@ impl PolicyBodyInput {
             hasher.update(u32::try_from(id.len()).unwrap_or(u32::MAX).to_le_bytes());
             hasher.update(id.as_bytes());
         }
-        Some(hasher.finalize().to_vec())
+        hasher.finalize().to_vec()
     }
 
-    /// Resolves the body source into a concrete policy definition with a fresh
-    /// `id`. An inline body carries no template origin; a template body keeps the
-    /// template's own origin; a labels body builds a degenerate definition — one
-    /// scope over the picked labels, each erased — under `generated_name`.
-    pub fn into_definition(self, generated_name: &str) -> Policy {
-        match self {
-            PolicyBodyInput::Inline { definition } => definition.into_definition(None),
-            PolicyBodyInput::Template { template } => Policy {
-                id: Uuid::now_v7(),
-                ..template.build().policy
-            },
-            PolicyBodyInput::Labels { labels } => {
-                let refs = labels.into_iter().map(LabelRef::new);
-                Policy {
-                    id: Uuid::now_v7(),
-                    name: generated_name.into(),
-                    description: None,
-                    template: None,
-                    scopes: vec![LabelScope::new(generated_name.to_owned(), refs)],
-                    rules: Vec::new(),
-                    fallback: Some(ModalityRedactions::text(TextRedaction::Erase)),
-                }
-            }
+    /// Builds the degenerate definition a derived policy holds — one scope over
+    /// the labels, each removed — under `name`, with a fresh `id`.
+    pub fn into_definition(self, name: &str) -> Policy {
+        let refs = self.labels.into_iter().map(LabelRef::new);
+        Policy {
+            id: Uuid::now_v7(),
+            name: name.into(),
+            description: None,
+            template: None,
+            scopes: vec![LabelScope::new(name.to_owned(), refs)],
+            rules: Vec::new(),
+            fallback: Some(ModalityRedactions::text(TextRedaction::Remove)),
         }
     }
 }
 
-/// Input for creating a policy: the body plus optional identity overrides.
+/// Input for creating an authored policy: the body plus optional identity
+/// overrides.
 pub struct CreatePolicyInput {
-    /// Optional display name override; ignored for a derived policy body.
+    /// Optional display name override.
     pub display_name: Option<String>,
     /// Optional description override.
     pub description: Option<String>,
@@ -136,8 +142,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn labels_body_erases_over_the_picked_labels() {
-        let body = PolicyBodyInput::Labels {
+    fn derived_policy_removes_the_picked_labels() {
+        let body = DerivedPolicyInput {
             labels: vec!["person_name".to_owned(), "email_address".to_owned()],
         };
 
@@ -153,34 +159,23 @@ mod tests {
         assert_eq!(labels, vec!["person_name", "email_address"]);
         assert!(matches!(
             definition.fallback.as_ref().and_then(|f| f.text.as_ref()),
-            Some(TextRedaction::Erase)
+            Some(TextRedaction::Remove)
         ));
     }
 
     #[test]
     fn derived_hash_is_order_insensitive() {
-        let a = PolicyBodyInput::Labels {
+        let a = DerivedPolicyInput {
             labels: vec!["person_name".to_owned(), "email_address".to_owned()],
         };
-        let b = PolicyBodyInput::Labels {
+        let b = DerivedPolicyInput {
             labels: vec!["email_address".to_owned(), "person_name".to_owned()],
         };
-        assert_eq!(a.derived_content_hash(), b.derived_content_hash());
+        assert_eq!(a.content_hash(), b.content_hash());
 
-        let different = PolicyBodyInput::Labels {
+        let different = DerivedPolicyInput {
             labels: vec!["ip_address".to_owned()],
         };
-        assert_ne!(a.derived_content_hash(), different.derived_content_hash());
-
-        let inline = PolicyBodyInput::Inline {
-            definition: Box::new(PolicyDraftInput {
-                name: "Custom".to_owned(),
-                description: None,
-                scopes: Vec::new(),
-                rules: Vec::new(),
-                fallback: None,
-            }),
-        };
-        assert!(inline.derived_content_hash().is_none());
+        assert_ne!(a.content_hash(), different.content_hash());
     }
 }

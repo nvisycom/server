@@ -28,7 +28,7 @@ default = []
 
 # CLI support: derives clap::Args on config structs so the binary can parse them
 # from flags/env directly, keeping the dependency optional for library users.
-cli = ["dep:clap", "dep:humantime"]
+cli = ["dep:clap", "nvisy-core/cli"]
 
 # Test support: an ephemeral NATS (JetStream) container + connected client, for
 # this crate's tests and for downstream crates that compose a real server.
@@ -53,7 +53,6 @@ tracing = { workspace = true, features = [] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 clap = { workspace = true, features = ["derive", "env"], optional = true }
-humantime = { workspace = true, features = [], optional = true }
 
 # Test-only: ephemeral NATS container (gated on the `test_util` feature).
 testcontainers-modules = { workspace = true, features = ["nats"], optional = true }

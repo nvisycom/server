@@ -59,3 +59,6 @@ temp/
 LLM.md
 .claude
 CLAUDE.md
+
+# Production compose config folder (keys, engine config)
+docker/config/

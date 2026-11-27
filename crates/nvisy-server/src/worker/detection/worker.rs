@@ -11,16 +11,15 @@ use std::num::NonZero;
 use std::sync::Arc;
 use std::time::Duration;
 
+use elide_pipeline::ArtifactSet;
 use elide_pipeline::primitive::RasterMode;
 use elide_pipeline::provider::{CodecParams, DocumentContext, RequestContext};
-use nvisy_postgres::model::{NewBlob, UpdateWorkspaceDetection, WorkspaceDetection};
+use nvisy_postgres::model::{UpdateWorkspaceDetection, WorkspaceDetection};
 use nvisy_postgres::query::{
     DetectionPolicyVersionRepository, EventOutboxRepository, WorkspaceBlobRepository,
     WorkspaceDetectionRepository, WorkspaceDocumentRepository, WorkspaceRepository,
 };
-use nvisy_postgres::types::{
-    DetectionStatus, Json, RasterPolicy, RetentionOverride, WorkspaceSettings,
-};
+use nvisy_postgres::types::{DetectionStatus, RasterPolicy, RetentionOverride, WorkspaceSettings};
 use nvisy_postgres::{AsyncConnection, DieselError, Error as PgError};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -28,12 +27,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::job::{DetectionJob, DetectionStream, broadcast_status};
-use super::support::{
-    FailDetection, FailOutcome, extract_detection_usage, fail_detection, resolve_policies_by_ids,
-};
+use super::support::{FailDetection, FailOutcome, fail_detection, resolve_policies_by_ids};
 use crate::extract::SecurityContext;
 use crate::response::{ErrorKind, Result};
-use crate::service::{ArtifactWriter, EngineService, Infra, event};
+use crate::service::{ArtifactWriter, EngineService, Infra, StagedBlob, event};
 use crate::worker::Worker;
 
 /// Tracing target for detection worker operations.
@@ -310,41 +307,30 @@ impl DetectionWorker {
 
     /// Best-effort reclaim of a staged object whose blob did not commit. A failure
     /// only defers cleanup, so it is logged, never propagated.
-    async fn discard_staged(&self, staged: &NewBlob) {
-        if let Err(err) = self.blob.discard_staged_object(staged).await {
+    async fn discard_staged(&self, staged: &StagedBlob) {
+        if let Err(err) = self.blob.discard_staged_object(&staged.blob).await {
             tracing::warn!(
                 target: TRACING_TARGET,
                 error = %err,
-                storage_path = %staged.storage_path,
+                storage_path = %staged.blob.storage_path,
                 "Failed to reclaim orphaned staged object; left for a later sweep",
             );
         }
     }
 
     /// Stages a detection's enrichment intermediates, or returns `None` when the
-    /// analysis ran no enricher for any group (its artifact set serializes empty).
-    /// Skipping the empty case avoids an intermediates blob that a client would
-    /// fetch only to find nothing.
-    async fn stage_intermediates<T: serde::Serialize>(
+    /// analysis enriched no part (its artifact set is empty). Skipping the empty
+    /// case avoids an intermediates blob that a client would fetch only to find
+    /// nothing. A part enriched to an empty artifact (an image OCR'd to no text)
+    /// still counts, so a restored re-run reuses it rather than re-enriching.
+    async fn stage_intermediates(
         &self,
         workspace_id: Uuid,
         retention_override: Option<&RetentionOverride>,
         settings: &WorkspaceSettings,
-        artifacts: &T,
-    ) -> Result<Option<NewBlob>> {
-        // The set serializes to `{ body, parts }`; an un-enriched document has a
-        // null body and no parts, and there is nothing worth persisting.
-        let value = serde_json::to_value(artifacts).map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Failed to serialize intermediates")
-                .with_context(err.to_string())
-        })?;
-        let has_body = value.get("body").is_some_and(|body| !body.is_null());
-        let has_parts = value
-            .get("parts")
-            .and_then(|parts| parts.as_object())
-            .is_some_and(|parts| !parts.is_empty());
-        if !has_body && !has_parts {
+        artifacts: &ArtifactSet,
+    ) -> Result<Option<StagedBlob>> {
+        if artifacts.is_empty() {
             return Ok(None);
         }
 
@@ -444,7 +430,7 @@ impl DetectionWorker {
         let audit = &analyzed.audit;
 
         // Write the (non-transactional) audit object first, then commit its blob
-        // and base-audit row together with the detection's usage and status in one
+        // and base-audit row together with the detection's status in one
         // transaction below.
         let retention_override = detection
             .retention_override
@@ -474,26 +460,13 @@ impl DetectionWorker {
             )
             .await?;
 
-        // Record inference usage: one call row (and its meter rows) per model call
-        // into the usage tables (the aggregation surface) and the full per-call
-        // report into metadata for drill-down. Absent for a purely deterministic
-        // detection. The report is layered onto the detection's existing metadata
-        // so tags and any recorded error survive the write.
-        let usage = extract_detection_usage(detection.id, audit);
-        let metadata = usage.as_ref().map(|u| {
-            let mut current = detection.metadata.or_default();
-            current.usage = Some(u.report.clone());
-            Json::encode(&current)
-        });
-
-        // Persist the audit file row, per-model usage, and the detection's
-        // transition to `Complete` atomically: a partial failure would otherwise
-        // strand usage rows or an audit pointer on a detection still marked
-        // `Executing`. The finalize is fenced on our claim; if it went stale
-        // (another worker re-claimed the detection past the lease), the whole
-        // transaction rolls back so we do not stamp over the new owner's work or
-        // leak usage/audit rows for a detection we lost. Kept to reclaim the
-        // just-staged object if the transaction does not commit: on rollback its
+        // Persist the audit file row and the detection's transition to
+        // `Complete` atomically: a partial failure would otherwise strand an
+        // audit pointer on a detection still marked `Executing`. The finalize is
+        // fenced on our claim; if it went stale (another worker re-claimed the
+        // detection past the lease), the whole transaction rolls back so we do
+        // not stamp over the new owner's work or leak audit rows for a detection
+        // we lost. Kept to reclaim the just-staged object if the transaction does not commit: on rollback its
         // `workspace_blobs` row never lands, so the blob-driven reaper could never
         // find the object otherwise. Build the outbox row here so the finalize
         // transaction is `PgError`-typed for its rollback sentinel, and insert it
@@ -528,35 +501,36 @@ impl DetectionWorker {
                 // The base analysis is a blob-ref on the detection: resolving
                 // (sharing or inserting) its blob records the detection's reference,
                 // and `audit_blob_id` is set on the detection at finalize below.
-                let audit_resolved = conn.find_or_create_blob(audit_blob).await?;
+                let audit_resolved = conn.find_or_create_blob(audit_blob.blob).await?;
                 // Pin the exact policy versions this analysis consumed, so the
                 // detection is reproducible against them regardless of later edits.
                 conn.record_detection_policy_versions(detection_id, &policy_version_ids)
                     .await?;
                 // The intermediate is likewise a blob-ref on the detection.
-                let resolved_blob = match intermediates_blob {
-                    Some(blob) => Some(conn.find_or_create_blob(blob).await?),
-                    None => None,
+                let (resolved_blob, intermediate_expires_at) = match intermediates_blob {
+                    Some(staged) => (
+                        Some(conn.find_or_create_blob(staged.blob).await?),
+                        Some(staged.expires_at.into()),
+                    ),
+                    None => (None, None),
                 };
                 let intermediate_blob_id = resolved_blob.as_ref().map(|blob| blob.id);
-                if let Some(usage) = usage {
-                    conn.record_detection_usage(usage.calls).await?;
-                }
                 let finalized = conn
                     .finalize_detection(
                         detection.id,
                         claim_token,
                         UpdateWorkspaceDetection {
                             intermediate_blob_id: Some(intermediate_blob_id),
+                            intermediate_expires_at: Some(intermediate_expires_at),
                             audit_blob_id: Some(Some(audit_resolved.id)),
-                            metadata,
+                            audit_expires_at: Some(Some(audit_blob.expires_at.into())),
                             ..Default::default()
                         },
                     )
                     .await?;
                 if !finalized {
-                    // Abort the file and usage inserts: the detection is no longer
-                    // ours to finalize. `RollbackTransaction` unwinds the writes
+                    // Abort the file inserts: the detection is no longer ours to
+                    // finalize. `RollbackTransaction` unwinds the writes
                     // without being a real error; it is matched below.
                     return Err(PgError::Query(DieselError::RollbackTransaction));
                 }
@@ -573,11 +547,11 @@ impl DetectionWorker {
                 // A base audit or intermediate whose content deduplicated onto an
                 // existing blob is pointed at that blob's stored object, orphaning
                 // the object staged for it. Reclaim the redundant staged objects.
-                if audit_path != staged_audit.storage_path {
+                if audit_path != staged_audit.blob.storage_path {
                     self.discard_staged(&staged_audit).await;
                 }
                 if let Some(staged) = &staged_intermediates
-                    && intermediate_path.as_deref() != Some(staged.storage_path.as_str())
+                    && intermediate_path.as_deref() != Some(staged.blob.storage_path.as_str())
                 {
                     self.discard_staged(staged).await;
                 }

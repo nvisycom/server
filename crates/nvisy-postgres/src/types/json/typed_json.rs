@@ -127,12 +127,32 @@ impl<T: DeserializeOwned> Json<T> {
 }
 
 impl<T: DeserializeOwned + Default> Json<T> {
-    /// Decodes the stored value into `T`, falling back to `T::default()` when it
-    /// does not match — for configuration that must stay usable across shape
-    /// changes rather than error or surface a raw blob.
+    /// Decodes the stored value into `T`, falling back to defaults where it does
+    /// not match — for configuration that must stay usable across shape changes
+    /// rather than error or surface a raw blob.
+    ///
+    /// The fallback is per top-level field: when the whole object does not
+    /// decode, each stored field that still decodes is kept and only the ones
+    /// that do not are left to `T`'s defaults, so one stale setting does not
+    /// reset every other. A stored value that is not an object falls back to
+    /// `T::default()` whole.
     #[must_use]
     pub fn or_default(&self) -> T {
-        serde_json::from_value(self.value.clone()).unwrap_or_default()
+        if let Ok(value) = serde_json::from_value(self.value.clone()) {
+            return value;
+        }
+        let serde_json::Value::Object(stored) = &self.value else {
+            return T::default();
+        };
+
+        let mut kept = serde_json::Map::new();
+        for (key, field) in stored {
+            kept.insert(key.clone(), field.clone());
+            if serde_json::from_value::<T>(serde_json::Value::Object(kept.clone())).is_err() {
+                kept.remove(key);
+            }
+        }
+        serde_json::from_value(serde_json::Value::Object(kept)).unwrap_or_default()
     }
 }
 

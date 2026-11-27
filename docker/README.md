@@ -66,13 +66,44 @@ The API documentation is available at:
 
 ### Production
 
-Build and run the complete stack:
+Run these from the `docker/` directory. Every command passes
+`-f compose.prod.yaml`; without it, compose starts the development stack.
 
-```bash
-cp .env.example .env
-# Edit .env with production values
-docker compose up -d --build
-```
+1. Put the server's key files and engine config in `docker/config/` (or another
+   folder named by `NVISY_CONFIG_DIR`), which is mounted read-only at
+   `/etc/nvisy`:
+
+   ```bash
+   mkdir -p config
+   (cd .. && make generate-keys) && mv ../private.pem ../public.pem ../encryption.key config/
+   cp engine.example.toml config/engine.toml   # then edit it
+   sudo chown -R 1000:1000 config              # the image runs as uid 1000
+   ```
+
+2. Create `docker/.env` with the values compose requires. Don't copy the
+   repository's `.env.example`: its key paths point at the working directory
+   and would override the `/etc/nvisy` defaults.
+
+   ```bash
+   VERSION=0.1.0-rc.1        # a release published on ghcr.io, or `local` with --build
+   POSTGRES_PASSWORD=...
+   NATS_TOKEN=...
+   S3_ACCESS_KEY_ID=...
+   S3_SECRET_ACCESS_KEY=...
+   CORS_ORIGINS=https://app.example.com
+   ```
+
+3. Start the stack, pulling the `VERSION` image:
+
+   ```bash
+   docker compose -f compose.prod.yaml up -d
+   ```
+
+   Or build the server image from this checkout instead (with `VERSION=local`):
+
+   ```bash
+   docker compose -f compose.prod.yaml up -d --build
+   ```
 
 The production compose file starts every service on a private bridge network.
 The server waits for the PostgreSQL, NATS, and RustFS health checks to pass,
@@ -113,8 +144,8 @@ make generate-keys
 ```
 
 This produces three files: `private.pem`, `public.pem`, and `encryption.key`. In
-production, store these securely and reference them via the environment
-variables above.
+production, store these securely. The production compose file reads them from
+its mounted config folder (see [Production](#production)).
 
 ## Container Image
 
@@ -126,7 +157,7 @@ The Dockerfile uses a multi-stage build:
 3. **Runtime:** minimal Debian image with only the binary and runtime libraries
 
 The runtime image runs as a non-root user (`nvisy`, UID 1000) and includes a
-health check endpoint at `/health/`.
+health check against `/health/ready`. The binary is `nvisy-cli`.
 
 ## NATS Configuration
 
@@ -171,12 +202,12 @@ payloads above are additionally encrypted at the application layer.
 
 All services expose health check endpoints:
 
-| Service    | Endpoint                | Method   |
-| ---------- | ----------------------- | -------- |
-| Server     | `/health/`              | HTTP GET |
-| PostgreSQL | `pg_isready`            | CLI      |
-| NATS       | `/healthz` on port 8222 | HTTP GET |
-| RustFS     | `/health/ready` on port 9000 | HTTP GET |
+| Service    | Endpoint                             | Method   |
+| ---------- | ------------------------------------ | -------- |
+| Server     | `/health/live`, `/health/ready`      | HTTP GET |
+| PostgreSQL | `pg_isready`                         | CLI      |
+| NATS       | `/healthz` on port 8222              | HTTP GET |
+| RustFS     | `/health/ready` on port 9000         | HTTP GET |
 
 The compose files configure health checks with 5-second intervals. The server
 depends on PostgreSQL, NATS, and RustFS being healthy before it starts accepting
@@ -193,6 +224,9 @@ make clear-migrations      # Revert all (destructive)
 ```
 
 ## Commands
+
+These use the development stack. For production, add `-f compose.prod.yaml` to
+each command.
 
 ```bash
 # Start services

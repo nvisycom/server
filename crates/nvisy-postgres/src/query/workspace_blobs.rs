@@ -68,8 +68,8 @@ pub trait WorkspaceBlobRepository {
         blob_id: Uuid,
     ) -> impl Future<Output = Result<Option<Blob>>> + Send;
 
-    /// Lists up to `limit` reclaimable blobs: `ref_count = 0`, past `expires_at`,
-    /// and not yet claimed for purge. These are the reaper's expiry sweep.
+    /// Lists up to `limit` reclaimable blobs: `ref_count = 0` and not yet claimed
+    /// for purge, oldest first. These are the reaper's purge sweep.
     fn blobs_due_for_purge(
         &mut self,
         limit: i64,
@@ -201,9 +201,7 @@ impl WorkspaceBlobRepository for PgConnection {
         workspace_blobs::table
             .filter(dsl::ref_count.eq(0))
             .filter(dsl::purged_at.is_null())
-            .filter(dsl::expires_at.is_not_null())
-            .filter(dsl::expires_at.lt(now))
-            .order(dsl::expires_at.asc())
+            .order(dsl::created_at.asc())
             .limit(limit)
             .select((dsl::id, dsl::storage_path, dsl::storage_bucket))
             .load(self)
@@ -259,11 +257,9 @@ impl WorkspaceBlobRepository for PgConnection {
 
 #[cfg(test)]
 mod tests {
-    use jiff::{Span, Timestamp};
-
     use super::*;
     use crate::query::WorkspaceBlobRepository;
-    use crate::test_util::{TestDatabase, backdate};
+    use crate::test_util::TestDatabase;
 
     #[tokio::test]
     async fn find_or_create_dedups_identical_content_and_counts_references() -> anyhow::Result<()> {
@@ -339,45 +335,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_unreferenced_expired_blobs_are_due_for_purge() -> anyhow::Result<()> {
+    async fn only_unreferenced_blobs_are_due_for_purge() -> anyhow::Result<()> {
         let db = TestDatabase::start().await;
         let seeded = db.seed_account_and_workspace().await;
         let mut conn = db.client.get_connection().await?;
 
-        // A blob still referenced is NOT reclaimable even once past its retention
-        // window. Insert it with a valid future window, then backdate it past due.
-        let mut referenced = NewBlob::test(seeded.workspace_id);
-        referenced.expires_at = Some((Timestamp::now() + Span::new().hours(1)).into());
-        let referenced = conn.find_or_create_blob(referenced).await?;
+        // A blob still referenced is NOT reclaimable: a referrer releases its
+        // reference (when its own window passes, or when it is deleted) first.
+        let referenced = conn
+            .find_or_create_blob(NewBlob::test(seeded.workspace_id))
+            .await?;
         assert_eq!(referenced.ref_count, 1);
-        backdate::blob_span(
-            &mut conn,
-            referenced.id,
-            Timestamp::now() - Span::new().hours(2),
-            Timestamp::now() - Span::new().hours(1),
-        )
-        .await?;
 
-        // A blob with no references and past retention IS reclaimable.
-        let mut expired = NewBlob::test(seeded.workspace_id);
-        expired.expires_at = Some((Timestamp::now() + Span::new().hours(1)).into());
-        let expired = conn.find_or_create_blob(expired).await?;
+        // A blob with no references IS reclaimable: nothing needs the bytes.
+        let expired = conn
+            .find_or_create_blob(NewBlob::test(seeded.workspace_id))
+            .await?;
         conn.decrement_ref(expired.id).await?;
-        // Backdate its window so it is now past due.
-        backdate::blob_span(
-            &mut conn,
-            expired.id,
-            Timestamp::now() - Span::new().hours(2),
-            Timestamp::now() - Span::new().hours(1),
-        )
-        .await?;
 
         let due = conn.blobs_due_for_purge(50).await?;
         let due_ids: Vec<Uuid> = due.iter().map(|b| b.id).collect();
-        assert!(
-            due_ids.contains(&expired.id),
-            "unreferenced + expired is due"
-        );
+        assert!(due_ids.contains(&expired.id), "an unreferenced blob is due");
         assert!(
             !due_ids.contains(&referenced.id),
             "a referenced blob is never due for purge"
@@ -388,7 +366,7 @@ mod tests {
         let claimed = conn
             .claim_blob_for_purge(expired.id)
             .await?
-            .expect("an unreferenced expired blob can be claimed");
+            .expect("an unreferenced blob can be claimed");
         assert_eq!(claimed.id, expired.id);
         assert!(
             !conn

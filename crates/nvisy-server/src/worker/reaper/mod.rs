@@ -4,19 +4,19 @@
 //! intermediates — lives in a shared, ref-counted `workspace_blobs` row. A blob
 //! becomes reclaimable only when its last referrer is gone (`ref_count = 0`),
 //! which protects a blob shared by two identical uploads from being purged out
-//! from under a still-live document. Retention is a time policy layered on top:
-//! a blob is reclaimed once it is both unreferenced and past its window. Each
-//! tick runs three stages:
+//! from under a still-live document. Retention is enforced on the referrers: each
+//! releases its reference when its own window passes, or when it is deleted, and
+//! the blob is reclaimed once none is left. Each tick runs three stages:
 //!
-//! - **Referrer cleanup**: machine byproducts — audits and detection
-//!   intermediates — hold a reference for their whole life, so their blobs never
-//!   reach `ref_count = 0` on their own. This stage expires those referrers by
-//!   their blob's retention window by nulling the blob pointer (keeping the audit
-//!   and detection rows, which are ledger records) and drops the reference, so an
-//!   expired byproduct blob becomes reclaimable by the Expire sweep.
-//! - **Expire**: unreferenced blobs whose retention window has elapsed
-//!   (`ref_count = 0 AND expires_at < now()`, from the per-blob retention rule).
-//!   Each is claimed ([`purged_at`], committed before any object delete, so it
+//! - **Referrer cleanup**: documents, audits, and detection intermediates hold a
+//!   reference for their whole life. This stage releases each one past its
+//!   retention window (a document's own `expires_at`, an audit's or
+//!   intermediate's blob expiry) by nulling the blob pointer (keeping the
+//!   document, detection, and redaction rows, which are ledger records) and
+//!   dropping the reference. A document keeps its bytes while a detection on it
+//!   is still pending or executing.
+//! - **Purge**: unreferenced blobs (`ref_count = 0`), whether released here or by
+//!   a deletion. Each is claimed ([`purged_at`], committed before any object delete, so it
 //!   leaves the dedup set atomically) and then its object is reclaimed.
 //! - **Reconcile**: blobs claimed for purge whose object delete was never
 //!   confirmed (`purged_at IS NOT NULL AND reclaimed_at IS NULL`) — a delete that

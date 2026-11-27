@@ -70,10 +70,6 @@ pub mod sql_types {
     pub struct SyncTriggerType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "usage_meter"))]
-    pub struct UsageMeter;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "webhook_event"))]
     pub struct WebhookEvent;
 
@@ -198,9 +194,9 @@ diesel::table! {
         file_size_bytes -> Int8,
         storage_path -> Text,
         storage_bucket -> Text,
+        audit_digest -> Nullable<Bytea>,
         ref_count -> Int4,
         created_at -> Timestamptz,
-        expires_at -> Nullable<Timestamptz>,
         purged_at -> Nullable<Timestamptz>,
         reclaimed_at -> Nullable<Timestamptz>,
     }
@@ -261,32 +257,6 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-
-    workspace_detection_call (id) {
-        id -> Uuid,
-        detection_id -> Uuid,
-        model -> Text,
-        version -> Nullable<Text>,
-        outcome -> Text,
-        duration_ms -> Int8,
-        output_count -> Nullable<Int8>,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use super::sql_types::UsageMeter;
-
-    workspace_detection_call_meter (id) {
-        id -> Uuid,
-        call_id -> Uuid,
-        meter -> UsageMeter,
-        amount -> Numeric,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
     use super::sql_types::OutboxStatus;
 
     workspace_detection_jobs (id) {
@@ -320,7 +290,9 @@ diesel::table! {
         account_id -> Uuid,
         input_document_id -> Uuid,
         intermediate_blob_id -> Nullable<Uuid>,
+        intermediate_expires_at -> Nullable<Timestamptz>,
         audit_blob_id -> Nullable<Uuid>,
+        audit_expires_at -> Nullable<Timestamptz>,
         status -> DetectionStatus,
         idempotency_key -> Nullable<Text>,
         retention_override -> Nullable<Jsonb>,
@@ -373,6 +345,7 @@ diesel::table! {
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,
+        expires_at -> Nullable<Timestamptz>,
     }
 }
 
@@ -499,6 +472,7 @@ diesel::table! {
         account_id -> Uuid,
         output_document_id -> Nullable<Uuid>,
         review_audit_blob_id -> Nullable<Uuid>,
+        review_audit_expires_at -> Nullable<Timestamptz>,
         created_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,
     }
@@ -618,8 +592,6 @@ diesel::joinable!(workspace_connection_syncs -> accounts (account_id));
 diesel::joinable!(workspace_connection_syncs -> workspace_connections (connection_id));
 diesel::joinable!(workspace_connections -> accounts (account_id));
 diesel::joinable!(workspace_connections -> workspaces (workspace_id));
-diesel::joinable!(workspace_detection_call -> workspace_detections (detection_id));
-diesel::joinable!(workspace_detection_call_meter -> workspace_detection_call (call_id));
 diesel::joinable!(workspace_detection_jobs -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detection_policy_versions -> workspace_detections (detection_id));
 diesel::joinable!(workspace_detection_policy_versions -> workspace_policy_versions (policy_version_id));
@@ -672,8 +644,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     workspace_connection_schedule,
     workspace_connection_syncs,
     workspace_connections,
-    workspace_detection_call,
-    workspace_detection_call_meter,
     workspace_detection_jobs,
     workspace_detection_policy_versions,
     workspace_detections,

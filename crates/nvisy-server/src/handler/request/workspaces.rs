@@ -34,7 +34,8 @@ pub struct CreateWorkspace {
     #[garde(length(max = 500, chars))]
     pub description: Option<String>,
     /// Workspace settings (approval requirement, data-retention rules). Defaults
-    /// to requiring approval and keeping everything when omitted.
+    /// to requiring approval and ephemeral retention for every class of data when
+    /// omitted.
     pub settings: Option<WorkspaceSettings>,
 }
 

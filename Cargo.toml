@@ -47,7 +47,7 @@ debug = true
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
 # Elide crates
-elide-pipeline = { git = "https://github.com/nvisycom/elide-runtime", rev = "eb23876f773e01f532d8d327b2883347e17465fa", default-features = false }
+elide-pipeline = { git = "https://github.com/nvisycom/elide-runtime", rev = "3e082627f91b1e98630364f9a98a162cd7e9a778", default-features = false }
 
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
@@ -62,7 +62,6 @@ nvisy-webhook = { path = "./crates/nvisy-webhook", version = "0.1.0" }
 
 # CLI
 clap = { version = "4.6", features = [] }
-humantime = { version = "2.4", features = [] }
 dotenvy = { version = "0.15", features = [] }
 
 # Async runtime

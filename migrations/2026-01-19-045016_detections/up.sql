@@ -1,6 +1,6 @@
--- Detections: one analysis pass of a document against a set of policies, its
--- per-model usage, and the transactional outbox that queues each analysis. A
--- detection can produce many redactions (see the redactions migration).
+-- Detections: one analysis pass of a document against a set of policies, and
+-- the transactional outbox that queues each analysis. A detection can produce
+-- many redactions (see the redactions migration).
 
 CREATE TYPE DETECTION_STATUS AS ENUM (
     'pending',      -- Enqueued for detection; no worker has picked it up yet
@@ -10,21 +10,6 @@ CREATE TYPE DETECTION_STATUS AS ENUM (
 );
 
 COMMENT ON TYPE DETECTION_STATUS IS 'Execution status of a detection: pending, executing, complete, or failed.';
-
--- The billing unit a model call metered. A call reports an open set of these
--- (tokens for LLMs, seconds for speech-to-text, pages/images for OCR, …); each
--- is one row keyed by this type, read together with its amount (never bare).
-CREATE TYPE USAGE_METER AS ENUM (
-    'tokens_input',     -- Input/prompt tokens (token-billed models)
-    'tokens_output',    -- Output/completion tokens
-    'tokens_total',     -- Total tokens as reported (not necessarily input + output)
-    'seconds',          -- Seconds of media processed (speech-to-text)
-    'pages',            -- Pages processed (document OCR, per page)
-    'images',           -- Images processed (vision/OCR, per image)
-    'characters'        -- Characters processed (per-character services)
-);
-
-COMMENT ON TYPE USAGE_METER IS 'The billing unit a model call metered: token counts, media seconds, pages, images, or characters.';
 
 -- Detections table: one analysis pass of a document against a set of policies.
 CREATE TABLE workspace_detections (
@@ -45,6 +30,10 @@ CREATE TABLE workspace_detections (
     -- reference clears (SET NULL) as the correct action for a produced artifact.
     input_document_id     UUID              NOT NULL REFERENCES workspace_documents (id) ON DELETE CASCADE,
     intermediate_blob_id  UUID              DEFAULT NULL REFERENCES workspace_blobs (id) ON DELETE SET NULL,
+    -- When the intermediate's bytes are released, from the intermediates
+    -- retention. Kept on the referrer, not the blob: identical bytes share a blob
+    -- across referrers with different retention.
+    intermediate_expires_at TIMESTAMPTZ     DEFAULT NULL,
 
     -- The detection's base analysis: the engine's findings set (the "audit"),
     -- stored as bytes in a blob. NULL before the analysis commits and again once
@@ -52,6 +41,8 @@ CREATE TABLE workspace_detections (
     -- is kept either way). Served as the detection's findings and reloaded to
     -- re-redact.
     audit_blob_id         UUID              DEFAULT NULL REFERENCES workspace_blobs (id) ON DELETE SET NULL,
+    -- When the base analysis's bytes are released, from the audit-logs retention.
+    audit_expires_at      TIMESTAMPTZ       DEFAULT NULL,
 
     -- Detection attributes
     status          DETECTION_STATUS        NOT NULL DEFAULT 'pending',
@@ -67,11 +58,7 @@ CREATE TABLE workspace_detections (
     -- falls back to the workspace retention baseline.
     retention_override JSONB                DEFAULT NULL,
 
-    -- Non-encrypted metadata for filtering and display. The engine's full
-    -- per-call usage report (outcomes, durations, and the units each call spent)
-    -- is kept here under `usage` for opaque drill-down; the structured per-call
-    -- and per-meter rows for aggregation live in the workspace_detection_call and
-    -- workspace_detection_call_meter tables below.
+    -- Non-encrypted metadata for filtering and display.
     metadata        JSONB                   NOT NULL DEFAULT '{}',
     CONSTRAINT workspace_detections_metadata_size CHECK (length(metadata::TEXT) BETWEEN 2 AND 65536),
 
@@ -136,6 +123,15 @@ CREATE INDEX workspace_detections_audit_blob_idx
     ON workspace_detections (audit_blob_id)
     WHERE audit_blob_id IS NOT NULL;
 
+-- The reaper's walks for detections whose intermediate or base-analysis
+-- retention window has passed.
+CREATE INDEX workspace_detections_intermediate_expiry_idx
+    ON workspace_detections (intermediate_expires_at)
+    WHERE intermediate_blob_id IS NOT NULL;
+CREATE INDEX workspace_detections_audit_expiry_idx
+    ON workspace_detections (audit_expires_at)
+    WHERE audit_blob_id IS NOT NULL;
+
 -- Idempotent detect: at most one live detection per (workspace, idempotency key),
 -- so a retry replays the existing detection. Partial on live rows: a soft-deleted
 -- detection does not block a fresh run under the same key.
@@ -153,105 +149,19 @@ COMMENT ON COLUMN workspace_detections.workspace_id IS 'Owning workspace';
 COMMENT ON COLUMN workspace_detections.account_id IS 'Account that triggered the detection';
 COMMENT ON COLUMN workspace_detections.input_document_id IS 'Source document the detection analyzes';
 COMMENT ON COLUMN workspace_detections.intermediate_blob_id IS 'Enrichment intermediate blob (OCR layout, transcript) served to the client; NULL if no enricher ran';
+COMMENT ON COLUMN workspace_detections.intermediate_expires_at IS 'When the intermediate bytes are released (intermediates retention)';
 COMMENT ON COLUMN workspace_detections.audit_blob_id IS 'Base analysis (findings set) blob; NULL before analysis commits and once the bytes are reclaimed on retention (the row is kept)';
+COMMENT ON COLUMN workspace_detections.audit_expires_at IS 'When the base analysis bytes are released (audit-logs retention)';
 COMMENT ON COLUMN workspace_detections.status IS 'Current detection status';
 COMMENT ON COLUMN workspace_detections.idempotency_key IS 'Detect idempotency key (dedupes retries)';
 COMMENT ON COLUMN workspace_detections.retention_override IS 'Retention override the detection ran under, snapshotted at create; read on redact so output retention reflects the run, not a since-edited pipeline. NULL falls back to the workspace baseline';
-COMMENT ON COLUMN workspace_detections.metadata IS 'Non-encrypted metadata for filtering/display; holds the full per-call usage report under `usage`';
+COMMENT ON COLUMN workspace_detections.metadata IS 'Non-encrypted metadata for filtering/display';
 COMMENT ON COLUMN workspace_detections.edit_set IS 'Accumulated reviewer edits (EditSet) applied over the base analysis at redact time; persists across redactions. NULL means none';
 COMMENT ON COLUMN workspace_detections.edit_set_rev IS 'Optimistic-concurrency version of edit_set, bumped on each edit write; an edit PATCH must name the revision it read';
 COMMENT ON COLUMN workspace_detections.claimed_at IS 'Detection lease: when a worker last claimed this detection';
 COMMENT ON COLUMN workspace_detections.started_at IS 'When the detection started';
 COMMENT ON COLUMN workspace_detections.completed_at IS 'When the detection completed; NULL while in flight';
 COMMENT ON COLUMN workspace_detections.deleted_at IS 'Soft-deletion timestamp; NULL means live. The row is kept as a ledger record; only its blob bytes are reclaimed';
-
--- Inference usage for a detection, at the grain the engine reports it: one row
--- per model *call*. A detection's recognizers may call the same model more than
--- once (and the same model may be called with different outcomes), so calls are
--- NOT collapsed by model here — each call keeps its own outcome and duration.
--- Per-model and per-meter rollups are produced by aggregating these at read
--- time. The full per-recognizer report is also kept on the detection
--- (metadata.usage) for opaque drill-down.
-CREATE TABLE workspace_detection_call (
-    -- Primary identifier
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- The detection this call belongs to; calls are deleted with their detection.
-    detection_id    UUID                    NOT NULL REFERENCES workspace_detections (id) ON DELETE CASCADE,
-
-    -- The model called and its optional version. Not unique per detection: the
-    -- same (model, version) may be called several times, each its own row.
-    model           TEXT                    NOT NULL,
-    version         TEXT                    DEFAULT NULL,
-    CONSTRAINT workspace_detection_call_model_length CHECK (length(model) BETWEEN 1 AND 255),
-    CONSTRAINT workspace_detection_call_version_length CHECK (version IS NULL OR length(version) BETWEEN 1 AND 255),
-
-    -- How the call ended: 'ok', or the engine's error-kind label. An open set, so
-    -- stored as text rather than an enum.
-    outcome         TEXT                    NOT NULL,
-    CONSTRAINT workspace_detection_call_outcome_length CHECK (length(outcome) BETWEEN 1 AND 64),
-
-    -- This call's wall-clock time (the model round-trip), in milliseconds.
-    -- Distinct from the detection's total duration, which spans every call plus
-    -- decode and enrichment.
-    duration_ms     BIGINT                  NOT NULL,
-    CONSTRAINT workspace_detection_call_duration_non_negative CHECK (duration_ms >= 0),
-
-    -- What the call produced (entities, segments, …), when the response reports a
-    -- count; NULL on failure or a response with no meaningful count.
-    output_count    BIGINT                  DEFAULT NULL,
-    CONSTRAINT workspace_detection_call_output_count_non_negative CHECK (output_count IS NULL OR output_count >= 0)
-);
-
--- Per-detection drill-down and the join key for the meter rollups.
-CREATE INDEX workspace_detection_call_detection_idx
-    ON workspace_detection_call (detection_id);
-
--- Usage rollups by model across detections.
-CREATE INDEX workspace_detection_call_model_idx
-    ON workspace_detection_call (model);
-
-COMMENT ON TABLE workspace_detection_call IS 'One model call made during a detection, with its outcome and duration.';
-COMMENT ON COLUMN workspace_detection_call.id IS 'Unique call row identifier';
-COMMENT ON COLUMN workspace_detection_call.detection_id IS 'Detection this call belongs to';
-COMMENT ON COLUMN workspace_detection_call.model IS 'Model identifier the call used';
-COMMENT ON COLUMN workspace_detection_call.version IS 'Model version, if the provider reported one';
-COMMENT ON COLUMN workspace_detection_call.outcome IS 'How the call ended: ok, or the engine error-kind label';
-COMMENT ON COLUMN workspace_detection_call.duration_ms IS 'This call''s wall-clock round-trip, in milliseconds';
-COMMENT ON COLUMN workspace_detection_call.output_count IS 'Items the call produced, if the response reported a count; NULL otherwise';
-
--- The billing meters a call spent: one row per (call, meter). A call that billed
--- nothing (e.g. a failed call) has no rows here. `amount` is NUMERIC because a
--- meter may be fractional (seconds) or an integer count (tokens, pages, …); it
--- is only meaningful read together with `meter`.
-CREATE TABLE workspace_detection_call_meter (
-    -- Primary identifier
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- The call this meter belongs to; meters are deleted with their call.
-    call_id         UUID                    NOT NULL REFERENCES workspace_detection_call (id) ON DELETE CASCADE,
-
-    -- Which unit was metered, and how much. The amount is non-negative and read
-    -- only in the context of the meter (1500 means tokens or seconds or pages
-    -- depending on this column).
-    meter           USAGE_METER             NOT NULL,
-    amount          NUMERIC                 NOT NULL,
-    CONSTRAINT workspace_detection_call_meter_amount_non_negative CHECK (amount >= 0)
-);
-
--- One amount per meter per call; a call reports each unit at most once.
-CREATE UNIQUE INDEX workspace_detection_call_meter_call_meter_key
-    ON workspace_detection_call_meter (call_id, meter);
-
--- Cross-detection rollups grouped by meter.
-CREATE INDEX workspace_detection_call_meter_meter_idx
-    ON workspace_detection_call_meter (meter);
-
-COMMENT ON TABLE workspace_detection_call_meter IS 'A billing meter (tokens, seconds, pages, …) a model call spent.';
-COMMENT ON COLUMN workspace_detection_call_meter.id IS 'Unique meter row identifier';
-COMMENT ON COLUMN workspace_detection_call_meter.call_id IS 'Call this meter belongs to';
-COMMENT ON COLUMN workspace_detection_call_meter.meter IS 'Which unit was metered';
-COMMENT ON COLUMN workspace_detection_call_meter.amount IS 'How much of the unit was spent; read only together with meter';
 
 -- Detection-job outbox: the transactional-outbox queue for detection analysis.
 -- Creating a detection inserts one row here in the same transaction as the

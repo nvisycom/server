@@ -58,9 +58,9 @@ ignore = [
     # pulled transitively by `oauth2`, `openidconnect`, and `object_store`, so
     # there is no workspace-level replacement. Remove once those move off chrono.
     "RUSTSEC-2026-0543",
-    # `humantime` is unmaintained because it wraps chrono (no vulnerability). We
-    # use it to parse CLI durations, and `object_store` depends on it too.
-    # Remove once there is a maintained replacement for both uses.
+    # `humantime` is unmaintained because it wraps chrono (no vulnerability). It
+    # is a transitive dep of `object_store` only; we parse durations with jiff.
+    # Remove once `object_store` drops it.
     "RUSTSEC-2026-0542",
     # `astral-tokio-tar` is unmaintained (no vulnerability). It is a dev-only
     # transitive dep of `testcontainers`, used to build test containers, and

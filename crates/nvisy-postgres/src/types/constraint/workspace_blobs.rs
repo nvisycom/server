@@ -15,8 +15,10 @@ pub enum WorkspaceBlobConstraints {
     StorageBucketNotEmpty,
     #[strum(serialize = "blobs_ref_count_min")]
     RefCountMin,
-    #[strum(serialize = "blobs_expires_after_created")]
-    ExpiresAfterCreated,
+    #[strum(serialize = "blobs_audit_digest_length")]
+    AuditDigestLength,
     #[strum(serialize = "blobs_purged_after_created")]
     PurgedAfterCreated,
+    #[strum(serialize = "blobs_reclaimed_after_purged")]
+    ReclaimedAfterPurged,
 }

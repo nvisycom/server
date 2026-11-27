@@ -118,8 +118,8 @@ struct DocumentUploadContext {
     crypto: CryptoService,
     /// Engine handle, used to reject upload of a format no codec can decode.
     engine: EngineService,
-    /// Retention expiry for uploaded originals (`None` = keep indefinitely).
-    expires_at: Option<jiff::Timestamp>,
+    /// Retention expiry for uploaded originals.
+    expires_at: jiff::Timestamp,
     /// The effective per-document upload cap in bytes — the smaller of the workspace's
     /// soft cap and the server-wide hard limit. A document streaming past it is
     /// rejected before its excess reaches storage. This is a true per-document bound,
@@ -213,7 +213,7 @@ async fn stage_document(ctx: &DocumentUploadContext, field: Field<'_>) -> Result
         file_size_bytes: i64::try_from(measurements.bytes()).unwrap_or(i64::MAX),
         storage_path: document_key.to_string(),
         storage_bucket: Bucket::Documents.name().to_owned(),
-        expires_at: ctx.expires_at.map(Into::into),
+        audit_digest: None,
     };
     let document = NewWorkspaceDocument {
         workspace_id: ctx.workspace_id,
@@ -225,6 +225,7 @@ async fn stage_document(ctx: &DocumentUploadContext, field: Field<'_>) -> Result
         original_filename: Some(filename),
         file_extension: Some(file_extension),
         metadata: None,
+        expires_at: Some(ctx.expires_at.into()),
     };
 
     Ok(StagedDocument {

@@ -362,11 +362,14 @@ pub mod backdate {
     backdate!(policy_created_at = workspace_policies.created_at);
     backdate!(redaction_created_at = workspace_redactions.created_at);
     backdate!(sync_started_at = workspace_connection_syncs.started_at);
+    backdate!(document_expiry = workspace_documents.expires_at);
+    backdate!(detection_audit_expiry = workspace_detections.audit_expires_at);
+    backdate!(detection_intermediate_expiry = workspace_detections.intermediate_expires_at);
+    backdate!(review_audit_expiry = workspace_redactions.review_audit_expires_at);
 
     // Two-column spans: set both at once so `expires_at > created_at` /
     // `completed_at >= started_at` holds (a two-step update would momentarily
     // violate it).
     backdate!(notification_span = account_notifications.(created_at, expires_at));
-    backdate!(blob_span = workspace_blobs.(created_at, expires_at));
     backdate!(detection_span = workspace_detections.(started_at, completed_at));
 }

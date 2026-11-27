@@ -15,7 +15,7 @@ in and out. Sibling to `nvisy-object-store`, which covers object stores
 
 ## Documentation
 
-See [`docs/`](../../docs/) for architecture, security, and API documentation.
+See [docs.nvisy.com](https://docs.nvisy.com) for architecture, security, and API documentation.
 
 ## Changelog
 

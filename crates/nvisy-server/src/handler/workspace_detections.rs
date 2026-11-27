@@ -120,8 +120,10 @@ async fn create_detection(
 fn create_detection_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Start a detection")
         .description(
-            "Starts analysis for a document against an explicit list of policies and \
-             returns 202 with the detection in the `pending` state; the analysis runs \
+            "Starts analysis for a document against named policies (a `policies` \
+             source) or a list of built-in labels (a `labels` source, run as a derived \
+             policy that an identical label list reuses), and returns 202 with the \
+             detection in the `pending` state; the analysis runs \
              in the background. Watch the detection's status via the SSE stream at \
              `.../detections/{detectionId}/events` (or re-read the detection) and \
              fetch the findings from `.../detections/{detectionId}/analysis/` once it \
@@ -548,12 +550,21 @@ async fn redact_detection(
                 .with_context(err.to_string())
         })?;
         edits.validate(&reviewed.report)?;
-        edits.apply(&mut reviewed.report)?;
+        // The requester applies the stored edits, so the review records them as
+        // the reviewer.
+        edits.apply(&mut reviewed.report, &authz.account_id.to_string())?;
     }
 
+    // The bytes can be purged between the blob lookup and this read (the
+    // reaper released them as their window passed); that is the same "source
+    // gone" outcome as a cleared pointer.
     let document = writer
         .build_document(&inputs.document, &inputs.source_blob, inputs.detection.id)
-        .await?;
+        .await
+        .map_err(|err| match err.kind() {
+            ErrorKind::NotFound => source_document_gone(),
+            _ => err,
+        })?;
 
     // No per-request key: the server does not yet drive keyed operators
     // (HMAC/encrypt), whose `KeyConfig` would be supplied here. The codec params
@@ -576,7 +587,7 @@ async fn redact_detection(
         .retention_override
         .as_ref()
         .map(nvisy_postgres::types::Json::or_default);
-    let staged_output = writer
+    let (staged_output, output_name) = writer
         .stage_redacted_document(
             &inputs.document,
             retention_override.as_ref(),
@@ -597,7 +608,7 @@ async fn redact_detection(
     {
         Ok(staged) => staged,
         Err(err) => {
-            writer.discard_staged_object(&staged_output.0).await.ok();
+            writer.discard_staged_object(&staged_output.blob).await.ok();
             return Err(err);
         }
     };
@@ -609,8 +620,8 @@ async fn redact_detection(
     let mut conn = match pg_client.get_connection().await {
         Ok(conn) => conn,
         Err(err) => {
-            writer.discard_staged_object(&staged_output.0).await.ok();
-            writer.discard_staged_object(&staged_review).await.ok();
+            writer.discard_staged_object(&staged_output.blob).await.ok();
+            writer.discard_staged_object(&staged_review.blob).await.ok();
             return Err(err.into());
         }
     };
@@ -625,24 +636,26 @@ async fn redact_detection(
                         account_id: authz.account_id,
                         blob_id: Uuid::nil(),
                         kind: Some(DocumentKind::Redacted),
-                        display_name: Some(staged_output.1.clone()),
+                        display_name: Some(output_name.clone()),
                         original_filename: Some(inputs.document.original_filename.clone()),
                         file_extension: Some(inputs.document.file_extension.clone()),
                         metadata: None,
+                        expires_at: Some(staged_output.expires_at.into()),
                     },
-                    staged_output.0.clone(),
+                    staged_output.blob.clone(),
                 )
                 .await?;
             // The review analysis is a blob-ref on the redaction: resolve (share or
             // insert) its blob to record the reference, then point the redaction at
             // it via `review_audit_blob_id`.
-            let review_resolved = conn.find_or_create_blob(staged_review.clone()).await?;
+            let review_resolved = conn.find_or_create_blob(staged_review.blob.clone()).await?;
             let redaction = conn
                 .create_redaction(NewWorkspaceRedaction {
                     detection_id: inputs.detection.id,
                     account_id: authz.account_id,
                     output_document_id: Some(output_document.id),
                     review_audit_blob_id: Some(review_resolved.id),
+                    review_audit_expires_at: Some(staged_review.expires_at.into()),
                 })
                 .await?;
             conn.emit_event(
@@ -683,8 +696,8 @@ async fn redact_detection(
         Err(err) => {
             // The rows rolled back, so their staged objects are orphans: reclaim
             // both (best effort — a failure only leaves them for a later sweep).
-            writer.discard_staged_object(&staged_output.0).await.ok();
-            writer.discard_staged_object(&staged_review).await.ok();
+            writer.discard_staged_object(&staged_output.blob).await.ok();
+            writer.discard_staged_object(&staged_review.blob).await.ok();
             return Err(err);
         }
     };
@@ -692,11 +705,11 @@ async fn redact_detection(
     // A committed blob whose content deduplicated onto an existing object leaves
     // the object staged for it orphaned (no row references it). Reclaim each
     // redundant staged object; best effort, a failure only defers it to a sweep.
-    if output_path.as_deref() != Some(staged_output.0.storage_path.as_str()) {
-        writer.discard_staged_object(&staged_output.0).await.ok();
+    if output_path.as_deref() != Some(staged_output.blob.storage_path.as_str()) {
+        writer.discard_staged_object(&staged_output.blob).await.ok();
     }
-    if review_path.as_deref() != Some(staged_review.storage_path.as_str()) {
-        writer.discard_staged_object(&staged_review).await.ok();
+    if review_path.as_deref() != Some(staged_review.blob.storage_path.as_str()) {
+        writer.discard_staged_object(&staged_review.blob).await.ok();
     }
 
     tracing::info!(
@@ -766,6 +779,7 @@ async fn edit_detection(
         .set_edits(
             workspace.id,
             detection_id,
+            authz.account_id,
             request.edit_set_rev,
             request.edits,
         )
