@@ -7,8 +7,8 @@
 //! mints and encrypts a secret and a test signs and sends a live request.
 
 use nvisy_postgres::model::WorkspaceWebhook;
-use nvisy_postgres::query::{WebhookCursor, WorkspaceWebhookRepository};
-use nvisy_postgres::types::{CursorPage, CursorPagination, WithAccountRef};
+use nvisy_postgres::query::WorkspaceWebhookRepository;
+use nvisy_postgres::types::{CursorPage, CursorPagination, TimeCursor, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use nvisy_webhook::WebhookService;
 use nvisy_webhook::guard::UrlGuardExt;
@@ -105,7 +105,7 @@ impl WorkspaceWebhookService {
     pub async fn list(
         &self,
         workspace_id: Uuid,
-        pagination: CursorPagination<WebhookCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> Result<CursorPage<WithAccountRef<WorkspaceWebhook>>> {
         let mut conn = self.postgres.get_connection().await?;
         Ok(conn

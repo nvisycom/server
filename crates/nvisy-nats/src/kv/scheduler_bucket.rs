@@ -3,17 +3,17 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use derive_more::{Display, From};
+use derive_more::Display;
 
 use super::core::{InvalidKvKey, KvBucket, KvKey, validate_kv_key};
 
 /// A string key for named locks and similar coordination entries.
 ///
-/// [`FromStr`] enforces NATS KV key syntax (via [`validate_kv_key`]), like the
-/// other key types, so a malformed lock name is rejected on parse rather than at
-/// the store.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Display, From)]
-pub struct SchedulerLockKey(pub String);
+/// [`FromStr`] is the only constructor and enforces NATS KV key syntax (via
+/// [`validate_kv_key`]), like the other key types, so a malformed lock name is
+/// rejected on parse rather than at the store.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Display)]
+pub struct SchedulerLockKey(String);
 
 impl FromStr for SchedulerLockKey {
     type Err = InvalidKvKey;

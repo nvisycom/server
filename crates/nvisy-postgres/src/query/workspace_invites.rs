@@ -10,7 +10,8 @@ use uuid::Uuid;
 
 use crate::model::{NewWorkspaceInvite, UpdateWorkspaceInvite, WorkspaceInvite};
 use crate::types::{
-    CursorPage, CursorPagination, InviteFilter, InviteSortBy, InviteSortField, InviteStatus, keyset,
+    CursorPage, CursorPagination, InviteFilter, InviteSortBy, InviteSortField, InviteStatus,
+    keyset, total,
 };
 use crate::{Error, PgConnection, Result, schema};
 
@@ -118,31 +119,25 @@ impl WorkspaceInviteRepository for PgConnection {
     ) -> Result<WorkspaceInvite> {
         use schema::workspace_invites;
 
-        let invite = diesel::insert_into(workspace_invites::table)
+        Ok(diesel::insert_into(workspace_invites::table)
             .values(&invite)
             .returning(WorkspaceInvite::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(invite)
+            .await?)
     }
 
     async fn find_workspace_invite_by_token(
         &mut self,
         token: &str,
     ) -> Result<Option<WorkspaceInvite>> {
-        use schema::workspace_invites::dsl::{invite_token, workspace_invites};
+        use schema::workspace_invites::{self, dsl};
 
-        let invite = workspace_invites
-            .filter(invite_token.eq(token))
+        Ok(workspace_invites::table
+            .filter(dsl::invite_token.eq(token))
             .select(WorkspaceInvite::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(invite)
+            .optional()?)
     }
 
     async fn find_invite_in_workspace(
@@ -152,16 +147,13 @@ impl WorkspaceInviteRepository for PgConnection {
     ) -> Result<Option<WorkspaceInvite>> {
         use schema::workspace_invites::{self, dsl};
 
-        let invite = workspace_invites::table
+        Ok(workspace_invites::table
             .filter(dsl::id.eq(invite_id))
             .filter(dsl::workspace_id.eq(workspace_id))
             .select(WorkspaceInvite::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(invite)
+            .optional()?)
     }
 
     async fn update_workspace_invite(
@@ -169,17 +161,14 @@ impl WorkspaceInviteRepository for PgConnection {
         invite_id: Uuid,
         changes: UpdateWorkspaceInvite,
     ) -> Result<WorkspaceInvite> {
-        use schema::workspace_invites::dsl::{id, workspace_invites};
+        use schema::workspace_invites::{self, dsl};
 
-        let invite = diesel::update(workspace_invites)
-            .filter(id.eq(invite_id))
+        Ok(diesel::update(workspace_invites::table)
+            .filter(dsl::id.eq(invite_id))
             .set(&changes)
             .returning(WorkspaceInvite::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(invite)
+            .await?)
     }
 
     async fn accept_workspace_invite(
@@ -273,17 +262,7 @@ impl WorkspaceInviteRepository for PgConnection {
             query
         };
 
-        let total = if pagination.include_count {
-            Some(
-                scoped()
-                    .select(count_star())
-                    .get_result(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
+        let total = total!(pagination, self, scoped().select(count_star()));
 
         // The keyset runs on whichever column the sort uses; the cursor carries the
         // matching value, so a stray Email cursor on a Date sort (or vice-versa)
@@ -309,8 +288,7 @@ impl WorkspaceInviteRepository for PgConnection {
         .select(WorkspaceInvite::as_select())
         .limit(pagination.fetch_limit())
         .load(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(CursorPage::new(items, total, pagination.limit, move |i| {
             if sort_by_email {
@@ -336,7 +314,7 @@ impl WorkspaceInviteRepository for PgConnection {
         use diesel::dsl::now;
         use schema::workspace_invites::{self, dsl};
 
-        let invite = workspace_invites::table
+        Ok(workspace_invites::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::invitee_email.eq(email))
             .filter(dsl::invite_status.eq(InviteStatus::Pending))
@@ -344,10 +322,7 @@ impl WorkspaceInviteRepository for PgConnection {
             .select(WorkspaceInvite::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(invite)
+            .optional()?)
     }
 }
 

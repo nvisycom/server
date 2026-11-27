@@ -4,6 +4,8 @@
 //! mirroring how `NatsConfig` and `PgConfig` are configured. [`OAuthAppsConfig`]
 //! resolves these into an [`OAuthApps`] and a [`FileService`].
 
+use std::fmt;
+
 use super::{FileService, OAuthApps};
 use crate::oauth::OAuthApp;
 
@@ -26,7 +28,7 @@ macro_rules! provider_app_config {
         $secret_long:literal, $secret_env:literal
     ) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, Default)]
+        #[derive(Clone, Default)]
         #[cfg_attr(feature = "cli", derive(clap::Args))]
         pub struct $name {
             #[doc = concat!($provider, " OAuth app client id. Set with the client secret to enable the connector.")]
@@ -51,6 +53,15 @@ macro_rules! provider_app_config {
                 )
             )]
             pub client_secret: Option<String>,
+        }
+
+        impl fmt::Debug for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_struct(stringify!($name))
+                    .field("client_id", &self.client_id)
+                    .field("client_secret", &self.client_secret.as_ref().map(|_| "<redacted>"))
+                    .finish()
+            }
         }
 
         impl $name {

@@ -4,25 +4,14 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::Timestamp;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceProvider, UpdateWorkspaceProvider, WorkspaceProvider};
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, ProviderType, WithAccountRef, keyset,
+    AccountRefRow, CursorPage, CursorPagination, ProviderType, TimeCursor, WithAccountRef, keyset,
+    total,
 };
-use crate::{Error, PgConnection, Result, schema};
-
-/// Keyset for paginating a workspace's providers: newest first by `created_at`,
-/// `id` as the tiebreaker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderCursor {
-    /// When the provider was created.
-    pub created_at: Timestamp,
-    /// Provider id (tiebreaker).
-    pub id: uuid::Uuid,
-}
+use crate::{PgConnection, Result, schema};
 
 /// Repository for workspace inference-provider database operations.
 ///
@@ -34,13 +23,6 @@ pub trait WorkspaceProviderRepository {
         &mut self,
         new_provider: NewWorkspaceProvider,
     ) -> impl Future<Output = Result<WorkspaceProvider>> + Send;
-
-    /// Finds a provider by ID within a specific workspace.
-    fn find_provider_in_workspace(
-        &mut self,
-        workspace_id: Uuid,
-        provider_id: Uuid,
-    ) -> impl Future<Output = Result<Option<WorkspaceProvider>>> + Send;
 
     /// Finds a provider by id within a specific workspace, with the handle and
     /// avatar of the account that created it. Excludes soft-deleted providers.
@@ -70,7 +52,7 @@ pub trait WorkspaceProviderRepository {
     fn cursor_list_workspace_providers(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<ProviderCursor>,
+        pagination: CursorPagination<TimeCursor>,
         providers: &[String],
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceProvider>>>> + Send;
 
@@ -95,34 +77,11 @@ impl WorkspaceProviderRepository for PgConnection {
     ) -> Result<WorkspaceProvider> {
         use schema::workspace_providers;
 
-        let provider = diesel::insert_into(workspace_providers::table)
+        Ok(diesel::insert_into(workspace_providers::table)
             .values(&new_provider)
             .returning(WorkspaceProvider::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(provider)
-    }
-
-    async fn find_provider_in_workspace(
-        &mut self,
-        workspace_id: Uuid,
-        provider_id: Uuid,
-    ) -> Result<Option<WorkspaceProvider>> {
-        use schema::workspace_providers::{self, dsl};
-
-        let provider = workspace_providers::table
-            .filter(dsl::id.eq(provider_id))
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .select(WorkspaceProvider::as_select())
-            .first(self)
-            .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(provider)
+            .await?)
     }
 
     async fn find_provider_in_workspace_with_creator(
@@ -138,21 +97,12 @@ impl WorkspaceProviderRepository for PgConnection {
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::id.eq(provider_id))
             .filter(dsl::deleted_at.is_null())
-            .select((
-                WorkspaceProvider::as_select(),
-                (
-                    accounts::id,
-                    accounts::username,
-                    accounts::display_name,
-                    accounts::avatar_url,
-                ),
-            ))
+            .select((WorkspaceProvider::as_select(), AccountRefRow::as_select()))
             .first::<(WorkspaceProvider, AccountRefRow)>(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
+            .optional()?;
 
-        Ok(row.map(|(item, account)| WithAccountRef { item, account }))
+        Ok(row.map(WithAccountRef::from))
     }
 
     async fn find_provider_by_type(
@@ -162,7 +112,7 @@ impl WorkspaceProviderRepository for PgConnection {
     ) -> Result<Option<WorkspaceProvider>> {
         use schema::workspace_providers::{self, dsl};
 
-        workspace_providers::table
+        Ok(workspace_providers::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::provider_type.eq(provider_type))
             .filter(dsl::deleted_at.is_null())
@@ -173,79 +123,44 @@ impl WorkspaceProviderRepository for PgConnection {
             .select(WorkspaceProvider::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)
+            .optional()?)
     }
 
     async fn cursor_list_workspace_providers(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<ProviderCursor>,
+        pagination: CursorPagination<TimeCursor>,
         providers: &[String],
     ) -> Result<CursorPage<WithAccountRef<WorkspaceProvider>>> {
         use schema::workspace_providers::dsl;
         use schema::{accounts, workspace_providers};
 
-        let mut base_query = workspace_providers::table
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .into_boxed();
-
-        if !providers.is_empty() {
-            base_query = base_query.filter(dsl::provider.eq_any(providers.to_vec()));
-        }
-
-        let total = if pagination.include_count {
-            Some(
-                base_query
-                    .count()
-                    .get_result::<i64>(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
+        let scoped = || {
+            let mut query = workspace_providers::table
+                .filter(dsl::workspace_id.eq(workspace_id))
+                .filter(dsl::deleted_at.is_null())
+                .into_boxed();
+            if !providers.is_empty() {
+                query = query.filter(dsl::provider.eq_any(providers));
+            }
+            query
         };
+        let total = total!(pagination, self, scoped().count());
+        let query = scoped().inner_join(accounts::table);
 
-        let mut query = workspace_providers::table
-            .inner_join(accounts::table)
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .into_boxed();
-
-        if !providers.is_empty() {
-            query = query.filter(dsl::provider.eq_any(providers.to_vec()));
-        }
-
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let after = pagination.after_pair();
         let rows: Vec<(WorkspaceProvider, AccountRefRow)> =
             keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
-                .select((
-                    WorkspaceProvider::as_select(),
-                    (
-                        accounts::id,
-                        accounts::username,
-                        accounts::display_name,
-                        accounts::avatar_url,
-                    ),
-                ))
+                .select((WorkspaceProvider::as_select(), AccountRefRow::as_select()))
                 .limit(pagination.fetch_limit())
                 .load(self)
-                .await
-                .map_err(Error::from)?;
+                .await?;
 
-        let items: Vec<WithAccountRef<WorkspaceProvider>> = rows
-            .into_iter()
-            .map(|(item, account)| WithAccountRef { item, account })
-            .collect();
+        let items: Vec<WithAccountRef<WorkspaceProvider>> =
+            rows.into_iter().map(WithAccountRef::from).collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wp| {
-            ProviderCursor {
-                created_at: wp.item.created_at.into(),
-                id: wp.item.id,
-            }
+            TimeCursor::new(wp.item.created_at, wp.item.id)
         }))
     }
 
@@ -259,7 +174,7 @@ impl WorkspaceProviderRepository for PgConnection {
         // Scope to a live row: a concurrent delete may have committed since the
         // caller's lookup, and updating the tombstoned row would revive it in
         // effect and emit a spurious event.
-        let provider = diesel::update(
+        Ok(diesel::update(
             workspace_providers::table
                 .filter(dsl::id.eq(provider_id))
                 .filter(dsl::deleted_at.is_null()),
@@ -267,10 +182,7 @@ impl WorkspaceProviderRepository for PgConnection {
         .set(&updates)
         .returning(WorkspaceProvider::as_returning())
         .get_result(self)
-        .await
-        .map_err(Error::from)?;
-
-        Ok(provider)
+        .await?)
     }
 
     async fn delete_workspace_provider(&mut self, provider_id: Uuid) -> Result<()> {
@@ -286,8 +198,7 @@ impl WorkspaceProviderRepository for PgConnection {
         )
         .set(dsl::deleted_at.eq(now))
         .execute(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(())
     }
@@ -371,7 +282,7 @@ mod tests {
         // Soft-delete it, then a second delete and an update both find no live row.
         conn.delete_workspace_provider(provider.id).await?;
         assert!(
-            conn.find_provider_in_workspace(seeded.workspace_id, provider.id)
+            conn.find_provider_in_workspace_with_creator(seeded.workspace_id, provider.id)
                 .await?
                 .is_none()
         );

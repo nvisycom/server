@@ -5,8 +5,6 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::Timestamp;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceDetection, UpdateWorkspaceDetection, WorkspaceDetection};
@@ -17,7 +15,8 @@ use crate::schema::{
     workspace_redactions as redactions,
 };
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Json, keyset,
+    AccountRefRow, CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Json,
+    TimeCursor, keyset, total,
 };
 use crate::{Error, PgConnection, Result, schema};
 
@@ -31,16 +30,6 @@ pub enum EditWriteOutcome {
     Stale,
     /// No live detection matches in the workspace.
     Absent,
-}
-
-/// Keyset for paginating detections: newest first by `started_at`, `id` as the
-/// tiebreaker. Used by the workspace-scoped detection listing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DetectionCursor {
-    /// When the detection started.
-    pub started_at: Timestamp,
-    /// Detection id (tiebreaker).
-    pub id: uuid::Uuid,
 }
 
 /// Resolved display name of a detection's input document.
@@ -169,7 +158,7 @@ pub trait WorkspaceDetectionRepository {
     fn cursor_list_detection_trees(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<DetectionCursor>,
+        pagination: CursorPagination<TimeCursor>,
         filter: &DetectionFilter,
     ) -> impl Future<Output = Result<CursorPage<DetectionTreeRow>>> + Send;
 
@@ -204,7 +193,7 @@ pub trait WorkspaceDetectionRepository {
     fn cursor_list_workspace_detections(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<DetectionCursor>,
+        pagination: CursorPagination<TimeCursor>,
         filter: &DetectionFilter,
     ) -> impl Future<Output = Result<CursorPage<DetectionListRow>>> + Send;
 
@@ -302,7 +291,7 @@ impl WorkspaceDetectionRepository for PgConnection {
     async fn cursor_list_detection_trees(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<DetectionCursor>,
+        pagination: CursorPagination<TimeCursor>,
         filter: &DetectionFilter,
     ) -> Result<CursorPage<DetectionTreeRow>> {
         let page = self
@@ -332,14 +321,11 @@ impl WorkspaceDetectionRepository for PgConnection {
     ) -> Result<WorkspaceDetection> {
         use schema::workspace_detections;
 
-        let detection = diesel::insert_into(workspace_detections::table)
+        Ok(diesel::insert_into(workspace_detections::table)
             .values(&new_detection)
             .returning(WorkspaceDetection::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(detection)
+            .await?)
     }
 
     async fn set_detection_edits(
@@ -368,8 +354,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         .returning(WorkspaceDetection::as_returning())
         .get_result(self)
         .await
-        .optional()
-        .map_err(Error::from)?;
+        .optional()?;
 
         if let Some(detection) = updated {
             return Ok(EditWriteOutcome::Updated(Box::new(detection)));
@@ -384,8 +369,7 @@ impl WorkspaceDetectionRepository for PgConnection {
                 .filter(dsl::deleted_at.is_null()),
         ))
         .get_result(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(if exists {
             EditWriteOutcome::Stale
@@ -421,23 +405,20 @@ impl WorkspaceDetectionRepository for PgConnection {
     ) -> Result<Option<WorkspaceDetection>> {
         use schema::workspace_detections::{self, dsl};
 
-        let detection = workspace_detections::table
+        Ok(workspace_detections::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::idempotency_key.eq(idempotency_key))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceDetection::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(detection)
+            .optional()?)
     }
 
     async fn cursor_list_workspace_detections(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<DetectionCursor>,
+        pagination: CursorPagination<TimeCursor>,
         filter: &DetectionFilter,
     ) -> Result<CursorPage<DetectionListRow>> {
         use schema::accounts::dsl as accounts;
@@ -500,34 +481,17 @@ impl WorkspaceDetectionRepository for PgConnection {
             query
         };
 
-        let total = if pagination.include_count {
-            Some(
-                scoped()
-                    .count()
-                    .get_result::<i64>(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
+        let total = total!(pagination, self, scoped().count());
 
         // Correlated aggregates preserve one row per detection, so counts and
         // cursor boundaries cannot be inflated by multiple redaction outputs.
         let selection = (
             DetectionSummary::as_select(),
-            (
-                accounts::id,
-                accounts::username,
-                accounts::display_name,
-                accounts::avatar_url,
-            ),
+            AccountRefRow::as_select(),
             documents::display_name.nullable(),
         );
 
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.started_at), k.id));
+        let after = pagination.after_pair();
         let items = keyset!(
             scoped(),
             detections::started_at,
@@ -538,14 +502,10 @@ impl WorkspaceDetectionRepository for PgConnection {
         .select(selection)
         .limit(pagination.fetch_limit())
         .load::<DetectionListRow>(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
-            DetectionCursor {
-                started_at: row.detection.started_at.into(),
-                id: row.detection.id,
-            }
+            TimeCursor::new(row.detection.started_at, row.detection.id)
         }))
     }
 
@@ -562,7 +522,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         // stale (a dead worker). The WHERE clause makes the transition atomic:
         // two concurrent deliveries race on the same row and exactly one flips
         // it to `executing`; the loser matches no row and gets `None`.
-        let claimed = diesel::update(
+        Ok(diesel::update(
             workspace_detections::table
                 .filter(dsl::id.eq(detection_id))
                 .filter(dsl::deleted_at.is_null())
@@ -579,10 +539,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         .returning(WorkspaceDetection::as_returning())
         .get_result(self)
         .await
-        .optional()
-        .map_err(Error::from)?;
-
-        Ok(claimed)
+        .optional()?)
     }
 
     async fn detection_document_names(
@@ -600,15 +557,14 @@ impl WorkspaceDetectionRepository for PgConnection {
             workspace_id: Uuid,
             document_id: Uuid,
         ) -> Result<Option<String>> {
-            workspace_documents::table
+            Ok(workspace_documents::table
                 .filter(dsl::id.eq(document_id))
                 .filter(dsl::workspace_id.eq(workspace_id))
                 .filter(dsl::deleted_at.is_null())
                 .select(dsl::display_name)
                 .first::<String>(conn)
                 .await
-                .optional()
-                .map_err(Error::from)
+                .optional()?)
         }
 
         let input = name_of(self, workspace_id, detection.input_document_id).await?;
@@ -646,8 +602,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         )
         .set(&updates)
         .execute(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(rows_affected == 1)
     }
@@ -678,8 +633,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         )
         .set(&updates)
         .execute(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(rows_affected == 1)
     }
@@ -707,8 +661,7 @@ impl WorkspaceDetectionRepository for PgConnection {
         )
         .set(&updates)
         .execute(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(rows_affected == 1)
     }
@@ -1245,7 +1198,7 @@ mod tests {
         );
         for id in ids {
             assert!(
-                conn.detection_outputs(seeded.workspace_id, id)
+                conn.detection_outputs_batch(seeded.workspace_id, &[id])
                     .await?
                     .is_empty()
             );

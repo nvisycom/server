@@ -7,8 +7,8 @@
 //! API tokens (not sessions) may be renamed.
 
 use nvisy_postgres::model::{AccountApiToken, NewAccountApiToken, UpdateAccountApiToken};
-use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository, ApiTokenCursor};
-use nvisy_postgres::types::{ApiTokenType, CursorPage, CursorPagination};
+use nvisy_postgres::query::{AccountApiTokenRepository, AccountRepository};
+use nvisy_postgres::types::{ApiTokenType, CursorPage, CursorPagination, TimeCursor};
 use nvisy_postgres::{AsyncConnection, PgClient};
 use uuid::Uuid;
 
@@ -86,7 +86,7 @@ impl AccountApiTokenService {
     pub async fn list(
         &self,
         account_id: Uuid,
-        pagination: CursorPagination<ApiTokenCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> Result<CursorPage<AccountApiToken>> {
         let mut conn = self.postgres.get_connection().await?;
         Ok(conn

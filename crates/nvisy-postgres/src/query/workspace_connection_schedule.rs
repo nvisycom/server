@@ -7,7 +7,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceConnectionSchedule, WorkspaceConnectionSchedule};
-use crate::{Error, PgConnection, Result, schema};
+use crate::{PgConnection, Result, schema};
 
 /// Repository for connection sync-schedule operations.
 ///
@@ -53,14 +53,11 @@ impl WorkspaceConnectionScheduleRepository for PgConnection {
     ) -> Result<WorkspaceConnectionSchedule> {
         use schema::workspace_connection_schedule;
 
-        let schedule = diesel::insert_into(workspace_connection_schedule::table)
+        Ok(diesel::insert_into(workspace_connection_schedule::table)
             .values(&schedule)
             .returning(WorkspaceConnectionSchedule::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(schedule)
+            .await?)
     }
 
     async fn upsert_connection_schedule(
@@ -69,7 +66,7 @@ impl WorkspaceConnectionScheduleRepository for PgConnection {
     ) -> Result<WorkspaceConnectionSchedule> {
         use schema::workspace_connection_schedule::{self, dsl};
 
-        let schedule = diesel::insert_into(workspace_connection_schedule::table)
+        Ok(diesel::insert_into(workspace_connection_schedule::table)
             .values(&schedule)
             .on_conflict(dsl::connection_id)
             .do_update()
@@ -80,10 +77,7 @@ impl WorkspaceConnectionScheduleRepository for PgConnection {
             ))
             .returning(WorkspaceConnectionSchedule::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(schedule)
+            .await?)
     }
 
     async fn find_connection_schedule(
@@ -92,15 +86,12 @@ impl WorkspaceConnectionScheduleRepository for PgConnection {
     ) -> Result<Option<WorkspaceConnectionSchedule>> {
         use schema::workspace_connection_schedule::{self, dsl};
 
-        let schedule = workspace_connection_schedule::table
+        Ok(workspace_connection_schedule::table
             .filter(dsl::connection_id.eq(connection_id))
             .select(WorkspaceConnectionSchedule::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(schedule)
+            .optional()?)
     }
 
     async fn find_schedules(
@@ -113,14 +104,11 @@ impl WorkspaceConnectionScheduleRepository for PgConnection {
             return Ok(Vec::new());
         }
 
-        let schedules = workspace_connection_schedule::table
+        Ok(workspace_connection_schedule::table
             .filter(dsl::connection_id.eq_any(connection_ids))
             .select(WorkspaceConnectionSchedule::as_select())
             .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(schedules)
+            .await?)
     }
 }
 

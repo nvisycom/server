@@ -2,7 +2,7 @@
 //! one row into the transactional outbox.
 //!
 //! [`EventEmitter`] is a server-side extension trait on the connection, layered
-//! over the postgres [`EventOutboxRepository`]: it turns a [`WorkspaceEvent`] plus
+//! over the postgres [`OutboxRepository`]: it turns a [`WorkspaceEvent`] plus
 //! its origin into one outbox row. Because it writes through the same connection
 //! as the action, wrapping the action and the emit in one transaction makes the
 //! two atomic — the event can never be lost, nor recorded for an action that
@@ -15,7 +15,7 @@ use std::future::Future;
 
 use nvisy_postgres::PgConn;
 use nvisy_postgres::model::NewWorkspaceEventOutbox;
-use nvisy_postgres::query::EventOutboxRepository;
+use nvisy_postgres::query::OutboxRepository;
 
 use crate::response::{ErrorKind, Result};
 use crate::service::event::{EventOrigin, WorkspaceEvent};
@@ -25,7 +25,7 @@ use crate::service::event::{EventOrigin, WorkspaceEvent};
 /// Serialization is the only fallible step, so callers that must insert the row
 /// inside a `PgError`-typed transaction (to preserve a rollback sentinel) can
 /// build the row up front with this and then insert it via
-/// [`EventOutboxRepository::insert_event_outbox`].
+/// [`OutboxRepository::insert_outbox`].
 ///
 /// # Errors
 ///
@@ -66,7 +66,7 @@ pub trait EventEmitter {
 impl EventEmitter for PgConn {
     async fn emit_event(&mut self, origin: EventOrigin<'_>, event: WorkspaceEvent) -> Result<()> {
         let row = event_outbox_row(origin, &event)?;
-        self.insert_event_outbox(row).await?;
+        self.insert_outbox(row).await?;
         Ok(())
     }
 }

@@ -15,9 +15,7 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::Timestamp;
 use pgtrgm::expression_methods::TrgmExpressionMethods;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{
@@ -27,20 +25,10 @@ use crate::model::{
 use crate::query::search::ilike_contains;
 use crate::query::workspace_blobs::WorkspaceBlobRepository;
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, DocumentFilter, DocumentKind, WithAccountRef,
-    keyset,
+    AccountRefRow, CursorPage, CursorPagination, DocumentFilter, DocumentKind, TimeCursor,
+    WithAccountRef, keyset, total,
 };
 use crate::{Error, PgConnection, Result, schema};
-
-/// Keyset for paginating a workspace's documents: newest first by `created_at`,
-/// `id` as the tiebreaker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DocumentCursor {
-    /// When the document was created.
-    pub created_at: Timestamp,
-    /// Document id (tiebreaker).
-    pub id: uuid::Uuid,
-}
 
 /// A document paired with its backing blob.
 ///
@@ -93,12 +81,6 @@ pub trait WorkspaceDocumentRepository {
         connection_id: Uuid,
         source_key: String,
     ) -> impl Future<Output = Result<WorkspaceDocument>> + Send;
-
-    /// Finds a document by its unique identifier.
-    fn find_workspace_document_by_id(
-        &mut self,
-        document_id: Uuid,
-    ) -> impl Future<Output = Result<Option<WorkspaceDocument>>> + Send;
 
     /// Finds a document by ID within a specific workspace.
     ///
@@ -193,7 +175,7 @@ pub trait WorkspaceDocumentRepository {
     fn cursor_list_workspace_documents(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<DocumentCursor>,
+        pagination: CursorPagination<TimeCursor>,
         filter: DocumentFilter,
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<DocumentWithBlob>>>> + Send;
 
@@ -234,8 +216,7 @@ impl WorkspaceDocumentRepository for PgConnection {
                 .values(&new_document)
                 .returning(WorkspaceDocument::as_returning())
                 .get_result(conn)
-                .await
-                .map_err(Error::from)?;
+                .await?;
 
             Ok::<_, Error>(document)
         })
@@ -260,8 +241,7 @@ impl WorkspaceDocumentRepository for PgConnection {
                 .values(&new_document)
                 .returning(WorkspaceDocument::as_returning())
                 .get_result(conn)
-                .await
-                .map_err(Error::from)?;
+                .await?;
 
             diesel::insert_into(workspace_document_imports::table)
                 .values(NewWorkspaceDocumentImport {
@@ -270,30 +250,11 @@ impl WorkspaceDocumentRepository for PgConnection {
                     source_key,
                 })
                 .execute(conn)
-                .await
-                .map_err(Error::from)?;
+                .await?;
 
             Ok::<_, Error>(document)
         })
         .await
-    }
-
-    async fn find_workspace_document_by_id(
-        &mut self,
-        document_id: Uuid,
-    ) -> Result<Option<WorkspaceDocument>> {
-        use schema::workspace_documents::{self, dsl};
-
-        let document = workspace_documents::table
-            .filter(dsl::id.eq(document_id))
-            .filter(dsl::deleted_at.is_null())
-            .select(WorkspaceDocument::as_select())
-            .first(self)
-            .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(document)
     }
 
     async fn find_document_in_workspace(
@@ -303,17 +264,14 @@ impl WorkspaceDocumentRepository for PgConnection {
     ) -> Result<Option<WorkspaceDocument>> {
         use schema::workspace_documents::{self, dsl};
 
-        let document = workspace_documents::table
+        Ok(workspace_documents::table
             .filter(dsl::id.eq(document_id))
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceDocument::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(document)
+            .optional()?)
     }
 
     async fn lock_document_in_workspace(
@@ -323,7 +281,7 @@ impl WorkspaceDocumentRepository for PgConnection {
     ) -> Result<Option<WorkspaceDocument>> {
         use schema::workspace_documents::{self, dsl};
 
-        workspace_documents::table
+        Ok(workspace_documents::table
             .filter(dsl::id.eq(document_id))
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
@@ -331,8 +289,7 @@ impl WorkspaceDocumentRepository for PgConnection {
             .for_update()
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)
+            .optional()?)
     }
 
     async fn find_document_in_workspace_with_creator(
@@ -352,17 +309,11 @@ impl WorkspaceDocumentRepository for PgConnection {
             .select((
                 WorkspaceDocument::as_select(),
                 Blob::as_select(),
-                (
-                    accounts::id,
-                    accounts::username,
-                    accounts::display_name,
-                    accounts::avatar_url,
-                ),
+                AccountRefRow::as_select(),
             ))
             .first::<(WorkspaceDocument, Blob, AccountRefRow)>(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
+            .optional()?;
 
         Ok(row.map(|row| WithAccountRef {
             item: DocumentWithBlob {
@@ -376,16 +327,13 @@ impl WorkspaceDocumentRepository for PgConnection {
     async fn imported_keys_for_connection(&mut self, connection_id: Uuid) -> Result<Vec<String>> {
         use schema::{workspace_document_imports, workspace_documents};
 
-        let keys = workspace_document_imports::table
+        Ok(workspace_document_imports::table
             .inner_join(workspace_documents::table)
             .filter(workspace_document_imports::connection_id.eq(connection_id))
             .filter(workspace_documents::deleted_at.is_null())
             .select(workspace_document_imports::source_key)
             .load::<String>(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(keys)
+            .await?)
     }
 
     async fn record_exported_document(
@@ -414,8 +362,7 @@ impl WorkspaceDocumentRepository for PgConnection {
                 workspace_document_exports::exported_at.eq(diesel::dsl::now),
             ))
             .execute(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
         Ok(())
     }
@@ -440,8 +387,7 @@ impl WorkspaceDocumentRepository for PgConnection {
             .filter(dsl::id.ne_all(exported))
             .select((WorkspaceDocument::as_select(), Blob::as_select()))
             .load::<(WorkspaceDocument, Blob)>(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
         Ok(rows
             .into_iter()
@@ -468,8 +414,7 @@ impl WorkspaceDocumentRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .select((WorkspaceDocument::as_select(), Blob::as_select()))
             .load::<(WorkspaceDocument, Blob)>(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
         Ok(rows
             .into_iter()
@@ -483,7 +428,7 @@ impl WorkspaceDocumentRepository for PgConnection {
     ) -> Result<Vec<ImportedDocumentRef>> {
         use schema::{workspace_blobs, workspace_document_imports, workspace_documents};
 
-        let documents = workspace_document_imports::table
+        Ok(workspace_document_imports::table
             .inner_join(workspace_documents::table.inner_join(workspace_blobs::table))
             .filter(workspace_document_imports::connection_id.eq(connection_id))
             .filter(workspace_documents::deleted_at.is_null())
@@ -493,10 +438,7 @@ impl WorkspaceDocumentRepository for PgConnection {
                 workspace_blobs::storage_path,
             ))
             .load::<ImportedDocumentRef>(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(documents)
+            .await?)
     }
 
     async fn update_workspace_document(
@@ -506,14 +448,15 @@ impl WorkspaceDocumentRepository for PgConnection {
     ) -> Result<WorkspaceDocument> {
         use schema::workspace_documents::{self, dsl};
 
-        let document = diesel::update(workspace_documents::table.filter(dsl::id.eq(document_id)))
+        // Scope to a live row: a concurrently deleted document yields `NotFound`
+        // instead of reviving the dead row.
+        Ok(diesel::update(workspace_documents::table)
+            .filter(dsl::id.eq(document_id))
+            .filter(dsl::deleted_at.is_null())
             .set(&updates)
             .returning(WorkspaceDocument::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(document)
+            .await?)
     }
 
     async fn delete_workspace_document(&mut self, document_id: Uuid) -> Result<()> {
@@ -538,8 +481,7 @@ impl WorkspaceDocumentRepository for PgConnection {
             .set(workspace_documents::deleted_at.eq(diesel::dsl::now))
             .returning(workspace_documents::blob_id)
             .get_results(conn)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
             // Only drop the blob reference if this call is the one that
             // transitioned the row (a second, concurrent delete returns nothing),
@@ -554,8 +496,7 @@ impl WorkspaceDocumentRepository for PgConnection {
                     .filter(workspace_document_imports::document_id.eq(document_id)),
             )
             .execute(conn)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
             Ok::<_, Error>(())
         })
@@ -565,7 +506,7 @@ impl WorkspaceDocumentRepository for PgConnection {
     async fn cursor_list_workspace_documents(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<DocumentCursor>,
+        pagination: CursorPagination<TimeCursor>,
         filter: DocumentFilter,
     ) -> Result<CursorPage<WithAccountRef<DocumentWithBlob>>> {
         use schema::workspace_documents::dsl;
@@ -617,21 +558,9 @@ impl WorkspaceDocumentRepository for PgConnection {
             query
         };
 
-        let total = if pagination.include_count {
-            Some(
-                scoped()
-                    .count()
-                    .get_result::<i64>(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
+        let total = total!(pagination, self, scoped().count());
 
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let after = pagination.after_pair();
         let rows: Vec<(WorkspaceDocument, Blob, AccountRefRow)> = keyset!(
             scoped(),
             dsl::created_at,
@@ -642,17 +571,11 @@ impl WorkspaceDocumentRepository for PgConnection {
         .select((
             WorkspaceDocument::as_select(),
             Blob::as_select(),
-            (
-                accounts::id,
-                accounts::username,
-                accounts::display_name,
-                accounts::avatar_url,
-            ),
+            AccountRefRow::as_select(),
         ))
         .limit(pagination.fetch_limit())
         .load(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         let items: Vec<WithAccountRef<DocumentWithBlob>> = rows
             .into_iter()
@@ -666,10 +589,7 @@ impl WorkspaceDocumentRepository for PgConnection {
             .collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
-            DocumentCursor {
-                created_at: wc.item.document.created_at.into(),
-                id: wc.item.document.id,
-            }
+            TimeCursor::new(wc.item.document.created_at, wc.item.document.id)
         }))
     }
 
@@ -695,8 +615,7 @@ impl WorkspaceDocumentRepository for PgConnection {
         .set(workspace_documents::deleted_at.eq(diesel::dsl::now))
         .returning(WorkspaceDocument::as_returning())
         .get_results(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         // Drop each deleted document's blob reference so a blob with no more live
         // references becomes reclaimable once its retention passes. A document whose
@@ -717,8 +636,7 @@ impl WorkspaceDocumentRepository for PgConnection {
                 .filter(workspace_document_imports::document_id.eq_any(&deleted_ids)),
         )
         .execute(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(deleted)
     }

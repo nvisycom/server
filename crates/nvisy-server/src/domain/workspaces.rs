@@ -5,10 +5,8 @@
 //! each pair their write with an event in one transaction.
 
 use nvisy_postgres::model::{Workspace, WorkspaceMember};
-use nvisy_postgres::query::{
-    AccountWorkspaceCursor, WorkspaceMemberRepository, WorkspaceRepository,
-};
-use nvisy_postgres::types::{AccountRefRow, CursorPage, CursorPagination};
+use nvisy_postgres::query::{WorkspaceMemberRepository, WorkspaceRepository};
+use nvisy_postgres::types::{AccountRefRow, CursorPage, CursorPagination, TimeCursor};
 use nvisy_postgres::{AsyncConnection, PgClient, model};
 use uuid::Uuid;
 
@@ -92,11 +90,11 @@ impl WorkspaceService {
     pub async fn list(
         &self,
         account_id: Uuid,
-        pagination: CursorPagination<AccountWorkspaceCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> Result<CursorPage<(Workspace, WorkspaceMember, AccountRefRow)>> {
         let mut conn = self.postgres.get_connection().await?;
         Ok(conn
-            .cursor_list_account_workspaces_with_details(account_id, pagination)
+            .list_account_workspaces_with_details(account_id, pagination)
             .await?)
     }
 

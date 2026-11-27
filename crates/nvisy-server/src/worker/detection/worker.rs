@@ -17,7 +17,7 @@ use elide_pipeline::primitive::RasterMode;
 use elide_pipeline::provider::{CodecParams, DocumentContext, RequestContext};
 use nvisy_postgres::model::{UpdateWorkspaceDetection, WorkspaceDetection};
 use nvisy_postgres::query::{
-    DetectionPolicyVersionRepository, EventOutboxRepository, WorkspaceBlobRepository,
+    DetectionPolicyVersionRepository, OutboxRepository, WorkspaceBlobRepository,
     WorkspaceDetectionRepository, WorkspaceDocumentRepository, WorkspaceRepository,
 };
 use nvisy_postgres::types::{DetectionStatus, RasterPolicy, RetentionOverride, WorkspaceSettings};
@@ -540,7 +540,7 @@ impl DetectionWorker {
                     // without being a real error; it is matched below.
                     return Err(PgError::Query(DieselError::RollbackTransaction));
                 }
-                conn.insert_event_outbox(outbox_row).await?;
+                conn.insert_outbox(outbox_row).await?;
                 // The resolved storage paths, so an object staged for content that
                 // deduplicated onto an existing blob can be reclaimed after commit.
                 let intermediate_path = resolved_blob.map(|blob| blob.storage_path);

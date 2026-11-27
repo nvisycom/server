@@ -30,6 +30,7 @@ mod workspace_reviews;
 mod workspace_connection_syncs;
 mod workspace_connections;
 mod workspace_policies;
+mod workspace_providers;
 
 pub use self::account_api_tokens::AccountApiTokenConstraints;
 pub use self::account_identities::AccountIdentityConstraints;
@@ -44,102 +45,63 @@ pub use self::workspace_connections::WorkspaceConnectionConstraints;
 pub use self::workspace_invites::WorkspaceInviteConstraints;
 pub use self::workspace_members::WorkspaceMemberConstraints;
 pub use self::workspace_policies::WorkspacePolicyConstraints;
+pub use self::workspace_providers::WorkspaceProviderConstraints;
 pub use self::workspace_review_comments::WorkspaceReviewCommentConstraints;
 pub use self::workspace_reviews::WorkspaceReviewConstraints;
 pub use self::workspace_webhooks::WorkspaceWebhookConstraints;
 pub use self::workspaces::WorkspaceConstraints;
 
-/// Unified constraint violation enum that can represent any database constraint.
-///
-/// This enum wraps all specific constraint types, providing a single interface
-/// for handling any constraint violation while maintaining type safety and
-/// organizational benefits of the separate modules.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConstraintViolation {
-    // Account-related constraints
+/// Declares [`ConstraintViolation`] from one list of `Variant(Enum)` pairs, so
+/// the enum and its name parser cannot drift apart.
+macro_rules! constraint_violations {
+    ($($variant:ident($ty:ty)),+ $(,)?) => {
+        /// Any recognised database constraint violation, grouped by table.
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub enum ConstraintViolation {
+            $($variant($ty),)+
+        }
+
+        impl ConstraintViolation {
+            /// Parses a violated constraint's name, or `None` if it is not one
+            /// the application recognises.
+            ///
+            /// # Examples
+            ///
+            /// ```
+            /// use nvisy_postgres::types::ConstraintViolation;
+            ///
+            /// assert!(ConstraintViolation::new("accounts_email_format").is_some());
+            /// assert!(ConstraintViolation::new("unknown_constraint").is_none());
+            /// ```
+            #[must_use]
+            pub fn new(constraint: &str) -> Option<Self> {
+                // Every per-table enum matches the full constraint name via
+                // strum, so each is tried in turn until one parses.
+                None$(.or_else(|| constraint.parse().ok().map(Self::$variant)))+
+            }
+        }
+    };
+}
+
+constraint_violations! {
     Account(AccountConstraints),
     AccountIdentity(AccountIdentityConstraints),
     AccountNotification(AccountNotificationConstraints),
     AccountApiToken(AccountApiTokenConstraints),
-
-    // Workspace-related constraints
     Workspace(WorkspaceConstraints),
     WorkspaceMember(WorkspaceMemberConstraints),
     WorkspaceInvite(WorkspaceInviteConstraints),
     WorkspaceActivityLog(WorkspaceActivitiesConstraints),
     WorkspaceWebhook(WorkspaceWebhookConstraints),
-
-    // Document / blob storage constraints
     WorkspaceDocument(WorkspaceDocumentConstraints),
     WorkspaceBlob(WorkspaceBlobConstraints),
-
-    // Review-related constraints
     WorkspaceReview(WorkspaceReviewConstraints),
     WorkspaceReviewComment(WorkspaceReviewCommentConstraints),
-
-    // Detection-related constraints
     WorkspaceDetection(WorkspaceDetectionConstraints),
     WorkspaceConnection(WorkspaceConnectionConstraints),
     WorkspaceConnectionSync(WorkspaceConnectionSyncConstraints),
     WorkspacePolicy(WorkspacePolicyConstraints),
-}
-
-impl ConstraintViolation {
-    /// Creates a new [`ConstraintViolation`] from the constraint name.
-    ///
-    /// This method attempts to parse a constraint name string into the corresponding
-    /// enum variant. It returns `None` if the constraint name is not recognized.
-    ///
-    /// # Arguments
-    ///
-    /// * `constraint` - The name of the database constraint that was violated
-    ///
-    /// # Returns
-    ///
-    /// * `Some(ConstraintViolation)` if the constraint name is recognized
-    /// * `None` if the constraint name is unknown
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use nvisy_postgres::types::ConstraintViolation;
-    ///
-    /// let violation = ConstraintViolation::new("accounts_email_format");
-    /// assert!(violation.is_some());
-    ///
-    /// let unknown = ConstraintViolation::new("unknown_constraint");
-    /// assert!(unknown.is_none());
-    /// ```
-    #[must_use]
-    pub fn new(constraint: &str) -> Option<Self> {
-        // Every per-table enum matches the full constraint name via strum, so
-        // parsing is tried against each in turn until one succeeds.
-        macro_rules! try_parse {
-            ($($variant:ident),+ $(,)?) => {
-                None$(.or_else(|| constraint.parse().ok().map(Self::$variant)))+
-            };
-        }
-
-        try_parse! {
-            Account,
-            AccountIdentity,
-            AccountNotification,
-            AccountApiToken,
-            Workspace,
-            WorkspaceMember,
-            WorkspaceInvite,
-            WorkspaceActivityLog,
-            WorkspaceWebhook,
-            WorkspaceDocument,
-            WorkspaceBlob,
-            WorkspaceReview,
-            WorkspaceReviewComment,
-            WorkspaceDetection,
-            WorkspaceConnection,
-            WorkspaceConnectionSync,
-            WorkspacePolicy,
-        }
-    }
+    WorkspaceProvider(WorkspaceProviderConstraints),
 }
 
 #[cfg(test)]
@@ -174,6 +136,13 @@ mod tests {
             ConstraintViolation::new("workspace_policy_versions_definition_size"),
             Some(ConstraintViolation::WorkspacePolicy(
                 WorkspacePolicyConstraints::DefinitionSize
+            ))
+        );
+
+        assert_eq!(
+            ConstraintViolation::new("workspace_providers_display_name_unique_idx"),
+            Some(ConstraintViolation::WorkspaceProvider(
+                WorkspaceProviderConstraints::NameUnique
             ))
         );
 

@@ -9,7 +9,7 @@ use object_store::azure::{MicrosoftAzureBuilder, split_sas};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{Client, redact};
+use super::Client;
 use crate::client::ObjectStoreClient;
 use crate::error::Error;
 
@@ -26,15 +26,43 @@ pub struct AzureCredentials {
     pub container: String,
     /// Azure storage account name.
     pub account_name: String,
-    /// Storage account access key.
-    #[serde(default)]
-    pub access_key: Option<String>,
-    /// Shared Access Signature token.
-    #[serde(default)]
-    pub sas_token: Option<String>,
+    /// How to authenticate. Required: without it the builder would fall back to
+    /// the server's own managed identity.
+    pub auth: AzureAuth,
     /// Custom endpoint URL (for Azure Stack or Azurite).
     #[serde(default)]
     pub endpoint: Option<String>,
+}
+
+/// Azure Blob Storage authentication, tagged by `type`: `{ "type": "accessKey",
+/// "accessKey": "..." }` or `{ "type": "sasToken", "sasToken": "..." }`.
+#[derive(Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum AzureAuth {
+    /// A storage account access key.
+    AccessKey {
+        /// The account key.
+        access_key: String,
+    },
+    /// A Shared Access Signature token.
+    SasToken {
+        /// The SAS token (query string form).
+        sas_token: String,
+    },
+}
+
+impl fmt::Debug for AzureAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AccessKey { .. } => f.write_str("AccessKey(<redacted>)"),
+            Self::SasToken { .. } => f.write_str("SasToken(<redacted>)"),
+        }
+    }
 }
 
 impl fmt::Debug for AzureCredentials {
@@ -42,8 +70,7 @@ impl fmt::Debug for AzureCredentials {
         f.debug_struct("AzureCredentials")
             .field("container", &self.container)
             .field("account_name", &self.account_name)
-            .field("access_key", &redact(self.access_key.as_deref()))
-            .field("sas_token", &redact(self.sas_token.as_deref()))
+            .field("auth", &self.auth)
             .field("endpoint", &self.endpoint)
             .finish()
     }
@@ -63,16 +90,17 @@ impl Client for AzureProvider {
             .with_container_name(&creds.container)
             .with_account(&creds.account_name);
 
-        if let Some(key) = &creds.access_key {
-            builder = builder.with_access_key(key);
-        }
-
-        if let Some(sas) = &creds.sas_token {
-            // `split_sas` percent-decodes and validates the token, handling the
-            // edge cases (e.g. `=` inside a value) a naive split would corrupt.
-            let pairs = split_sas(sas).map_err(|e| Error::connection(e.to_string(), Self::ID))?;
-            builder = builder.with_sas_authorization(pairs);
-        }
+        builder = match &creds.auth {
+            AzureAuth::AccessKey { access_key } => builder.with_access_key(access_key),
+            AzureAuth::SasToken { sas_token } => {
+                // `split_sas` percent-decodes and validates the token, handling
+                // the edge cases (e.g. `=` inside a value) a naive split would
+                // corrupt.
+                let pairs =
+                    split_sas(sas_token).map_err(|e| Error::connection(e.to_string(), Self::ID))?;
+                builder.with_sas_authorization(pairs)
+            }
+        };
 
         if let Some(endpoint) = &creds.endpoint {
             // Validate the custom endpoint under the deployment policy; enable

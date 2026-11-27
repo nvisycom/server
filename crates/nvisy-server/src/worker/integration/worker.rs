@@ -176,7 +176,7 @@ impl ConnectionSyncWorker {
         // instance's tick phase. The bucket TTL reclaims old period keys. Segments
         // are joined with `.`, which NATS KV keys allow (`[-/_=.a-zA-Z0-9]`).
         let period = now.as_second() / i64::try_from(TICK_INTERVAL.as_secs()).unwrap_or(i64::MAX);
-        let lock_key = SchedulerLockKey::from(format!("{SCHEDULER_LOCK_KEY}.{period}"));
+        let lock_key: SchedulerLockKey = format!("{SCHEDULER_LOCK_KEY}.{period}").parse()?;
         let locks = self.infra.nats.kv_store::<SchedulerLocksBucket>().await?;
         let acquired = locks.create(&lock_key, &1).await?;
         if !acquired {

@@ -70,9 +70,6 @@ impl From<WorkspaceInviteConstraints> for Error<'static> {
             WorkspaceInviteConstraints::InviteeEmailFormat => {
                 ErrorKind::BadRequest.with_message("Invalid invitee email format")
             }
-            WorkspaceInviteConstraints::WorkspaceIdIdUnique => {
-                ErrorKind::Conflict.with_message("An invite with this identifier already exists")
-            }
         }
     }
 }
@@ -106,9 +103,6 @@ impl From<WorkspaceWebhookConstraints> for Error<'static> {
             }
             WorkspaceWebhookConstraints::HeadersSize => {
                 ErrorKind::BadRequest.with_message("Webhook headers size is too large")
-            }
-            WorkspaceWebhookConstraints::WorkspaceIdIdUnique => {
-                ErrorKind::Conflict.with_message("A webhook with this identifier already exists")
             }
         }
     }

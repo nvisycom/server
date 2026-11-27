@@ -1,9 +1,12 @@
 //! NATS connection configuration.
 
+use std::fmt;
 use std::time::Duration;
 
 /// Configuration for NATS connections with sensible defaults.
-#[derive(Debug, Clone)]
+///
+/// The token is masked in the [`Debug`] output.
+#[derive(Clone)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct NatsConfig {
     /// NATS server URL (comma-separated for clustering)
@@ -49,6 +52,19 @@ pub struct NatsConfig {
         arg(long = "nats-max-reconnects", env = "NATS_MAX_RECONNECTS")
     )]
     pub nats_max_reconnects: Option<usize>,
+}
+
+impl fmt::Debug for NatsConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NatsConfig")
+            .field("nats_url", &self.nats_url)
+            .field("nats_token", &"<redacted>")
+            .field("nats_client_name", &self.nats_client_name)
+            .field("nats_connect_timeout", &self.nats_connect_timeout)
+            .field("nats_request_timeout", &self.nats_request_timeout)
+            .field("nats_max_reconnects", &self.nats_max_reconnects)
+            .finish()
+    }
 }
 
 // Default values

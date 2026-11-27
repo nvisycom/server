@@ -4,23 +4,13 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::Timestamp;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceConnection, UpdateWorkspaceConnection, WorkspaceConnection};
-use crate::types::{AccountRefRow, CursorPage, CursorPagination, WithAccountRef, keyset};
-use crate::{Error, PgConnection, Result, schema};
-
-/// Keyset for paginating a workspace's connections: newest first by `created_at`,
-/// `id` as the tiebreaker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConnectionCursor {
-    /// When the connection was created.
-    pub created_at: Timestamp,
-    /// Connection id (tiebreaker).
-    pub id: uuid::Uuid,
-}
+use crate::types::{
+    AccountRefRow, CursorPage, CursorPagination, TimeCursor, WithAccountRef, keyset, total,
+};
+use crate::{PgConnection, Result, schema};
 
 /// A sync-scheduled connection paired with its cron expression, as returned by
 /// [`WorkspaceConnectionRepository::list_scheduled_connections`]. The cron is
@@ -92,7 +82,7 @@ pub trait WorkspaceConnectionRepository {
     fn cursor_list_workspace_connections(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<ConnectionCursor>,
+        pagination: CursorPagination<TimeCursor>,
         providers: &[String],
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceConnection>>>> + Send;
 
@@ -117,14 +107,11 @@ impl WorkspaceConnectionRepository for PgConnection {
     ) -> Result<WorkspaceConnection> {
         use schema::workspace_connections;
 
-        let connection = diesel::insert_into(workspace_connections::table)
+        Ok(diesel::insert_into(workspace_connections::table)
             .values(&new_connection)
             .returning(WorkspaceConnection::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(connection)
+            .await?)
     }
 
     async fn find_workspace_connection_by_id_for_update(
@@ -133,17 +120,14 @@ impl WorkspaceConnectionRepository for PgConnection {
     ) -> Result<Option<WorkspaceConnection>> {
         use schema::workspace_connections::{self, dsl};
 
-        let connection = workspace_connections::table
+        Ok(workspace_connections::table
             .filter(dsl::id.eq(connection_id))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceConnection::as_select())
             .for_update()
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(connection)
+            .optional()?)
     }
 
     async fn find_connection_in_workspace(
@@ -153,17 +137,14 @@ impl WorkspaceConnectionRepository for PgConnection {
     ) -> Result<Option<WorkspaceConnection>> {
         use schema::workspace_connections::{self, dsl};
 
-        let connection = workspace_connections::table
+        Ok(workspace_connections::table
             .filter(dsl::id.eq(connection_id))
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceConnection::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(connection)
+            .optional()?)
     }
 
     async fn find_connection_in_workspace_with_creator(
@@ -179,21 +160,12 @@ impl WorkspaceConnectionRepository for PgConnection {
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::id.eq(connection_id))
             .filter(dsl::deleted_at.is_null())
-            .select((
-                WorkspaceConnection::as_select(),
-                (
-                    accounts::id,
-                    accounts::username,
-                    accounts::display_name,
-                    accounts::avatar_url,
-                ),
-            ))
+            .select((WorkspaceConnection::as_select(), AccountRefRow::as_select()))
             .first::<(WorkspaceConnection, AccountRefRow)>(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
+            .optional()?;
 
-        Ok(row.map(|(item, account)| WithAccountRef { item, account }))
+        Ok(row.map(WithAccountRef::from))
     }
 
     async fn list_scheduled_connections(&mut self) -> Result<Vec<ScheduledConnection>> {
@@ -205,7 +177,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         // `schedule_cron IS NOT NULL` filter makes the column non-null for this
         // query, so the worker gets the cron without re-reading the schedule row.
         // Which connections are given a schedule is decided at the handler layer.
-        let connections = workspace_connections::table
+        Ok(workspace_connections::table
             .inner_join(sched::table.on(sched::connection_id.eq(dsl::id)))
             .filter(sched::schedule_cron.is_not_null())
             .filter(dsl::is_active.eq(true))
@@ -215,16 +187,13 @@ impl WorkspaceConnectionRepository for PgConnection {
                 sched::schedule_cron.assume_not_null(),
             ))
             .load::<ScheduledConnection>(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(connections)
+            .await?)
     }
 
     async fn cursor_list_workspace_connections(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<ConnectionCursor>,
+        pagination: CursorPagination<TimeCursor>,
         providers: &[String],
     ) -> Result<CursorPage<WithAccountRef<WorkspaceConnection>>> {
         use schema::workspace_connections::dsl;
@@ -243,21 +212,9 @@ impl WorkspaceConnectionRepository for PgConnection {
             query
         };
 
-        let total = if pagination.include_count {
-            Some(
-                scoped()
-                    .count()
-                    .get_result::<i64>(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
+        let total = total!(pagination, self, scoped().count());
 
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let after = pagination.after_pair();
         let rows: Vec<(WorkspaceConnection, AccountRefRow)> = keyset!(
             scoped(),
             dsl::created_at,
@@ -265,30 +222,16 @@ impl WorkspaceConnectionRepository for PgConnection {
             pagination.direction,
             after
         )
-        .select((
-            WorkspaceConnection::as_select(),
-            (
-                accounts::id,
-                accounts::username,
-                accounts::display_name,
-                accounts::avatar_url,
-            ),
-        ))
+        .select((WorkspaceConnection::as_select(), AccountRefRow::as_select()))
         .limit(pagination.fetch_limit())
         .load(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
-        let items: Vec<WithAccountRef<WorkspaceConnection>> = rows
-            .into_iter()
-            .map(|(item, account)| WithAccountRef { item, account })
-            .collect();
+        let items: Vec<WithAccountRef<WorkspaceConnection>> =
+            rows.into_iter().map(WithAccountRef::from).collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
-            ConnectionCursor {
-                created_at: wc.item.created_at.into(),
-                id: wc.item.id,
-            }
+            TimeCursor::new(wc.item.created_at, wc.item.id)
         }))
     }
 
@@ -302,7 +245,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         // Scope to a live row: a concurrent delete may have committed since the
         // caller's lookup, and updating the tombstoned row would revive it in
         // effect and emit a spurious event.
-        let connection = diesel::update(
+        Ok(diesel::update(
             workspace_connections::table
                 .filter(dsl::id.eq(connection_id))
                 .filter(dsl::deleted_at.is_null()),
@@ -310,10 +253,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         .set(&updates)
         .returning(WorkspaceConnection::as_returning())
         .get_result(self)
-        .await
-        .map_err(Error::from)?;
-
-        Ok(connection)
+        .await?)
     }
 
     async fn delete_workspace_connection(&mut self, connection_id: Uuid) -> Result<()> {
@@ -329,8 +269,7 @@ impl WorkspaceConnectionRepository for PgConnection {
         )
         .set(dsl::deleted_at.eq(now))
         .execute(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(())
     }

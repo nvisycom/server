@@ -30,6 +30,7 @@ use nvisy_postgres::query::{
 };
 use nvisy_postgres::types::{DetectionStatus, DocumentKind};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::domain;
@@ -283,6 +284,7 @@ fn list_detection_trees_docs(op: TransformOperation) -> TransformOperation {
 async fn stream_detection_events(
     State(detections): State<domain::WorkspaceDetectionService>,
     State(detection): State<DetectionQueue>,
+    State(shutdown): State<CancellationToken>,
     authz: Authorized<markers::ViewDetections>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
 ) -> Result<SseResponse<DetectionStatusEvent>> {
@@ -320,7 +322,13 @@ async fn stream_detection_events(
         }
 
         loop {
-            match tokio::time::timeout(STATUS_POLL_INTERVAL, updates.next()).await {
+            // A long-running detection would otherwise hold this stream open
+            // through a graceful shutdown, so end it promptly when one begins.
+            let next = tokio::select! {
+                () = shutdown.cancelled() => break,
+                next = tokio::time::timeout(STATUS_POLL_INTERVAL, updates.next()) => next,
+            };
+            match next {
                 // A live broadcast arrived; forward it (unless it moves backwards)
                 // and stop once it settles.
                 Ok(Some(event)) => {

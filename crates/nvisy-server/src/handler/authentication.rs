@@ -419,7 +419,6 @@ mod tests {
             "pruning app tokens must not revoke web sessions"
         );
 
-        conn.delete_all_account_api_tokens(account.id).await?;
         conn.delete_account(account.id).await?;
         Ok(())
     }

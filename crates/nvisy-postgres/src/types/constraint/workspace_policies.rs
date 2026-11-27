@@ -17,4 +17,7 @@ pub enum WorkspacePolicyConstraints {
     WorkspaceIdIdUnique,
     #[strum(serialize = "workspace_policies_display_name_unique_idx")]
     NameUnique,
+    /// Two concurrent edits tried to append the same version number.
+    #[strum(serialize = "workspace_policy_versions_policy_version_key")]
+    VersionUnique,
 }

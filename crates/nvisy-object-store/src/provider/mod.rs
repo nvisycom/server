@@ -6,7 +6,7 @@ mod s3;
 
 use std::ops::Deref;
 
-pub use azure::{AzureCredentials, AzureProvider};
+pub use azure::{AzureAuth, AzureCredentials, AzureProvider};
 pub use gcs::{GcsCredentials, GcsProvider};
 use nvisy_core::net::EndpointPolicy;
 use object_store::prefix::PrefixStore;
@@ -185,7 +185,10 @@ async fn connect_client<C: Client>(
     Ok((*C::connect(credentials, policy).await?).clone())
 }
 
-/// Renders a secret field for [`Debug`]: `<set>` when present, `<unset>` when
+/// Renders a required secret field for [`Debug`].
+const REDACTED: &str = "<redacted>";
+
+/// Renders an optional secret field for [`Debug`]: `<set>` when present, `<unset>` when
 /// absent. Never reveals the value.
 fn redact(value: Option<&str>) -> &'static str {
     match value {
@@ -204,7 +207,7 @@ mod tests {
     async fn deserializes_provider_tagged_config() {
         let config: StorageConfig = serde_json::from_value(json!({
             "provider": "s3",
-            "credentials": { "bucket": "test-bucket", "region": "us-east-1" },
+            "credentials": { "bucket": "test-bucket", "accessKeyId": "AKIA", "secretAccessKey": "secret" },
         }))
         .unwrap();
         assert_eq!(config.provider_id(), "s3");
@@ -215,6 +218,32 @@ mod tests {
     async fn rejects_unknown_provider_tag() {
         let result: Result<StorageConfig, _> =
             serde_json::from_value(json!({ "provider": "nope", "credentials": { "bucket": "b" } }));
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn rejects_s3_without_static_credentials() {
+        // No keys would leave the builder to fall back to the server's own
+        // instance identity.
+        let result: Result<StorageConfig, _> =
+            serde_json::from_value(json!({ "provider": "s3", "credentials": { "bucket": "b" } }));
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn rejects_gcs_without_service_account_key() {
+        let result: Result<StorageConfig, _> = serde_json::from_value(
+            json!({ "provider": "gcs", "credentials": { "bucket": "b", "serviceAccountPath": "/etc/passwd" } }),
+        );
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn rejects_azure_without_auth() {
+        let result: Result<StorageConfig, _> = serde_json::from_value(json!({
+            "provider": "azure",
+            "credentials": { "container": "c", "accountName": "a" },
+        }));
         assert!(result.is_err());
     }
 
@@ -233,7 +262,7 @@ mod tests {
         let config = StorageConfig::S3 {
             root_path: None,
             credentials: serde_json::from_value(
-                json!({ "bucket": "test-bucket", "region": "us-east-1" }),
+                json!({ "bucket": "test-bucket", "region": "us-east-1", "accessKeyId": "AKIA", "secretAccessKey": "secret" }),
             )
             .unwrap(),
         };
@@ -245,7 +274,7 @@ mod tests {
         let config: StorageConfig = serde_json::from_value(json!({
             "provider": "s3",
             "rootPath": "incoming/documents",
-            "credentials": { "bucket": "test-bucket", "region": "us-east-1" },
+            "credentials": { "bucket": "test-bucket", "accessKeyId": "AKIA", "secretAccessKey": "secret" },
         }))
         .unwrap();
         assert_eq!(config.root_path(), Some("incoming/documents"));

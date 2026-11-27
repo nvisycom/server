@@ -120,7 +120,7 @@ async fn start_oauth(
     };
     let store = nats.kv_store::<OAuthStateBucket>().await?;
     store
-        .put(&OAuthStateKey(authorization.csrf_state), &flow)
+        .put(&authorization.csrf_state.parse::<OAuthStateKey>()?, &flow)
         .await?;
 
     Ok((
@@ -193,15 +193,14 @@ async fn complete_callback(
     let key = OAuthStateKey::from_str(&query.state)
         .map_err(|_| ErrorKind::BadRequest.with_message("Invalid authorization state"))?;
 
-    // Consume the pending authorization single-use: read then delete, so a
-    // replayed callback finds nothing and a denial still cleans up its state. A
+    // Consume the pending authorization atomically, so of two concurrent
+    // replays only one gets the flow, and a denial still cleans up its state. A
     // missing entry means an unknown, expired, or already-used state.
     let store = nats.kv_store::<OAuthStateBucket>().await?;
     let flow = store
-        .get_value(&key)
+        .take(&key)
         .await?
         .ok_or_else(|| ErrorKind::BadRequest.with_message("Invalid or expired authorization"))?;
-    store.delete(&key).await?;
 
     // A denial (or any provider error) arrives with `error` and no `code`; the
     // state is now consumed, so reject after cleanup.

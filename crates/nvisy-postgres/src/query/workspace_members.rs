@@ -13,7 +13,7 @@ use crate::model::{
 };
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, Handle, MemberFilter, MemberSortBy,
-    MemberSortField, NotificationEvent, OffsetPagination, WorkspaceRole, keyset,
+    MemberSortField, NotificationEvent, TimeCursor, WorkspaceRole, keyset, total,
 };
 use crate::{Error, PgConnection, Result, schema};
 
@@ -22,17 +22,6 @@ diesel::define_sql_function! {
     /// empty string — keeping null-name members in the name-sorted listing rather
     /// than filtering them out, and giving the keyset a total sort column.
     fn coalesce(value: diesel::sql_types::Nullable<diesel::sql_types::Text>, default: diesel::sql_types::Text) -> diesel::sql_types::Text;
-}
-
-/// Keyset for paginating an account's workspaces: newest membership first by
-/// `created_at`, with the workspace id as the tiebreaker (a member row has a
-/// composite key, so there is no single `id` column).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AccountWorkspaceCursor {
-    /// When the membership was created.
-    pub created_at: Timestamp,
-    /// Workspace id (tiebreaker).
-    pub workspace_id: uuid::Uuid,
 }
 
 /// Keyset for paginating a workspace's members. Members can be sorted by join
@@ -100,20 +89,13 @@ pub trait WorkspaceMemberRepository {
         member_account_id: Uuid,
     ) -> impl Future<Output = Result<()>> + Send;
 
-    /// Lists user workspaces with full workspace details via JOIN.
-    fn list_account_workspaces_with_details(
-        &mut self,
-        account_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> impl Future<Output = Result<Vec<(Workspace, WorkspaceMember)>>> + Send;
-
     /// Lists user workspaces with full workspace details using cursor
     /// pagination, each paired with the handle of the account that created the
     /// workspace.
-    fn cursor_list_account_workspaces_with_details(
+    fn list_account_workspaces_with_details(
         &mut self,
         account_id: Uuid,
-        pagination: CursorPagination<AccountWorkspaceCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> impl Future<Output = Result<CursorPage<(Workspace, WorkspaceMember, AccountRefRow)>>> + Send;
 
     /// Returns the account ids of members holding any of `roles` who accept
@@ -187,14 +169,11 @@ impl WorkspaceMemberRepository for PgConnection {
     ) -> Result<WorkspaceMember> {
         use schema::workspace_members;
 
-        let member = diesel::insert_into(workspace_members::table)
+        Ok(diesel::insert_into(workspace_members::table)
             .values(&member)
             .returning(WorkspaceMember::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(member)
+            .await?)
     }
 
     async fn find_workspace_member(
@@ -204,16 +183,13 @@ impl WorkspaceMemberRepository for PgConnection {
     ) -> Result<Option<WorkspaceMember>> {
         use schema::workspace_members::{self, dsl};
 
-        let member = workspace_members::table
+        Ok(workspace_members::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::account_id.eq(member_account_id))
             .select(WorkspaceMember::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(member)
+            .optional()?)
     }
 
     async fn find_member_ids_by_usernames(
@@ -230,17 +206,14 @@ impl WorkspaceMemberRepository for PgConnection {
 
         // Join members to their account and keep those whose username is in the
         // set — one round-trip instead of a lookup per handle.
-        let ids: Vec<Uuid> = workspace_members::table
+        Ok(workspace_members::table
             .inner_join(accounts::table.on(members::account_id.eq(accounts::id)))
             .filter(members::workspace_id.eq(workspace_id))
             .filter(accounts::username.eq_any(usernames))
             .filter(accounts::deleted_at.is_null())
             .select(members::account_id)
             .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(ids)
+            .await?)
     }
 
     async fn update_workspace_member(
@@ -251,16 +224,13 @@ impl WorkspaceMemberRepository for PgConnection {
     ) -> Result<WorkspaceMember> {
         use schema::workspace_members::{self, dsl};
 
-        let member = diesel::update(workspace_members::table)
+        Ok(diesel::update(workspace_members::table)
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::account_id.eq(member_account_id))
             .set(&changes)
             .returning(WorkspaceMember::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(member)
+            .await?)
     }
 
     async fn remove_workspace_member(
@@ -274,8 +244,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::account_id.eq(member_account_id))
             .execute(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
         Ok(())
     }
@@ -283,29 +252,7 @@ impl WorkspaceMemberRepository for PgConnection {
     async fn list_account_workspaces_with_details(
         &mut self,
         account_id: Uuid,
-        pagination: OffsetPagination,
-    ) -> Result<Vec<(Workspace, WorkspaceMember)>> {
-        use schema::{workspace_members, workspaces};
-
-        let results = workspace_members::table
-            .inner_join(workspaces::table.on(workspaces::id.eq(workspace_members::workspace_id)))
-            .filter(workspace_members::account_id.eq(account_id))
-            .filter(workspaces::deleted_at.is_null())
-            .select((Workspace::as_select(), WorkspaceMember::as_select()))
-            .order(workspace_members::created_at.desc())
-            .limit(pagination.limit)
-            .offset(pagination.offset)
-            .load::<(Workspace, WorkspaceMember)>(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(results)
-    }
-
-    async fn cursor_list_account_workspaces_with_details(
-        &mut self,
-        account_id: Uuid,
-        pagination: CursorPagination<AccountWorkspaceCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> Result<CursorPage<(Workspace, WorkspaceMember, AccountRefRow)>> {
         use diesel::dsl::count_star;
         use schema::{accounts, workspace_members, workspaces};
@@ -316,21 +263,16 @@ impl WorkspaceMemberRepository for PgConnection {
             .and(workspaces::deleted_at.is_null());
 
         // Get total count only if requested
-        let total = if pagination.include_count {
-            Some(
-                workspace_members::table
-                    .inner_join(
-                        workspaces::table.on(workspaces::id.eq(workspace_members::workspace_id)),
-                    )
-                    .filter(base_filter)
-                    .select(count_star())
-                    .get_result(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
+        let total = total!(
+            pagination,
+            self,
+            workspace_members::table
+                .inner_join(
+                    workspaces::table.on(workspaces::id.eq(workspace_members::workspace_id)),
+                )
+                .filter(base_filter)
+                .select(count_star())
+        );
 
         let query = workspace_members::table
             .inner_join(workspaces::table.on(workspaces::id.eq(workspace_members::workspace_id)))
@@ -338,9 +280,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .filter(base_filter)
             .into_boxed();
 
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.workspace_id));
+        let after = pagination.after_pair();
         let items = keyset!(
             query,
             workspace_members::created_at,
@@ -352,24 +292,17 @@ impl WorkspaceMemberRepository for PgConnection {
         .select((
             Workspace::as_select(),
             WorkspaceMember::as_select(),
-            (
-                accounts::id,
-                accounts::username,
-                accounts::display_name,
-                accounts::avatar_url,
-            ),
+            AccountRefRow::as_select(),
         ))
         .load(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(CursorPage::new(
             items,
             total,
             pagination.limit,
-            |(_, m, _): &(Workspace, WorkspaceMember, AccountRefRow)| AccountWorkspaceCursor {
-                created_at: m.created_at.into(),
-                workspace_id: m.workspace_id,
+            |(_, m, _): &(Workspace, WorkspaceMember, AccountRefRow)| {
+                TimeCursor::new(m.created_at, m.workspace_id)
             },
         ))
     }
@@ -386,16 +319,13 @@ impl WorkspaceMemberRepository for PgConnection {
         // Array<Nullable<NotificationEvent>>, so the needle matches that shape.
         let needle: Vec<Option<NotificationEvent>> = vec![Some(event)];
 
-        let account_ids = workspace_members::table
+        Ok(workspace_members::table
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::member_role.eq_any(roles.to_vec()))
             .filter(dsl::notification_events_app.contains(needle))
             .select(dsl::account_id)
             .load::<Uuid>(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(account_ids)
+            .await?)
     }
 
     async fn cursor_list_workspace_members_with_accounts(
@@ -428,17 +358,7 @@ impl WorkspaceMemberRepository for PgConnection {
             query
         };
 
-        let total = if pagination.include_count {
-            Some(
-                scoped()
-                    .select(count_star())
-                    .get_result(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
+        let total = total!(pagination, self, scoped().select(count_star()));
 
         // The keyset runs on whichever column the sort uses; the cursor carries the
         // matching value, so a stray Name cursor on a Date sort (or vice-versa)
@@ -480,8 +400,7 @@ impl WorkspaceMemberRepository for PgConnection {
         .limit(pagination.fetch_limit())
         .select((WorkspaceMember::as_select(), Account::as_select()))
         .load(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(CursorPage::new(
             items,
@@ -510,7 +429,7 @@ impl WorkspaceMemberRepository for PgConnection {
     ) -> Result<Option<(WorkspaceMember, Account)>> {
         use schema::{accounts, workspace_members};
 
-        let result = workspace_members::table
+        Ok(workspace_members::table
             .inner_join(accounts::table.on(accounts::id.eq(workspace_members::account_id)))
             .filter(workspace_members::workspace_id.eq(workspace_id))
             .filter(workspace_members::account_id.eq(member_account_id))
@@ -518,10 +437,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .select((WorkspaceMember::as_select(), Account::as_select()))
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(result)
+            .optional()?)
     }
 
     async fn find_workspace_member_by_email(
@@ -531,7 +447,7 @@ impl WorkspaceMemberRepository for PgConnection {
     ) -> Result<Option<(WorkspaceMember, Account)>> {
         use schema::{accounts, workspace_members};
 
-        let result = workspace_members::table
+        Ok(workspace_members::table
             .inner_join(accounts::table.on(accounts::id.eq(workspace_members::account_id)))
             .filter(workspace_members::workspace_id.eq(workspace_id))
             .filter(accounts::email_address.eq(email))
@@ -539,10 +455,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .select((WorkspaceMember::as_select(), Account::as_select()))
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(result)
+            .optional()?)
     }
 
     async fn accounts_share_workspace(
@@ -563,7 +476,7 @@ impl WorkspaceMemberRepository for PgConnection {
         let wm_a = workspace_members::table;
         let wm_b = diesel::alias!(workspace_members as wm_b);
 
-        let shares = diesel::select(exists(
+        Ok(diesel::select(exists(
             wm_a.inner_join(
                 wm_b.on(wm_b
                     .field(workspace_members::workspace_id)
@@ -573,10 +486,7 @@ impl WorkspaceMemberRepository for PgConnection {
             .filter(wm_b.field(workspace_members::account_id).eq(account_id_b)),
         ))
         .get_result::<bool>(self)
-        .await
-        .map_err(Error::from)?;
-
-        Ok(shares)
+        .await?)
     }
 
     async fn lock_owner_ids(&mut self, workspace_id: Uuid) -> Result<Vec<Uuid>> {

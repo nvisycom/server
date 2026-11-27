@@ -8,8 +8,8 @@
 
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::AccountNotification;
-use nvisy_postgres::query::{AccountNotificationRepository, NotificationCursor};
-use nvisy_postgres::types::{CursorPage, CursorPagination};
+use nvisy_postgres::query::AccountNotificationRepository;
+use nvisy_postgres::types::{CursorPage, CursorPagination, TimeCursor};
 use uuid::Uuid;
 
 use crate::response::{Error, Result};
@@ -47,7 +47,7 @@ impl AccountNotificationService {
     pub async fn list(
         &self,
         account_id: Uuid,
-        pagination: CursorPagination<NotificationCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> Result<CursorPage<AccountNotification>> {
         let mut conn = self.postgres.get_connection().await?;
         Ok(conn

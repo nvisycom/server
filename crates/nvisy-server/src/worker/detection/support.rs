@@ -173,7 +173,7 @@ pub(crate) async fn resolve_policies_by_ids(
     let mut policies = Vec::with_capacity(policy_ids.len());
     for policy_id in policy_ids {
         let policy = conn
-            .find_policy_in_workspace_by_id(workspace_id, *policy_id)
+            .find_policy_in_workspace_with_creator(workspace_id, *policy_id)
             .await?
             .ok_or_else(|| {
                 ErrorKind::InternalServerError

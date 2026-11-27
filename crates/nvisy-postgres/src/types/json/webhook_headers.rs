@@ -95,12 +95,6 @@ impl WebhookHeaders {
         self.0.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
-    /// Borrows the underlying ordered name → value map.
-    #[must_use]
-    pub fn as_map(&self) -> &BTreeMap<String, String> {
-        &self.0
-    }
-
     /// Consumes into the underlying ordered name → value map.
     #[must_use]
     pub fn into_map(self) -> BTreeMap<String, String> {

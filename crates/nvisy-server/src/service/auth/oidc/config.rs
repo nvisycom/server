@@ -4,13 +4,16 @@
 //! mirroring the cloud file-service OAuth config. A provider whose required
 //! values are not all set is left unconfigured and cannot be used to sign in.
 
+use std::fmt;
+
 use nvisy_postgres::types::IdentityProvider;
 
 /// A resolved OIDC provider: the credentials and issuer needed to run a sign-in.
 ///
 /// Produced from a provider's config only when every required value is present,
 /// so a partially-configured provider is simply absent rather than half-usable.
-#[derive(Debug, Clone)]
+/// The client secret is masked in the [`Debug`] output.
+#[derive(Clone)]
 pub struct ResolvedOidcProvider {
     /// Which identity provider this is.
     pub provider: IdentityProvider,
@@ -22,6 +25,18 @@ pub struct ResolvedOidcProvider {
     pub redirect_uri: String,
     /// OIDC issuer URL used for discovery.
     pub issuer: String,
+}
+
+impl fmt::Debug for ResolvedOidcProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ResolvedOidcProvider")
+            .field("provider", &self.provider)
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"<redacted>")
+            .field("redirect_uri", &self.redirect_uri)
+            .field("issuer", &self.issuer)
+            .finish()
+    }
 }
 
 /// Defines one provider's OIDC config struct.
@@ -43,7 +58,7 @@ macro_rules! oidc_provider_config {
         $issuer_long:literal, $issuer_env:literal
     ) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, Default)]
+        #[derive(Clone, Default)]
         #[cfg_attr(feature = "cli", derive(clap::Args))]
         pub struct $name {
             #[doc = concat!($display, " sign-in OIDC client id. Set with the client secret and redirect URI to enable sign-in.")]
@@ -90,6 +105,17 @@ macro_rules! oidc_provider_config {
                 )
             )]
             pub issuer: Option<String>,
+        }
+
+        impl fmt::Debug for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_struct(stringify!($name))
+                    .field("client_id", &self.client_id)
+                    .field("client_secret", &self.client_secret.as_ref().map(|_| "<redacted>"))
+                    .field("redirect_uri", &self.redirect_uri)
+                    .field("issuer", &self.issuer)
+                    .finish()
+            }
         }
 
         impl $name {

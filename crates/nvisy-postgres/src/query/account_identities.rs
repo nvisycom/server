@@ -129,12 +129,11 @@ impl AccountIdentityRepository for PgConnection {
     ) -> Result<AccountIdentity> {
         use schema::account_identities;
 
-        diesel::insert_into(account_identities::table)
+        Ok(diesel::insert_into(account_identities::table)
             .values(&identity)
             .returning(AccountIdentity::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)
+            .await?)
     }
 
     async fn find_account_identity(
@@ -144,14 +143,13 @@ impl AccountIdentityRepository for PgConnection {
     ) -> Result<Option<AccountIdentity>> {
         use schema::account_identities::dsl;
 
-        dsl::account_identities
+        Ok(dsl::account_identities
             .filter(dsl::account_id.eq(account_id))
             .filter(dsl::provider.eq(provider))
             .select(AccountIdentity::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)
+            .optional()?)
     }
 
     async fn link_oidc_identity(
@@ -220,26 +218,24 @@ impl AccountIdentityRepository for PgConnection {
     ) -> Result<Option<AccountIdentity>> {
         use schema::account_identities::dsl;
 
-        dsl::account_identities
+        Ok(dsl::account_identities
             .filter(dsl::provider.eq(provider))
             .filter(dsl::provider_subject.eq(provider_subject))
             .select(AccountIdentity::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)
+            .optional()?)
     }
 
     async fn list_account_identities(&mut self, account_id: Uuid) -> Result<Vec<AccountIdentity>> {
         use schema::account_identities::dsl;
 
-        dsl::account_identities
+        Ok(dsl::account_identities
             .filter(dsl::account_id.eq(account_id))
             .order(dsl::provider.asc())
             .select(AccountIdentity::as_select())
             .load(self)
-            .await
-            .map_err(Error::from)
+            .await?)
     }
 
     async fn upsert_password_secret(
@@ -258,7 +254,7 @@ impl AccountIdentityRepository for PgConnection {
             lock_active_account(conn, account_id).await?;
 
             let new_identity = NewAccountIdentity::password(account_id, secret.clone());
-            diesel::insert_into(dsl::account_identities)
+            Ok(diesel::insert_into(dsl::account_identities)
                 .values(&new_identity)
                 // A password identity already exists for this account: replace its
                 // secret instead of failing the `(account_id, provider)` uniqueness.
@@ -267,8 +263,7 @@ impl AccountIdentityRepository for PgConnection {
                 .set(dsl::secret.eq(secret))
                 .returning(AccountIdentity::as_returning())
                 .get_result(conn)
-                .await
-                .map_err(Error::from)
+                .await?)
         })
         .await
     }
@@ -294,8 +289,7 @@ impl AccountIdentityRepository for PgConnection {
                 .for_update()
                 .select(dsl::provider)
                 .load(conn)
-                .await
-                .map_err(Error::from)?;
+                .await?;
 
             if !providers.contains(&provider) {
                 return Ok(DeleteIdentityOutcome::NotFound);
@@ -312,8 +306,7 @@ impl AccountIdentityRepository for PgConnection {
                     .filter(dsl::provider.eq(provider)),
             )
             .execute(conn)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
             Ok::<_, Error>(DeleteIdentityOutcome::Deleted)
         })
@@ -340,8 +333,7 @@ async fn lock_active_account(conn: &mut PgConnection, account_id: Uuid) -> Resul
         .select(dsl::deleted_at)
         .first::<Option<JiffTimestamp>>(conn)
         .await
-        .optional()
-        .map_err(Error::from)?;
+        .optional()?;
 
     match row {
         // Row exists and is not tombstoned (`deleted_at IS NULL`).

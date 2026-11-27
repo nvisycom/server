@@ -4,25 +4,14 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::Timestamp;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceConnectionSync, WorkspaceConnectionSync};
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, SyncStatus, WithAccountRef, keyset,
+    AccountRefRow, CursorPage, CursorPagination, SyncStatus, TimeCursor, WithAccountRef, keyset,
+    total,
 };
 use crate::{Error, PgConnection, Result, schema};
-
-/// Keyset for paginating connection sync runs: newest first by `started_at`, `id`
-/// as the tiebreaker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConnectionSyncCursor {
-    /// When the sync run started.
-    pub started_at: Timestamp,
-    /// Sync run id (tiebreaker).
-    pub id: uuid::Uuid,
-}
 
 /// Repository for workspace connection sync database operations.
 ///
@@ -69,7 +58,7 @@ pub trait WorkspaceConnectionSyncRepository {
     fn cursor_list_workspace_connection_syncs(
         &mut self,
         connection_id: Uuid,
-        pagination: CursorPagination<ConnectionSyncCursor>,
+        pagination: CursorPagination<TimeCursor>,
         status_filter: Option<SyncStatus>,
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceConnectionSync>>>> + Send;
 
@@ -85,7 +74,7 @@ pub trait WorkspaceConnectionSyncRepository {
     fn cursor_list_workspace_connection_syncs_all(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<ConnectionSyncCursor>,
+        pagination: CursorPagination<TimeCursor>,
         status_filter: Option<SyncStatus>,
         providers: &[String],
     ) -> impl Future<Output = Result<CursorPage<(WithAccountRef<WorkspaceConnectionSync>, Uuid)>>> + Send;
@@ -147,14 +136,11 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
     ) -> Result<WorkspaceConnectionSync> {
         use schema::workspace_connection_syncs;
 
-        let sync = diesel::insert_into(workspace_connection_syncs::table)
+        Ok(diesel::insert_into(workspace_connection_syncs::table)
             .values(&new_sync)
             .returning(WorkspaceConnectionSync::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(sync)
+            .await?)
     }
 
     async fn find_workspace_connection_sync_by_id(
@@ -163,15 +149,12 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
     ) -> Result<Option<WorkspaceConnectionSync>> {
         use schema::workspace_connection_syncs::{self, dsl};
 
-        let sync = workspace_connection_syncs::table
+        Ok(workspace_connection_syncs::table
             .filter(dsl::id.eq(sync_id))
             .select(WorkspaceConnectionSync::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(sync)
+            .optional()?)
     }
 
     async fn find_connection_sync_in_workspace(
@@ -182,7 +165,7 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
         use schema::workspace_connection_syncs::dsl as runs;
         use schema::workspace_connections::dsl as connections;
 
-        let sync = runs::workspace_connection_syncs
+        Ok(runs::workspace_connection_syncs
             .inner_join(
                 connections::workspace_connections.on(connections::id.eq(runs::connection_id)),
             )
@@ -191,10 +174,7 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
             .select(WorkspaceConnectionSync::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(sync)
+            .optional()?)
     }
 
     async fn last_successful_sync_at(
@@ -224,7 +204,7 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
     async fn cursor_list_workspace_connection_syncs(
         &mut self,
         connection_id: Uuid,
-        pagination: CursorPagination<ConnectionSyncCursor>,
+        pagination: CursorPagination<TimeCursor>,
         status_filter: Option<SyncStatus>,
     ) -> Result<CursorPage<WithAccountRef<WorkspaceConnectionSync>>> {
         use schema::workspace_connection_syncs::dsl;
@@ -242,21 +222,9 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
             query
         };
 
-        let total = if pagination.include_count {
-            Some(
-                scoped()
-                    .count()
-                    .get_result::<i64>(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
+        let total = total!(pagination, self, scoped().count());
 
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.started_at), k.id));
+        let after = pagination.after_pair();
         let rows: Vec<(WorkspaceConnectionSync, AccountRefRow)> = keyset!(
             scoped(),
             dsl::started_at,
@@ -266,35 +234,24 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
         )
         .select((
             WorkspaceConnectionSync::as_select(),
-            (
-                accounts::id,
-                accounts::username,
-                accounts::display_name,
-                accounts::avatar_url,
-            ),
+            AccountRefRow::as_select(),
         ))
         .limit(pagination.fetch_limit())
         .load(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
-        let items: Vec<WithAccountRef<WorkspaceConnectionSync>> = rows
-            .into_iter()
-            .map(|(item, account)| WithAccountRef { item, account })
-            .collect();
+        let items: Vec<WithAccountRef<WorkspaceConnectionSync>> =
+            rows.into_iter().map(WithAccountRef::from).collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
-            ConnectionSyncCursor {
-                started_at: wc.item.started_at.into(),
-                id: wc.item.id,
-            }
+            TimeCursor::new(wc.item.started_at, wc.item.id)
         }))
     }
 
     async fn cursor_list_workspace_connection_syncs_all(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<ConnectionSyncCursor>,
+        pagination: CursorPagination<TimeCursor>,
         status_filter: Option<SyncStatus>,
         providers: &[String],
     ) -> Result<CursorPage<(WithAccountRef<WorkspaceConnectionSync>, Uuid)>> {
@@ -323,32 +280,15 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
             query
         };
 
-        let total = if pagination.include_count {
-            Some(
-                scoped()
-                    .count()
-                    .get_result::<i64>(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
+        let total = total!(pagination, self, scoped().count());
 
         let selection = (
             WorkspaceConnectionSync::as_select(),
             connections::id,
-            (
-                accounts::id,
-                accounts::username,
-                accounts::display_name,
-                accounts::avatar_url,
-            ),
+            AccountRefRow::as_select(),
         );
 
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.started_at), k.id));
+        let after = pagination.after_pair();
         let rows: Vec<(WorkspaceConnectionSync, Uuid, AccountRefRow)> = keyset!(
             scoped(),
             runs::started_at,
@@ -359,8 +299,7 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
         .select(selection)
         .limit(pagination.fetch_limit())
         .load(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         let items: Vec<(WithAccountRef<WorkspaceConnectionSync>, Uuid)> = rows
             .into_iter()
@@ -371,9 +310,8 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
             items,
             total,
             pagination.limit,
-            |(wc, _): &(WithAccountRef<WorkspaceConnectionSync>, Uuid)| ConnectionSyncCursor {
-                started_at: wc.item.started_at.into(),
-                id: wc.item.id,
+            |(wc, _): &(WithAccountRef<WorkspaceConnectionSync>, Uuid)| {
+                TimeCursor::new(wc.item.started_at, wc.item.id)
             },
         ))
     }
@@ -384,7 +322,7 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
     ) -> Result<Option<WorkspaceConnectionSync>> {
         use schema::workspace_connection_syncs::{self, dsl};
 
-        let sync = workspace_connection_syncs::table
+        Ok(workspace_connection_syncs::table
             .filter(dsl::connection_id.eq(connection_id))
             // `id` breaks a `started_at` tie so the newest row is deterministic,
             // matching the batched `find_latest_workspace_connection_syncs`.
@@ -392,10 +330,7 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
             .select(WorkspaceConnectionSync::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(sync)
+            .optional()?)
     }
 
     async fn find_latest_workspace_connection_syncs(
@@ -408,16 +343,13 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
         // connection_id under the matching ORDER BY (newest started_at first). The
         // id tie-breaker makes the pick deterministic when two runs share a
         // started_at, so the scheduler reads a stable busy state / last attempt.
-        let syncs = workspace_connection_syncs::table
+        Ok(workspace_connection_syncs::table
             .filter(dsl::connection_id.eq_any(connection_ids))
             .distinct_on(dsl::connection_id)
             .order((dsl::connection_id, dsl::started_at.desc(), dsl::id.desc()))
             .select(WorkspaceConnectionSync::as_select())
             .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(syncs)
+            .await?)
     }
 
     async fn complete_workspace_connection_sync(
@@ -430,7 +362,7 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
 
         // Only transition from an active state, so a sync already cancelled/reaped
         // is not resurrected as completed and its record count is not rewritten.
-        let sync = diesel::update(
+        Ok(diesel::update(
             workspace_connection_syncs::table
                 .filter(dsl::id.eq(sync_id))
                 .filter(dsl::status.eq_any([SyncStatus::Pending, SyncStatus::Running])),
@@ -443,10 +375,7 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
         .returning(WorkspaceConnectionSync::as_returning())
         .get_result(self)
         .await
-        .optional()
-        .map_err(Error::from)?;
-
-        Ok(sync)
+        .optional()?)
     }
 
     async fn fail_workspace_connection_sync(
@@ -459,7 +388,7 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
 
         // Only transition from an active state, so a terminal sync is not
         // overwritten.
-        let sync = diesel::update(
+        Ok(diesel::update(
             workspace_connection_syncs::table
                 .filter(dsl::id.eq(sync_id))
                 .filter(dsl::status.eq_any([SyncStatus::Pending, SyncStatus::Running])),
@@ -472,10 +401,7 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
         .returning(WorkspaceConnectionSync::as_returning())
         .get_result(self)
         .await
-        .optional()
-        .map_err(Error::from)?;
-
-        Ok(sync)
+        .optional()?)
     }
 
     async fn cancel_workspace_connection_sync(
@@ -487,7 +413,7 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
 
         // Only transition from an active state, so a sync that already completed,
         // failed, or was reaped is not overwritten as cancelled.
-        let sync = diesel::update(
+        Ok(diesel::update(
             workspace_connection_syncs::table
                 .filter(dsl::id.eq(sync_id))
                 .filter(dsl::status.eq_any([SyncStatus::Pending, SyncStatus::Running])),
@@ -499,17 +425,14 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
         .returning(WorkspaceConnectionSync::as_returning())
         .get_result(self)
         .await
-        .optional()
-        .map_err(Error::from)?;
-
-        Ok(sync)
+        .optional()?)
     }
 
     async fn fail_stale_running_syncs(&mut self, cutoff: jiff_diesel::Timestamp) -> Result<usize> {
         use diesel::dsl::now;
         use schema::workspace_connection_syncs::{self, dsl};
 
-        let reaped = diesel::update(
+        Ok(diesel::update(
             workspace_connection_syncs::table
                 .filter(dsl::status.eq(SyncStatus::Running))
                 .filter(dsl::started_at.lt(cutoff)),
@@ -520,10 +443,7 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
             dsl::completed_at.eq(now),
         ))
         .execute(self)
-        .await
-        .map_err(Error::from)?;
-
-        Ok(reaped)
+        .await?)
     }
 }
 

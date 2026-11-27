@@ -102,7 +102,6 @@ impl UpdateWebhookInput {
             headers,
             status,
             consecutive_failures,
-            ..Default::default()
         })
     }
 }

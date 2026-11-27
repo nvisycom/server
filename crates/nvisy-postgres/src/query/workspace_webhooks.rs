@@ -4,26 +4,14 @@ use std::future::Future;
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::Timestamp;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceWebhook, UpdateWorkspaceWebhook, WorkspaceWebhook};
 use crate::types::{
-    AccountRefRow, CursorPage, CursorPagination, WebhookEvent, WebhookStatus, WithAccountRef,
-    keyset,
+    AccountRefRow, CursorPage, CursorPagination, TimeCursor, WebhookEvent, WebhookStatus,
+    WithAccountRef, keyset, total,
 };
-use crate::{Error, PgConnection, Result, schema};
-
-/// Keyset for paginating a workspace's webhooks: newest first by `created_at`,
-/// `id` as the tiebreaker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebhookCursor {
-    /// When the webhook was created.
-    pub created_at: Timestamp,
-    /// Webhook id (tiebreaker).
-    pub id: uuid::Uuid,
-}
+use crate::{PgConnection, Result, schema};
 
 /// Repository for workspace webhook database operations.
 ///
@@ -54,7 +42,7 @@ pub trait WorkspaceWebhookRepository {
     fn cursor_list_workspace_webhooks(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<WebhookCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceWebhook>>>> + Send;
 
     /// Updates a workspace webhook.
@@ -116,32 +104,26 @@ impl WorkspaceWebhookRepository for PgConnection {
     ) -> Result<WorkspaceWebhook> {
         use schema::workspace_webhooks;
 
-        let webhook = diesel::insert_into(workspace_webhooks::table)
+        Ok(diesel::insert_into(workspace_webhooks::table)
             .values(&new_webhook)
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(webhook)
+            .await?)
     }
 
     async fn find_workspace_webhook_by_id(
         &mut self,
         webhook_id: Uuid,
     ) -> Result<Option<WorkspaceWebhook>> {
-        use schema::workspace_webhooks::dsl::{deleted_at, id, workspace_webhooks};
+        use schema::workspace_webhooks::{self, dsl};
 
-        let webhook = workspace_webhooks
-            .filter(id.eq(webhook_id))
-            .filter(deleted_at.is_null())
+        Ok(workspace_webhooks::table
+            .filter(dsl::id.eq(webhook_id))
+            .filter(dsl::deleted_at.is_null())
             .select(WorkspaceWebhook::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(webhook)
+            .optional()?)
     }
 
     async fn find_webhook_in_workspace_with_creator(
@@ -157,81 +139,44 @@ impl WorkspaceWebhookRepository for PgConnection {
             .filter(dsl::id.eq(webhook_id))
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
-            .select((
-                WorkspaceWebhook::as_select(),
-                (
-                    accounts::id,
-                    accounts::username,
-                    accounts::display_name,
-                    accounts::avatar_url,
-                ),
-            ))
+            .select((WorkspaceWebhook::as_select(), AccountRefRow::as_select()))
             .first::<(WorkspaceWebhook, AccountRefRow)>(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
+            .optional()?;
 
-        Ok(row.map(|(item, account)| WithAccountRef { item, account }))
+        Ok(row.map(WithAccountRef::from))
     }
 
     async fn cursor_list_workspace_webhooks(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<WebhookCursor>,
+        pagination: CursorPagination<TimeCursor>,
     ) -> Result<CursorPage<WithAccountRef<WorkspaceWebhook>>> {
         use schema::workspace_webhooks::dsl;
         use schema::{accounts, workspace_webhooks};
 
-        // Get total count only if requested
-        let total = if pagination.include_count {
-            Some(
-                workspace_webhooks::table
-                    .filter(dsl::workspace_id.eq(workspace_id))
-                    .filter(dsl::deleted_at.is_null())
-                    .count()
-                    .get_result(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
+        let scoped = || {
+            workspace_webhooks::table
+                .filter(dsl::workspace_id.eq(workspace_id))
+                .filter(dsl::deleted_at.is_null())
+                .into_boxed()
         };
+        let total = total!(pagination, self, scoped().count());
+        let query = scoped().inner_join(accounts::table);
 
-        let query = workspace_webhooks::table
-            .inner_join(accounts::table)
-            .filter(dsl::workspace_id.eq(workspace_id))
-            .filter(dsl::deleted_at.is_null())
-            .into_boxed();
-
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let after = pagination.after_pair();
         let rows: Vec<(WorkspaceWebhook, AccountRefRow)> =
             keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
-                .select((
-                    WorkspaceWebhook::as_select(),
-                    (
-                        accounts::id,
-                        accounts::username,
-                        accounts::display_name,
-                        accounts::avatar_url,
-                    ),
-                ))
+                .select((WorkspaceWebhook::as_select(), AccountRefRow::as_select()))
                 .limit(pagination.fetch_limit())
                 .load(self)
-                .await
-                .map_err(Error::from)?;
+                .await?;
 
-        let items: Vec<WithAccountRef<WorkspaceWebhook>> = rows
-            .into_iter()
-            .map(|(item, account)| WithAccountRef { item, account })
-            .collect();
+        let items: Vec<WithAccountRef<WorkspaceWebhook>> =
+            rows.into_iter().map(WithAccountRef::from).collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |wc| {
-            WebhookCursor {
-                created_at: wc.item.created_at.into(),
-                id: wc.item.id,
-            }
+            TimeCursor::new(wc.item.created_at, wc.item.id)
         }))
     }
 
@@ -240,73 +185,62 @@ impl WorkspaceWebhookRepository for PgConnection {
         webhook_id: Uuid,
         changes: UpdateWorkspaceWebhook,
     ) -> Result<WorkspaceWebhook> {
-        use schema::workspace_webhooks::dsl::{deleted_at, id, workspace_webhooks};
+        use schema::workspace_webhooks::{self, dsl};
 
         // Scope to a live row: a concurrently tombstoned webhook yields
         // `NotFound` instead of reviving the dead row.
-        let webhook = diesel::update(workspace_webhooks)
-            .filter(id.eq(webhook_id))
-            .filter(deleted_at.is_null())
+        Ok(diesel::update(workspace_webhooks::table)
+            .filter(dsl::id.eq(webhook_id))
+            .filter(dsl::deleted_at.is_null())
             .set(&changes)
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(webhook)
+            .await?)
     }
 
     async fn delete_workspace_webhook(&mut self, webhook_id: Uuid) -> Result<()> {
         use diesel::dsl::now;
-        use schema::workspace_webhooks::dsl::{deleted_at, id, workspace_webhooks};
+        use schema::workspace_webhooks::{self, dsl};
 
         // Scope to a live row so re-deleting keeps the original tombstone.
-        diesel::update(workspace_webhooks)
-            .filter(id.eq(webhook_id))
-            .filter(deleted_at.is_null())
-            .set(deleted_at.eq(now))
+        diesel::update(workspace_webhooks::table)
+            .filter(dsl::id.eq(webhook_id))
+            .filter(dsl::deleted_at.is_null())
+            .set(dsl::deleted_at.eq(now))
             .execute(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
         Ok(())
     }
 
     async fn record_webhook_success(&mut self, webhook_id: Uuid) -> Result<WorkspaceWebhook> {
         use diesel::dsl::now;
-        use schema::workspace_webhooks::dsl::{
-            consecutive_failures, id, last_success_at, workspace_webhooks,
-        };
+        use schema::workspace_webhooks::{self, dsl};
 
-        let webhook = diesel::update(workspace_webhooks)
-            .filter(id.eq(webhook_id))
-            .set((last_success_at.eq(now), consecutive_failures.eq(0)))
+        Ok(diesel::update(workspace_webhooks::table)
+            .filter(dsl::id.eq(webhook_id))
+            .set((
+                dsl::last_success_at.eq(now),
+                dsl::consecutive_failures.eq(0),
+            ))
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(webhook)
+            .await?)
     }
 
     async fn record_webhook_failure(&mut self, webhook_id: Uuid) -> Result<WorkspaceWebhook> {
         use diesel::dsl::now;
-        use schema::workspace_webhooks::dsl::{
-            consecutive_failures, id, last_failure_at, workspace_webhooks,
-        };
+        use schema::workspace_webhooks::{self, dsl};
 
-        let webhook = diesel::update(workspace_webhooks)
-            .filter(id.eq(webhook_id))
+        Ok(diesel::update(workspace_webhooks::table)
+            .filter(dsl::id.eq(webhook_id))
             .set((
-                last_failure_at.eq(now),
-                consecutive_failures.eq(consecutive_failures + 1),
+                dsl::last_failure_at.eq(now),
+                dsl::consecutive_failures.eq(dsl::consecutive_failures + 1),
             ))
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(webhook)
+            .await?)
     }
 
     async fn suspend_failing_webhook(
@@ -314,20 +248,17 @@ impl WorkspaceWebhookRepository for PgConnection {
         webhook_id: Uuid,
         min_failures: i32,
     ) -> Result<Option<WorkspaceWebhook>> {
-        use schema::workspace_webhooks::dsl::{
-            consecutive_failures, id, status, workspace_webhooks,
-        };
+        use schema::workspace_webhooks::{self, dsl};
 
-        diesel::update(workspace_webhooks)
-            .filter(id.eq(webhook_id))
-            .filter(status.eq(WebhookStatus::Enabled))
-            .filter(consecutive_failures.ge(min_failures))
-            .set(status.eq(WebhookStatus::Suspended))
+        Ok(diesel::update(workspace_webhooks::table)
+            .filter(dsl::id.eq(webhook_id))
+            .filter(dsl::status.eq(WebhookStatus::Enabled))
+            .filter(dsl::consecutive_failures.ge(min_failures))
+            .set(dsl::status.eq(WebhookStatus::Suspended))
             .returning(WorkspaceWebhook::as_returning())
             .get_result(self)
             .await
-            .optional()
-            .map_err(Error::from)
+            .optional()?)
     }
 
     async fn find_webhooks_for_event(
@@ -335,26 +266,21 @@ impl WorkspaceWebhookRepository for PgConnection {
         ws_id: Uuid,
         event: WebhookEvent,
     ) -> Result<Vec<WorkspaceWebhook>> {
-        use schema::workspace_webhooks::dsl::{
-            deleted_at, events, status, workspace_id, workspace_webhooks,
-        };
+        use schema::workspace_webhooks::{self, dsl};
 
         // Query webhooks whose events array contains the target event via the
         // PostgreSQL `@>` operator. The events column is
         // Array<Nullable<WebhookEvent>>, so the bound needle matches that shape.
         let needle: Vec<Option<WebhookEvent>> = vec![Some(event)];
 
-        let webhooks = workspace_webhooks
-            .filter(workspace_id.eq(ws_id))
-            .filter(status.eq(WebhookStatus::Enabled))
-            .filter(deleted_at.is_null())
-            .filter(events.contains(needle))
+        Ok(workspace_webhooks::table
+            .filter(dsl::workspace_id.eq(ws_id))
+            .filter(dsl::status.eq(WebhookStatus::Enabled))
+            .filter(dsl::deleted_at.is_null())
+            .filter(dsl::events.contains(needle))
             .select(WorkspaceWebhook::as_select())
             .load(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(webhooks)
+            .await?)
     }
 }
 

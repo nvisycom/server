@@ -8,6 +8,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspace, UpdateWorkspace, Workspace};
+use crate::query::WorkspaceBlobRepository;
 use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for workspace database operations.
@@ -88,29 +89,23 @@ impl WorkspaceRepository for PgConnection {
     async fn create_workspace(&mut self, workspace: NewWorkspace) -> Result<Workspace> {
         use schema::workspaces;
 
-        let workspace = diesel::insert_into(workspaces::table)
+        Ok(diesel::insert_into(workspaces::table)
             .values(&workspace)
             .returning(Workspace::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(workspace)
+            .await?)
     }
 
     async fn find_workspace_by_id(&mut self, workspace_id: Uuid) -> Result<Option<Workspace>> {
         use schema::workspaces::{self, dsl};
 
-        let workspace = workspaces::table
+        Ok(workspaces::table
             .filter(dsl::id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .select(Workspace::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)?;
-
-        Ok(workspace)
+            .optional()?)
     }
 
     async fn update_workspace(
@@ -120,28 +115,24 @@ impl WorkspaceRepository for PgConnection {
     ) -> Result<Workspace> {
         use schema::workspaces::{self, dsl};
 
-        let workspace = diesel::update(workspaces::table)
+        Ok(diesel::update(workspaces::table)
             .filter(dsl::id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .set(&changes)
             .returning(Workspace::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
-
-        Ok(workspace)
+            .await?)
     }
 
     async fn delete_workspace(&mut self, workspace_id: Uuid) -> Result<()> {
-        use schema::workspaces::dsl::{deleted_at, id, workspaces};
+        use schema::workspaces::{self, dsl};
 
-        diesel::update(workspaces)
-            .filter(id.eq(workspace_id))
-            .filter(deleted_at.is_null())
-            .set(deleted_at.eq(now))
+        diesel::update(workspaces::table)
+            .filter(dsl::id.eq(workspace_id))
+            .filter(dsl::deleted_at.is_null())
+            .set(dsl::deleted_at.eq(now))
             .execute(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
         Ok(())
     }
@@ -165,23 +156,19 @@ impl WorkspaceRepository for PgConnection {
             .bind::<BigInt, _>(grace_secs)
             .sql(" * interval '1 second')");
 
-        workspaces::table
+        Ok(workspaces::table
             .filter(dsl::deleted_at.is_not_null())
             .filter(dsl::deleted_at.le(cutoff))
             .order(dsl::deleted_at.asc())
             .limit(limit)
             .select(dsl::id)
             .load(self)
-            .await
-            .map_err(Error::from)
+            .await?)
     }
 
     async fn release_workspace_blobs(&mut self, workspace_id: Uuid) -> Result<usize> {
         use diesel_async::AsyncConnection;
-        use schema::workspace_blobs::dsl as blobs;
-        use schema::{
-            workspace_blobs, workspace_detections, workspace_documents, workspace_redactions,
-        };
+        use schema::{workspace_detections, workspace_documents, workspace_redactions};
 
         // Soft-delete the workspace's blob-holding entities and drop the reference
         // each still holds, so the reaper reclaims the freed bytes. Runs in one
@@ -203,8 +190,7 @@ impl WorkspaceRepository for PgConnection {
             .set(workspace_documents::deleted_at.eq(now))
             .returning(workspace_documents::blob_id)
             .get_results(conn)
-            .await
-            .map_err(Error::from)?;
+            .await?;
             refs.extend(doc_blobs.into_iter().flatten());
 
             // A detection holds two references (its intermediate and its base
@@ -220,8 +206,7 @@ impl WorkspaceRepository for PgConnection {
                 workspace_detections::audit_blob_id,
             ))
             .get_results(conn)
-            .await
-            .map_err(Error::from)?;
+            .await?;
             for (intermediate, audit) in detection_blobs {
                 refs.extend(intermediate);
                 refs.extend(audit);
@@ -243,20 +228,13 @@ impl WorkspaceRepository for PgConnection {
             .set(workspace_redactions::deleted_at.eq(now))
             .returning(workspace_redactions::review_audit_blob_id)
             .get_results(conn)
-            .await
-            .map_err(Error::from)?;
+            .await?;
             refs.extend(review_blobs.into_iter().flatten());
 
+            // One decrement per reference: a blob shared by several referrers
+            // appears once for each.
             for blob_id in &refs {
-                diesel::update(
-                    workspace_blobs::table
-                        .filter(blobs::id.eq(blob_id))
-                        .filter(blobs::ref_count.gt(0)),
-                )
-                .set(blobs::ref_count.eq(blobs::ref_count - 1))
-                .execute(conn)
-                .await
-                .map_err(Error::from)?;
+                conn.decrement_ref(*blob_id).await?;
             }
 
             Ok(refs.len())
@@ -274,8 +252,7 @@ impl WorkspaceRepository for PgConnection {
             .filter(dsl::reclaimed_at.is_null())
             .count()
             .get_result(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
         Ok(remaining == 0)
     }
@@ -292,8 +269,7 @@ impl WorkspaceRepository for PgConnection {
                 .filter(dsl::deleted_at.is_not_null()),
         )
         .execute(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(())
     }

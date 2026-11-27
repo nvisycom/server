@@ -8,9 +8,9 @@
 use elide_pipeline::governance::policy::Policy;
 use nvisy_postgres::model::{NewWorkspacePolicy, WorkspacePolicy, WorkspacePolicyVersion};
 use nvisy_postgres::query::{
-    PolicyCursor, PolicyWithVersion, WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
+    PolicyWithVersion, WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
 };
-use nvisy_postgres::types::{CursorPage, CursorPagination, PolicyKind, WithAccountRef};
+use nvisy_postgres::types::{CursorPage, CursorPagination, PolicyKind, TimeCursor, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, model};
 use uuid::Uuid;
 
@@ -102,7 +102,7 @@ impl WorkspacePolicyService {
     pub async fn list(
         &self,
         workspace_id: Uuid,
-        pagination: CursorPagination<PolicyCursor>,
+        pagination: CursorPagination<TimeCursor>,
         kind: Option<PolicyKind>,
     ) -> Result<CursorPage<WithAccountRef<WorkspacePolicy>>> {
         let mut conn = self.postgres.get_connection().await?;
@@ -329,7 +329,7 @@ async fn find_policy(
     workspace_id: Uuid,
     policy_id: Uuid,
 ) -> Result<WithAccountRef<WorkspacePolicy>> {
-    conn.find_policy_in_workspace_by_id(workspace_id, policy_id)
+    conn.find_policy_in_workspace_with_creator(workspace_id, policy_id)
         .await?
         .ok_or_else(|| Error::not_found("policy"))
 }

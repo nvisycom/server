@@ -11,7 +11,7 @@ use object_store::aws::AmazonS3Builder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{Client, redact};
+use super::{Client, REDACTED, redact};
 use crate::client::ObjectStoreClient;
 use crate::error::Error;
 
@@ -33,12 +33,11 @@ pub struct S3Credentials {
     /// Required for non-AWS S3-compatible services.
     #[serde(default)]
     pub endpoint: Option<String>,
-    /// Access key ID for static credentials.
-    #[serde(default)]
-    pub access_key_id: Option<String>,
-    /// Secret access key for static credentials.
-    #[serde(default)]
-    pub secret_access_key: Option<String>,
+    /// Access key ID. Required: without static credentials the builder would
+    /// fall back to the server's own ambient identity (instance metadata).
+    pub access_key_id: String,
+    /// Secret access key paired with `access_key_id`.
+    pub secret_access_key: String,
     /// Session token for temporary credentials.
     #[serde(default)]
     pub session_token: Option<String>,
@@ -54,11 +53,8 @@ impl fmt::Debug for S3Credentials {
             .field("bucket", &self.bucket)
             .field("region", &self.region)
             .field("endpoint", &self.endpoint)
-            .field("access_key_id", &redact(self.access_key_id.as_deref()))
-            .field(
-                "secret_access_key",
-                &redact(self.secret_access_key.as_deref()),
-            )
+            .field("access_key_id", &REDACTED)
+            .field("secret_access_key", &REDACTED)
             .field("session_token", &redact(self.session_token.as_deref()))
             .finish()
     }
@@ -76,7 +72,9 @@ impl Client for S3Provider {
     async fn connect(creds: &Self::Credentials, policy: EndpointPolicy) -> Result<Self, Error> {
         let mut builder = AmazonS3Builder::new()
             .with_bucket_name(&creds.bucket)
-            .with_region(&creds.region);
+            .with_region(&creds.region)
+            .with_access_key_id(&creds.access_key_id)
+            .with_secret_access_key(&creds.secret_access_key);
 
         if let Some(endpoint) = &creds.endpoint {
             // Validate the custom endpoint and enable plaintext HTTP only for a
@@ -86,14 +84,6 @@ impl Client for S3Provider {
             if allow_http {
                 builder = builder.with_allow_http(true);
             }
-        }
-
-        if let Some(access_key) = &creds.access_key_id {
-            builder = builder.with_access_key_id(access_key);
-        }
-
-        if let Some(secret_key) = &creds.secret_access_key {
-            builder = builder.with_secret_access_key(secret_key);
         }
 
         if let Some(token) = &creds.session_token {

@@ -94,12 +94,11 @@ impl WorkspaceReviewCommentRepository for PgConnection {
     ) -> Result<WorkspaceReviewComment> {
         use schema::workspace_review_comments;
 
-        diesel::insert_into(workspace_review_comments::table)
+        Ok(diesel::insert_into(workspace_review_comments::table)
             .values(&new_comment)
             .returning(WorkspaceReviewComment::as_returning())
             .get_result(self)
-            .await
-            .map_err(Error::from)
+            .await?)
     }
 
     async fn create_reply(
@@ -161,7 +160,7 @@ impl WorkspaceReviewCommentRepository for PgConnection {
             .filter(workspace_reviews::workspace_id.eq(workspace_id))
             .select(workspace_reviews::id);
 
-        workspace_review_comments::table
+        Ok(workspace_review_comments::table
             .filter(dsl::id.eq(comment_id))
             .filter(dsl::review_id.eq_any(in_workspace))
             .filter(dsl::deleted_at.is_null())
@@ -169,8 +168,7 @@ impl WorkspaceReviewCommentRepository for PgConnection {
             .for_update()
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)
+            .optional()?)
     }
 
     async fn list_review_comments(
@@ -186,23 +184,14 @@ impl WorkspaceReviewCommentRepository for PgConnection {
             .filter(dsl::deleted_at.is_null())
             .select((
                 WorkspaceReviewComment::as_select(),
-                (
-                    accounts::id,
-                    accounts::username,
-                    accounts::display_name,
-                    accounts::avatar_url,
-                ),
+                AccountRefRow::as_select(),
             ))
             // Oldest first: a discussion reads top to bottom.
             .order((dsl::created_at.asc(), dsl::id.asc()))
             .load(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|(item, account)| WithAccountRef { item, account })
-            .collect())
+        Ok(rows.into_iter().map(WithAccountRef::from).collect())
     }
 
     async fn list_review_comments_after(
@@ -245,23 +234,14 @@ impl WorkspaceReviewCommentRepository for PgConnection {
         let rows: Vec<(WorkspaceReviewComment, AccountRefRow)> = query
             .select((
                 WorkspaceReviewComment::as_select(),
-                (
-                    accounts::id,
-                    accounts::username,
-                    accounts::display_name,
-                    accounts::avatar_url,
-                ),
+                AccountRefRow::as_select(),
             ))
             .order((dsl::created_at.asc(), dsl::id.asc()))
             .limit(limit)
             .load(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|(item, account)| WithAccountRef { item, account })
-            .collect())
+        Ok(rows.into_iter().map(WithAccountRef::from).collect())
     }
 
     async fn update_comment_body(
@@ -284,7 +264,7 @@ impl WorkspaceReviewCommentRepository for PgConnection {
                 .map_err(Error::from);
         }
 
-        diesel::update(
+        Ok(diesel::update(
             workspace_review_comments::table
                 .filter(dsl::id.eq(comment_id))
                 .filter(dsl::deleted_at.is_null()),
@@ -292,8 +272,7 @@ impl WorkspaceReviewCommentRepository for PgConnection {
         .set(&updates)
         .returning(WorkspaceReviewComment::as_returning())
         .get_result(self)
-        .await
-        .map_err(Error::from)
+        .await?)
     }
 
     async fn delete_comment(&mut self, comment_id: Uuid) -> Result<()> {
@@ -311,8 +290,7 @@ impl WorkspaceReviewCommentRepository for PgConnection {
         )
         .set(dsl::deleted_at.eq(now))
         .execute(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(())
     }

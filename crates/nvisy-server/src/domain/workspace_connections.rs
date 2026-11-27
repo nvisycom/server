@@ -15,10 +15,10 @@ use nvisy_postgres::model::{
     NewWorkspaceConnection, NewWorkspaceConnectionSchedule, WorkspaceConnectionSchedule,
 };
 use nvisy_postgres::query::{
-    ConnectionCursor, WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
+    WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
     WorkspaceConnectionSyncRepository,
 };
-use nvisy_postgres::types::{ConnectionId, CursorPage, CursorPagination};
+use nvisy_postgres::types::{ConnectionId, CursorPage, CursorPagination, TimeCursor};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, model};
 use uuid::Uuid;
 
@@ -155,7 +155,7 @@ impl WorkspaceConnectionService {
     pub async fn list(
         &self,
         workspace_id: Uuid,
-        pagination: CursorPagination<ConnectionCursor>,
+        pagination: CursorPagination<TimeCursor>,
         providers: &[String],
     ) -> Result<CursorPage<FoundConnection>> {
         let mut conn = self.postgres.get_connection().await?;

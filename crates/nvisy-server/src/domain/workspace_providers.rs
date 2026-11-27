@@ -8,8 +8,8 @@
 
 use nvisy_core::net::EndpointPolicy;
 use nvisy_postgres::model::{NewWorkspaceProvider, WorkspaceProvider};
-use nvisy_postgres::query::{ProviderCursor, WorkspaceProviderRepository};
-use nvisy_postgres::types::{CursorPage, CursorPagination, ProviderId, WithAccountRef};
+use nvisy_postgres::query::WorkspaceProviderRepository;
+use nvisy_postgres::types::{CursorPage, CursorPagination, ProviderId, TimeCursor, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, model};
 use uuid::Uuid;
 
@@ -121,7 +121,7 @@ impl WorkspaceProviderService {
     pub async fn list(
         &self,
         workspace_id: Uuid,
-        pagination: CursorPagination<ProviderCursor>,
+        pagination: CursorPagination<TimeCursor>,
         providers: &[String],
     ) -> Result<CursorPage<WithAccountRef<WorkspaceProvider>>> {
         let mut conn = self.postgres.get_connection().await?;

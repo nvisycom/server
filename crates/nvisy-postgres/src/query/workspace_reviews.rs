@@ -17,8 +17,6 @@ use std::future::Future;
 use diesel::dsl::now;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use jiff::Timestamp;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::workspace_review_events::record_event;
@@ -28,28 +26,9 @@ use crate::model::{
 };
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, DocumentReviewFilter, ReviewEventKind,
-    ReviewStatus, keyset,
+    ReviewStatus, TimeCursor, WithAccountRef, keyset, total,
 };
-use crate::{AsyncConnection, Error, PgConnection, Result, schema};
-
-/// Keyset for paginating reviews: newest first by `created_at`, `id` tiebreaker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DocumentReviewCursor {
-    /// When the review was created.
-    pub created_at: Timestamp,
-    /// Review id (tiebreaker).
-    pub id: uuid::Uuid,
-}
-
-/// Keyset for paginating a review's activity events by `created_at`, `id`
-/// tiebreaker (direction is the caller's).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReviewEventCursor {
-    /// When the event happened.
-    pub created_at: Timestamp,
-    /// Event id (tiebreaker).
-    pub id: uuid::Uuid,
-}
+use crate::{AsyncConnection, PgConnection, Result, schema};
 
 /// A review paired with its assignees' account references (empty when unassigned).
 #[derive(Debug, Clone)]
@@ -104,7 +83,7 @@ pub trait WorkspaceReviewRepository {
     fn cursor_list_reviews(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<DocumentReviewCursor>,
+        pagination: CursorPagination<TimeCursor>,
         filter: &DocumentReviewFilter,
     ) -> impl Future<Output = Result<CursorPage<WithReviewers<WorkspaceReview>>>> + Send;
 
@@ -222,8 +201,10 @@ pub trait WorkspaceReviewRepository {
     fn cursor_list_review_events(
         &mut self,
         review_id: Uuid,
-        pagination: CursorPagination<ReviewEventCursor>,
-    ) -> impl Future<Output = Result<CursorPage<WithActor<WorkspaceReviewEvent>>>> + Send;
+        pagination: CursorPagination<TimeCursor>,
+    ) -> impl Future<
+        Output = Result<CursorPage<WithAccountRef<WorkspaceReviewEvent, Option<AccountRefRow>>>>,
+    > + Send;
 }
 
 /// The result of an assignee add/remove: the review and whether the operation
@@ -265,16 +246,6 @@ pub struct ApprovalOutcome {
     pub rebind_rejected: bool,
 }
 
-/// A review event paired with its actor's account reference (absent when the
-/// account was removed).
-#[derive(Debug, Clone)]
-pub struct WithActor<T> {
-    /// The event.
-    pub item: T,
-    /// The actor's account reference, or `None` when the account was removed.
-    pub actor: Option<AccountRefRow>,
-}
-
 impl WorkspaceReviewRepository for PgConnection {
     async fn create_review(&mut self, new_review: NewWorkspaceReview) -> Result<WorkspaceReview> {
         self.transaction(async |conn| {
@@ -282,8 +253,7 @@ impl WorkspaceReviewRepository for PgConnection {
                 .values(&new_review)
                 .returning(WorkspaceReview::as_returning())
                 .get_result::<WorkspaceReview>(conn)
-                .await
-                .map_err(Error::from)?;
+                .await?;
 
             // Record the review's opening as the first timeline event, so the stream
             // begins with an explicit `review.opened` entry. When the review opens
@@ -313,15 +283,14 @@ impl WorkspaceReviewRepository for PgConnection {
     ) -> Result<Option<WorkspaceReview>> {
         use schema::workspace_reviews::{self, dsl};
 
-        workspace_reviews::table
+        Ok(workspace_reviews::table
             .filter(dsl::id.eq(review_id))
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
             .select(WorkspaceReview::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)
+            .optional()?)
     }
 
     async fn lock_review_in_workspace(
@@ -331,7 +300,7 @@ impl WorkspaceReviewRepository for PgConnection {
     ) -> Result<Option<WorkspaceReview>> {
         use schema::workspace_reviews::{self, dsl};
 
-        workspace_reviews::table
+        Ok(workspace_reviews::table
             .filter(dsl::id.eq(review_id))
             .filter(dsl::workspace_id.eq(workspace_id))
             .filter(dsl::deleted_at.is_null())
@@ -339,8 +308,7 @@ impl WorkspaceReviewRepository for PgConnection {
             .for_update()
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)
+            .optional()?)
     }
 
     async fn list_document_reviews(
@@ -357,8 +325,7 @@ impl WorkspaceReviewRepository for PgConnection {
             .order((dsl::created_at.desc(), dsl::id.desc()))
             .select(WorkspaceReview::as_select())
             .load(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
         attach_assignees(self, reviews).await
     }
@@ -366,7 +333,7 @@ impl WorkspaceReviewRepository for PgConnection {
     async fn cursor_list_reviews(
         &mut self,
         workspace_id: Uuid,
-        pagination: CursorPagination<DocumentReviewCursor>,
+        pagination: CursorPagination<TimeCursor>,
         filter: &DocumentReviewFilter,
     ) -> Result<CursorPage<WithReviewers<WorkspaceReview>>> {
         use schema::workspace_reviews::{self, dsl};
@@ -398,21 +365,9 @@ impl WorkspaceReviewRepository for PgConnection {
             query
         };
 
-        let total = if pagination.include_count {
-            Some(
-                scoped()
-                    .count()
-                    .get_result::<i64>(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
+        let total = total!(pagination, self, scoped().count());
 
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let after = pagination.after_pair();
         let reviews: Vec<WorkspaceReview> = keyset!(
             scoped(),
             dsl::created_at,
@@ -423,16 +378,12 @@ impl WorkspaceReviewRepository for PgConnection {
         .select(WorkspaceReview::as_select())
         .limit(pagination.fetch_limit())
         .load(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         let items = attach_assignees(self, reviews).await?;
 
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
-            DocumentReviewCursor {
-                created_at: row.item.created_at.into(),
-                id: row.item.id,
-            }
+            TimeCursor::new(row.item.created_at, row.item.id)
         }))
     }
 
@@ -456,8 +407,7 @@ impl WorkspaceReviewRepository for PgConnection {
                     .set(dsl::display_name.eq(display_name.clone()))
                     .returning(WorkspaceReview::as_returning())
                     .get_result(conn)
-                    .await
-                    .map_err(Error::from)?
+                    .await?
             };
 
             // The new name is the event's target so the timeline shows what it was
@@ -483,8 +433,7 @@ impl WorkspaceReviewRepository for PgConnection {
             )
             .set(workspace_reviews::deleted_at.eq(now))
             .execute(conn)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
             diesel::update(
                 workspace_review_comments::table
@@ -493,8 +442,7 @@ impl WorkspaceReviewRepository for PgConnection {
             )
             .set(workspace_review_comments::deleted_at.eq(now))
             .execute(conn)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
             Ok(())
         })
@@ -556,8 +504,7 @@ impl WorkspaceReviewRepository for PgConnection {
                 })
                 .on_conflict_do_nothing()
                 .execute(conn)
-                .await
-                .map_err(Error::from)?;
+                .await?;
 
             // Already assigned: idempotent no-op, no event.
             if inserted == 0 {
@@ -607,8 +554,7 @@ impl WorkspaceReviewRepository for PgConnection {
                 .select(wra::approved_at)
                 .first(conn)
                 .await
-                .optional()
-                .map_err(Error::from)?;
+                .optional()?;
 
             let deleted = diesel::delete(
                 wra::table
@@ -616,8 +562,7 @@ impl WorkspaceReviewRepository for PgConnection {
                     .filter(wra::account_id.eq(account_id)),
             )
             .execute(conn)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
             // Not assigned: nothing to do.
             if deleted == 0 {
@@ -684,19 +629,13 @@ impl WorkspaceReviewRepository for PgConnection {
     async fn list_review_assignees(&mut self, review_id: Uuid) -> Result<Vec<AccountRefRow>> {
         use schema::{accounts, workspace_review_assignees as wra, workspace_review_assignees};
 
-        workspace_review_assignees::table
+        Ok(workspace_review_assignees::table
             .inner_join(accounts::table.on(wra::account_id.eq(accounts::id)))
             .filter(wra::review_id.eq(review_id))
             .order(accounts::username.asc())
-            .select((
-                accounts::id,
-                accounts::username,
-                accounts::display_name,
-                accounts::avatar_url,
-            ))
+            .select(AccountRefRow::as_select())
             .load(self)
-            .await
-            .map_err(Error::from)
+            .await?)
     }
 
     async fn submit_review(&mut self, review_id: Uuid, actor: Uuid) -> Result<StatusOutcome> {
@@ -833,8 +772,7 @@ impl WorkspaceReviewRepository for PgConnection {
             )
             .set(wra::approved_at.eq(now))
             .execute(conn)
-            .await
-            .map_err(Error::from)?;
+            .await?;
 
             // Count approved assignees now on the review (including any just stamped).
             let approvals = count_approvals(conn, review_id).await?;
@@ -933,8 +871,8 @@ impl WorkspaceReviewRepository for PgConnection {
     async fn cursor_list_review_events(
         &mut self,
         review_id: Uuid,
-        pagination: CursorPagination<ReviewEventCursor>,
-    ) -> Result<CursorPage<WithActor<WorkspaceReviewEvent>>> {
+        pagination: CursorPagination<TimeCursor>,
+    ) -> Result<CursorPage<WithAccountRef<WorkspaceReviewEvent, Option<AccountRefRow>>>> {
         use schema::workspace_review_events::dsl;
         use schema::{accounts, workspace_review_events};
 
@@ -945,21 +883,9 @@ impl WorkspaceReviewRepository for PgConnection {
                 .into_boxed()
         };
 
-        let total = if pagination.include_count {
-            Some(
-                scoped()
-                    .count()
-                    .get_result::<i64>(self)
-                    .await
-                    .map_err(Error::from)?,
-            )
-        } else {
-            None
-        };
+        let total = total!(pagination, self, scoped().count());
 
-        let after = pagination
-            .after_key()
-            .map(|k| (jiff_diesel::Timestamp::from(k.created_at), k.id));
+        let after = pagination.after_pair();
         let rows: Vec<(WorkspaceReviewEvent, Option<AccountRefRow>)> = keyset!(
             scoped(),
             dsl::created_at,
@@ -969,29 +895,17 @@ impl WorkspaceReviewRepository for PgConnection {
         )
         .select((
             WorkspaceReviewEvent::as_select(),
-            (
-                accounts::id,
-                accounts::username,
-                accounts::display_name,
-                accounts::avatar_url,
-            )
-                .nullable(),
+            Option::<AccountRefRow>::as_select(),
         ))
         .limit(pagination.fetch_limit())
         .load(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
-        let items: Vec<WithActor<WorkspaceReviewEvent>> = rows
-            .into_iter()
-            .map(|(item, actor)| WithActor { item, actor })
-            .collect();
+        let items: Vec<WithAccountRef<WorkspaceReviewEvent, Option<AccountRefRow>>> =
+            rows.into_iter().map(WithAccountRef::from).collect();
 
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
-            ReviewEventCursor {
-                created_at: row.item.created_at.into(),
-                id: row.item.id,
-            }
+            TimeCursor::new(row.item.created_at, row.item.id)
         }))
     }
 }
@@ -1004,14 +918,13 @@ impl WorkspaceReviewRepository for PgConnection {
 async fn lock_review(conn: &mut PgConnection, review_id: Uuid) -> Result<WorkspaceReview> {
     use schema::workspace_reviews::{self, dsl};
 
-    workspace_reviews::table
+    Ok(workspace_reviews::table
         .filter(dsl::id.eq(review_id))
         .filter(dsl::deleted_at.is_null())
         .select(WorkspaceReview::as_select())
         .for_update()
         .first(conn)
-        .await
-        .map_err(Error::from)
+        .await?)
 }
 
 /// Sets a review's status and returns the updated row.
@@ -1040,12 +953,13 @@ async fn apply_update(
 ) -> Result<WorkspaceReview> {
     use schema::workspace_reviews::{self, dsl};
 
-    diesel::update(workspace_reviews::table.filter(dsl::id.eq(review_id)))
-        .set(changes)
-        .returning(WorkspaceReview::as_returning())
-        .get_result(conn)
-        .await
-        .map_err(Error::from)
+    Ok(
+        diesel::update(workspace_reviews::table.filter(dsl::id.eq(review_id)))
+            .set(changes)
+            .returning(WorkspaceReview::as_returning())
+            .get_result(conn)
+            .await?,
+    )
 }
 
 /// Counts the review's assignees that have approved (a stamped `approved_at`).
@@ -1057,8 +971,7 @@ async fn count_approvals(conn: &mut PgConnection, review_id: Uuid) -> Result<u32
         .filter(wra::approved_at.is_not_null())
         .count()
         .get_result(conn)
-        .await
-        .map_err(Error::from)?;
+        .await?;
     Ok(u32::try_from(count).unwrap_or(u32::MAX))
 }
 
@@ -1070,8 +983,7 @@ async fn clear_approvals(conn: &mut PgConnection, review_id: Uuid) -> Result<()>
     diesel::update(wra::table.filter(wra::review_id.eq(review_id)))
         .set(wra::approved_at.eq(None::<jiff_diesel::Timestamp>))
         .execute(conn)
-        .await
-        .map_err(Error::from)?;
+        .await?;
     Ok(())
 }
 
@@ -1091,18 +1003,9 @@ async fn attach_assignees(
         .inner_join(accounts::table.on(wra::account_id.eq(accounts::id)))
         .filter(wra::review_id.eq_any(&review_ids))
         .order(accounts::username.asc())
-        .select((
-            wra::review_id,
-            (
-                accounts::id,
-                accounts::username,
-                accounts::display_name,
-                accounts::avatar_url,
-            ),
-        ))
+        .select((wra::review_id, AccountRefRow::as_select()))
         .load(conn)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
     let mut by_review: HashMap<Uuid, Vec<AccountRefRow>> = HashMap::new();
     for (review_id, account) in rows {
@@ -1177,10 +1080,10 @@ mod tests {
 
         // Opening a review records a `review.opened` event as the timeline's start.
         let kinds: Vec<_> = conn
-            .list_review_events(legal.id)
+            .list_review_events_after(legal.id, None, 100)
             .await?
             .into_iter()
-            .map(|(e, _)| e.kind)
+            .map(|row| row.item.kind)
             .collect();
         assert_eq!(kinds, vec![ReviewEventKind::Opened]);
         Ok(())
@@ -1237,10 +1140,10 @@ mod tests {
         assert_eq!(renamed.display_name, "A title");
 
         let kinds: Vec<_> = conn
-            .list_review_events(review.id)
+            .list_review_events_after(review.id, None, 100)
             .await?
             .into_iter()
-            .map(|(e, _)| e.kind)
+            .map(|row| row.item.kind)
             .collect();
         assert_eq!(
             kinds,
@@ -1251,10 +1154,10 @@ mod tests {
         conn.rename_review(review.id, "A title".to_owned(), seeded.account_id)
             .await?;
         let rename_events = conn
-            .list_review_events(review.id)
+            .list_review_events_after(review.id, None, 100)
             .await?
             .into_iter()
-            .filter(|(e, _)| e.kind == ReviewEventKind::Renamed)
+            .filter(|row| row.item.kind == ReviewEventKind::Renamed)
             .count();
         assert_eq!(rename_events, 1, "an identical rename records no new event");
         Ok(())
@@ -1897,11 +1800,13 @@ mod tests {
                 .iter()
                 .map(|c| (c.item.created_at.into(), TimelineSource::Comment, c.item.id)),
         );
-        merged.extend(
-            events
-                .iter()
-                .map(|(e, _)| (e.created_at.into(), TimelineSource::Event, e.id)),
-        );
+        merged.extend(events.iter().map(|row| {
+            (
+                row.item.created_at.into(),
+                TimelineSource::Event,
+                row.item.id,
+            )
+        }));
         merged.sort();
 
         let next = if i64::try_from(merged.len()).unwrap_or(i64::MAX) > limit {

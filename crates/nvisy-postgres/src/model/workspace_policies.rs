@@ -122,6 +122,4 @@ pub struct UpdateWorkspacePolicy {
     pub content_hash: Option<Option<Vec<u8>>>,
     /// Metadata for filtering/display.
     pub metadata: Option<JsonValue>,
-    /// Soft delete timestamp.
-    pub deleted_at: Option<Option<Timestamp>>,
 }

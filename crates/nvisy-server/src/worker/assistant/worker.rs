@@ -14,7 +14,7 @@ use std::time::Duration;
 use nvisy_assistant::{AssistantClient, AssistantConfig, ChatTurn};
 use nvisy_postgres::model::{NewWorkspaceReviewComment, WorkspaceReview, WorkspaceReviewComment};
 use nvisy_postgres::query::{
-    EventOutboxRepository, WorkspaceProviderRepository, WorkspaceReviewCommentRepository,
+    OutboxRepository, WorkspaceProviderRepository, WorkspaceReviewCommentRepository,
     WorkspaceReviewRepository,
 };
 use nvisy_postgres::types::ProviderType;
@@ -418,7 +418,7 @@ impl AssistantWorker {
                 },
                 &event,
             )?;
-            conn.insert_event_outbox(row).await?;
+            conn.insert_outbox(row).await?;
             Ok::<_, Error>(true)
         })
         .await

@@ -5,8 +5,8 @@
 //! [`find_or_create_blob`](WorkspaceBlobRepository::find_or_create_blob) reuses a
 //! live blob with the same `(workspace_id, content_hash, file_size_bytes,
 //! storage_bucket)` and bumps its `ref_count`, inserting a fresh one only when
-//! none exists. Every reference add/remove goes through [`increment_ref`] /
-//! [`decrement_ref`], and the reaper reclaims a blob's object only once
+//! none exists, so every new reference goes through it; a dropped reference goes
+//! through [`decrement_ref`]. The reaper reclaims a blob's object only once
 //! `ref_count` reaches zero and its retention window has passed.
 //!
 //! Reclamation is two-phase so a deleted object can never be deduplicated onto:
@@ -15,7 +15,6 @@
 //! [`mark_blob_reclaimed`] stamps `reclaimed_at` once the object is confirmed
 //! gone. A blob claimed but not reclaimed is retried by the reconcile sweep.
 //!
-//! [`increment_ref`]: WorkspaceBlobRepository::increment_ref
 //! [`decrement_ref`]: WorkspaceBlobRepository::decrement_ref
 //! [`claim_blob_for_purge`]: WorkspaceBlobRepository::claim_blob_for_purge
 //! [`mark_blob_reclaimed`]: WorkspaceBlobRepository::mark_blob_reclaimed
@@ -54,9 +53,6 @@ pub trait WorkspaceBlobRepository {
         &mut self,
         new_blob: NewBlob,
     ) -> impl Future<Output = Result<Blob>> + Send;
-
-    /// Records one more reference to a blob (`ref_count += 1`).
-    fn increment_ref(&mut self, blob_id: Uuid) -> impl Future<Output = Result<()>> + Send;
 
     /// Drops one reference to a blob (`ref_count -= 1`), never below zero. A blob
     /// that reaches zero becomes reclaimable once its retention has passed.
@@ -121,8 +117,7 @@ impl WorkspaceBlobRepository for PgConnection {
         .returning(Blob::as_returning())
         .get_result(self)
         .await
-        .optional()
-        .map_err(Error::from)?;
+        .optional()?;
 
         if let Some(blob) = existing {
             return Ok(blob);
@@ -149,23 +144,6 @@ impl WorkspaceBlobRepository for PgConnection {
             .map_err(Error::from)
     }
 
-    async fn increment_ref(&mut self, blob_id: Uuid) -> Result<()> {
-        use schema::workspace_blobs::{self, dsl};
-
-        // Never resurrect a purged blob: a reference is only meaningful while the
-        // backing object still exists.
-        diesel::update(
-            workspace_blobs::table
-                .filter(dsl::id.eq(blob_id))
-                .filter(dsl::purged_at.is_null()),
-        )
-        .set(dsl::ref_count.eq(dsl::ref_count + 1))
-        .execute(self)
-        .await
-        .map_err(Error::from)?;
-        Ok(())
-    }
-
     async fn decrement_ref(&mut self, blob_id: Uuid) -> Result<()> {
         use schema::workspace_blobs::{self, dsl};
 
@@ -178,49 +156,45 @@ impl WorkspaceBlobRepository for PgConnection {
         )
         .set(dsl::ref_count.eq(dsl::ref_count - 1))
         .execute(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
         Ok(())
     }
 
     async fn find_blob_by_id(&mut self, blob_id: Uuid) -> Result<Option<Blob>> {
         use schema::workspace_blobs::{self, dsl};
 
-        workspace_blobs::table
+        Ok(workspace_blobs::table
             .filter(dsl::id.eq(blob_id))
             .select(Blob::as_select())
             .first(self)
             .await
-            .optional()
-            .map_err(Error::from)
+            .optional()?)
     }
 
     async fn blobs_due_for_purge(&mut self, limit: i64) -> Result<Vec<ReclaimableBlob>> {
         use schema::workspace_blobs::{self, dsl};
 
-        workspace_blobs::table
+        Ok(workspace_blobs::table
             .filter(dsl::ref_count.eq(0))
             .filter(dsl::purged_at.is_null())
             .order(dsl::created_at.asc())
             .limit(limit)
             .select((dsl::id, dsl::storage_path, dsl::storage_bucket))
             .load(self)
-            .await
-            .map_err(Error::from)
+            .await?)
     }
 
     async fn blobs_pending_reclaim(&mut self, limit: i64) -> Result<Vec<ReclaimableBlob>> {
         use schema::workspace_blobs::{self, dsl};
 
-        workspace_blobs::table
+        Ok(workspace_blobs::table
             .filter(dsl::purged_at.is_not_null())
             .filter(dsl::reclaimed_at.is_null())
             .order(dsl::purged_at.asc())
             .limit(limit)
             .select((dsl::id, dsl::storage_path, dsl::storage_bucket))
             .load(self)
-            .await
-            .map_err(Error::from)
+            .await?)
     }
 
     async fn claim_blob_for_purge(&mut self, blob_id: Uuid) -> Result<Option<ReclaimableBlob>> {
@@ -249,8 +223,7 @@ impl WorkspaceBlobRepository for PgConnection {
         diesel::update(workspace_blobs::table.filter(dsl::id.eq(blob_id)))
             .set(dsl::reclaimed_at.eq(now))
             .execute(self)
-            .await
-            .map_err(Error::from)?;
+            .await?;
         Ok(())
     }
 }
@@ -440,11 +413,6 @@ mod tests {
         conn.claim_blob_for_purge(blob.id)
             .await?
             .expect("claimable");
-
-        // increment_ref must not raise a claimed blob's count back above zero.
-        conn.increment_ref(blob.id).await?;
-        let after = conn.find_blob_by_id(blob.id).await?.expect("blob present");
-        assert_eq!(after.ref_count, 0, "a claimed blob is never re-referenced");
 
         // A claimed blob cannot be claimed a second time.
         assert!(
