@@ -1,8 +1,7 @@
 //! Encryption key management.
 
-use std::fmt;
-
 use hkdf::Hkdf;
+use nvisy_core::Secret;
 #[cfg(test)]
 use rand::Rng;
 use sha2::Sha256;
@@ -20,9 +19,9 @@ const WORKSPACE_KEY_INFO: &[u8] = b"nvisy-workspace-encryption-key-v1";
 ///
 /// This type wraps the raw key bytes and provides safe construction methods.
 /// The key is stored in memory and should be handled carefully to avoid leaks.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct EncryptionKey {
-    bytes: [u8; KEY_SIZE],
+    bytes: Secret<[u8; KEY_SIZE]>,
 }
 
 impl EncryptionKey {
@@ -35,7 +34,9 @@ impl EncryptionKey {
         let bytes: [u8; KEY_SIZE] = bytes
             .try_into()
             .map_err(|_| CryptoError::InvalidKeyLength)?;
-        Ok(Self { bytes })
+        Ok(Self {
+            bytes: Secret::new(bytes),
+        })
     }
 
     /// Generates a new random encryption key using a cryptographically secure RNG.
@@ -44,14 +45,16 @@ impl EncryptionKey {
     pub fn generate() -> Self {
         let mut bytes = [0u8; KEY_SIZE];
         rand::rng().fill_bytes(&mut bytes);
-        Self { bytes }
+        Self {
+            bytes: Secret::new(bytes),
+        }
     }
 
     /// Returns the raw key bytes.
     #[inline]
     #[must_use]
     pub fn as_bytes(&self) -> &[u8; KEY_SIZE] {
-        &self.bytes
+        self.bytes.expose()
     }
 
     /// Derives a workspace-specific encryption key using HKDF-SHA256.
@@ -60,21 +63,15 @@ impl EncryptionKey {
     /// the master key with the workspace ID.
     #[must_use]
     pub fn derive_workspace_key(&self, workspace_id: Uuid) -> Self {
-        let hkdf = Hkdf::<Sha256>::new(Some(workspace_id.as_bytes()), &self.bytes);
+        let hkdf = Hkdf::<Sha256>::new(Some(workspace_id.as_bytes()), self.bytes.expose());
 
         let mut derived_key = [0u8; KEY_SIZE];
         hkdf.expand(WORKSPACE_KEY_INFO, &mut derived_key)
             .expect("HKDF expand should not fail for 32-byte output");
 
-        Self { bytes: derived_key }
-    }
-}
-
-impl fmt::Debug for EncryptionKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("EncryptionKey")
-            .field("bytes", &"[REDACTED]")
-            .finish()
+        Self {
+            bytes: Secret::new(derived_key),
+        }
     }
 }
 
@@ -96,12 +93,14 @@ impl TryFrom<Vec<u8>> for EncryptionKey {
 
 impl AsRef<[u8]> for EncryptionKey {
     fn as_ref(&self) -> &[u8] {
-        &self.bytes
+        self.bytes.expose()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use nvisy_core::REDACTED;
+
     use super::*;
 
     #[test]
@@ -130,7 +129,7 @@ mod tests {
     fn test_debug_redacts_key() {
         let key = EncryptionKey::generate();
         let debug = format!("{key:?}");
-        assert!(debug.contains("REDACTED"));
+        assert!(debug.contains(REDACTED));
         assert!(!debug.contains(&format!("{:?}", key.as_bytes())));
     }
 

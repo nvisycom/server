@@ -45,8 +45,8 @@ impl BlobStore {
         match (&config.access_key_id, &config.secret_access_key) {
             (Some(access_key_id), Some(secret_access_key)) => {
                 loader = loader.credentials_provider(Credentials::new(
-                    access_key_id,
-                    secret_access_key,
+                    access_key_id.expose(),
+                    secret_access_key.expose(),
                     None,
                     None,
                     STATIC_PROVIDER,

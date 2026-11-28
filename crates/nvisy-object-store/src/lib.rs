@@ -3,7 +3,6 @@
 #![doc = include_str!("../README.md")]
 
 pub mod client;
-mod error;
 pub mod provider;
 
-pub use error::{Error, ErrorKind};
+pub use nvisy_core::{Error, ErrorKind};

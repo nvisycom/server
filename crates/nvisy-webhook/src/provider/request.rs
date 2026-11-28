@@ -1,10 +1,10 @@
 //! Webhook delivery request and payload types.
 
 use std::collections::HashMap;
-use std::fmt;
 use std::time::Duration;
 
 use jiff::Timestamp;
+use nvisy_core::Secret;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use uuid::Uuid;
@@ -17,7 +17,7 @@ use super::WebhookContext;
 /// webhook's current configuration. It is never serialized onto NATS (the queued
 /// job is a slim identifier), so the signing secret lives here in plaintext
 /// without ever crossing — or resting in — the message stream.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct WebhookRequest {
     /// Unique identifier for this request.
     pub request_id: Uuid,
@@ -34,22 +34,7 @@ pub struct WebhookRequest {
     /// Optional request timeout (uses client default if not set).
     pub timeout: Option<Duration>,
     /// HMAC-SHA256 signing secret for request authentication.
-    pub secret: Option<String>,
-}
-
-impl fmt::Debug for WebhookRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WebhookRequest")
-            .field("request_id", &self.request_id)
-            .field("url", &self.url)
-            .field("event", &self.event)
-            .field("message", &self.message)
-            .field("context", &self.context)
-            .field("headers", &self.headers)
-            .field("timeout", &self.timeout)
-            .field("secret", &self.secret.as_ref().map(|_| "[REDACTED]"))
-            .finish()
-    }
+    pub secret: Option<Secret<String>>,
 }
 
 impl WebhookRequest {
@@ -107,7 +92,7 @@ impl WebhookRequest {
     /// Sets the signing secret for HMAC-SHA256 authentication.
     #[must_use]
     pub fn with_secret(mut self, secret: impl Into<String>) -> Self {
-        self.secret = Some(secret.into());
+        self.secret = Some(Secret::new(secret.into()));
         self
     }
 

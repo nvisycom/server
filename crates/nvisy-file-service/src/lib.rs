@@ -3,9 +3,8 @@
 #![doc = include_str!("../README.md")]
 
 pub mod client;
-mod error;
 pub mod oauth;
 pub mod provider;
 
 pub use client::{ConnectedFileService, FileService, FreshToken, OAuthApps, PickerAccessToken};
-pub use error::{Error, ErrorKind, Result};
+pub use nvisy_core::{Error, ErrorKind, Result};

@@ -5,12 +5,12 @@
 //! drops the bearer header on the cross-host hop, as the target requires). The
 //! `common` tenant supports both personal and work/school accounts.
 
+use nvisy_core::{ByteStream, Error, ErrorKind, FileUpload, Result, Secret};
 use reqwest::header::CONTENT_LENGTH;
 use serde::Deserialize;
 
 use super::{FileServiceConfig, ProviderRequest, encode_path_segment, response_stream};
-use crate::client::{ByteStream, FileService, FileServiceClient, FileUpload, PickerAccessToken};
-use crate::error::{Error, ErrorKind, Result};
+use crate::client::{FileService, FileServiceClient, PickerAccessToken};
 use crate::oauth::OAuthProvider;
 
 /// Provider identifier stored in the connection's `provider` column.
@@ -60,12 +60,12 @@ pub fn oauth_provider() -> OAuthProvider {
 ///
 /// # Errors
 ///
-/// Returns [`ErrorKind::BadRequest`] for a personal/consumer account (no
+/// Returns [`ErrorKind::Invalid`] for a personal/consumer account (no
 /// `SharePoint` host) — the modern picker is only supported for `OneDrive` for
 /// Business — or an auth error if the token cannot be minted.
 ///
 /// [`FileServiceProvider::mint_picker_token`]: super::FileServiceProvider::mint_picker_token
-/// [`ErrorKind::BadRequest`]: crate::error::ErrorKind::BadRequest
+/// [`ErrorKind::Invalid`]: nvisy_core::ErrorKind::Invalid
 pub(super) async fn mint_picker_token(
     service: &FileService,
     config: &FileServiceConfig,
@@ -76,11 +76,11 @@ pub(super) async fn mint_picker_token(
     let fresh = service.ensure_fresh(config).await?;
     let effective = fresh.refreshed.as_ref().unwrap_or(config);
 
-    let host = resolve_sharepoint_host(service.http(), &fresh.access_token)
+    let host = resolve_sharepoint_host(service.http(), fresh.access_token.expose())
         .await?
         .ok_or_else(|| {
             Error::new(
-                ErrorKind::BadRequest,
+                ErrorKind::Invalid,
                 "the OneDrive file picker is available only for work or school \
                  (OneDrive for Business) accounts, not personal accounts",
             )
@@ -95,7 +95,7 @@ pub(super) async fn mint_picker_token(
         Some(requested) if same_sharepoint_tenant(&host, requested) => requested,
         Some(_) => {
             return Err(Error::new(
-                ErrorKind::BadRequest,
+                ErrorKind::Invalid,
                 "the requested picker resource is not in this account's SharePoint tenant",
             ));
         }
@@ -196,7 +196,7 @@ fn same_sharepoint_tenant(host: &str, resource: &str) -> bool {
 /// A connected `OneDrive` client holding a valid access token.
 pub struct OneDriveClient {
     http: reqwest::Client,
-    access_token: String,
+    access_token: Secret<String>,
     /// The drive item id of the folder new exports are created in; `None` is the
     /// drive root.
     root_folder_id: Option<String>,
@@ -206,7 +206,7 @@ impl OneDriveClient {
     /// Creates a client from an already-valid access token.
     pub fn new(
         http: reqwest::Client,
-        access_token: String,
+        access_token: Secret<String>,
         root_folder_id: Option<String>,
     ) -> Self {
         Self {
@@ -222,7 +222,7 @@ impl FileServiceClient for OneDriveClient {
     async fn verify(&self) -> Result<()> {
         self.http
             .get(format!("{API_BASE}/me/drive"))
-            .bearer_auth(&self.access_token)
+            .bearer_auth(self.access_token.expose())
             .send_checked(PROVIDER_ID)
             .await?;
         Ok(())
@@ -237,7 +237,7 @@ impl FileServiceClient for OneDriveClient {
         let response = self
             .http
             .get(format!("{API_BASE}/me/drive/items/{id}/content"))
-            .bearer_auth(&self.access_token)
+            .bearer_auth(self.access_token.expose())
             .send_checked(PROVIDER_ID)
             .await?;
         Ok(response_stream(response))
@@ -245,7 +245,7 @@ impl FileServiceClient for OneDriveClient {
 
     async fn put_stream(&self, upload: FileUpload<'_>) -> Result<()> {
         let FileUpload {
-            name,
+            key: name,
             content_type,
             content_length,
             body,
@@ -264,7 +264,7 @@ impl FileServiceClient for OneDriveClient {
         };
         self.http
             .put(url)
-            .bearer_auth(&self.access_token)
+            .bearer_auth(self.access_token.expose())
             .header("Content-Type", content_type)
             .header(CONTENT_LENGTH, content_length)
             .body(reqwest::Body::wrap_stream(body))

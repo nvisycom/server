@@ -11,13 +11,12 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt};
+use nvisy_core::{ByteStream, Error, ErrorKind};
 use object_store::path::Path;
 use object_store::{
     Attribute, Attributes, ObjectMeta, ObjectStore, ObjectStoreExt, PutMode, PutMultipartOptions,
     PutOptions, PutPayload, WriteMultipart,
 };
-
-use crate::error::{Error, ErrorKind};
 
 mod get_output;
 mod put_output;
@@ -40,7 +39,23 @@ const MULTIPART_PART_SIZE: usize = 5 * 1024 * 1024;
 /// Parses a caller-supplied key into an object-store [`Path`], surfacing a
 /// malformed key as an error rather than silently normalizing it.
 fn parse_key(key: &str) -> Result<Path, Error> {
-    Path::parse(key).map_err(|e| Error::new(ErrorKind::Runtime, e, "object-store"))
+    Path::parse(key)
+        .map_err(|e| Error::invalid(format!("invalid object key {key:?}")).with_source(e))
+}
+
+/// Classifies an [`object_store::Error`] into the shared error kinds.
+fn store_error(err: object_store::Error) -> Error {
+    use object_store::Error as O;
+    let kind = match &err {
+        O::NotFound { .. } => ErrorKind::NotFound,
+        O::AlreadyExists { .. } => ErrorKind::AlreadyExists,
+        O::Precondition { .. } | O::NotModified { .. } => ErrorKind::Precondition,
+        O::PermissionDenied { .. } => ErrorKind::PermissionDenied,
+        O::Unauthenticated { .. } => ErrorKind::Unauthenticated,
+        O::NotSupported { .. } | O::NotImplemented { .. } => ErrorKind::NotSupported,
+        _ => ErrorKind::Runtime,
+    };
+    Error::new(kind, err.to_string()).with_source(err)
 }
 
 /// Cloneable handle to any [`ObjectStore`] backend (S3, Azure, GCS, ...).
@@ -74,7 +89,7 @@ impl ObjectStoreClient {
             .list_with_delimiter(None)
             .await
             .map(|_| ())
-            .map_err(Error::from)
+            .map_err(store_error)
     }
 
     /// List object keys under `prefix`.
@@ -98,7 +113,7 @@ impl ObjectStoreClient {
             .list(prefix.as_ref())
             .try_collect()
             .await
-            .map_err(Error::from)
+            .map_err(store_error)
     }
 
     /// Lazily stream object metadata under `prefix`.
@@ -109,7 +124,7 @@ impl ObjectStoreClient {
         } else {
             Some(Path::from(prefix))
         };
-        Box::pin(self.0.list(prefix.as_ref()).map_err(Error::from))
+        Box::pin(self.0.list(prefix.as_ref()).map_err(store_error))
     }
 
     /// Retrieve the raw bytes, content-type, and metadata stored at `key`.
@@ -122,13 +137,13 @@ impl ObjectStoreClient {
     #[tracing::instrument(name = "object.get", skip(self), fields(key = %key))]
     pub async fn get(&self, key: &str) -> Result<GetOutput, Error> {
         let path = parse_key(key)?;
-        let result = self.0.get(&path).await.map_err(Error::from)?;
+        let result = self.0.get(&path).await.map_err(store_error)?;
         let meta = result.meta.clone();
         let content_type = result
             .attributes
             .get(&Attribute::ContentType)
             .map(|v| v.to_string());
-        let data = result.bytes().await.map_err(Error::from)?;
+        let data = result.bytes().await.map_err(store_error)?;
         Ok(GetOutput {
             data,
             content_type,
@@ -148,13 +163,10 @@ impl ObjectStoreClient {
     /// - A storage error (including `NotFound`) if the object cannot be opened.
     ///   Errors reading individual chunks are yielded by the returned stream.
     #[tracing::instrument(name = "object.get_stream", skip(self), fields(key = %key))]
-    pub async fn get_stream(
-        &self,
-        key: &str,
-    ) -> Result<BoxStream<'static, Result<Bytes, Error>>, Error> {
+    pub async fn get_stream(&self, key: &str) -> Result<ByteStream, Error> {
         let path = parse_key(key)?;
-        let result = self.0.get(&path).await.map_err(Error::from)?;
-        Ok(Box::pin(result.into_stream().map_err(Error::from)))
+        let result = self.0.get(&path).await.map_err(store_error)?;
+        Ok(Box::pin(result.into_stream().map_err(store_error)))
     }
 
     /// Upload `data` to `key`, optionally setting the content-type.
@@ -201,7 +213,7 @@ impl ObjectStoreClient {
             .0
             .put_opts(&path, payload, opts)
             .await
-            .map_err(Error::from)?;
+            .map_err(store_error)?;
         Ok(result.into())
     }
 
@@ -214,7 +226,7 @@ impl ObjectStoreClient {
     #[tracing::instrument(name = "object.head", skip(self), fields(key = %key))]
     pub async fn head(&self, key: &str) -> Result<ObjectMeta, Error> {
         let path = parse_key(key)?;
-        self.0.head(&path).await.map_err(Error::from)
+        self.0.head(&path).await.map_err(store_error)
     }
 
     /// Delete the object at `key`.
@@ -226,7 +238,7 @@ impl ObjectStoreClient {
     #[tracing::instrument(name = "object.delete", skip(self), fields(key = %key))]
     pub async fn delete(&self, key: &str) -> Result<(), Error> {
         let path = parse_key(key)?;
-        self.0.delete(&path).await.map_err(Error::from)
+        self.0.delete(&path).await.map_err(store_error)
     }
 
     /// Copy an object from `src` to `dst` within the same store.
@@ -241,7 +253,7 @@ impl ObjectStoreClient {
     pub async fn copy(&self, src: &str, dst: &str) -> Result<(), Error> {
         let from = parse_key(src)?;
         let to = parse_key(dst)?;
-        self.0.copy(&from, &to).await.map_err(Error::from)
+        self.0.copy(&from, &to).await.map_err(store_error)
     }
 
     /// Whether an object exists at `key`.
@@ -270,7 +282,7 @@ impl ObjectStoreClient {
     #[tracing::instrument(name = "object.get_range", skip(self), fields(key = %key))]
     pub async fn get_range(&self, key: &str, range: Range<u64>) -> Result<Bytes, Error> {
         let path = parse_key(key)?;
-        self.0.get_range(&path, range).await.map_err(Error::from)
+        self.0.get_range(&path, range).await.map_err(store_error)
     }
 
     /// Upload the contents of a byte stream to `key` using a multipart upload.
@@ -312,7 +324,7 @@ impl ObjectStoreClient {
             .0
             .put_multipart_opts(&path, opts)
             .await
-            .map_err(Error::from)?;
+            .map_err(store_error)?;
         let mut writer = WriteMultipart::new(upload);
 
         while let Some(chunk) = stream.next().await {
@@ -333,7 +345,7 @@ impl ObjectStoreClient {
                 let part = bytes.split_to(bytes.len().min(MULTIPART_PART_SIZE));
                 if let Err(e) = writer.wait_for_capacity(MULTIPART_MAX_CONCURRENCY).await {
                     let _ = writer.abort().await;
-                    return Err(Error::from(e));
+                    return Err(store_error(e));
                 }
                 writer.put(part);
             }
@@ -346,10 +358,10 @@ impl ObjectStoreClient {
         // `complete` step already aborts on failure.
         if let Err(e) = writer.wait_for_capacity(0).await {
             let _ = writer.abort().await;
-            return Err(Error::from(e));
+            return Err(store_error(e));
         }
 
-        writer.finish().await.map(Into::into).map_err(Error::from)
+        writer.finish().await.map(Into::into).map_err(store_error)
     }
 }
 
@@ -441,13 +453,13 @@ mod tests {
         let client = test_client();
         let chunks = vec![
             Ok(Bytes::from("partial")),
-            Err(Error::runtime("stream broke", "test")),
+            Err(Error::runtime("stream broke")),
         ];
         let err = client
             .put_multipart("aborted.txt", None, futures::stream::iter(chunks))
             .await
             .unwrap_err();
-        assert_eq!(err.to_string(), "[test] stream broke");
+        assert_eq!(err.to_string(), "stream broke");
         // The object must not have been committed.
         assert!(!client.exists("aborted.txt").await.unwrap());
     }
@@ -458,6 +470,5 @@ mod tests {
         let err = client.head("missing.bin").await.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::NotFound);
         assert!(!err.is_retryable());
-        assert!(err.retry_delay().is_none());
     }
 }

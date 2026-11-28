@@ -1,9 +1,8 @@
 //! Azure Blob Storage provider using [`object_store::azure::MicrosoftAzureBuilder`].
 
-use std::fmt;
-
 use derive_more::Deref;
 use nvisy_core::net::EndpointPolicy;
+use nvisy_core::{Error, Secret};
 use object_store::azure::{MicrosoftAzureBuilder, split_sas};
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
@@ -11,14 +10,13 @@ use serde::{Deserialize, Serialize};
 
 use super::Client;
 use crate::client::ObjectStoreClient;
-use crate::error::Error;
 
 /// Typed credentials for Azure Blob Storage.
 ///
 /// Secret fields are masked in the [`Debug`] output. Serialization exists only
 /// to persist the credentials encrypted at rest; they are never returned in API
 /// responses.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AzureCredentials {
@@ -36,7 +34,7 @@ pub struct AzureCredentials {
 
 /// Azure Blob Storage authentication, tagged by `type`: `{ "type": "accessKey",
 /// "accessKey": "..." }` or `{ "type": "sasToken", "sasToken": "..." }`.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(
     tag = "type",
@@ -47,33 +45,13 @@ pub enum AzureAuth {
     /// A storage account access key.
     AccessKey {
         /// The account key.
-        access_key: String,
+        access_key: Secret<String>,
     },
     /// A Shared Access Signature token.
     SasToken {
         /// The SAS token (query string form).
-        sas_token: String,
+        sas_token: Secret<String>,
     },
-}
-
-impl fmt::Debug for AzureAuth {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::AccessKey { .. } => f.write_str("AccessKey(<redacted>)"),
-            Self::SasToken { .. } => f.write_str("SasToken(<redacted>)"),
-        }
-    }
-}
-
-impl fmt::Debug for AzureCredentials {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AzureCredentials")
-            .field("container", &self.container)
-            .field("account_name", &self.account_name)
-            .field("auth", &self.auth)
-            .field("endpoint", &self.endpoint)
-            .finish()
-    }
 }
 
 /// Azure Blob Storage-backed object storage client.
@@ -91,13 +69,13 @@ impl Client for AzureProvider {
             .with_account(&creds.account_name);
 
         builder = match &creds.auth {
-            AzureAuth::AccessKey { access_key } => builder.with_access_key(access_key),
+            AzureAuth::AccessKey { access_key } => builder.with_access_key(access_key.expose()),
             AzureAuth::SasToken { sas_token } => {
                 // `split_sas` percent-decodes and validates the token, handling
                 // the edge cases (e.g. `=` inside a value) a naive split would
                 // corrupt.
-                let pairs =
-                    split_sas(sas_token).map_err(|e| Error::connection(e.to_string(), Self::ID))?;
+                let pairs = split_sas(sas_token.expose())
+                    .map_err(|e| Error::invalid(format!("{}: {e}", Self::ID)))?;
                 builder.with_sas_authorization(pairs)
             }
         };
@@ -105,7 +83,7 @@ impl Client for AzureProvider {
         if let Some(endpoint) = &creds.endpoint {
             // Validate the custom endpoint under the deployment policy; enable
             // plaintext HTTP only for a local emulator (Azurite).
-            let allow_http = super::endpoint_allow_http(policy, endpoint, Self::ID).await?;
+            let allow_http = super::endpoint_allow_http(policy, endpoint).await?;
             builder = builder.with_endpoint(endpoint.clone());
             if allow_http {
                 builder = builder.with_allow_http(true);
@@ -114,7 +92,7 @@ impl Client for AzureProvider {
 
         let store = builder
             .build()
-            .map_err(|e| Error::connection(e.to_string(), Self::ID))?;
+            .map_err(|e| Error::invalid(format!("{}: {e}", Self::ID)))?;
 
         Ok(Self(ObjectStoreClient::new(store)))
     }

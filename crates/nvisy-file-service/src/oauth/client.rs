@@ -1,5 +1,6 @@
 //! The [`OAuthClient`]: the authorization-code flow bound to a provider and app.
 
+use nvisy_core::{Error, ErrorKind, Result, Secret};
 use oauth2::basic::BasicClient;
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointNotSet, EndpointSet,
@@ -8,7 +9,6 @@ use oauth2::{
 
 use super::http_client::OAuthHttpClient;
 use super::types::{Authorization, OAuthApp, OAuthProvider, OAuthTokens};
-use crate::error::{Error, ErrorKind, Result};
 
 /// A configured `oauth2` client for the authorization-code grant, with the auth,
 /// token, and redirect endpoints all set.
@@ -48,7 +48,7 @@ impl OAuthClient {
             .map_err(|err| Error::connection("invalid OAuth redirect URI").with_source(err))?;
 
         Ok(BasicClient::new(ClientId::new(self.app.client_id.clone()))
-            .set_client_secret(ClientSecret::new(self.app.client_secret.clone()))
+            .set_client_secret(ClientSecret::new(self.app.client_secret.expose().clone()))
             .set_auth_uri(auth_url)
             .set_token_uri(token_url)
             .set_redirect_uri(redirect_uri))
@@ -149,7 +149,7 @@ impl OAuthClient {
         // A refresh response often omits the refresh token; keep the existing one.
         Ok(tokens_from_response(
             &response,
-            Some(refresh_token.to_owned()),
+            Some(Secret::new(refresh_token.to_owned())),
         ))
     }
 }
@@ -158,7 +158,7 @@ impl OAuthClient {
 /// falling back to `existing_refresh` when the response omits a refresh token.
 fn tokens_from_response(
     response: &oauth2::basic::BasicTokenResponse,
-    existing_refresh: Option<String>,
+    existing_refresh: Option<Secret<String>>,
 ) -> OAuthTokens {
     let expires_at = response.expires_in().map(|d| {
         let now = i64::try_from(
@@ -171,10 +171,10 @@ fn tokens_from_response(
         now + i64::try_from(d.as_secs()).unwrap_or(i64::MAX)
     });
     OAuthTokens {
-        access_token: response.access_token().secret().clone(),
+        access_token: Secret::new(response.access_token().secret().clone()),
         refresh_token: response
             .refresh_token()
-            .map(|t| t.secret().clone())
+            .map(|t| Secret::new(t.secret().clone()))
             .or(existing_refresh),
         expires_at,
     }

@@ -3,8 +3,6 @@
 use std::fmt;
 use std::sync::Arc;
 
-use nvisy_core::health::ComponentHealth;
-
 use crate::Result;
 use crate::provider::{WebhookProvider, WebhookRequest, WebhookResponse};
 
@@ -13,7 +11,7 @@ use crate::provider::{WebhookProvider, WebhookRequest, WebhookResponse};
 /// Wraps any [`WebhookProvider`] in an `Arc` for cheap cloning across tasks.
 #[derive(Clone)]
 pub struct WebhookService {
-    inner: Arc<dyn WebhookProvider>,
+    pub(super) inner: Arc<dyn WebhookProvider>,
 }
 
 impl fmt::Debug for WebhookService {
@@ -38,14 +36,5 @@ impl WebhookService {
     /// SSRF-guard rejection or a transport failure).
     pub async fn deliver(&self, request: &WebhookRequest) -> Result<WebhookResponse> {
         self.inner.deliver(request).await
-    }
-
-    /// Performs a health check on the underlying webhook provider.
-    ///
-    /// # Errors
-    ///
-    /// Propagates any error from the underlying provider's health check.
-    pub async fn health_check(&self) -> Result<ComponentHealth> {
-        self.inner.health_check().await
     }
 }

@@ -3,8 +3,6 @@
 #![doc = include_str!("../README.md")]
 
 mod client;
-mod error;
-pub mod guard;
 pub mod provider;
 
 #[cfg(feature = "reqwest")]
@@ -12,7 +10,7 @@ pub mod provider;
 pub mod reqwest;
 
 pub use client::WebhookService;
-pub use error::{BoxedError, Error, ErrorKind, Result};
+pub use nvisy_core::{Error, ErrorKind, Result};
 
 /// Tracing target for webhook operations.
 pub const TRACING_TARGET: &str = "nvisy_webhook";

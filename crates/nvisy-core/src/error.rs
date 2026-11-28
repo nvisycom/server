@@ -1,13 +1,9 @@
 //! Shared error and result types.
 //!
-//! A general-purpose [`Error`] carrying a classified [`ErrorKind`], a message,
-//! and an optional source, with the builder helpers (`with_message`,
-//! `with_source`) and retry classification (`is_retryable`, `retry_delay`) the
-//! rest of the platform's error types follow. Crates with provider-specific
-//! failure modes define their own richer error; this is the foundation shape for
-//! shared code that has no such specialization.
-
-use std::time::Duration;
+//! One [`Error`] for every crate that talks to an external system (object
+//! stores, cloud file services, webhook endpoints): a classified [`ErrorKind`],
+//! a message, and an optional source. Callers branch on the kind, never on the
+//! message.
 
 /// A result whose error defaults to the shared [`Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -15,35 +11,62 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// A boxed, thread-safe source error.
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 
-/// Default delay suggested before retrying a transient failure.
-const DEFAULT_RETRY_DELAY: Duration = Duration::from_millis(250);
-
 /// Classification of a failure, so callers can branch without matching on
 /// messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorKind {
-    /// The input or configuration was invalid.
+    /// The input, configuration, or target was invalid, or the remote rejected
+    /// the request as malformed.
     Invalid,
     /// The requested resource does not exist.
     NotFound,
+    /// The resource already exists.
+    AlreadyExists,
+    /// A precondition on the request was not met.
+    Precondition,
     /// The credentials were rejected, missing, or expired.
     Unauthenticated,
     /// The operation was not permitted.
     PermissionDenied,
+    /// The operation is not supported by this backend.
+    NotSupported,
     /// The operation timed out.
     Timeout,
-    /// Failure while establishing or configuring a connection.
+    /// The remote could not be reached.
     Connection,
-    /// Any other runtime failure.
+    /// The remote failed while handling the request.
     Runtime,
+    /// A local failure no retry can fix, such as a payload that cannot be
+    /// serialized.
+    Internal,
 }
 
 impl ErrorKind {
     /// Whether an operation failing with this kind is worth retrying. Only
-    /// transient failures are retryable.
+    /// transient failures are.
     #[must_use]
     pub fn is_retryable(self) -> bool {
         matches!(self, Self::Timeout | Self::Connection | Self::Runtime)
+    }
+
+    /// A safe, user-facing reason that exposes no URLs, bucket names, or other
+    /// infrastructure detail, for API responses such as connection
+    /// verification.
+    #[must_use]
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Invalid => "The request was rejected as invalid",
+            Self::NotFound => "The resource was not found",
+            Self::AlreadyExists => "The resource already exists",
+            Self::Precondition => "A precondition was not met",
+            Self::Unauthenticated => "The credentials were rejected or expired",
+            Self::PermissionDenied => "Access was denied",
+            Self::NotSupported => "The operation is not supported",
+            Self::Timeout => "The request timed out",
+            Self::Connection => "Could not connect",
+            Self::Runtime => "The remote service returned an error",
+            Self::Internal => "An internal error occurred",
+        }
     }
 }
 
@@ -59,42 +82,39 @@ pub struct Error {
 }
 
 impl Error {
-    /// Create an error of the given [`ErrorKind`] with an empty message.
-    #[must_use]
-    pub fn new(kind: ErrorKind) -> Self {
+    /// Creates an error of the given [`ErrorKind`] with a message.
+    pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
         Self {
             kind,
-            message: String::new(),
+            message: message.into(),
             source: None,
         }
     }
 
-    /// Create an [`Invalid`](ErrorKind::Invalid) error with a message.
+    /// Creates an [`Invalid`](ErrorKind::Invalid) error.
     pub fn invalid(message: impl Into<String>) -> Self {
-        Self::new(ErrorKind::Invalid).with_message(message)
+        Self::new(ErrorKind::Invalid, message)
     }
 
-    /// Create a [`Connection`](ErrorKind::Connection) error with a message.
+    /// Creates a [`Connection`](ErrorKind::Connection) error.
     pub fn connection(message: impl Into<String>) -> Self {
-        Self::new(ErrorKind::Connection).with_message(message)
+        Self::new(ErrorKind::Connection, message)
     }
 
-    /// Create a [`Runtime`](ErrorKind::Runtime) error with a message.
+    /// Creates a [`Runtime`](ErrorKind::Runtime) error.
     pub fn runtime(message: impl Into<String>) -> Self {
-        Self::new(ErrorKind::Runtime).with_message(message)
+        Self::new(ErrorKind::Runtime, message)
     }
 
-    /// Set the human-readable message.
-    #[must_use]
-    pub fn with_message(mut self, message: impl Into<String>) -> Self {
-        self.message = message.into();
-        self
+    /// Creates an [`Internal`](ErrorKind::Internal) error.
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Internal, message)
     }
 
-    /// Attach a source error.
+    /// Attaches a source error.
     #[must_use]
-    pub fn with_source(mut self, source: impl std::error::Error + Send + Sync + 'static) -> Self {
-        self.source = Some(Box::new(source));
+    pub fn with_source(mut self, source: impl Into<BoxedError>) -> Self {
+        self.source = Some(source.into());
         self
     }
 
@@ -115,11 +135,62 @@ impl Error {
     pub fn is_retryable(&self) -> bool {
         self.kind.is_retryable()
     }
+}
 
-    /// Suggested delay before retrying, or `None` when not retryable.
-    #[must_use]
-    pub fn retry_delay(&self) -> Option<Duration> {
-        self.kind.is_retryable().then_some(DEFAULT_RETRY_DELAY)
+/// Classifies a failed HTTP response status: auth and lookup statuses map to
+/// their kinds; the transient client errors (408 timeout, 425 too early, 429
+/// throttled) and every server error are [`Runtime`](ErrorKind::Runtime); any
+/// other client error is a permanent [`Invalid`](ErrorKind::Invalid).
+#[must_use]
+pub fn kind_for_status(status: u16) -> ErrorKind {
+    match status {
+        401 => ErrorKind::Unauthenticated,
+        403 => ErrorKind::PermissionDenied,
+        404 => ErrorKind::NotFound,
+        409 => ErrorKind::AlreadyExists,
+        412 => ErrorKind::Precondition,
+        408 | 425 | 429 => ErrorKind::Runtime,
+        400..=499 => ErrorKind::Invalid,
+        _ => ErrorKind::Runtime,
+    }
+}
+
+#[cfg(feature = "reqwest")]
+impl From<reqwest::Error> for Error {
+    /// Classifies a reqwest failure: a response status by
+    /// [`kind_for_status`], a timeout as [`Timeout`](ErrorKind::Timeout), a
+    /// request that could not be built as [`Invalid`](ErrorKind::Invalid), a
+    /// response body that could not be read or decoded as
+    /// [`Runtime`](ErrorKind::Runtime), and any other transport failure as
+    /// [`Connection`](ErrorKind::Connection).
+    fn from(err: reqwest::Error) -> Self {
+        let kind = if let Some(status) = err.status() {
+            kind_for_status(status.as_u16())
+        } else if err.is_timeout() {
+            ErrorKind::Timeout
+        } else if err.is_builder() {
+            ErrorKind::Invalid
+        } else if err.is_body() || err.is_decode() {
+            ErrorKind::Runtime
+        } else {
+            ErrorKind::Connection
+        };
+        Self::new(kind, err.to_string()).with_source(err)
+    }
+}
+
+#[cfg(feature = "reqwest")]
+impl From<reqwest_middleware::Error> for Error {
+    /// Classifies a middleware-wrapped failure like the reqwest error inside
+    /// it; a failure raised by a middleware itself is
+    /// [`Runtime`](ErrorKind::Runtime).
+    fn from(err: reqwest_middleware::Error) -> Self {
+        match err {
+            reqwest_middleware::Error::Reqwest(err) => err.into(),
+            reqwest_middleware::Error::Middleware(err) => {
+                Self::runtime(err.to_string()).with_source(err)
+            }
+        }
     }
 }
 
@@ -129,19 +200,38 @@ mod tests {
 
     #[test]
     fn builder_sets_kind_message_and_source() {
-        let source = std::io::Error::other("boom");
-        let err = Error::connection("failed to connect").with_source(source);
+        let err = Error::connection("failed to connect").with_source(std::io::Error::other("boom"));
         assert_eq!(err.kind(), ErrorKind::Connection);
         assert_eq!(err.message(), "failed to connect");
         assert!(std::error::Error::source(&err).is_some());
     }
 
     #[test]
-    fn retryability_follows_kind() {
+    fn only_transient_kinds_are_retryable() {
         assert!(Error::runtime("x").is_retryable());
         assert!(Error::connection("x").is_retryable());
+        assert!(Error::new(ErrorKind::Timeout, "x").is_retryable());
         assert!(!Error::invalid("x").is_retryable());
-        assert_eq!(Error::runtime("x").retry_delay(), Some(DEFAULT_RETRY_DELAY));
-        assert_eq!(Error::invalid("x").retry_delay(), None);
+        assert!(!Error::internal("x").is_retryable());
+    }
+
+    #[test]
+    fn statuses_map_to_kinds() {
+        assert_eq!(kind_for_status(401), ErrorKind::Unauthenticated);
+        assert_eq!(kind_for_status(404), ErrorKind::NotFound);
+        for permanent in [400, 402, 405, 410, 422, 423, 451] {
+            assert_eq!(
+                kind_for_status(permanent),
+                ErrorKind::Invalid,
+                "{permanent}"
+            );
+        }
+        for transient in [408, 425, 429, 500, 503] {
+            assert_eq!(
+                kind_for_status(transient),
+                ErrorKind::Runtime,
+                "{transient}"
+            );
+        }
     }
 }

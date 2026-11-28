@@ -4,7 +4,7 @@
 //! mirroring how `NatsConfig` and `PgConfig` are configured. [`OAuthAppsConfig`]
 //! resolves these into an [`OAuthApps`] and a [`FileService`].
 
-use std::fmt;
+use nvisy_core::Secret;
 
 use super::{FileService, OAuthApps};
 use crate::oauth::OAuthApp;
@@ -28,7 +28,7 @@ macro_rules! provider_app_config {
         $secret_long:literal, $secret_env:literal
     ) => {
         $(#[$meta])*
-        #[derive(Clone, Default)]
+        #[derive(Debug, Clone, Default)]
         #[cfg_attr(feature = "cli", derive(clap::Args))]
         pub struct $name {
             #[doc = concat!($provider, " OAuth app client id. Set with the client secret to enable the connector.")]
@@ -52,35 +52,27 @@ macro_rules! provider_app_config {
                     help = concat!($provider, " OAuth app client secret."),
                 )
             )]
-            pub client_secret: Option<String>,
+            pub client_secret: Option<Secret<String>>,
         }
 
-        impl fmt::Debug for $name {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.debug_struct(stringify!($name))
-                    .field("client_id", &self.client_id)
-                    .field("client_secret", &self.client_secret.as_ref().map(|_| "<redacted>"))
-                    .finish()
-            }
-        }
-
-        impl $name {
+                impl $name {
             /// The [`OAuthApp`], present only when the client id and secret are set
             /// to non-empty strings and a shared `redirect_uri` is supplied. An
             /// empty value (e.g. `GOOGLE_DRIVE_CLIENT_ID=` in an env file) counts as
             /// unset, so a placeholder line does not mark the provider as
             /// configured.
             fn to_app(&self, redirect_uri: &str) -> Option<OAuthApp> {
-                let non_empty = |value: &Option<String>| {
+                let non_empty = |value: Option<&str>| {
                     value
-                        .as_deref()
                         .map(str::trim)
                         .filter(|value| !value.is_empty())
                         .map(str::to_owned)
                 };
                 Some(OAuthApp {
-                    client_id: non_empty(&self.client_id)?,
-                    client_secret: non_empty(&self.client_secret)?,
+                    client_id: non_empty(self.client_id.as_deref())?,
+                    client_secret: Secret::new(non_empty(
+                        self.client_secret.as_ref().map(|secret| secret.expose().as_str()),
+                    )?),
                     redirect_uri: redirect_uri.to_owned(),
                 })
             }
@@ -233,12 +225,12 @@ mod tests {
             // Both credentials set (non-empty) -> configured.
             google_drive: GoogleDriveConfig {
                 client_id: Some("id".to_owned()),
-                client_secret: Some("secret".to_owned()),
+                client_secret: Some(Secret::new("secret".to_owned())),
             },
             // Present but empty/blank (as an env file's `KEY=` yields) -> unset.
             dropbox: DropboxConfig {
                 client_id: Some(String::new()),
-                client_secret: Some("   ".to_owned()),
+                client_secret: Some(Secret::new("   ".to_owned())),
             },
             // Partially set (missing secret) -> unset.
             onedrive: OneDriveConfig {
@@ -270,7 +262,7 @@ mod tests {
             redirect_uri: None,
             google_drive: GoogleDriveConfig {
                 client_id: Some("id".to_owned()),
-                client_secret: Some("secret".to_owned()),
+                client_secret: Some(Secret::new("secret".to_owned())),
             },
             ..Default::default()
         };

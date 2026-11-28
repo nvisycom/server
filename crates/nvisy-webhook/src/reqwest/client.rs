@@ -1,24 +1,22 @@
 //! Reqwest-based HTTP client for webhook delivery.
 
 use std::fmt;
-use std::net::IpAddr;
 use std::sync::Arc;
 
 use hmac::{Hmac, KeyInit, Mac};
 use jiff::Timestamp;
+use nvisy_core::health::{ComponentHealth, HealthCheck};
+use nvisy_core::net::check_outbound;
 use reqwest::Client;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::RetryTransientMiddleware;
 use reqwest_retry::policies::ExponentialBackoff;
 use reqwest_tracing::TracingMiddleware;
 use sha2::Sha256;
-use url::Url;
 
-use super::error::Error as ReqwestError;
 use super::{ReqwestConfig, TRACING_TARGET};
-use crate::guard::UrlGuardExt;
 use crate::provider::{WebhookProvider, WebhookRequest, WebhookResponse};
-use crate::{Error, ErrorKind, Result, WebhookService};
+use crate::{Error, Result, WebhookService};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -132,6 +130,17 @@ impl Default for ReqwestClient {
     }
 }
 
+/// Component name reported for the webhook health check.
+const COMPONENT_NAME: &str = "webhook";
+
+#[async_trait::async_trait]
+impl HealthCheck for ReqwestClient {
+    /// Delivers directly to each endpoint, with no backing service to probe.
+    async fn check_health(&self) -> ComponentHealth {
+        ComponentHealth::healthy(COMPONENT_NAME)
+    }
+}
+
 #[async_trait::async_trait]
 impl WebhookProvider for ReqwestClient {
     async fn deliver(&self, request: &WebhookRequest) -> Result<WebhookResponse> {
@@ -141,13 +150,13 @@ impl WebhookProvider for ReqwestClient {
         // SSRF guard: reject non-http(s) schemes, then reject the delivery if the
         // host resolves to any non-routable address (loopback, private ranges,
         // the cloud metadata endpoint, and so on).
-        request.url.check_scheme()?;
-        let addrs = resolve_host(&request.url).await?;
-        request.url.check_resolved_addrs(addrs)?;
+        check_outbound(&request.url).await?;
 
         // Create the payload from the request
         let payload = request.to_payload();
-        let payload_bytes = serde_json::to_vec(&payload).map_err(ReqwestError::Serde)?;
+        let payload_bytes = serde_json::to_vec(&payload).map_err(|err| {
+            Error::internal("failed to serialize webhook payload").with_source(err)
+        })?;
 
         // Build the HTTP request
         let mut http_request = self
@@ -165,7 +174,7 @@ impl WebhookProvider for ReqwestClient {
 
         // Add HMAC-SHA256 signature if secret is present
         if let Some(ref secret) = request.secret {
-            let signature = Self::sign_payload(secret, timestamp, &payload_bytes);
+            let signature = Self::sign_payload(secret.expose(), timestamp, &payload_bytes);
             http_request =
                 http_request.header("X-Webhook-Signature", format!("sha256={signature}"));
         }
@@ -180,11 +189,7 @@ impl WebhookProvider for ReqwestClient {
         }
 
         // Send the request with the JSON payload
-        let http_response = http_request
-            .body(payload_bytes)
-            .send()
-            .await
-            .map_err(ReqwestError::from)?;
+        let http_response = http_request.body(payload_bytes).send().await?;
 
         let status_code = http_response.status().as_u16();
         let response = WebhookResponse::new(request.request_id, status_code, started_at);
@@ -210,38 +215,6 @@ fn is_reserved_header(name: &str) -> bool {
     RESERVED_HEADERS
         .iter()
         .any(|reserved| name.eq_ignore_ascii_case(reserved))
-}
-
-/// Resolves a webhook URL's host to its socket addresses for the SSRF guard.
-///
-/// Uses the URL's explicit port, or the scheme default (443 for `https`, 80 for
-/// `http`), since the port does not affect address classification.
-///
-/// This resolves independently of the connection reqwest makes on send, leaving
-/// a narrow DNS-rebinding window where a hostname vetted here could resolve to a
-/// different address at connect time. Closing it fully requires pinning the
-/// vetted address into the connection via a custom resolver; redirects are
-/// already disabled, which removes the simpler post-connection bypass.
-async fn resolve_host(url: &Url) -> Result<Vec<IpAddr>> {
-    // Build a resolvable `host:port` authority. `host_str` yields the bare host;
-    // a literal IP resolves to itself.
-    let host = url.host_str().ok_or_else(|| {
-        Error::new(ErrorKind::InvalidEndpoint).with_message("webhook URL has no host")
-    })?;
-    let port = url.port_or_known_default().unwrap_or(443);
-    let authority = format!("{host}:{port}");
-
-    let addrs = tokio::net::lookup_host(authority)
-        .await
-        .map_err(|err| {
-            Error::new(ErrorKind::InvalidEndpoint)
-                .with_message("failed to resolve webhook host")
-                .with_source(err)
-        })?
-        .map(|socket_addr| socket_addr.ip())
-        .collect();
-
-    Ok(addrs)
 }
 
 #[cfg(test)]
@@ -290,7 +263,6 @@ mod tests {
     #[tokio::test]
     async fn test_health_check() {
         let client = ReqwestClient::default();
-        let health = client.health_check().await.unwrap();
-        assert!(health.status.is_healthy());
+        assert!(client.check_health().await.status.is_healthy());
     }
 }

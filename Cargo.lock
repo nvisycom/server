@@ -7228,6 +7228,7 @@ version = "0.1.0"
 dependencies = [
  "async-stream",
  "futures",
+ "nvisy-core",
  "rig 0.47.0",
  "schemars 1.2.3",
  "serde",
@@ -7261,12 +7262,18 @@ name = "nvisy-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "clap",
+ "futures",
  "jiff 0.2.46",
+ "reqwest 0.13.5",
+ "reqwest-middleware",
  "schemars 1.2.3",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "tokio",
+ "tracing",
  "url",
 ]
 
@@ -7280,6 +7287,7 @@ dependencies = [
  "futures",
  "http",
  "jiff 0.2.46",
+ "nvisy-core",
  "oauth2",
  "percent-encoding",
  "reqwest 0.13.5",
@@ -7456,7 +7464,6 @@ dependencies = [
  "async-trait",
  "clap",
  "hex",
- "hipstr",
  "hmac 0.13.0",
  "jiff 0.2.46",
  "nvisy-core",
@@ -7468,8 +7475,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
- "strum 0.28.0",
- "thiserror 2.0.21",
  "tokio",
  "tracing",
  "url",

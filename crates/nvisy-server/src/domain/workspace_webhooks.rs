@@ -6,12 +6,13 @@
 //! handler. The service owns the crypto and delivery clients because a create
 //! mints and encrypts a secret and a test signs and sends a live request.
 
+use nvisy_core::ErrorKind as CoreErrorKind;
+use nvisy_core::net::check_outbound_literal;
 use nvisy_postgres::model::WorkspaceWebhook;
 use nvisy_postgres::query::WorkspaceWebhookRepository;
 use nvisy_postgres::types::{CursorPage, CursorPagination, TimeCursor, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use nvisy_webhook::WebhookService;
-use nvisy_webhook::guard::UrlGuardExt;
 use nvisy_webhook::provider::{WebhookContext, WebhookRequest, WebhookResponse};
 use url::Url;
 use uuid::Uuid;
@@ -292,11 +293,12 @@ fn check_webhook_url(url: &str) -> Result<()> {
     let parsed: Url = url
         .parse()
         .map_err(|_| ErrorKind::BadRequest.with_message("invalid webhook URL"))?;
-    parsed
-        .check_scheme()
-        .map_err(|_| ErrorKind::BadRequest.with_message("webhook URL must use http or https"))?;
-    parsed.check_literal_host().map_err(|_| {
-        ErrorKind::BadRequest.with_message("webhook URL must not target an internal address")
+    check_outbound_literal(&parsed).map_err(|err| {
+        let message = match err.kind() {
+            CoreErrorKind::PermissionDenied => "webhook URL must not target an internal address",
+            _ => "webhook URL must use http or https",
+        };
+        ErrorKind::BadRequest.with_message(message)
     })
 }
 

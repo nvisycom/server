@@ -4,8 +4,7 @@
 //! mirroring the cloud file-service OAuth config. A provider whose required
 //! values are not all set is left unconfigured and cannot be used to sign in.
 
-use std::fmt;
-
+use nvisy_core::Secret;
 use nvisy_postgres::types::IdentityProvider;
 
 /// A resolved OIDC provider: the credentials and issuer needed to run a sign-in.
@@ -13,30 +12,18 @@ use nvisy_postgres::types::IdentityProvider;
 /// Produced from a provider's config only when every required value is present,
 /// so a partially-configured provider is simply absent rather than half-usable.
 /// The client secret is masked in the [`Debug`] output.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ResolvedOidcProvider {
     /// Which identity provider this is.
     pub provider: IdentityProvider,
     /// OIDC client id.
     pub client_id: String,
     /// OIDC client secret.
-    pub client_secret: String,
+    pub client_secret: Secret<String>,
     /// The sign-in callback URL registered with the provider.
     pub redirect_uri: String,
     /// OIDC issuer URL used for discovery.
     pub issuer: String,
-}
-
-impl fmt::Debug for ResolvedOidcProvider {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ResolvedOidcProvider")
-            .field("provider", &self.provider)
-            .field("client_id", &self.client_id)
-            .field("client_secret", &"<redacted>")
-            .field("redirect_uri", &self.redirect_uri)
-            .field("issuer", &self.issuer)
-            .finish()
-    }
 }
 
 /// Defines one provider's OIDC config struct.
@@ -58,7 +45,7 @@ macro_rules! oidc_provider_config {
         $issuer_long:literal, $issuer_env:literal
     ) => {
         $(#[$meta])*
-        #[derive(Clone, Default)]
+        #[derive(Debug, Clone, Default)]
         #[cfg_attr(feature = "cli", derive(clap::Args))]
         pub struct $name {
             #[doc = concat!($display, " sign-in OIDC client id. Set with the client secret and redirect URI to enable sign-in.")]
@@ -82,7 +69,7 @@ macro_rules! oidc_provider_config {
                     help = concat!($display, " sign-in OIDC client secret."),
                 )
             )]
-            pub client_secret: Option<String>,
+            pub client_secret: Option<Secret<String>>,
             #[doc = concat!($display, " sign-in callback URI, registered with the provider (the route the callback is served at).")]
             #[cfg_attr(
                 feature = "cli",
@@ -107,18 +94,7 @@ macro_rules! oidc_provider_config {
             pub issuer: Option<String>,
         }
 
-        impl fmt::Debug for $name {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.debug_struct(stringify!($name))
-                    .field("client_id", &self.client_id)
-                    .field("client_secret", &self.client_secret.as_ref().map(|_| "<redacted>"))
-                    .field("redirect_uri", &self.redirect_uri)
-                    .field("issuer", &self.issuer)
-                    .finish()
-            }
-        }
-
-        impl $name {
+                impl $name {
             /// The default issuer used when [`issuer`](Self::issuer) is unset, or
             /// `None` when the provider has no safe default and requires an
             /// explicit issuer.
@@ -130,19 +106,20 @@ macro_rules! oidc_provider_config {
             /// [`DEFAULT_ISSUER`](Self::DEFAULT_ISSUER)). A blank value (e.g. a
             /// bare `GOOGLE_CLIENT_ID=` line) counts as unset.
             fn resolve(&self) -> Option<ResolvedOidcProvider> {
-                let non_empty = |value: &Option<String>| {
+                let non_empty = |value: Option<&str>| {
                     value
-                        .as_deref()
                         .map(str::trim)
                         .filter(|value| !value.is_empty())
                         .map(str::to_owned)
                 };
                 Some(ResolvedOidcProvider {
                     provider: $provider,
-                    client_id: non_empty(&self.client_id)?,
-                    client_secret: non_empty(&self.client_secret)?,
-                    redirect_uri: non_empty(&self.redirect_uri)?,
-                    issuer: non_empty(&self.issuer)
+                    client_id: non_empty(self.client_id.as_deref())?,
+                    client_secret: Secret::new(non_empty(
+                        self.client_secret.as_ref().map(|secret| secret.expose().as_str()),
+                    )?),
+                    redirect_uri: non_empty(self.redirect_uri.as_deref())?,
+                    issuer: non_empty(self.issuer.as_deref())
                         .or_else(|| Self::DEFAULT_ISSUER.map(str::to_owned))?,
                 })
             }
@@ -306,14 +283,14 @@ mod tests {
             // Fully set -> resolves, issuer defaulted.
             google: GoogleOidcConfig {
                 client_id: Some("id".to_owned()),
-                client_secret: Some("secret".to_owned()),
+                client_secret: Some(Secret::new("secret".to_owned())),
                 redirect_uri: Some("https://app/auth/google/callback".to_owned()),
                 issuer: None,
             },
             // Missing secret -> unset.
             microsoft: MicrosoftOidcConfig {
                 client_id: Some("id".to_owned()),
-                client_secret: Some("  ".to_owned()),
+                client_secret: Some(Secret::new("  ".to_owned())),
                 redirect_uri: Some("https://app/auth/microsoft/callback".to_owned()),
                 issuer: None,
             },
@@ -334,7 +311,7 @@ mod tests {
         // No default issuer: fully credentialed but no issuer -> unconfigured.
         let without_issuer = MicrosoftOidcConfig {
             client_id: Some("id".to_owned()),
-            client_secret: Some("secret".to_owned()),
+            client_secret: Some(Secret::new("secret".to_owned())),
             redirect_uri: Some("https://app/auth/microsoft/callback".to_owned()),
             issuer: None,
         };
@@ -356,7 +333,7 @@ mod tests {
     fn issuer_override_is_respected() {
         let config = MicrosoftOidcConfig {
             client_id: Some("id".to_owned()),
-            client_secret: Some("secret".to_owned()),
+            client_secret: Some(Secret::new("secret".to_owned())),
             redirect_uri: Some("https://app/auth/microsoft/callback".to_owned()),
             issuer: Some("https://login.microsoftonline.com/tenant-123/v2.0".to_owned()),
         };

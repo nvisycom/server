@@ -1,6 +1,7 @@
 //! Connection response types.
 
 use jiff::Timestamp;
+use nvisy_core::Secret;
 use nvisy_postgres::model::{
     WorkspaceConnection as WorkspaceConnectionModel, WorkspaceConnectionSchedule,
 };
@@ -107,7 +108,7 @@ impl WorkspaceConnectionVerification {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePickerToken {
     /// The provider OAuth access token to hand to the browser picker.
-    pub access_token: String,
+    pub access_token: Secret<String>,
     /// Unix seconds at which the access token expires, if the provider reports
     /// it. `None` means the provider did not return an expiry.
     #[serde(skip_serializing_if = "Option::is_none")]

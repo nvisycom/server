@@ -10,9 +10,10 @@
 //! flow already returns and stores the rotated token, so no special handling is
 //! needed here.
 
+use nvisy_core::{ByteStream, FileUpload, Result, Secret};
+
 use super::{ProviderRequest, encode_path_segment, response_stream};
-use crate::client::{ByteStream, FileServiceClient, FileUpload};
-use crate::error::Result;
+use crate::client::FileServiceClient;
 use crate::oauth::OAuthProvider;
 
 /// Provider identifier stored in the connection's `provider` column.
@@ -44,7 +45,7 @@ pub fn oauth_provider() -> OAuthProvider {
 /// A connected Box client holding a valid access token.
 pub struct BoxClient {
     http: reqwest::Client,
-    access_token: String,
+    access_token: Secret<String>,
     /// The folder id that new exports are created in; `None` is the account root
     /// (`"0"`).
     root_folder_id: Option<String>,
@@ -54,7 +55,7 @@ impl BoxClient {
     /// Creates a client from an already-valid access token.
     pub fn new(
         http: reqwest::Client,
-        access_token: String,
+        access_token: Secret<String>,
         root_folder_id: Option<String>,
     ) -> Self {
         Self {
@@ -70,7 +71,7 @@ impl FileServiceClient for BoxClient {
     async fn verify(&self) -> Result<()> {
         self.http
             .get(format!("{API_BASE}/users/me"))
-            .bearer_auth(&self.access_token)
+            .bearer_auth(self.access_token.expose())
             .send_checked(PROVIDER_ID)
             .await?;
         Ok(())
@@ -84,7 +85,7 @@ impl FileServiceClient for BoxClient {
         let response = self
             .http
             .get(format!("{API_BASE}/files/{id}/content"))
-            .bearer_auth(&self.access_token)
+            .bearer_auth(self.access_token.expose())
             .send_checked(PROVIDER_ID)
             .await?;
         Ok(response_stream(response))
@@ -95,7 +96,9 @@ impl FileServiceClient for BoxClient {
         // part, or Box rejects it with metadata_after_file_contents.
         // `content_length` is the file's size, not the multipart body's, so it is
         // unused here; reqwest frames the multipart body.
-        let FileUpload { name, body, .. } = upload;
+        let FileUpload {
+            key: name, body, ..
+        } = upload;
         let parent = self.root_folder_id.as_deref().unwrap_or(ROOT_FOLDER_ID);
         let attributes =
             serde_json::json!({ "name": name, "parent": { "id": parent } }).to_string();
@@ -108,7 +111,7 @@ impl FileServiceClient for BoxClient {
 
         self.http
             .post(format!("{UPLOAD_BASE}/files/content"))
-            .bearer_auth(&self.access_token)
+            .bearer_auth(self.access_token.expose())
             .multipart(form)
             .send_checked(PROVIDER_ID)
             .await?;

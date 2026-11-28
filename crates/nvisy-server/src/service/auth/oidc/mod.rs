@@ -80,7 +80,7 @@ impl OidcProvider {
         Ok(Self {
             provider: resolved.provider,
             client_id: ClientId::new(resolved.client_id),
-            client_secret: ClientSecret::new(resolved.client_secret),
+            client_secret: ClientSecret::new(resolved.client_secret.into_inner()),
             redirect_uri: RedirectUrl::new(resolved.redirect_uri)
                 .map_err(|e| OidcError::config("invalid redirect URI", e))?,
             issuer: IssuerUrl::new(resolved.issuer)

@@ -8,6 +8,7 @@ use std::ops::Deref;
 
 pub use azure::{AzureAuth, AzureCredentials, AzureProvider};
 pub use gcs::{GcsCredentials, GcsProvider};
+use nvisy_core::Error;
 use nvisy_core::net::EndpointPolicy;
 use object_store::prefix::PrefixStore;
 pub use s3::{S3Credentials, S3Provider};
@@ -16,7 +17,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::client::ObjectStoreClient;
-use crate::error::{Error, ErrorKind};
 
 /// A fully-typed object-store connection configuration.
 ///
@@ -96,25 +96,13 @@ impl StorageConfig {
     }
 }
 
-/// Validates a caller-supplied custom endpoint under the deployment's
+/// Validates a tenant-supplied endpoint against the deployment's
 /// [`EndpointPolicy`] and reports whether the provider builder should enable
 /// plaintext HTTP for it (only ever for a loopback emulator under a permissive
-/// policy). Maps a rejection to the crate error, tagged with the provider — a
-/// non-routable-address rejection stays `PermissionDenied` (non-retryable),
-/// while a malformed URL or disallowed scheme maps to `Connection`.
-async fn endpoint_allow_http(
-    policy: EndpointPolicy,
-    endpoint: &str,
-    label: &str,
-) -> Result<bool, Error> {
-    let decision = policy.validate_endpoint(endpoint).await.map_err(|err| {
-        let kind = match err.kind() {
-            nvisy_core::ErrorKind::PermissionDenied => ErrorKind::PermissionDenied,
-            _ => ErrorKind::Connection,
-        };
-        Error::new(kind, err.to_string(), label)
-    })?;
-    Ok(decision.allow_http)
+/// policy). A malformed URL or disallowed scheme is `Invalid`, a non-routable
+/// address `PermissionDenied`, and an unresolvable host `Connection`.
+async fn endpoint_allow_http(policy: EndpointPolicy, endpoint: &str) -> Result<bool, Error> {
+    Ok(policy.validate_endpoint(endpoint).await?.allow_http)
 }
 
 /// Scopes a client's keys under `root_path` when one is set, so callers address
@@ -183,18 +171,6 @@ async fn connect_client<C: Client>(
     policy: EndpointPolicy,
 ) -> Result<ObjectStoreClient, Error> {
     Ok((*C::connect(credentials, policy).await?).clone())
-}
-
-/// Renders a required secret field for [`Debug`].
-const REDACTED: &str = "<redacted>";
-
-/// Renders an optional secret field for [`Debug`]: `<set>` when present, `<unset>` when
-/// absent. Never reveals the value.
-fn redact(value: Option<&str>) -> &'static str {
-    match value {
-        Some(_) => "<set>",
-        None => "<unset>",
-    }
 }
 
 #[cfg(test)]

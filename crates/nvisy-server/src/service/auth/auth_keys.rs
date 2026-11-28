@@ -5,11 +5,11 @@
 //! [`AuthKeys::from_pem`], or from the two key files a deployment configures
 //! with [`AuthKeysConfig::load`].
 
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use jsonwebtoken::{DecodingKey, EncodingKey};
+use nvisy_core::Secret;
 
 use crate::{Error, Result};
 
@@ -52,7 +52,7 @@ impl Default for AuthKeysConfig {
 /// (the keys sit behind an `Arc`).
 #[derive(Clone)]
 pub struct AuthKeys {
-    inner: Arc<Keys>,
+    inner: Arc<Secret<Keys>>,
 }
 
 /// The decoding/encoding keys, shared behind [`AuthKeys`]'s `Arc`.
@@ -80,10 +80,10 @@ impl AuthKeys {
         })?;
 
         Ok(Self {
-            inner: Arc::new(Keys {
+            inner: Arc::new(Secret::new(Keys {
                 decoding_key,
                 encoding_key,
-            }),
+            })),
         })
     }
 
@@ -91,14 +91,14 @@ impl AuthKeys {
     #[inline]
     #[must_use]
     pub fn decoding_key(&self) -> &DecodingKey {
-        &self.inner.decoding_key
+        &self.inner.expose().decoding_key
     }
 
     /// The encoding key, used to sign session tokens.
     #[inline]
     #[must_use]
     pub fn encoding_key(&self) -> &EncodingKey {
-        &self.inner.encoding_key
+        &self.inner.expose().encoding_key
     }
 }
 
@@ -133,14 +133,6 @@ async fn read_key_file(path: &Path, which: &str) -> Result<Vec<u8>> {
         tracing::error!(target: TRACING_TARGET, key = which, path = %path.display(), error = %e, "failed to read key file");
         Error::file_system(format!("failed to read {which} key file")).with_source(e)
     })
-}
-
-impl fmt::Debug for AuthKeys {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AuthKeys")
-            .field("keys", &"[REDACTED]")
-            .finish()
-    }
 }
 
 #[cfg(test)]

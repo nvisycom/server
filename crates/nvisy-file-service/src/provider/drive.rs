@@ -10,10 +10,10 @@
 
 use bytes::Bytes;
 use futures::stream::{self, StreamExt};
+use nvisy_core::{ByteStream, Error, FileUpload, Result, Secret};
 
 use super::{ProviderRequest, encode_path_segment, response_stream};
-use crate::client::{ByteStream, FileServiceClient, FileUpload};
-use crate::error::{Error, Result};
+use crate::client::FileServiceClient;
 use crate::oauth::OAuthProvider;
 
 /// Provider identifier stored in the connection's `provider` column.
@@ -51,7 +51,7 @@ pub fn oauth_provider() -> OAuthProvider {
 /// A connected Google Drive client, holding a valid access token.
 pub struct DriveClient {
     http: reqwest::Client,
-    access_token: String,
+    access_token: Secret<String>,
     /// The Drive folder id that new exports are created in; `None` uses the
     /// user's root.
     root_folder_id: Option<String>,
@@ -62,7 +62,7 @@ impl DriveClient {
     /// caller's responsibility, done before constructing this.
     pub fn new(
         http: reqwest::Client,
-        access_token: String,
+        access_token: Secret<String>,
         root_folder_id: Option<String>,
     ) -> Self {
         Self {
@@ -80,7 +80,7 @@ impl FileServiceClient for DriveClient {
         // it returns, without listing or transferring any file.
         self.http
             .get(format!("{API_BASE}/about?fields=user(emailAddress)"))
-            .bearer_auth(&self.access_token)
+            .bearer_auth(self.access_token.expose())
             .send_checked(PROVIDER_ID)
             .await?;
         Ok(())
@@ -93,7 +93,7 @@ impl FileServiceClient for DriveClient {
         let response = self
             .http
             .get(format!("{API_BASE}/files/{id}?alt=media"))
-            .bearer_auth(&self.access_token)
+            .bearer_auth(self.access_token.expose())
             .send_checked(PROVIDER_ID)
             .await?;
         Ok(response_stream(response))
@@ -103,7 +103,7 @@ impl FileServiceClient for DriveClient {
         // `content_length` is the file's size, not the multipart body's, so it is
         // unused here; reqwest frames the chunked multipart body.
         let FileUpload {
-            name,
+            key: name,
             content_type,
             body,
             ..
@@ -136,7 +136,7 @@ impl FileServiceClient for DriveClient {
 
         self.http
             .post(format!("{UPLOAD_BASE}/files?uploadType=multipart"))
-            .bearer_auth(&self.access_token)
+            .bearer_auth(self.access_token.expose())
             .header(
                 "Content-Type",
                 format!("multipart/related; boundary={boundary}"),

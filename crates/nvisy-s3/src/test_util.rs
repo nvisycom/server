@@ -7,6 +7,7 @@
 
 use std::sync::OnceLock;
 
+use nvisy_core::Secret;
 use testcontainers_modules::testcontainers::core::wait::HttpWaitStrategy;
 use testcontainers_modules::testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
@@ -95,8 +96,8 @@ impl TestBlobStore {
             region: "us-east-1".to_owned(),
             endpoint: Some(format!("http://127.0.0.1:{port}")),
             force_path_style: true,
-            access_key_id: Some(S3_ACCESS_KEY.to_owned()),
-            secret_access_key: Some(S3_SECRET_KEY.to_owned()),
+            access_key_id: Some(Secret::new(S3_ACCESS_KEY.to_owned())),
+            secret_access_key: Some(Secret::new(S3_SECRET_KEY.to_owned())),
         };
 
         let store = BlobStore::connect(&config)

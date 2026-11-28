@@ -5,6 +5,8 @@
 //! designed to be drop-in replacements for their standard Axum counterparts while
 //! providing additional features like detailed error context and automatic validation.
 
+use nvisy_core::REDACTED;
+
 mod json_with_rej;
 mod multipart_with_rej;
 mod path_with_rej;
@@ -40,7 +42,7 @@ fn redact_quoted(message: &str) -> String {
     let mut chars = message.chars();
     while let Some(ch) = chars.next() {
         if ch == '"' || ch == '`' {
-            output.push_str("<redacted>");
+            output.push_str(REDACTED);
             // Consume through the matching closing delimiter, treating a
             // backslash as escaping the next character so an escaped delimiter
             // (`\"`) inside the value does not end the span early and leak the
@@ -64,14 +66,14 @@ fn redact_quoted(message: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_error_message;
+    use super::{REDACTED, sanitize_error_message};
 
     #[test]
     fn redacts_submitted_values() {
         let message = r#"invalid value: string "user@example.com", expected an integer"#;
         let sanitized = sanitize_error_message(message);
         assert!(!sanitized.contains("user@example.com"));
-        assert!(sanitized.contains("<redacted>"));
+        assert!(sanitized.contains(REDACTED));
     }
 
     #[test]
@@ -79,7 +81,7 @@ mod tests {
         let message = "unknown field `secret_token`, expected one of ...";
         let sanitized = sanitize_error_message(message);
         assert!(!sanitized.contains("secret_token"));
-        assert!(sanitized.contains("<redacted>"));
+        assert!(sanitized.contains(REDACTED));
     }
 
     #[test]
@@ -96,6 +98,6 @@ mod tests {
         let message = r#"invalid value: string "a\"secret", expected an integer"#;
         let sanitized = sanitize_error_message(message);
         assert!(!sanitized.contains("secret"), "leaked: {sanitized}");
-        assert!(sanitized.contains("<redacted>"));
+        assert!(sanitized.contains(REDACTED));
     }
 }

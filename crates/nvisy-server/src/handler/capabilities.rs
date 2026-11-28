@@ -190,6 +190,7 @@ pub fn public_routes() -> ApiRouter<ServiceState> {
 #[cfg(test)]
 mod tests {
     use elide_pipeline::entity::LabelCatalog;
+    use nvisy_core::Secret;
     use nvisy_file_service::OAuthApps;
     use nvisy_file_service::oauth::OAuthApp;
 
@@ -222,7 +223,7 @@ mod tests {
         let apps = OAuthApps {
             google_drive: Some(OAuthApp {
                 client_id: "id".to_owned(),
-                client_secret: "secret".to_owned(),
+                client_secret: Secret::new("secret".to_owned()),
                 redirect_uri: "https://example.com/callback".to_owned(),
             }),
             ..Default::default()

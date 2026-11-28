@@ -21,9 +21,12 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-schema = ["dep:schemars"]
+schema = ["dep:schemars", "nvisy-core/schema"]
 
 [dependencies]
+# Internal crates
+nvisy-core = { workspace = true }
+
 # Async runtime
 futures = { workspace = true, features = [] }
 async-stream = { workspace = true, features = [] }

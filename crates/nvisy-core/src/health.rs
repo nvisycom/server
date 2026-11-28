@@ -6,8 +6,11 @@
 //! a response body) is left to the consumer.
 
 use std::borrow::Cow;
+use std::fmt;
 
 use serde::Serialize;
+
+use crate::TRACING_TARGET;
 
 /// Operational status of a service component.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +84,25 @@ impl ComponentHealth {
         Self {
             name: name.into(),
             status: HealthStatus::Unhealthy,
+        }
+    }
+
+    /// Builds a component's health from a probe's outcome: healthy on success,
+    /// unhealthy on failure, logging the failure with the component's name.
+    pub fn from_probe<T, E: fmt::Display>(
+        name: impl Into<Cow<'static, str>>,
+        probe: Result<T, E>,
+    ) -> Self {
+        let name = name.into();
+        match probe {
+            Ok(_) => {
+                tracing::debug!(target: TRACING_TARGET, component = %name, "Health check passed");
+                Self::healthy(name)
+            }
+            Err(error) => {
+                tracing::warn!(target: TRACING_TARGET, component = %name, %error, "Health check failed");
+                Self::unhealthy(name)
+            }
         }
     }
 }
