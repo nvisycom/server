@@ -138,9 +138,9 @@ impl Error {
 }
 
 /// Classifies a failed HTTP response status: auth and lookup statuses map to
-/// their kinds, other client errors are [`Invalid`](ErrorKind::Invalid), and
-/// everything else (timeouts, throttling, server errors) is
-/// [`Runtime`](ErrorKind::Runtime).
+/// their kinds; the transient client errors (408 timeout, 425 too early, 429
+/// throttled) and every server error are [`Runtime`](ErrorKind::Runtime); any
+/// other client error is a permanent [`Invalid`](ErrorKind::Invalid).
 #[must_use]
 pub fn kind_for_status(status: u16) -> ErrorKind {
     match status {
@@ -149,7 +149,8 @@ pub fn kind_for_status(status: u16) -> ErrorKind {
         404 => ErrorKind::NotFound,
         409 => ErrorKind::AlreadyExists,
         412 => ErrorKind::Precondition,
-        400 | 405..=407 | 410 | 411 | 413..=422 => ErrorKind::Invalid,
+        408 | 425 | 429 => ErrorKind::Runtime,
+        400..=499 => ErrorKind::Invalid,
         _ => ErrorKind::Runtime,
     }
 }
@@ -218,8 +219,19 @@ mod tests {
     fn statuses_map_to_kinds() {
         assert_eq!(kind_for_status(401), ErrorKind::Unauthenticated);
         assert_eq!(kind_for_status(404), ErrorKind::NotFound);
-        assert_eq!(kind_for_status(422), ErrorKind::Invalid);
-        assert_eq!(kind_for_status(429), ErrorKind::Runtime);
-        assert_eq!(kind_for_status(503), ErrorKind::Runtime);
+        for permanent in [400, 402, 405, 410, 422, 423, 451] {
+            assert_eq!(
+                kind_for_status(permanent),
+                ErrorKind::Invalid,
+                "{permanent}"
+            );
+        }
+        for transient in [408, 425, 429, 500, 503] {
+            assert_eq!(
+                kind_for_status(transient),
+                ErrorKind::Runtime,
+                "{transient}"
+            );
+        }
     }
 }
