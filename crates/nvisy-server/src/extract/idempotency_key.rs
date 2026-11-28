@@ -5,11 +5,19 @@
 //! returns the original outcome instead of performing the action again.
 
 use aide::OperationInput;
+use aide::generate::GenContext;
+use aide::openapi::{
+    HeaderStyle, Operation, Parameter, ParameterData, ParameterSchemaOrContent, Response,
+    SchemaObject, StatusCode,
+};
+use aide::operation::add_parameters;
 use axum::extract::FromRequestParts;
 use axum::http::HeaderName;
 use axum::http::request::Parts;
+use indexmap::IndexMap;
+use schemars::json_schema;
 
-use crate::response::{Error, ErrorKind};
+use crate::response::{Error, ErrorKind, error_responses};
 
 /// The idempotency header name, lowercased to match `HeaderMap` lookup.
 const IDEMPOTENCY_HEADER: HeaderName = HeaderName::from_static("idempotency-key");
@@ -52,7 +60,45 @@ where
     }
 }
 
-impl OperationInput for IdempotencyKey {}
+impl OperationInput for IdempotencyKey {
+    fn operation_input(ctx: &mut GenContext, operation: &mut Operation) {
+        let max_length = MAX_KEY_LENGTH;
+        let header = Parameter::Header {
+            parameter_data: ParameterData {
+                name: "Idempotency-Key".to_owned(),
+                description: Some(
+                    "An optional client-chosen key: a repeat of the request with the same key \
+                     returns the original outcome instead of performing the action again."
+                        .to_owned(),
+                ),
+                required: false,
+                deprecated: None,
+                format: ParameterSchemaOrContent::Schema(SchemaObject {
+                    json_schema: json_schema!({
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": max_length,
+                    }),
+                    example: None,
+                    external_docs: None,
+                }),
+                example: None,
+                examples: IndexMap::default(),
+                explode: None,
+                extensions: IndexMap::default(),
+            },
+            style: HeaderStyle::Simple,
+        };
+        add_parameters(ctx, operation, [header]);
+    }
+
+    fn inferred_early_responses(
+        ctx: &mut GenContext,
+        operation: &mut Operation,
+    ) -> Vec<(Option<StatusCode>, Response)> {
+        error_responses(ctx, operation, &[400])
+    }
+}
 
 #[cfg(test)]
 mod tests {

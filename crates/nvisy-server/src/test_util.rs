@@ -30,7 +30,7 @@ use uuid::Uuid;
 use crate::ServiceArgs;
 use crate::extract::AuthClaims;
 use crate::handler::{CustomRoutes, routes};
-use crate::middleware::UploadConfig;
+use crate::middleware::{OpenApiConfig, RouterOpenApiExt, UploadConfig};
 use crate::response::CookieConfig;
 use crate::service::{
     AuthKeys, AuthKeysConfig, CryptoConfig, CryptoService, EngineConfig, FileConnectorsConfig,
@@ -145,6 +145,20 @@ impl TestApp {
                 _s3: s3,
             },
         }
+    }
+
+    /// The full built-in router's generated `OpenAPI` document, as JSON.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the document cannot be served or parsed.
+    pub async fn openapi(&self) -> serde_json::Value {
+        let config = OpenApiConfig::default();
+        let app = routes(CustomRoutes::new(), (*self.state).clone())
+            .with_open_api(&config)
+            .with_state((*self.state).clone());
+        let server = TestServer::new(app);
+        server.get(&config.open_api_json).await.json()
     }
 
     /// The running test server; issue requests through it.

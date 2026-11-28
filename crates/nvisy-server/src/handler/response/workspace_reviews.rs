@@ -17,7 +17,7 @@ use super::{AccountRef, Page};
 /// Response type for a review: a named discussion on a document with an explicit
 /// approval lifecycle (0..N per document, concurrent per audience), opened explicitly. It
 /// carries a `reviewStatus`, a `displayName`, its `assignees` (0..N reviewers), the
-/// `detectionId` it is currently reviewing, and the `redactionId` it approved; its
+/// `detectionId` it is currently reviewing, and the `redactionId` it approved, if any; its
 /// stream is a [`WorkspaceReviewEntry`] timeline.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -29,7 +29,8 @@ pub struct WorkspaceReview {
     /// The detection the review is currently reviewing, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detection_id: Option<DetectionId>,
-    /// The approved redaction output, set once the review is approved.
+    /// The approved redaction output: set only when the review is approved and an
+    /// approver named a redaction, so an approved review may have none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub redaction_id: Option<RedactionId>,
     /// The review's title.

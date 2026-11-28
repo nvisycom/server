@@ -99,7 +99,7 @@ fn create_detection_docs(op: TransformOperation) -> TransformOperation {
              detection in the `pending` state; the analysis runs \
              in the background. Watch the detection's status via the SSE stream at \
              `.../detections/{detectionId}/events` (or re-read the detection) and \
-             fetch the findings from `.../detections/{detectionId}/analysis/` once it \
+             fetch the findings from `.../detections/{detectionId}/analysis` once it \
              reaches `complete`. A repeated Idempotency-Key returns the existing \
              detection.",
         )
@@ -250,7 +250,7 @@ async fn stream_detection_events(
 
         // Emit the current status first: covers the race where analysis settled
         // before the subscription was live (no live event would ever arrive).
-        yield status_event(&DetectionStatusEvent { detection_id, status: current });
+        yield status_event(&DetectionStatusEvent { detection_id: path_params.detection_id, status: current });
         if !current.is_detecting() {
             return;
         }
@@ -270,7 +270,7 @@ async fn stream_detection_events(
             };
             if status.phase() >= max_phase {
                 max_phase = status.phase();
-                yield status_event(&DetectionStatusEvent { detection_id, status });
+                yield status_event(&DetectionStatusEvent { detection_id: path_params.detection_id, status });
             }
             // Stop once the detection settles, or the subscription ended.
             if !status.is_detecting() || closed {

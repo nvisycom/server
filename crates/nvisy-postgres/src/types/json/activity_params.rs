@@ -90,7 +90,8 @@ pub struct DocumentActivityParams {
 }
 
 /// Params of a review activity (`review.opened`, `review.reopened`,
-/// `review.renamed`, `review.deleted`, `review.verified`, `review.assigned`,
+/// `review.renamed`, `review.deleted`, `review.submitted`,
+/// `review.changes_requested`, `review.approved`, `review.assigned`,
 /// `review.unassigned`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
