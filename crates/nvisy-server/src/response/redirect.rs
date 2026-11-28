@@ -1,9 +1,10 @@
 //! Redirects that return the browser to the configured frontend at the end of a
 //! browser-driven flow (OIDC sign-in/link/reauth, cloud-file OAuth).
 //!
-//! Each flow validates its redirect target when it starts, so the `base` here is
-//! always an allow-listed URL; when none is configured, a minimal self-describing
-//! fallback is rendered instead of redirecting.
+//! An OIDC flow checks its redirect target against the allow-list when it
+//! starts. The cloud-file OAuth target is the deployment's configured frontend
+//! URL, checked to be absolute at startup. When no target is configured, a
+//! minimal self-describing fallback is rendered instead of redirecting.
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};

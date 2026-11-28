@@ -186,7 +186,8 @@ impl WorkspaceReviewService {
         Ok(conn.list_review_timeline(review_id, &pagination).await?)
     }
 
-    /// Lists a review's lifecycle events, newest first.
+    /// Lists a review's lifecycle events in the order `pagination.direction`
+    /// selects.
     ///
     /// # Errors
     ///

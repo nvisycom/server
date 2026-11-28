@@ -134,7 +134,8 @@ impl WorkspaceConnectionSyncService {
         Ok(run)
     }
 
-    /// Lists a connection's sync runs, newest first, each with its trigger.
+    /// Lists a connection's sync runs, each with its trigger, in the order
+    /// `pagination.direction` selects (newest first by default).
     ///
     /// # Errors
     ///
@@ -153,8 +154,9 @@ impl WorkspaceConnectionSyncService {
             .await?)
     }
 
-    /// Lists every sync run across a workspace's connections, newest first,
-    /// optionally filtered by status and by connection provider.
+    /// Lists every sync run across a workspace's connections, optionally filtered
+    /// by status and by connection provider, in the order `pagination.direction`
+    /// selects (newest first by default).
     ///
     /// # Errors
     ///
@@ -189,9 +191,10 @@ impl WorkspaceConnectionSyncService {
         find_run(&mut conn, workspace_id, connection_id, sync_id).await
     }
 
-    /// Cancels an in-progress sync run: flips its status, then signals the
-    /// transfer if it runs on this instance. A run on another instance is stopped
-    /// by the status flip plus the status-guarded finalizers.
+    /// Cancels an in-progress sync run. The `Cancelled` status is durable and the
+    /// run's finalizers never overwrite it. Signalling the transfer itself is best
+    /// effort: only a transfer running on this instance is stopped, and one on
+    /// another instance continues until it finishes or times out.
     ///
     /// # Errors
     ///

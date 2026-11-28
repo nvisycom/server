@@ -84,8 +84,9 @@ impl WorkspaceRedactionService {
     ///
     /// Runs in three phases so a pooled connection is never held across the slow
     /// work: the pre-flight reads, then the analysis load, inference, and object
-    /// staging with no connection held, then the commit. Every failure after
-    /// staging reclaims the staged objects.
+    /// staging with no connection held, then the commit. A failure after staging
+    /// tries to delete the staged objects; if that deletion fails too, the object
+    /// is logged and left in storage with no blob row, so it needs a manual sweep.
     ///
     /// # Errors
     ///
