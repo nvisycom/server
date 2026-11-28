@@ -207,9 +207,9 @@ impl ConnectionSyncWorker {
     }
 
     /// Runs one scheduled sync job: loads the connection, opens a `Scheduled`
-    /// run, and performs the sync in its scheduled direction. A failed run is
-    /// redelivered with a linear backoff until the stream's attempts run out;
-    /// everything else is acked.
+    /// run, and performs the sync in its scheduled direction. A failed run, or a
+    /// transient failure before it opens, is redelivered with a linear backoff
+    /// until the stream's attempts run out; everything else is acked.
     async fn run_job(&self, job: ConnectionSyncJob, delivery: Delivery) -> Settle {
         let attempt = i32::try_from(delivery.attempt).unwrap_or(i32::MAX);
         let connection = match self.load_connection(&job).await {
@@ -220,7 +220,7 @@ impl ConnectionSyncWorker {
             }
             Err(err) => {
                 tracing::error!(target: TRACING_TARGET, connection_id = %job.connection_id, error = %err, "Failed to load scheduled connection");
-                return Settle::Ack;
+                return retry(delivery);
             }
         };
 
@@ -241,7 +241,7 @@ impl ConnectionSyncWorker {
             Ok(_) => {}
             Err(err) => {
                 tracing::error!(target: TRACING_TARGET, connection_id = %connection.id, error = %err, "Failed to check in-progress run");
-                return Settle::Ack;
+                return retry(delivery);
             }
         }
 
@@ -252,11 +252,16 @@ impl ConnectionSyncWorker {
             // cleared after enqueue); drop the job quietly.
             Ok(None) => return Settle::Ack,
             // A lost race on the one-active-run index is benign and expected
-            // (at-least-once delivery); anything else — a decrypt failure or a
-            // mis-scheduled non-sync connection — is a real fault worth surfacing.
+            // (at-least-once delivery). A transient failure (an exhausted pool, a
+            // lost connection) is retried; anything else — a decrypt failure or a mis-scheduled
+            // non-sync connection — is a real fault that a retry cannot fix.
             Err(err) if err.kind() == ErrorKind::Conflict => {
                 tracing::debug!(target: TRACING_TARGET, connection_id = %connection_id, "Skipping scheduled run: already active");
                 return Settle::Ack;
+            }
+            Err(err) if err.kind() == ErrorKind::ServiceUnavailable => {
+                tracing::warn!(target: TRACING_TARGET, connection_id = %connection_id, error = %err, "Failed to open scheduled run; retrying");
+                return retry(delivery);
             }
             Err(err) => {
                 tracing::warn!(target: TRACING_TARGET, connection_id = %connection_id, error = %err, "Failed to open scheduled run");
@@ -269,9 +274,9 @@ impl ConnectionSyncWorker {
         let run_id = request.run_id;
         self.sync.run_transfer(request).await;
 
-        if !delivery.is_final && self.run_failed(run_id).await {
-            tracing::info!(target: TRACING_TARGET, %connection_id, attempt, "Scheduled sync failed; redelivering");
-            return Settle::RetryAfter(RETRY_BACKOFF * u32::try_from(attempt).unwrap_or(1));
+        if self.run_failed(run_id).await {
+            tracing::info!(target: TRACING_TARGET, %connection_id, attempt, "Scheduled sync failed");
+            return retry(delivery);
         }
         Settle::Ack
     }
@@ -386,4 +391,14 @@ impl ConnectionSyncWorker {
             kind,
         }))
     }
+}
+
+/// Redelivers a job after a linear backoff, or acks it on its final attempt (a
+/// retry would be dropped by the stream anyway).
+fn retry(delivery: Delivery) -> Settle {
+    if delivery.is_final {
+        return Settle::Ack;
+    }
+    let attempt = u32::try_from(delivery.attempt).unwrap_or(u32::MAX);
+    Settle::RetryAfter(RETRY_BACKOFF.saturating_mul(attempt))
 }

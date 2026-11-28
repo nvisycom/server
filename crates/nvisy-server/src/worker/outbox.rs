@@ -221,6 +221,9 @@ impl<H: OutboxHandler> OutboxDrainer<H> {
                 Ok::<_, Error>((pass, done))
             })
             .await?;
+        // The hook may take its own pooled connection (webhook and notification
+        // emitters), so return this one first.
+        drop(conn);
 
         self.handler.after_commit(done).await;
         Ok(pass)

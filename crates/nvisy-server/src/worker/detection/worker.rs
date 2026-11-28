@@ -119,10 +119,11 @@ impl DetectionWorker {
     /// Runs one detection job: claims the detection, analyzes, and records the
     /// result.
     ///
-    /// Returns [`Settle::Retry`] when the job should be redelivered (a
-    /// transient error before the detection was claimed), and [`Settle::Ack`]
-    /// when it reached a terminal outcome or is safe to drop (missing detection,
-    /// already claimed, already settled).
+    /// Returns [`Settle::Retry`] on a transient error before the detection was
+    /// claimed, [`Settle::RetryAfter`] the claim lease when a failure after the
+    /// claim could not be recorded (so the redelivery can reclaim it), and
+    /// [`Settle::Ack`] when it reached a terminal outcome or is safe to drop
+    /// (missing detection, already claimed, already settled).
     #[tracing::instrument(skip_all, fields(detection_id = %job.detection_id, workspace_id = %job.workspace_id))]
     async fn run_job(&self, job: DetectionJob) -> Settle {
         let mut conn = match self.infra.postgres.get_connection().await {
@@ -195,10 +196,11 @@ impl DetectionWorker {
                 Ok(conn) => conn,
                 Err(err) => {
                     // No connection to persist the failure: the detection stays
-                    // `Executing` with no queued job, so redeliver to drive it to a
-                    // terminal state on a later attempt.
+                    // `Executing` with no queued job, so redeliver once this
+                    // attempt's claim lease lapses, when a later attempt can
+                    // reclaim it and drive it to a terminal state.
                     tracing::error!(target: TRACING_TARGET, error = %err, "Failed to get connection to fail detection");
-                    return Settle::Retry;
+                    return Settle::RetryAfter(DETECTION_LEASE);
                 }
             };
             let outcome = fail_detection(
@@ -215,11 +217,11 @@ impl DetectionWorker {
             )
             .await;
             // If the failure state could not be persisted, the detection is left
-            // `Executing` with no queued job to reclaim its lease: redeliver so a
-            // later attempt drives it to a terminal state rather than ack'ing a
-            // detection that will hang.
+            // `Executing` with no queued job to reclaim its lease: redeliver once
+            // the lease lapses (an earlier redelivery would find it still claimed
+            // and ack), so a later attempt drives it to a terminal state.
             if outcome == FailOutcome::PersistFailed {
-                return Settle::Retry;
+                return Settle::RetryAfter(DETECTION_LEASE);
             }
         }
         Settle::Ack

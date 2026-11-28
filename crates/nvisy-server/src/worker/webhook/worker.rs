@@ -24,6 +24,10 @@ use crate::{Error, Result};
 /// Tracing target for webhook worker operations.
 const TRACING_TARGET: &str = "nvisy_server::worker::webhook";
 
+/// Base backoff before a failed delivery is redelivered; attempt `n` waits `n`
+/// times this.
+const RETRY_BACKOFF: Duration = Duration::from_secs(90);
+
 /// Default timeout for a single webhook delivery attempt.
 const DEFAULT_DELIVERY_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -171,7 +175,13 @@ impl WebhookDeliveryWorker {
             }
         };
 
-        if ack { Settle::Ack } else { Settle::Retry }
+        if ack {
+            return Settle::Ack;
+        }
+        // A linear backoff spaces the attempts, so a briefly unavailable endpoint
+        // is not tried again at once.
+        let attempt = u32::try_from(delivery.attempt).unwrap_or(u32::MAX);
+        Settle::RetryAfter(RETRY_BACKOFF.saturating_mul(attempt))
     }
 
     /// Attempts to deliver a webhook job, returning how the job should be

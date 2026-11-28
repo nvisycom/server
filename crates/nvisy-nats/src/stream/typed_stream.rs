@@ -1,6 +1,7 @@
 //! Type-safe wrappers over a `JetStream` pull consumer's messages.
 //!
-//! [`TypedMessageStream`] deserializes a consumer's messages into `T`;
+//! [`TypedMessageStream`] pulls a consumer's messages one at a time, decoded into
+//! `T`;
 //! [`TypedMessage`] pairs a decoded value with its ack handle.
 
 use std::marker::PhantomData;
@@ -10,18 +11,25 @@ use async_nats::jetstream::consumer::{self, Consumer};
 use async_nats::jetstream::{self, Message};
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
+use tokio::time::Instant;
 
 use crate::{Error, Result, TRACING_TARGET_STREAM};
 
-/// Type-safe message stream wrapper.
+/// The shortest pull worth sending; a shorter remaining wait ends the pull.
+const MIN_PULL_WAIT: Duration = Duration::from_millis(50);
+
+/// Extra time past a pull's expiry before the client stops waiting on a server
+/// that has not answered.
+const PULL_GRACE: Duration = Duration::from_secs(1);
+
+/// Type-safe pull over a `JetStream` consumer.
 ///
-/// Holds a single long-lived pull-consumer message stream and polls it
-/// repeatedly. The stream is opened lazily on the first [`next`](Self::next) and
-/// then reused, so messages already fetched into its buffer are not dropped
-/// between calls.
+/// Each [`next`](Self::next) issues a pull request for exactly one message, so
+/// the server delivers a message only when the caller is ready to handle it.
+/// Nothing is prefetched into a client-side buffer, where its ack lease would
+/// run (and its delivery count go stale) while it waited for a handler.
 pub struct TypedMessageStream<T> {
     consumer: Consumer<consumer::pull::Config>,
-    messages: Option<consumer::pull::Stream>,
     _marker: PhantomData<T>,
 }
 
@@ -30,7 +38,6 @@ impl<T> TypedMessageStream<T> {
     pub(super) fn new(consumer: Consumer<consumer::pull::Config>) -> Self {
         Self {
             consumer,
-            messages: None,
             _marker: PhantomData,
         }
     }
@@ -40,95 +47,77 @@ impl<T> TypedMessageStream<T>
 where
     T: DeserializeOwned + Send + 'static,
 {
-    /// Fetch the next message from the stream with timeout.
+    /// Pulls the next message, waiting up to `wait` for one to arrive.
+    ///
+    /// The wait is the pull request's server-side expiry, so a request the
+    /// server still holds never outlives the caller's interest in it. A payload
+    /// that cannot be deserialized is terminated (so the server stops
+    /// redelivering it) and the pull continues within the same wait; a failure
+    /// to terminate it is only logged.
     ///
     /// # Errors
     ///
-    /// - `Operation` propagated from [`next`](Self::next) (opening the consumer
-    ///   stream or receiving a message failed). Exhausting `timeout` is not an
-    ///   error; it returns `Ok(None)`.
-    pub async fn next_with_timeout(
-        &mut self,
-        timeout: Duration,
-    ) -> Result<Option<TypedMessage<T>>> {
-        let result = tokio::time::timeout(timeout, self.next()).await;
-        match result {
-            Ok(msg_result) => msg_result,
-            Err(_) => Ok(None), // Timeout occurred
-        }
-    }
+    /// - `Operation` if the pull request cannot be sent or receiving the message
+    ///   fails. No message within `wait` is not an error; it returns `Ok(None)`.
+    pub async fn next(&self, wait: Duration) -> Result<Option<TypedMessage<T>>> {
+        let deadline = Instant::now() + wait;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining < MIN_PULL_WAIT {
+                return Ok(None);
+            }
 
-    /// Fetch the next message from the persistent message stream.
-    ///
-    /// # Errors
-    ///
-    /// - `Operation` if the consumer message stream cannot be opened on first
-    ///   use, or if receiving a message from the server fails. A payload that
-    ///   cannot be deserialized is skipped rather than surfaced as an error: it is
-    ///   terminated (so the server stops redelivering it), but if that
-    ///   termination acknowledgment itself fails the failure is only logged and
-    ///   the server may redeliver the message. The stream ending returns
-    ///   `Ok(None)`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the message stream, just set to `Some` on first use, is `None` —
-    /// an unreachable invariant violation.
-    pub async fn next(&mut self) -> Result<Option<TypedMessage<T>>> {
-        // Open the message stream once and reuse it across calls; recreating it
-        // each call would drop any already-fetched-but-unpolled messages.
-        if self.messages.is_none() {
-            let messages = self
+            let mut batch = self
                 .consumer
+                .batch()
+                .max_messages(1)
+                .expires(remaining)
                 .messages()
                 .await
-                .map_err(|e| Error::operation("messages_stream", e.to_string()))?;
-            self.messages = Some(messages);
-        }
-        let messages = self.messages.as_mut().expect("message stream initialized");
+                .map_err(|e| Error::operation("pull_request", e.to_string()))?;
+            // The server ends the batch when the request expires; the client-side
+            // bound only guards against a server that never answers.
+            let pulled = tokio::time::timeout(remaining + PULL_GRACE, batch.next())
+                .await
+                .ok()
+                .flatten();
 
-        // Skip over poison messages (payloads that cannot be deserialized) by
-        // terminating them, so a single bad message does not stall the consumer.
-        loop {
-            match messages.next().await {
-                Some(Ok(message)) => match serde_json::from_slice::<T>(&message.payload) {
-                    Ok(payload) => {
-                        tracing::debug!(
-                            target: TRACING_TARGET_STREAM,
-                            subject = %message.subject,
-                            "Received typed message"
-                        );
-                        return Ok(Some(TypedMessage { payload, message }));
-                    }
-                    Err(err) => {
-                        // A payload that cannot be deserialized will never succeed,
-                        // so terminate it (drop permanently) rather than leaving it
-                        // un-acked to be redelivered until the stream ages it out.
-                        tracing::error!(
-                            target: TRACING_TARGET_STREAM,
-                            subject = %message.subject,
-                            error = %err,
-                            "Terminating undeserializable message"
-                        );
-                        if let Err(ack_err) = message.ack_with(jetstream::AckKind::Term).await {
-                            tracing::warn!(
-                                target: TRACING_TARGET_STREAM,
-                                error = %ack_err,
-                                "Failed to terminate undeserializable message"
-                            );
-                        }
-                        // Continue to the next message.
-                    }
-                },
+            let message = match pulled {
+                Some(Ok(message)) => message,
                 Some(Err(e)) => {
-                    tracing::warn!(
-                        target: TRACING_TARGET_STREAM,
-                        error = %e,
-                        "Error receiving message"
-                    );
+                    tracing::warn!(target: TRACING_TARGET_STREAM, error = %e, "Error receiving message");
                     return Err(Error::operation("message_receive", e.to_string()));
                 }
                 None => return Ok(None),
+            };
+
+            match serde_json::from_slice::<T>(&message.payload) {
+                Ok(payload) => {
+                    tracing::debug!(
+                        target: TRACING_TARGET_STREAM,
+                        subject = %message.subject,
+                        "Received typed message"
+                    );
+                    return Ok(Some(TypedMessage { payload, message }));
+                }
+                Err(err) => {
+                    // A payload that cannot be deserialized will never succeed, so
+                    // terminate it rather than leave it to be redelivered until the
+                    // stream ages it out.
+                    tracing::error!(
+                        target: TRACING_TARGET_STREAM,
+                        subject = %message.subject,
+                        error = %err,
+                        "Terminating undeserializable message"
+                    );
+                    if let Err(ack_err) = message.ack_with(jetstream::AckKind::Term).await {
+                        tracing::warn!(
+                            target: TRACING_TARGET_STREAM,
+                            error = %ack_err,
+                            "Failed to terminate undeserializable message"
+                        );
+                    }
+                }
             }
         }
     }

@@ -35,6 +35,9 @@ const MAX_SOURCE_DIMENSION: u32 = 4096;
 /// Longest side of the stored avatar; larger images are scaled down to fit.
 const TARGET_DIMENSION: u32 = 512;
 
+/// Tracing target for avatar operations.
+const TRACING_TARGET: &str = "nvisy_server::service::avatar";
+
 /// Whose avatar: an account's or a workspace's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AvatarOwner {
@@ -154,8 +157,9 @@ impl AvatarService {
     /// The stored object is keyed by `(owner, content hash)` and the URL embeds
     /// the same hash, so a versioned URL maps to immutable bytes. The new object
     /// is written and the URL updated before the previous version is deleted, so
-    /// a reader never sees a missing avatar; a crash between the update and the
-    /// delete can leave the previous object orphaned (see #192).
+    /// a reader never sees a missing avatar. If the URL update fails, the new
+    /// object is removed again; removing the previous version is best-effort, so
+    /// a failure (or a crash before it) can leave that object orphaned (see #192).
     ///
     /// # Errors
     ///
@@ -163,24 +167,54 @@ impl AvatarService {
     ///   image, or exceeds the source-dimension cap.
     /// - `InternalServerError` if avatar processing fails (the blocking
     ///   decode/resize task, or WebP re-encoding).
-    /// - A storage error if writing or deleting the avatar object fails.
+    /// - A storage error if writing the avatar object fails.
     /// - A database error if reading or updating the owner fails.
     pub async fn set(&self, owner: AvatarOwner, upload: Bytes) -> Result<()> {
         let webp = process_avatar(upload).await?;
         let version = content_version(&webp);
         owner.put(&self.infra.blobs, &version, webp).await?;
 
-        let mut conn = self.infra.postgres.get_connection().await?;
-        let previous = owner.current_version(&mut conn).await?;
-        owner.set_url(&mut conn, Some(owner.url(&version))).await?;
-        drop(conn);
+        let previous = match self.point_at(owner, &version).await {
+            Ok(previous) => previous,
+            Err(err) => {
+                // The URL still names the previous version, so the object just
+                // written is unreferenced, unless it is that same version.
+                if self.current_version(owner).await.ok().flatten().as_deref() != Some(&version) {
+                    self.discard(owner, &version).await;
+                }
+                return Err(err);
+            }
+        };
 
         if let Some(previous) = previous
             && previous != version
         {
-            owner.delete(&self.infra.blobs, &previous).await?;
+            self.discard(owner, &previous).await;
         }
         Ok(())
+    }
+
+    /// Points the owner's `avatar_url` at `version`, returning the version it
+    /// named before.
+    async fn point_at(&self, owner: AvatarOwner, version: &str) -> Result<Option<String>> {
+        let mut conn = self.infra.postgres.get_connection().await?;
+        let previous = owner.current_version(&mut conn).await?;
+        owner.set_url(&mut conn, Some(owner.url(version))).await?;
+        Ok(previous)
+    }
+
+    /// The version the owner's `avatar_url` currently names.
+    async fn current_version(&self, owner: AvatarOwner) -> Result<Option<String>> {
+        let mut conn = self.infra.postgres.get_connection().await?;
+        owner.current_version(&mut conn).await
+    }
+
+    /// Removes an avatar object no URL references, best-effort: a failure only
+    /// leaves the object orphaned, so it is logged rather than returned.
+    async fn discard(&self, owner: AvatarOwner, version: &str) {
+        if let Err(err) = owner.delete(&self.infra.blobs, version).await {
+            tracing::warn!(target: TRACING_TARGET, ?owner, version, error = %err, "Failed to remove an unreferenced avatar object");
+        }
     }
 
     /// Reads one version of an avatar, or `None` if absent. Avatars are small
@@ -193,18 +227,23 @@ impl AvatarService {
         owner.get(&self.infra.blobs, version).await
     }
 
-    /// Removes the owner's current avatar object and clears its `avatar_url`.
+    /// Clears the owner's `avatar_url`, then removes the object it named. The
+    /// URL goes first, so a failure never leaves it naming a missing object;
+    /// removing the object is best-effort.
     ///
     /// # Errors
     ///
-    /// - A storage error if deleting the avatar object fails.
     /// - A database error if reading or updating the owner fails.
     pub async fn delete(&self, owner: AvatarOwner) -> Result<()> {
         let mut conn = self.infra.postgres.get_connection().await?;
-        if let Some(version) = owner.current_version(&mut conn).await? {
-            owner.delete(&self.infra.blobs, &version).await?;
+        let current = owner.current_version(&mut conn).await?;
+        owner.set_url(&mut conn, None).await?;
+        drop(conn);
+
+        if let Some(version) = current {
+            self.discard(owner, &version).await;
         }
-        owner.set_url(&mut conn, None).await
+        Ok(())
     }
 }
 
