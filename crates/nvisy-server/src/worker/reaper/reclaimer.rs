@@ -56,19 +56,27 @@ impl BlobReclaimer {
     ///
     /// # Errors
     ///
-    /// - A database error if the claim query fails. Once the blob is claimed, the
-    ///   object reclaim is folded into the returned [`PurgeOutcome`] (a failed
-    ///   delete yields `Pending`, not an error).
+    /// - A database error if no connection can be checked out, so the sweep
+    ///   stops rather than waiting out the pool for every remaining blob. A
+    ///   failed claim, delete, or mark only affects this blob: it is logged and
+    ///   yields `Pending`.
     pub(super) async fn purge_blob(&self, blob: &ReclaimableBlob) -> Result<PurgeOutcome> {
         // Claim first, in its own committed step: once purged_at is set the blob no
         // longer deduplicates, so deleting its object next cannot strand a live
         // reference even if this process crashes before the delete.
         let mut conn = self.infra.postgres.get_connection().await?;
-        if conn.claim_blob_for_purge(blob.id).await?.is_none() {
+        let claimed = match conn.claim_blob_for_purge(blob.id).await {
+            Ok(claimed) => claimed.is_some(),
+            Err(err) => {
+                tracing::error!(target: TRACING_TARGET, blob_id = %blob.id, error = %err, "Failed to claim blob for purge");
+                return Ok(PurgeOutcome::Pending);
+            }
+        };
+        drop(conn);
+        if !claimed {
             return Ok(PurgeOutcome::Pending);
         }
-        drop(conn);
-        Ok(self.reclaim_claimed_object(blob).await)
+        self.reclaim_claimed_object(blob).await
     }
 
     /// Reclaims the object of a blob already claimed for purge (`purged_at` set),
@@ -76,7 +84,15 @@ impl BlobReclaimer {
     ///
     /// A failed delete leaves `reclaimed_at` NULL so the blob is retried; the blob
     /// is already out of the dedup set, so its bytes are never reused meanwhile.
-    pub(super) async fn reclaim_claimed_object(&self, blob: &ReclaimableBlob) -> PurgeOutcome {
+    ///
+    /// # Errors
+    ///
+    /// - A database error if no connection can be checked out to mark the blob
+    ///   reclaimed. A failed delete or mark is logged and yields `Pending`.
+    pub(super) async fn reclaim_claimed_object(
+        &self,
+        blob: &ReclaimableBlob,
+    ) -> Result<PurgeOutcome> {
         if let Err(err) =
             delete_object(&self.infra.blobs, &blob.storage_bucket, &blob.storage_path).await
         {
@@ -86,25 +102,19 @@ impl BlobReclaimer {
                 error = %err,
                 "Failed to delete claimed blob object; left for the reaper to retry",
             );
-            return PurgeOutcome::Pending;
+            return Ok(PurgeOutcome::Pending);
         }
 
-        if let Err(err) = self.mark_reclaimed(blob).await {
+        let mut conn = self.infra.postgres.get_connection().await?;
+        if let Err(err) = conn.mark_blob_reclaimed(blob.id).await {
             tracing::error!(
                 target: TRACING_TARGET,
                 blob_id = %blob.id,
                 error = %err,
                 "Deleted blob object but failed to mark it reclaimed; will retry",
             );
-            return PurgeOutcome::Pending;
+            return Ok(PurgeOutcome::Pending);
         }
-        PurgeOutcome::Purged
-    }
-
-    /// Stamps `reclaimed_at` on a blob whose object is gone.
-    async fn mark_reclaimed(&self, blob: &ReclaimableBlob) -> Result<()> {
-        let mut conn = self.infra.postgres.get_connection().await?;
-        conn.mark_blob_reclaimed(blob.id).await?;
-        Ok(())
+        Ok(PurgeOutcome::Purged)
     }
 }
