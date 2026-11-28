@@ -153,17 +153,20 @@ fn is_loopback_host(host: Option<&Host<&str>>) -> bool {
     }
 }
 
-/// Resolves a URL's host to its socket addresses, using the explicit port or the
-/// scheme default. The port does not affect address classification; it only
-/// makes the resolver happy.
+/// Resolves a URL's host to the addresses it stands for: a literal IPv4 or IPv6
+/// host is its own address, with no DNS lookup; a domain is resolved, using the
+/// explicit port or the scheme default (the port only satisfies the resolver).
 async fn resolve_host(url: &Url) -> Result<Vec<IpAddr>> {
-    let host = url
-        .host_str()
-        .ok_or_else(|| Error::invalid(format!("endpoint has no host: {url}")))?;
+    let domain = match url.host() {
+        Some(Host::Ipv4(ip)) => return Ok(vec![IpAddr::V4(ip)]),
+        Some(Host::Ipv6(ip)) => return Ok(vec![IpAddr::V6(ip)]),
+        Some(Host::Domain(domain)) => domain,
+        None => return Err(Error::invalid(format!("endpoint has no host: {url}"))),
+    };
     let port = url.port_or_known_default().unwrap_or(443);
-    let addrs = tokio::net::lookup_host((host, port))
+    let addrs = tokio::net::lookup_host((domain, port))
         .await
-        .map_err(|e| Error::connection(format!("could not resolve endpoint host {host}: {e}")))?
+        .map_err(|e| Error::connection(format!("could not resolve endpoint host {domain}: {e}")))?
         .map(|socket| socket.ip())
         .collect();
     Ok(addrs)
@@ -352,6 +355,27 @@ mod tests {
             assert_eq!(err.kind(), ErrorKind::PermissionDenied, "{url}");
         }
         assert!(check_outbound_literal(&Url::parse("http://93.184.216.34/").unwrap()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn literal_hosts_resolve_to_themselves_without_dns() {
+        for (url, ip) in [
+            (
+                "https://[2606:4700:4700::1111]/hook",
+                "2606:4700:4700::1111",
+            ),
+            ("https://93.184.216.34/hook", "93.184.216.34"),
+        ] {
+            let addrs = resolve_host(&Url::parse(url).unwrap()).await.unwrap();
+            assert_eq!(addrs, vec![ip.parse::<IpAddr>().unwrap()], "{url}");
+        }
+        assert!(
+            check_outbound(&Url::parse("https://[2606:4700:4700::1111]/hook").unwrap())
+                .await
+                .is_ok()
+        );
+        let internal = check_outbound(&Url::parse("https://[::1]/hook").unwrap()).await;
+        assert_eq!(internal.unwrap_err().kind(), ErrorKind::PermissionDenied);
     }
 
     #[test]
