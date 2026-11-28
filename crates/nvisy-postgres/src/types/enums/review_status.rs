@@ -23,7 +23,8 @@ db_enum! {
         /// A reviewer requested changes; `submit` returns it to `InReview`.
         ChangesRequested = "changes_requested",
         /// Some, but not all, required approvals are in. Only reachable when the
-        /// workspace requires two or more approvals.
+        /// workspace requires two or more approvals. An approver may already have
+        /// bound the redaction the remaining approvals must endorse.
         PartiallyApproved = "partially_approved",
         /// Signed off: the required approvals are in. When an approver named a
         /// redaction, that redaction is the review's output; otherwise the review

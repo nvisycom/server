@@ -29,8 +29,9 @@ pub struct WorkspaceReview {
     /// The detection the review is currently reviewing, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detection_id: Option<DetectionId>,
-    /// The approved redaction output: set only when the review is approved and an
-    /// approver named a redaction, so an approved review may have none.
+    /// The redaction bound by an approval: the first approver to name one binds
+    /// it, so it may be present on a `partially_approved` review as well as an
+    /// `approved` one, and an approved review may have none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub redaction_id: Option<RedactionId>,
     /// The review's title.

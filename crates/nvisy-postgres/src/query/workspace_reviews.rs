@@ -179,8 +179,10 @@ pub trait WorkspaceReviewRepository {
 
     /// Stamps `actor`'s approval on their assignee row (idempotent per reviewer) and
     /// advances the status: once the count of approved assignees reaches
-    /// `required_approvals` the review becomes `approved` (and `redaction_id` is set
-    /// when `output` is given), otherwise `partially_approved`. Records an `approved`
+    /// `required_approvals` the review becomes `approved`, otherwise
+    /// `partially_approved`. A given `output` binds `redaction_id` on either
+    /// outcome, and once bound a later approval naming a different redaction is
+    /// rejected (`rebind_rejected`). Records an `approved`
     /// event on a new approval. Locks the review first. The caller must already be an
     /// assignee (the domain layer enforces this); an un-assigned actor stamps nothing
     /// and the [`ApprovalOutcome`] reports `recorded = false` with the unchanged count.

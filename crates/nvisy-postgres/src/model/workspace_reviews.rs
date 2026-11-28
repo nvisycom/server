@@ -31,7 +31,7 @@ pub struct WorkspaceReview {
     pub document_id: Uuid,
     /// The detection currently under review; `None` before one is linked.
     pub detection_id: Option<Uuid>,
-    /// The approved redaction output; `None` until the review is approved.
+    /// The redaction bound by an approval; `None` until an approver names one.
     pub redaction_id: Option<Uuid>,
     /// Account that opened the review.
     pub author_account_id: Uuid,
@@ -95,6 +95,6 @@ pub struct UpdateWorkspaceReview {
     pub review_status: Option<ReviewStatus>,
     /// The detection under review; outer `None` leaves it, inner `None` clears it.
     pub detection_id: Option<Option<Uuid>>,
-    /// The approved redaction; outer `None` leaves it, inner `None` clears it.
+    /// The bound redaction; outer `None` leaves it, inner `None` clears it.
     pub redaction_id: Option<Option<Uuid>>,
 }
