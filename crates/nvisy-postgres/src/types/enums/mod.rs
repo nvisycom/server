@@ -84,15 +84,8 @@ macro_rules! db_enum {
         $(#[doc = $enum_doc])*
         #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
         #[cfg_attr(feature = "schema", derive(::schemars::JsonSchema))]
-        #[derive(
-            ::serde::Serialize,
-            ::serde::Deserialize,
-            ::diesel_derive_enum::DbEnum,
-            ::strum::Display,
-            ::strum::EnumIter,
-            ::strum::EnumString,
-            ::strum::IntoStaticStr,
-        )]
+        #[derive(::serde::Serialize, ::serde::Deserialize, ::diesel_derive_enum::DbEnum)]
+        #[derive(::strum::Display, ::strum::EnumIter, ::strum::EnumString, ::strum::IntoStaticStr)]
         #[ExistingTypePath = $sql_ty]
         $vis enum $name {
             $(

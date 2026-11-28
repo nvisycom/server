@@ -25,7 +25,7 @@ pub trait ObjectKey: fmt::Display + FromStr<Err = Error> + Clone + Send + Sync +
 
 /// Builds a key-parse error from any displayable cause.
 pub(super) fn parse_error(message: impl std::fmt::Display) -> Error {
-    Error::operation_msg("parse_key", message.to_string())
+    Error::InvalidKey(message.to_string())
 }
 
 /// Strips a key type's prefix, erroring if it is absent.

@@ -5,12 +5,10 @@
 //! can be exercised against a real database without any external setup. Gated on
 //! the `test_util` feature, so it never ships in a default build.
 
-use std::sync::OnceLock;
-
+use nvisy_core::test_util::boot_permit;
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
-use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::client::PgClientMigrationExt;
@@ -24,30 +22,6 @@ use crate::query::{
 };
 use crate::types::WorkspaceRole;
 use crate::{PgClient, PgConfig};
-
-/// Caps how many Postgres containers may boot at once, across the whole test
-/// binary.
-///
-/// Each test spins up its own container for isolation, but the readiness probe
-/// inside `start()` is startup-sensitive: booting all of them at once stresses
-/// the Docker daemon enough that some probes time out and the test flakes. This
-/// semaphore serializes the boot (only the boot — the container runs and the test
-/// executes fully in parallel once it is up), so there is never a boot storm.
-///
-/// The permit count defaults to 1 (fully serialized boots, deterministic on any
-/// runner) and can be raised with the `NVISY_TEST_BOOT_CONCURRENCY` environment
-/// variable to trade determinism for faster startup on a capable machine.
-fn boot_semaphore() -> &'static Semaphore {
-    static BOOT: OnceLock<Semaphore> = OnceLock::new();
-    BOOT.get_or_init(|| {
-        let permits = std::env::var("NVISY_TEST_BOOT_CONCURRENCY")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .filter(|&n| n >= 1)
-            .unwrap_or(1);
-        Semaphore::new(permits)
-    })
-}
 
 /// A running Postgres container paired with a migrated [`PgClient`].
 ///
@@ -73,14 +47,11 @@ impl TestDatabase {
     /// Panics if the container cannot start, the client cannot connect, or the
     /// migrations fail — a test cannot proceed without a working database.
     pub async fn start() -> Self {
-        // Serialize the boot (and the readiness probe inside `start()`) so many
-        // tests do not overwhelm the Docker daemon at once; the permit is released
-        // as soon as the container is up, so tests still run in parallel from there.
-        let (container, port) = {
-            let _permit = boot_semaphore()
-                .acquire()
-                .await
-                .expect("boot semaphore is never closed");
+        // Serialize the boot, readiness probe, and first connect so many tests do
+        // not overwhelm the Docker daemon at once; the permit is released once the
+        // database is usable, so tests still run in parallel from there.
+        let (container, client) = {
+            let _permit = boot_permit().await;
             let container = Postgres::default()
                 .with_tag("18-alpine")
                 .start()
@@ -90,13 +61,12 @@ impl TestDatabase {
                 .get_host_port_ipv4(5432)
                 .await
                 .expect("failed to resolve container port");
-            (container, port)
+            let url = format!("postgresql://postgres:postgres@127.0.0.1:{port}/postgres");
+            let client = PgClient::new_with_test(PgConfig::new(url))
+                .await
+                .expect("failed to connect to the test database");
+            (container, client)
         };
-        let url = format!("postgresql://postgres:postgres@127.0.0.1:{port}/postgres");
-
-        let client = PgClient::new_with_test(PgConfig::new(url))
-            .await
-            .expect("failed to connect to the test database");
         client
             .run_pending_migrations()
             .await

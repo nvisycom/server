@@ -20,6 +20,7 @@
 //! [`create_connection`]: super::connections
 
 use std::str::FromStr;
+use std::time::Duration;
 
 use aide::axum::ApiRouter;
 use aide::axum::routing::post_with;
@@ -30,19 +31,16 @@ use axum::routing::get;
 use nvisy_file_service::FileService;
 use nvisy_file_service::provider::{ConnectionSettings, FileServiceConfig, FileServiceProvider};
 use nvisy_nats::NatsClient;
-use nvisy_nats::kv::{OAuthStateBucket as OAuthStateKvBucket, OAuthStateKey};
-use nvisy_postgres::model::NewWorkspaceConnection;
-use nvisy_postgres::query::WorkspaceConnectionRepository;
-use nvisy_postgres::{AsyncConnection, PgClient};
+use nvisy_nats::kv::TokenKey;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::WorkspaceConnectionService;
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{OAuthCallbackQuery, OAuthStartPathParams, StartFileServiceOAuth};
 use crate::handler::response::AuthorizeRedirect;
-use crate::response::{Error, ErrorKind, Result, connection_result_redirect};
-use crate::service::event::EventEmitter;
-use crate::service::{ConnectionConfig, CryptoService, FileServiceRedirect, ServiceState, event};
+use crate::response::{ErrorKind, Result, connection_result_redirect};
+use crate::service::{FileServiceRedirect, ServiceState, event};
 
 /// Tracing target for connection OAuth operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::connection_oauth";
@@ -50,7 +48,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::connection_oauth";
 /// The stashed state of an in-flight OAuth authorization, held between `start`
 /// and `callback` in the [`OAuthStateBucket`]. Keyed by the CSRF state token.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct OAuthFlowState {
+pub(crate) struct OAuthFlowState {
     /// Workspace the connection will be created in.
     workspace_id: Uuid,
     /// The workspace's handle, carried so the post-auth redirect can substitute a
@@ -68,10 +66,17 @@ struct OAuthFlowState {
     pkce_verifier: String,
 }
 
-/// The OAuth-state bucket pinned to this server's flow-state value. The bucket's
-/// static config (name, TTL, key) lives in the NATS layer; this alias fixes the
-/// value type once so call sites need only name the bucket.
-type OAuthStateBucket = OAuthStateKvBucket<OAuthFlowState>;
+nvisy_nats::kv_bucket! {
+    /// In-flight OAuth authorization state (CSRF token and PKCE verifier), held
+    /// between starting an authorization and its callback, keyed by the state
+    /// token the provider echoes back. Short-lived: a user finishes the consent
+    /// screen within minutes, and an abandoned flow's state should not linger.
+    pub(crate) OAuthStateBucket: OAuthFlowState {
+        name: "oauth_state",
+        description: "In-flight OAuth authorization state",
+        ttl: Duration::from_mins(10),
+    }
+}
 
 /// The result of a completed OAuth callback: the connection that was created and
 /// the workspace it belongs to (used to build the post-auth redirect).
@@ -97,7 +102,7 @@ async fn start_oauth(
     tracing::debug!(target: TRACING_TARGET, "Starting cloud file OAuth");
 
     let provider = path_params.provider;
-    let authorization = cloud.oauth_client(provider)?.begin_authorization()?;
+    let authorization = cloud.oauth_client(provider)?.begin_authorization();
 
     let flow = OAuthFlowState {
         workspace_id: authz.workspace.id,
@@ -110,7 +115,7 @@ async fn start_oauth(
     };
     let store = nats.kv_store::<OAuthStateBucket>().await?;
     store
-        .put(&authorization.csrf_state.parse::<OAuthStateKey>()?, &flow)
+        .put(&authorization.csrf_state.parse::<TokenKey>()?, &flow)
         .await?;
 
     Ok(Json(AuthorizeRedirect {
@@ -132,9 +137,8 @@ fn start_oauth_docs(op: TransformOperation) -> TransformOperation {
 /// here with the code and state.
 #[tracing::instrument(skip_all)]
 async fn oauth_callback(
-    State(pg_client): State<PgClient>,
+    State(connections): State<WorkspaceConnectionService>,
     State(nats): State<NatsClient>,
-    State(crypto): State<CryptoService>,
     State(cloud): State<FileService>,
     State(redirect): State<FileServiceRedirect>,
     security: SecurityContext,
@@ -144,7 +148,7 @@ async fn oauth_callback(
 
     // The callback is a top-level browser navigation, so its outcome is conveyed
     // by a redirect back to the frontend rather than a response body.
-    let outcome = complete_callback(&pg_client, &nats, &crypto, &cloud, &security, query).await;
+    let outcome = complete_callback(&connections, &nats, &cloud, &security, query).await;
     let (status, workspace_handle) = match outcome {
         Ok(outcome) => {
             tracing::info!(
@@ -166,16 +170,15 @@ async fn oauth_callback(
 /// code, and create the connection. Returns the new connection id and the
 /// workspace handle (for the post-auth redirect) on success.
 async fn complete_callback(
-    pg_client: &PgClient,
+    connections: &WorkspaceConnectionService,
     nats: &NatsClient,
-    crypto: &CryptoService,
     cloud: &FileService,
     security: &SecurityContext,
     query: OAuthCallbackQuery,
 ) -> Result<CallbackOutcome> {
     // Validate the state before touching the store so a malformed value maps to
     // a clean BadRequest rather than a KV error.
-    let key = OAuthStateKey::from_str(&query.state)
+    let key = TokenKey::from_str(&query.state)
         .map_err(|_| ErrorKind::BadRequest.with_message("Invalid authorization state"))?;
 
     // Consume the pending authorization atomically, so of two concurrent
@@ -207,45 +210,17 @@ async fn complete_callback(
         tokens,
         root: flow.root,
     };
-    let config = ConnectionConfig::FileService(FileServiceConfig::new(flow.provider, settings));
-    let provider = config.provider_id().to_owned();
-    let connection_type = config.connection_type();
-    let encrypted_data = crypto.encrypt_json(flow.workspace_id, &config)?;
-
-    let new_connection = NewWorkspaceConnection {
+    let origin = event::EventOrigin {
         workspace_id: flow.workspace_id,
         account_id: flow.account_id,
-        display_name: flow.display_name,
-        provider,
-        connection_type,
-        encrypted_data,
-        is_active: Some(true),
-        metadata: None,
+        security,
     };
-
-    // Insert the connection and the outbox event atomically. A file service is
-    // request-time only — its import is picker-driven and its export per file,
-    // neither scheduled — so it gets no schedule row (scheduling is an
-    // object-store concept). Transfer capability comes from its provider_type.
-    // The requester's security context comes from the callback request itself.
-    let mut conn = pg_client.get_connection().await?;
-    let connection_id = conn
-        .transaction(async |conn| {
-            let connection = conn.create_workspace_connection(new_connection).await?;
-            conn.emit_event(
-                event::EventOrigin {
-                    workspace_id: flow.workspace_id,
-                    account_id: flow.account_id,
-                    security,
-                },
-                event::ConnectionCreated {
-                    connection_id: connection.id,
-                    connection_name: connection.display_name.clone(),
-                },
-            )
-            .await?;
-            Ok::<_, Error>(connection.id)
-        })
+    let connection_id = connections
+        .create_authorized(
+            origin,
+            flow.display_name,
+            FileServiceConfig::new(flow.provider, settings),
+        )
         .await?;
 
     Ok(CallbackOutcome {

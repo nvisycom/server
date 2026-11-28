@@ -3,14 +3,14 @@
 //! Holds the connection rules — endpoint-policy validation, sync-schedule
 //! validation and pairing, config encryption, and the config-replacement guard
 //! that a connection's provider is fixed at creation (carrying stored OAuth tokens
-//! onto a replacement config) — in one place, factored out of the handler. The
-//! service owns the crypto service and the endpoint policy. The external-store
-//! actions (verify, picker token) stay in the handler; they load a connection
-//! through [`find`].
-//!
-//! [`find`]: WorkspaceConnectionService::find
+//! onto a replacement config) — in one place, factored out of the handler — plus
+//! the actions that reach a connection's backing store: verifying it, minting a
+//! browser-picker token, and recording a connection authorized through OAuth.
 
 use nvisy_core::net::EndpointPolicy;
+use nvisy_file_service::FileService;
+use nvisy_file_service::oauth::OAuthTokens;
+use nvisy_file_service::provider::FileServiceConfig;
 use nvisy_postgres::model::{NewWorkspaceConnection, WorkspaceConnectionSchedule};
 use nvisy_postgres::query::{
     WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
@@ -22,10 +22,12 @@ use uuid::Uuid;
 
 use crate::domain::config::replace_config;
 use crate::domain::input::{CreateConnectionInput, UpdateConnectionInput};
-use crate::domain::output::FoundConnection;
-use crate::response::{Error, Resource, Result};
+use crate::domain::output::{ConnectionCheck, FoundConnection, PickerToken};
+use crate::response::{Error, ErrorKind, Resource, Result};
 use crate::service::event::EventEmitter;
-use crate::service::{CryptoService, event};
+use crate::service::{
+    ConnectionConfig, CryptoService, ExternalObjectStore, event, persist_refreshed_tokens,
+};
 
 /// Tracing target for connection domain operations.
 const TRACING_TARGET: &str = "nvisy_server::domain::connection";
@@ -33,8 +35,9 @@ const TRACING_TARGET: &str = "nvisy_server::domain::connection";
 /// Creates, reads, updates, and deletes workspace connections.
 ///
 /// Holds the Postgres client (acquiring its own connection per call), the crypto
-/// service (to encrypt and decrypt the connection config), and the endpoint policy
-/// (to validate custom endpoints at write time). Resolved per request from
+/// service (to encrypt and decrypt the connection config), the endpoint policy
+/// (to validate custom endpoints), and the cloud file service (to reach and
+/// refresh file-service connections). Resolved per request from
 /// [`ServiceState`].
 ///
 /// [`ServiceState`]: crate::service::ServiceState
@@ -43,16 +46,23 @@ pub struct WorkspaceConnectionService {
     postgres: PgClient,
     crypto: CryptoService,
     endpoint_policy: EndpointPolicy,
+    files: FileService,
 }
 
 impl WorkspaceConnectionService {
     /// Creates a [`WorkspaceConnectionService`] over its clients.
     #[must_use]
-    pub fn new(postgres: PgClient, crypto: CryptoService, endpoint_policy: EndpointPolicy) -> Self {
+    pub fn new(
+        postgres: PgClient,
+        crypto: CryptoService,
+        endpoint_policy: EndpointPolicy,
+        files: FileService,
+    ) -> Self {
         Self {
             postgres,
             crypto,
             endpoint_policy,
+            files,
         }
     }
 
@@ -320,6 +330,175 @@ impl WorkspaceConnectionService {
 
         tracing::info!(target: TRACING_TARGET, "Connection deleted");
         Ok(())
+    }
+
+    /// Checks a connection against its backing store: an object store must be
+    /// reachable, a file service must accept its credentials (refreshed if
+    /// expired, with the refreshed tokens stored).
+    ///
+    /// The provider I/O runs with no pooled connection held: it reaches external
+    /// services with no total timeout, so holding one could exhaust the pool.
+    /// A failure is a [`ConnectionCheck::Unreachable`] with a safe reason; the
+    /// full error is only logged.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the connection does not exist in the workspace.
+    /// - A crypto or database error if the config cannot be read, or refreshed
+    ///   tokens cannot be stored.
+    pub async fn verify(
+        &self,
+        workspace_id: Uuid,
+        connection_id: ConnectionId,
+    ) -> Result<ConnectionCheck> {
+        let connection = self
+            .find(workspace_id, connection_id)
+            .await?
+            .connection
+            .item;
+        let config: ConnectionConfig = self
+            .crypto
+            .decrypt_json(workspace_id, &connection.encrypted_data)?;
+
+        let checked = match config {
+            ConnectionConfig::ObjectStore(config) => {
+                match ExternalObjectStore::new(self.endpoint_policy)
+                    .connect(&config)
+                    .await
+                {
+                    Ok(client) => client.verify_reachable().await,
+                    Err(err) => Err(err),
+                }
+            }
+            ConnectionConfig::FileService(config) => match self.files.connect(&config).await {
+                Ok(connected) => {
+                    // A refresh during verification produces fresh tokens; store
+                    // them so the renewed credentials are not thrown away.
+                    if let Some(refreshed) = connected.refreshed {
+                        self.store_tokens(workspace_id, connection.id, refreshed.tokens().clone())
+                            .await?;
+                    }
+                    connected.client.verify().await
+                }
+                Err(err) => Err(err),
+            },
+        };
+
+        Ok(match checked {
+            Ok(()) => {
+                tracing::info!(target: TRACING_TARGET, %connection_id, "Connection verified");
+                ConnectionCheck::Reachable
+            }
+            Err(err) => {
+                tracing::warn!(target: TRACING_TARGET, %connection_id, error = %err, "Connection unreachable");
+                ConnectionCheck::Unreachable {
+                    reason: err.kind().reason(),
+                }
+            }
+        })
+    }
+
+    /// Mints a short-lived provider access token for a browser file picker,
+    /// scoped to `resource` when the picker names one (`OneDrive`). A refreshed
+    /// token set is stored; the refresh token never leaves the server.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the connection does not exist in the workspace.
+    /// - `BadRequest` if the connection is inactive, is not a file service, or
+    ///   its provider's picker uses a client-side app key.
+    /// - A provider, crypto, or database error if minting or storing fails.
+    pub async fn picker_token(
+        &self,
+        workspace_id: Uuid,
+        connection_id: ConnectionId,
+        resource: Option<&str>,
+    ) -> Result<PickerToken> {
+        let connection = self
+            .find(workspace_id, connection_id)
+            .await?
+            .connection
+            .item;
+        if !connection.is_active {
+            return Err(ErrorKind::BadRequest.with_message("Connection is not active"));
+        }
+
+        let config: ConnectionConfig = self
+            .crypto
+            .decrypt_json(workspace_id, &connection.encrypted_data)?;
+        let ConnectionConfig::FileService(config) = config else {
+            return Err(ErrorKind::BadRequest
+                .with_message("Picker tokens are only available for file services"));
+        };
+        if !config.provider.picker_needs_user_token() {
+            return Err(ErrorKind::BadRequest.with_message(
+                "This provider's picker uses a client-side app key, not a server token",
+            ));
+        }
+
+        let picker = self.files.mint_picker_token(&config, resource).await?;
+        if let Some(refreshed) = picker.refreshed {
+            self.store_tokens(workspace_id, connection.id, refreshed.tokens().clone())
+                .await?;
+        }
+        Ok(PickerToken {
+            access_token: picker.access_token,
+            expires_at: picker.expires_at,
+        })
+    }
+
+    /// Records a file-service connection whose credentials an OAuth flow just
+    /// obtained, with its created event, in one transaction. A file service is
+    /// request-time only (picker-driven import, per-file export), so it gets no
+    /// schedule.
+    ///
+    /// # Errors
+    ///
+    /// - A crypto error if the config cannot be encrypted.
+    /// - A database error if the insert or the event fails.
+    pub async fn create_authorized(
+        &self,
+        origin: event::EventOrigin<'_>,
+        display_name: String,
+        config: FileServiceConfig,
+    ) -> Result<Uuid> {
+        let config = ConnectionConfig::FileService(config);
+        let new_connection = NewWorkspaceConnection {
+            workspace_id: origin.workspace_id,
+            account_id: origin.account_id,
+            display_name,
+            provider: config.provider_id().to_owned(),
+            connection_type: config.connection_type(),
+            encrypted_data: self.crypto.encrypt_json(origin.workspace_id, &config)?,
+            is_active: Some(true),
+            metadata: None,
+        };
+
+        let mut conn = self.postgres.get_connection().await?;
+        conn.transaction(async |conn| {
+            let connection = conn.create_workspace_connection(new_connection).await?;
+            conn.emit_event(
+                origin,
+                event::ConnectionCreated {
+                    connection_id: connection.id,
+                    connection_name: connection.display_name.clone(),
+                },
+            )
+            .await?;
+            Ok::<_, Error>(connection.id)
+        })
+        .await
+    }
+
+    /// Stores a connection's refreshed OAuth tokens.
+    async fn store_tokens(
+        &self,
+        workspace_id: Uuid,
+        connection_id: Uuid,
+        tokens: OAuthTokens,
+    ) -> Result<()> {
+        let mut conn = self.postgres.get_connection().await?;
+        persist_refreshed_tokens(&mut conn, &self.crypto, workspace_id, connection_id, tokens).await
     }
 }
 

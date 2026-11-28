@@ -1,15 +1,13 @@
 //! The typed LLM connection configuration.
 
 use nvisy_core::Secret;
+use rig::agent::AgentBuilder;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::AssistantClient;
+use super::{AssistantClient, providers};
 use crate::error::Result;
-use crate::provider::{
-    AnthropicProvider, Client, OllamaCredentials, OllamaProvider, OpenAiProvider,
-};
 
 /// Configuration for a provider reached with an API key (`OpenAI`, Anthropic).
 ///
@@ -72,9 +70,9 @@ impl LlmConfig {
     #[must_use]
     pub fn provider_id(&self) -> &'static str {
         match self {
-            Self::OpenAi(_) => OpenAiProvider::ID,
-            Self::Ollama(_) => OllamaProvider::ID,
-            Self::Anthropic(_) => AnthropicProvider::ID,
+            Self::OpenAi(_) => "openai",
+            Self::Ollama(_) => "ollama",
+            Self::Anthropic(_) => "anthropic",
         }
     }
 
@@ -102,35 +100,17 @@ impl LlmConfig {
     /// credentials against the provider.
     ///
     /// Used by the connection test endpoint. Returns `Ok(())` when the provider
-    /// accepts the credentials, or an [`Error`] describing the build or
-    /// verification failure.
+    /// accepts the credentials, or an [`Error`] describing the verification
+    /// failure.
     ///
     /// [`Error`]: crate::Error
     ///
     /// # Errors
     ///
-    /// - A `Build` error if the provider client cannot be constructed from the
-    ///   config.
-    /// - A `Verify` error if the provider rejects the credentials or is
-    ///   unreachable.
+    /// A `Verify` error if the provider rejects the credentials or is
+    /// unreachable.
     pub async fn validate(&self) -> Result<()> {
-        match self {
-            Self::OpenAi(p) => {
-                OpenAiProvider::connect(p.api_key.expose(), p.base_url.as_deref())
-                    .verify()
-                    .await
-            }
-            Self::Ollama(p) => {
-                OllamaProvider::connect(&OllamaCredentials, Some(&p.base_url))
-                    .verify()
-                    .await
-            }
-            Self::Anthropic(p) => {
-                AnthropicProvider::connect(p.api_key.expose(), p.base_url.as_deref())
-                    .verify()
-                    .await
-            }
-        }
+        providers::verify(self).await
     }
 
     /// Builds a ready-to-use [`AssistantClient`] for this config.
@@ -139,25 +119,11 @@ impl LlmConfig {
     /// provider's own default applies.
     ///
     /// [`default_model`]: Self::default_model
-    ///
-    /// # Errors
-    ///
-    /// Returns a `Result` for a stable call-site seam; building a provider client
-    /// from a validated config does not currently fail.
-    pub fn connect(&self, model: Option<&str>) -> Result<AssistantClient> {
+    #[must_use]
+    pub fn connect(&self, model: Option<&str>) -> AssistantClient {
         let model = model.or_else(|| self.default_model()).unwrap_or_default();
-        let client = match self {
-            Self::OpenAi(p) => {
-                OpenAiProvider::connect(p.api_key.expose(), p.base_url.as_deref()).model(model)
-            }
-            Self::Ollama(p) => {
-                OllamaProvider::connect(&OllamaCredentials, Some(&p.base_url)).model(model)
-            }
-            Self::Anthropic(p) => {
-                AnthropicProvider::connect(p.api_key.expose(), p.base_url.as_deref()).model(model)
-            }
-        };
-        Ok(client)
+        let completion = providers::completion_model(self, model);
+        AssistantClient::new(AgentBuilder::new(completion).build())
     }
 }
 
@@ -200,8 +166,8 @@ impl AssistantConfig {
     ///
     /// # Errors
     ///
-    /// Returns an [`Error`] describing the build or verification failure when the
-    /// provider does not accept the credentials.
+    /// Returns an [`Error`] describing the verification failure when the provider
+    /// does not accept the credentials.
     ///
     /// [`Error`]: crate::Error
     pub async fn validate(&self) -> Result<()> {

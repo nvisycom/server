@@ -210,7 +210,7 @@ impl OAuthAppsConfig {
     /// Returns an error if the HTTP client cannot be built (see
     /// [`FileService::new`]).
     pub fn build(self) -> crate::Result<FileService> {
-        FileService::new(self.into_apps())
+        FileService::new(&self.into_apps())
     }
 }
 

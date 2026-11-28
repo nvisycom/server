@@ -17,87 +17,24 @@ impl From<InvalidKvKey> for HttpError {
 }
 
 impl From<nvisy_nats::Error> for HttpError {
-    fn from(nats_error: nvisy_nats::Error) -> Self {
-        match nats_error {
-            // Connection and network errors -> Service Unavailable (transient,
-            // retryable; the messaging backend is momentarily unreachable).
-            nvisy_nats::Error::Connection(_) => ErrorKind::ServiceUnavailable
-                .with_message("Service temporarily unavailable")
-                .with_context("Unable to connect to messaging service"),
-
-            nvisy_nats::Error::Timeout { .. } => ErrorKind::InternalServerError
-                .with_message("Request timed out")
-                .with_context("Operation took too long to complete"),
-
-            nvisy_nats::Error::DeliveryFailed { ref subject, .. } => ErrorKind::InternalServerError
-                .with_message("Message delivery failed")
-                .with_context(format!("Failed to deliver message to {subject}")),
-
-            // Serialization is an internal encode/decode fault, not a client
-            // input error: the caller cannot influence how we frame NATS payloads.
-            nvisy_nats::Error::Serialization(_) => ErrorKind::InternalServerError
-                .with_message("Invalid request or response data format")
-                .with_context("Failed to serialize data for storage"),
-
-            // A bad messaging configuration is a server-side fault, not a client
-            // error.
-            nvisy_nats::Error::InvalidConfig { .. } => ErrorKind::InternalServerError
-                .with_message("Invalid configuration")
-                .with_context("Service configuration is invalid"),
-
-            // Not found errors -> Not Found
-            nvisy_nats::Error::KvKeyNotFound { ref bucket, .. } => ErrorKind::NotFound
-                .with_message("Resource not found")
-                .with_context(format!("Key not found in storage bucket '{bucket}'")),
-
-            nvisy_nats::Error::KvBucketNotFound { .. } => ErrorKind::NotFound
-                .with_message("Storage bucket not found")
-                .with_context("The requested storage bucket does not exist"),
-
-            // Revision conflicts -> Conflict
-            nvisy_nats::Error::KvRevisionMismatch { .. } => ErrorKind::Conflict
-                .with_message("Resource has been modified")
-                .with_context("The resource was modified by another request"),
-
-            // JetStream and streaming errors -> Internal Server Error
-            nvisy_nats::Error::JetstreamPublish(_) => ErrorKind::InternalServerError
-                .with_message("Failed to publish message")
-                .with_context("Unable to publish to JetStream"),
-
-            nvisy_nats::Error::JetstreamMessage(_) => ErrorKind::InternalServerError
-                .with_message("Message processing failed")
-                .with_context("Error processing JetStream message"),
-
-            nvisy_nats::Error::StreamError { .. } => ErrorKind::InternalServerError
-                .with_message("Stream operation failed")
-                .with_context("Error accessing or manipulating stream"),
-
-            nvisy_nats::Error::ConsumerError { .. } => ErrorKind::InternalServerError
-                .with_message("Consumer operation failed")
-                .with_context("Error with message consumer"),
-
-            nvisy_nats::Error::JobQueueError { .. } => ErrorKind::InternalServerError
-                .with_message("Job processing failed")
-                .with_context("Error processing job from queue"),
-
-            // Legacy streaming errors -> Internal Server Error
-            nvisy_nats::Error::Consumer(_) => ErrorKind::InternalServerError
-                .with_message("Consumer error")
-                .with_context("Message consumer encountered an error"),
-
-            nvisy_nats::Error::Stream(_) => ErrorKind::InternalServerError
-                .with_message("Stream error")
-                .with_context("Stream operation encountered an error"),
-
-            nvisy_nats::Error::Ack(_) => ErrorKind::InternalServerError
-                .with_message("Message acknowledgment failed")
-                .with_context("Unable to acknowledge message receipt"),
-
-            // Generic operation error -> Internal Server Error
-            nvisy_nats::Error::Operation { ref operation, .. } => ErrorKind::InternalServerError
-                .with_message(format!("Operation '{operation}' failed"))
-                .with_context("The requested operation could not be completed"),
-        }
+    fn from(error: nvisy_nats::Error) -> Self {
+        let kind = match &error {
+            // The messaging backend is momentarily unreachable or slow:
+            // transient, so a retryable 503.
+            nvisy_nats::Error::Connection(_) | nvisy_nats::Error::Timeout { .. } => {
+                ErrorKind::ServiceUnavailable
+            }
+            // A payload we framed ourselves, or a server-side messaging
+            // operation: never something the caller's request can fix.
+            nvisy_nats::Error::Serialization(_) | nvisy_nats::Error::Operation { .. } => {
+                ErrorKind::InternalServerError
+            }
+        };
+        let message = match kind {
+            ErrorKind::ServiceUnavailable => "Messaging is temporarily unavailable",
+            _ => "Messaging operation failed",
+        };
+        kind.with_message(message).with_context(error.to_string())
     }
 }
 
@@ -108,69 +45,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_connection_error_conversion() {
-        let nats_err = nvisy_nats::Error::timeout(Duration::from_secs(30));
-        let http_err: HttpError = nats_err.into();
-
-        assert_eq!(http_err.kind(), ErrorKind::InternalServerError);
-        assert!(http_err.message.as_deref().unwrap().contains("timed out"));
-    }
-
-    #[test]
-    fn test_serialization_error_conversion() {
-        let json_err = serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
-        let nats_err = nvisy_nats::Error::Serialization(json_err);
-        let http_err: HttpError = nats_err.into();
-
-        assert_eq!(http_err.kind(), ErrorKind::InternalServerError);
-        assert!(
-            http_err
-                .message
-                .as_deref()
-                .unwrap()
-                .contains("Invalid request")
+    fn transient_failures_are_retryable() {
+        let timeout = nvisy_nats::Error::Timeout {
+            operation: "ping",
+            timeout: Duration::from_secs(10),
+        };
+        assert_eq!(
+            HttpError::from(timeout).kind(),
+            ErrorKind::ServiceUnavailable
         );
     }
 
     #[test]
-    fn test_not_found_error_conversion() {
-        let nats_err = nvisy_nats::Error::kv_key_not_found("test_bucket", "missing_key");
-        let http_err: HttpError = nats_err.into();
-
-        assert_eq!(http_err.kind(), ErrorKind::NotFound);
-        assert!(http_err.context.as_deref().unwrap().contains("test_bucket"));
-    }
-
-    #[test]
-    fn test_revision_mismatch_conversion() {
-        let nats_err = nvisy_nats::Error::kv_revision_mismatch("test_key", 5, 7);
-        let http_err: HttpError = nats_err.into();
-
-        assert_eq!(http_err.kind(), ErrorKind::Conflict);
-        assert!(http_err.context.as_deref().unwrap().contains("modified"));
-    }
-
-    #[test]
-    fn test_stream_error_conversion() {
-        let nats_err = nvisy_nats::Error::stream_error("test_stream", "stream not available");
-        let http_err: HttpError = nats_err.into();
-
-        assert_eq!(http_err.kind(), ErrorKind::InternalServerError);
-        assert!(http_err.context.as_deref().unwrap().contains("stream"));
-    }
-
-    #[test]
-    fn test_invalid_config_conversion() {
-        let nats_err = nvisy_nats::Error::invalid_config("missing server URL");
-        let http_err: HttpError = nats_err.into();
-
-        assert_eq!(http_err.kind(), ErrorKind::InternalServerError);
-        assert!(
-            http_err
-                .context
-                .as_deref()
-                .unwrap()
-                .contains("configuration")
-        );
+    fn payload_failures_are_server_faults() {
+        let json = serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
+        let error = HttpError::from(nvisy_nats::Error::Serialization(json));
+        assert_eq!(error.kind(), ErrorKind::InternalServerError);
     }
 }

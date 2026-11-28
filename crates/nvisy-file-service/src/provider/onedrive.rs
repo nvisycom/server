@@ -9,15 +9,10 @@ use nvisy_core::{ByteStream, Error, ErrorKind, FileUpload, Result, Secret};
 use reqwest::header::CONTENT_LENGTH;
 use serde::Deserialize;
 
-use super::{FileServiceConfig, ProviderRequest, encode_path_segment, response_stream};
+use super::session::Session;
+use super::{FileServiceConfig, FileServiceProvider, encode_path_segment, response_stream};
 use crate::client::{FileService, FileServiceClient, PickerAccessToken};
 use crate::oauth::OAuthProvider;
-
-/// Provider identifier stored in the connection's `provider` column.
-///
-/// Must match `FileServiceProvider::OneDrive`'s serde tag (`one_drive`) so the
-/// stored provider column and the serialized config agree.
-pub const PROVIDER_ID: &str = "one_drive";
 
 /// Microsoft identity platform authorize endpoint (multi-tenant + personal).
 const AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
@@ -76,15 +71,18 @@ pub(super) async fn mint_picker_token(
     let fresh = service.ensure_fresh(config).await?;
     let effective = fresh.refreshed.as_ref().unwrap_or(config);
 
-    let host = resolve_sharepoint_host(service.http(), fresh.access_token.expose())
-        .await?
-        .ok_or_else(|| {
-            Error::new(
-                ErrorKind::Invalid,
-                "the OneDrive file picker is available only for work or school \
+    let graph = Session::new(
+        service.http().clone(),
+        fresh.access_token.clone(),
+        FileServiceProvider::OneDrive,
+    );
+    let host = resolve_sharepoint_host(&graph).await?.ok_or_else(|| {
+        Error::new(
+            ErrorKind::Invalid,
+            "the OneDrive file picker is available only for work or school \
                  (OneDrive for Business) accounts, not personal accounts",
-            )
-        })?;
+        )
+    })?;
 
     // The picker names the resource it wants per `authenticate` command; fall back
     // to the account's SharePoint host. A client-supplied resource is untrusted —
@@ -115,7 +113,7 @@ pub(super) async fn mint_picker_token(
 }
 
 /// Resolves the `SharePoint` host that backs a `OneDrive` account's drive, using a
-/// Microsoft Graph access token. Returns `None` for a consumer/personal account,
+/// Microsoft Graph session. Returns `None` for a consumer/personal account,
 /// whose drive is on the legacy consumer `OneDrive` service and has no `SharePoint`
 /// host.
 ///
@@ -128,30 +126,19 @@ pub(super) async fn mint_picker_token(
 /// # Errors
 ///
 /// Returns an error if the Graph request fails or its body cannot be parsed.
-pub(super) async fn resolve_sharepoint_host(
-    http: &reqwest::Client,
-    graph_access_token: &str,
-) -> Result<Option<String>> {
+pub(super) async fn resolve_sharepoint_host(graph: &Session) -> Result<Option<String>> {
     #[derive(Deserialize)]
     struct DriveResponse {
         #[serde(rename = "webUrl")]
         web_url: Option<String>,
     }
 
-    let response = http
-        .get(format!("{API_BASE}/me/drive?$select=webUrl"))
-        .bearer_auth(graph_access_token)
-        .send()
-        .await
-        .map_err(|err| Error::connection("failed to query OneDrive drive").with_source(err))?
-        // Classify by status via the crate's `From<reqwest::Error>`, so 401 maps
-        // to an auth error while a 429 throttle or 5xx outage maps to a transient
-        // kind rather than an auth failure.
-        .error_for_status()
-        .map_err(Error::from)?
+    let response = graph
+        .send(graph.get(format!("{API_BASE}/me/drive?$select=webUrl")))
+        .await?
         .json::<DriveResponse>()
         .await
-        .map_err(|err| Error::connection("invalid OneDrive drive response").with_source(err))?;
+        .map_err(|err| Error::runtime("invalid OneDrive drive response").with_source(err))?;
 
     let host = response.web_url.and_then(|url| {
         let parsed = reqwest::Url::parse(&url).ok()?;
@@ -195,8 +182,7 @@ fn same_sharepoint_tenant(host: &str, resource: &str) -> bool {
 
 /// A connected `OneDrive` client holding a valid access token.
 pub struct OneDriveClient {
-    http: reqwest::Client,
-    access_token: Secret<String>,
+    session: Session,
     /// The drive item id of the folder new exports are created in; `None` is the
     /// drive root.
     root_folder_id: Option<String>,
@@ -210,8 +196,7 @@ impl OneDriveClient {
         root_folder_id: Option<String>,
     ) -> Self {
         Self {
-            http,
-            access_token,
+            session: Session::new(http, access_token, FileServiceProvider::OneDrive),
             root_folder_id,
         }
     }
@@ -220,10 +205,8 @@ impl OneDriveClient {
 #[async_trait::async_trait]
 impl FileServiceClient for OneDriveClient {
     async fn verify(&self) -> Result<()> {
-        self.http
-            .get(format!("{API_BASE}/me/drive"))
-            .bearer_auth(self.access_token.expose())
-            .send_checked(PROVIDER_ID)
+        self.session
+            .send(self.session.get(format!("{API_BASE}/me/drive")))
             .await?;
         Ok(())
     }
@@ -235,10 +218,11 @@ impl FileServiceClient for OneDriveClient {
         // request URL.
         let id = encode_path_segment(id);
         let response = self
-            .http
-            .get(format!("{API_BASE}/me/drive/items/{id}/content"))
-            .bearer_auth(self.access_token.expose())
-            .send_checked(PROVIDER_ID)
+            .session
+            .send(
+                self.session
+                    .get(format!("{API_BASE}/me/drive/items/{id}/content")),
+            )
             .await?;
         Ok(response_stream(response))
     }
@@ -262,13 +246,14 @@ impl FileServiceClient for OneDriveClient {
             }
             None => format!("{API_BASE}/me/drive/root:/{name}:/content"),
         };
-        self.http
-            .put(url)
-            .bearer_auth(self.access_token.expose())
-            .header("Content-Type", content_type)
-            .header(CONTENT_LENGTH, content_length)
-            .body(reqwest::Body::wrap_stream(body))
-            .send_checked(PROVIDER_ID)
+        self.session
+            .send(
+                self.session
+                    .put(url)
+                    .header("Content-Type", content_type)
+                    .header(CONTENT_LENGTH, content_length)
+                    .body(reqwest::Body::wrap_stream(body)),
+            )
             .await?;
         Ok(())
     }

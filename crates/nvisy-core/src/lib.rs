@@ -6,8 +6,13 @@
 mod duration;
 mod error;
 pub mod health;
+#[cfg(feature = "reqwest")]
+#[cfg_attr(docsrs, doc(cfg(feature = "reqwest")))]
+pub mod http;
 pub mod net;
 mod secret;
+#[cfg(feature = "test_util")]
+pub mod test_util;
 mod transfer;
 
 #[cfg(feature = "cli")]

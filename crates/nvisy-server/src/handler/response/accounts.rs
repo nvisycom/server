@@ -57,7 +57,7 @@ impl Account {
 /// Public view of an account, returned when looking up someone other than the
 /// authenticated caller. Carries only the fields safe to share with a
 /// workspace peer; private details (email, account flags) are omitted
-/// and remain available solely through the caller's own `/account/` view.
+/// and remain available solely through the caller's own `/account` view.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]

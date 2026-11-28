@@ -29,28 +29,23 @@ default = []
 # TLS support: enables HTTPS with rustls for secure connections
 tls = ["axum-server"]
 
-# OpenTelemetry support: enables environment-based log filtering
-otel = ["tracing-subscriber/env-filter"]
-
 # Dotenv support: loads environment variables from .env files
 # This allows configuration via .env files in addition to CLI args
 dotenv = ["dep:dotenvy"]
 
 [dependencies]
-# Internal crates. Service configs and their clap wiring come through
-# nvisy-server's `cli` feature; the reqwest webhook client is the binary's own
-# choice of `WebhookService` implementation, so nvisy-webhook is a direct dep.
+# Internal crates
 nvisy-core = { workspace = true, features = ["cli"] }
 nvisy-server = { workspace = true, features = ["cli"] }
 nvisy-webhook = { workspace = true, features = ["reqwest", "cli"] }
 
-# Async runtime
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
-tokio-util = { workspace = true, features = [] }
-
 # CLI
 clap = { workspace = true, features = ["derive", "env"] }
 dotenvy = { workspace = true, features = [], optional = true }
+
+# Async runtime
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+tokio-util = { workspace = true, features = [] }
 
 # HTTP server & middleware
 axum = { workspace = true, features = ["http2", "macros"] }
@@ -59,9 +54,6 @@ axum-server = { workspace = true, features = ["tls-rustls"], optional = true }
 # Observability
 tracing = { workspace = true, features = [] }
 tracing-subscriber = { workspace = true, features = ["fmt", "ansi", "json", "env-filter"] }
-
-# (De)serialization
-serde = { workspace = true, features = ["derive"] }
 
 # Derive macros & utilities
 anyhow = { workspace = true, features = ["backtrace"] }

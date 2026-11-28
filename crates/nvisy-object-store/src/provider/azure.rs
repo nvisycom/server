@@ -1,6 +1,5 @@
 //! Azure Blob Storage provider using [`object_store::azure::MicrosoftAzureBuilder`].
 
-use derive_more::Deref;
 use nvisy_core::net::EndpointPolicy;
 use nvisy_core::{Error, Secret};
 use object_store::azure::{MicrosoftAzureBuilder, split_sas};
@@ -8,7 +7,6 @@ use object_store::azure::{MicrosoftAzureBuilder, split_sas};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::Client;
 use crate::client::ObjectStoreClient;
 
 /// Typed credentials for Azure Blob Storage.
@@ -54,33 +52,26 @@ pub enum AzureAuth {
     },
 }
 
-/// Azure Blob Storage-backed object storage client.
-#[derive(Deref)]
-pub struct AzureProvider(ObjectStoreClient);
-
-impl Client for AzureProvider {
-    type Credentials = AzureCredentials;
-
-    const ID: &str = "azure";
-
-    async fn connect(creds: &Self::Credentials, policy: EndpointPolicy) -> Result<Self, Error> {
+impl AzureCredentials {
+    /// Connects to the store, validating any custom endpoint under `policy`.
+    pub(super) async fn connect(&self, policy: EndpointPolicy) -> Result<ObjectStoreClient, Error> {
         let mut builder = MicrosoftAzureBuilder::new()
-            .with_container_name(&creds.container)
-            .with_account(&creds.account_name);
+            .with_container_name(&self.container)
+            .with_account(&self.account_name);
 
-        builder = match &creds.auth {
+        builder = match &self.auth {
             AzureAuth::AccessKey { access_key } => builder.with_access_key(access_key.expose()),
             AzureAuth::SasToken { sas_token } => {
                 // `split_sas` percent-decodes and validates the token, handling
                 // the edge cases (e.g. `=` inside a value) a naive split would
                 // corrupt.
                 let pairs = split_sas(sas_token.expose())
-                    .map_err(|e| Error::invalid(format!("{}: {e}", Self::ID)))?;
+                    .map_err(|e| Error::invalid(format!("{}: {e}", "azure")))?;
                 builder.with_sas_authorization(pairs)
             }
         };
 
-        if let Some(endpoint) = &creds.endpoint {
+        if let Some(endpoint) = &self.endpoint {
             // Validate the custom endpoint under the deployment policy; enable
             // plaintext HTTP only for a local emulator (Azurite).
             let allow_http = super::endpoint_allow_http(policy, endpoint).await?;
@@ -92,8 +83,8 @@ impl Client for AzureProvider {
 
         let store = builder
             .build()
-            .map_err(|e| Error::invalid(format!("{}: {e}", Self::ID)))?;
+            .map_err(|e| Error::invalid(format!("{}: {e}", "azure")))?;
 
-        Ok(Self(ObjectStoreClient::new(store)))
+        Ok(ObjectStoreClient::new(store))
     }
 }

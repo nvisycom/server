@@ -6,8 +6,8 @@
 //! # Environment Variables
 //!
 //! - `HOST` - Server host address (default: 127.0.0.1)
-//! - `PORT` - Server port (default: 3000)
-//! - `SHUTDOWN_TIMEOUT` - Graceful shutdown timeout in seconds (default: 30)
+//! - `PORT` - Server port (default: 8080)
+//! - `SHUTDOWN_TIMEOUT` - Graceful shutdown timeout (default: 30s)
 //! - `TLS_CERT_PATH` - Path to TLS certificate (required when `tls` feature enabled)
 //! - `TLS_KEY_PATH` - Path to TLS private key (required when `tls` feature enabled)
 //!
@@ -21,13 +21,12 @@
 //! nvisy-cli --tls-cert-path ./cert.pem --tls-key-path ./key.pem
 //! ```
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 #[cfg(feature = "tls")]
 use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Args;
-use serde::{Deserialize, Serialize};
 
 use super::TRACING_TARGET_CONFIG;
 
@@ -35,7 +34,7 @@ use super::TRACING_TARGET_CONFIG;
 ///
 /// Controls how the server binds to network interfaces, handles TLS,
 /// and performs graceful shutdown.
-#[derive(Debug, Clone, Args, Serialize, Deserialize)]
+#[derive(Debug, Clone, Args)]
 #[must_use = "config does nothing unless you use it"]
 pub struct ServerConfig {
     /// Host address to bind the server to.
@@ -44,7 +43,6 @@ pub struct ServerConfig {
     ///
     /// In production, consider binding to specific interfaces for security.
     #[arg(long, env = "HOST", default_value = "127.0.0.1")]
-    #[serde(default = "default_host")]
     pub host: IpAddr,
 
     /// TCP port number for the server to listen on.
@@ -78,11 +76,21 @@ pub struct ServerConfig {
     pub tls_key_path: PathBuf,
 }
 
-const fn default_host() -> IpAddr {
-    IpAddr::V4(Ipv4Addr::UNSPECIFIED)
-}
-
 impl ServerConfig {
+    /// A loopback config on an OS-assigned port, for tests.
+    #[cfg(test)]
+    pub(crate) fn test() -> Self {
+        Self {
+            host: IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            port: 0,
+            shutdown_timeout: Duration::from_secs(30),
+            #[cfg(feature = "tls")]
+            tls_cert_path: PathBuf::from("cert.pem"),
+            #[cfg(feature = "tls")]
+            tls_key_path: PathBuf::from("key.pem"),
+        }
+    }
+
     /// Returns the socket address for server binding.
     #[must_use]
     pub const fn socket_addr(&self) -> SocketAddr {
@@ -122,50 +130,28 @@ impl ServerConfig {
     }
 }
 
-impl Default for ServerConfig {
-    fn default() -> Self {
-        Self {
-            host: default_host(),
-            port: 3000,
-            shutdown_timeout: Duration::from_secs(30),
-            #[cfg(feature = "tls")]
-            tls_cert_path: PathBuf::from("cert.pem"),
-            #[cfg(feature = "tls")]
-            tls_key_path: PathBuf::from("key.pem"),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv6Addr;
+    use std::net::{Ipv4Addr, Ipv6Addr};
 
     use super::*;
 
     #[test]
-    fn default_config() {
-        let config = ServerConfig::default();
-        assert!(config.binds_to_all_interfaces());
-        assert_eq!(config.port, 3000);
-        assert_eq!(config.shutdown_timeout, Duration::from_secs(30));
-    }
-
-    #[test]
-    fn socket_addr_returns_correct_address() {
-        let config = ServerConfig::default();
-        let addr = config.socket_addr();
-        assert_eq!(addr.ip(), IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-        assert_eq!(addr.port(), 3000);
+    fn socket_addr_joins_host_and_port() {
+        let mut config = ServerConfig::test();
+        config.port = 8080;
+        assert_eq!(
+            config.socket_addr(),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080)
+        );
     }
 
     #[test]
     fn binds_to_all_interfaces_detection() {
-        let mut config = ServerConfig::default();
-        assert!(config.binds_to_all_interfaces());
-
-        config.host = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let mut config = ServerConfig::test();
         assert!(!config.binds_to_all_interfaces());
-
+        config.host = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+        assert!(config.binds_to_all_interfaces());
         config.host = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
         assert!(config.binds_to_all_interfaces());
     }

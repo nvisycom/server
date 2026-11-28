@@ -40,9 +40,6 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use nvisy_postgres::PgClient;
-use nvisy_postgres::query::AccountApiTokenRepository;
-use nvisy_postgres::types::ApiTokenType;
 
 use crate::extract::{AuthState, Json, Path, Query, SecurityContext, ValidateJson};
 use crate::handler::request::{
@@ -51,8 +48,7 @@ use crate::handler::request::{
 use crate::handler::response::{AccountDesktopToken, AuthorizeRedirect};
 use crate::response::{CookieConfig, ErrorKind, ErrorResponse, RedirectResult, Result, WebSession};
 use crate::service::{
-    AccountProvisioner, AuthIssuer, CallbackOutcome, OidcPurpose, OidcService, RedirectKind,
-    ServiceState,
+    CallbackOutcome, OidcPurpose, OidcService, RedirectKind, ServiceState, SignInService,
 };
 
 /// Tracing target for OIDC sign-in operations.
@@ -204,10 +200,8 @@ fn start_reauth_docs(op: TransformOperation) -> TransformOperation {
 /// mint a token for their own account. No cookie is set on the response.
 #[tracing::instrument(skip_all)]
 async fn mint_desktop_token(
-    State(pg_client): State<PgClient>,
     State(oidc): State<OidcService>,
-    State(issuer): State<AuthIssuer>,
-    State(provisioner): State<AccountProvisioner>,
+    State(sign_in): State<SignInService>,
     auth_state: AuthState,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<DesktopTokenRequest>,
@@ -223,28 +217,8 @@ async fn mint_desktop_token(
         );
     }
 
-    let mut conn = pg_client.get_connection().await?;
-
-    // Only a browser (`web`) session may mint a desktop token: the desktop login
-    // completes in the browser first. Rejecting `app`/`api` tokens stops a leaked
-    // long-lived `app` token from renewing itself indefinitely by minting fresh
-    // `app` tokens.
-    let session = conn
-        .find_account_api_token_by_id(auth_state.token_id)
-        .await?
-        .ok_or_else(|| ErrorKind::Unauthorized.with_message("Session not found"))?;
-    if session.session_type != ApiTokenType::Web {
-        return Err(ErrorKind::Forbidden
-            .with_message("Desktop tokens can only be minted from a browser session"));
-    }
-
-    let account = provisioner
-        .load_active(&mut conn, auth_state.account_id)
-        .await?;
-    AccountProvisioner::ensure_can_sign_in(&account)?;
-
-    let api_token = issuer
-        .issue_app_token(&mut conn, &account, security)
+    let api_token = sign_in
+        .issue_desktop_token(auth_state.account_id, auth_state.token_id, security)
         .await?;
 
     Ok(Json(AccountDesktopToken {

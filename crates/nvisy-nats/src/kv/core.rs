@@ -1,75 +1,55 @@
-//! The core KV contracts: the key and bucket traits every store is built on.
+//! The core KV contracts: the entry key and the bucket trait every store is
+//! built on.
 
-use std::fmt;
 use std::str::FromStr;
 use std::time::Duration;
 
+use derive_more::Display;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-/// Marker trait for KV key types.
-///
-/// Defines how keys are formatted for storage in NATS KV: a key must render to
-/// and parse from the string form used as the entry's KV key.
-pub trait KvKey:
-    fmt::Debug + fmt::Display + FromStr<Err = InvalidKvKey> + Clone + Send + Sync + 'static
-{
-}
-
 /// Returned when a string is not a valid NATS KV key (empty, or containing
-/// characters KV keys disallow). Shared by the opaque-token key types whose
-/// value arrives untrusted (OAuth/OIDC state, step-up proofs).
+/// characters KV keys disallow).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("invalid KV key")]
 pub struct InvalidKvKey;
 
-/// Validates that `value` is a usable NATS KV key: non-empty and composed only of
-/// the alphanumeric and `-/_=.` characters KV keys allow. A URL-safe base64 token
-/// (the common opaque-key case) always passes.
+/// A KV entry key: an opaque token (an OAuth or OIDC state, a reauth proof id)
+/// or a lock name.
 ///
-/// The `.` is a NATS subject-token separator, so a key must have no empty
-/// token: a leading, trailing, or consecutive dot (e.g. `.a`, `a.`, `a..b`, or a
-/// bare `.`) is rejected, matching async-nats KV subject rules.
-///
-/// Returns the value on success so a caller's [`FromStr`] is a one-liner:
-/// `validate_kv_key(s).map(Self)`.
-///
-/// # Errors
-///
-/// - `InvalidKvKey` if `value` is empty, contains a character outside the
-///   allowed alphanumeric and `-/_=.` set, or has an empty dot-separated token
-///   (a leading, trailing, or consecutive dot).
-pub fn validate_kv_key(value: &str) -> Result<String, InvalidKvKey> {
-    if value.is_empty() {
-        return Err(InvalidKvKey);
-    }
-    let chars_valid = value
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'/' | b'_' | b'=' | b'.'));
-    // Every dot-separated token must be non-empty (no leading, trailing, or
-    // consecutive dots), since `.` separates NATS subject tokens.
-    let tokens_nonempty = value.split('.').all(|token| !token.is_empty());
-    if chars_valid && tokens_nonempty {
-        Ok(value.to_owned())
-    } else {
-        Err(InvalidKvKey)
+/// Keys often arrive untrusted (a state echoed into a callback URL, a proof in a
+/// request body), so [`FromStr`] is the only constructor and enforces NATS KV key
+/// syntax: non-empty, only alphanumeric and `-/_=.` characters, and no empty
+/// dot-separated token. A URL-safe base64 token always passes.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Display)]
+pub struct TokenKey(String);
+
+impl FromStr for TokenKey {
+    type Err = InvalidKvKey;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let chars_valid = value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'/' | b'_' | b'=' | b'.'));
+        // `.` separates NATS subject tokens, so no token may be empty (no
+        // leading, trailing, or consecutive dot); this also rejects "".
+        let tokens_nonempty = value.split('.').all(|token| !token.is_empty());
+        if chars_valid && tokens_nonempty {
+            Ok(Self(value.to_owned()))
+        } else {
+            Err(InvalidKvKey)
+        }
     }
 }
 
-/// Configuration for a NATS KV bucket, similar to `ObjectBucket` for object
-/// stores.
+/// A NATS KV bucket: the value it stores and its name, description, and entry
+/// TTL. A store is selected by its bucket alone; every bucket is keyed by
+/// [`TokenKey`].
 ///
-/// A bucket fixes both the key and the value it stores, so they are associated
-/// types rather than free parameters on [`kv_store`]: a store is selected by its
-/// bucket alone. A bucket is a pure type-level tag — all of its configuration
-/// lives in associated types and consts — so it is never instantiated and carries
-/// no value bounds.
-///
-/// [`kv_store`]: crate::NatsClient::kv_store
+/// A bucket is a pure type-level tag, never instantiated. Define one with
+/// [`kv_bucket!`](crate::kv_bucket).
 pub trait KvBucket: 'static {
-    /// The key type addressing entries in this bucket.
-    type Key: KvKey;
-
     /// The value type stored in this bucket.
     type Value: Serialize + DeserializeOwned + Send + Sync + 'static;
 
@@ -79,39 +59,72 @@ pub trait KvBucket: 'static {
     /// Human-readable description for the bucket.
     const DESCRIPTION: &'static str;
 
-    /// Default TTL for entries in this bucket.
-    /// Returns `None` for buckets where entries should not expire.
-    const TTL: Option<Duration>;
+    /// How long an entry lives before it expires.
+    const TTL: Duration;
+}
+
+/// Defines a [`KvBucket`]: an uninhabited tag type with its value, name,
+/// description, and entry TTL.
+///
+/// ```ignore
+/// nvisy_nats::kv_bucket! {
+///     /// In-flight OAuth authorization state.
+///     pub(crate) OAuthStateBucket: OAuthFlowState {
+///         name: "oauth_state",
+///         description: "In-flight OAuth authorization state",
+///         ttl: Duration::from_mins(10),
+///     }
+/// }
+/// ```
+#[macro_export]
+macro_rules! kv_bucket {
+    (
+        $(#[$meta:meta])*
+        $vis:vis $bucket:ident: $value:ty {
+            name: $name:literal,
+            description: $description:literal,
+            ttl: $ttl:expr $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        $vis enum $bucket {}
+
+        impl $crate::kv::KvBucket for $bucket {
+            type Value = $value;
+
+            const DESCRIPTION: &'static str = $description;
+            const NAME: &'static str = $name;
+            const TTL: ::std::time::Duration = $ttl;
+        }
+    };
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn validate_kv_key_accepts_url_safe_tokens() {
-        // A URL-safe base64 value (with `-_=` and `/.`) is a valid KV key and
-        // round-trips unchanged.
-        assert_eq!(validate_kv_key("abc-123_XYZ=").unwrap(), "abc-123_XYZ=");
-        assert_eq!(validate_kv_key("a/b.c").unwrap(), "a/b.c");
+    fn parse(value: &str) -> Result<String, InvalidKvKey> {
+        value.parse::<TokenKey>().map(|key| key.to_string())
     }
 
     #[test]
-    fn validate_kv_key_rejects_empty_and_disallowed_chars() {
-        assert_eq!(validate_kv_key(""), Err(InvalidKvKey));
-        assert_eq!(validate_kv_key("has space"), Err(InvalidKvKey));
-        assert_eq!(validate_kv_key("bad*char"), Err(InvalidKvKey));
-        assert_eq!(validate_kv_key("newline\n"), Err(InvalidKvKey));
+    fn accepts_url_safe_tokens_unchanged() {
+        assert_eq!(parse("abc-123_XYZ=").unwrap(), "abc-123_XYZ=");
+        assert_eq!(parse("a/b.c").unwrap(), "a/b.c");
     }
 
     #[test]
-    fn validate_kv_key_rejects_empty_dot_tokens() {
-        // `.` separates NATS subject tokens, so no token may be empty.
-        assert_eq!(validate_kv_key("."), Err(InvalidKvKey));
-        assert_eq!(validate_kv_key(".a"), Err(InvalidKvKey));
-        assert_eq!(validate_kv_key("a."), Err(InvalidKvKey));
-        assert_eq!(validate_kv_key("a..b"), Err(InvalidKvKey));
-        // A single interior dot with non-empty tokens is still fine.
-        assert_eq!(validate_kv_key("a.b").unwrap(), "a.b");
+    fn rejects_empty_and_disallowed_chars() {
+        for value in ["", "has space", "bad*char", "newline\n"] {
+            assert_eq!(parse(value), Err(InvalidKvKey), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_empty_dot_tokens() {
+        for value in [".", ".a", "a.", "a..b"] {
+            assert_eq!(parse(value), Err(InvalidKvKey), "{value:?}");
+        }
+        assert_eq!(parse("a.b").unwrap(), "a.b");
     }
 }

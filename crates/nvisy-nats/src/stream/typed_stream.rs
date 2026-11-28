@@ -1,8 +1,7 @@
 //! Type-safe wrappers over a `JetStream` pull consumer's messages.
 //!
-//! [`TypedMessageStream`] pulls a consumer's messages one at a time, decoded into
-//! `T`;
-//! [`TypedMessage`] pairs a decoded value with its ack handle.
+//! [`TypedMessageStream`] pulls a consumer's messages one at a time, each decoded
+//! into `T` and paired with the raw message that settles it.
 
 use std::marker::PhantomData;
 use std::time::Duration;
@@ -47,7 +46,8 @@ impl<T> TypedMessageStream<T>
 where
     T: DeserializeOwned + Send + 'static,
 {
-    /// Pulls the next message, waiting up to `wait` for one to arrive.
+    /// Pulls the next message, waiting up to `wait` for one to arrive, and
+    /// returns its decoded payload with the raw message that settles it.
     ///
     /// The wait is the pull request's server-side expiry, so a request the
     /// server still holds never outlives the caller's interest in it. Every step
@@ -61,7 +61,7 @@ where
     ///
     /// - `Operation` if the pull request cannot be sent or receiving the message
     ///   fails. No message within `wait` is not an error; it returns `Ok(None)`.
-    pub async fn next(&self, wait: Duration) -> Result<Option<TypedMessage<T>>> {
+    pub async fn next(&self, wait: Duration) -> Result<Option<(T, Message)>> {
         let deadline = Instant::now() + wait;
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -106,7 +106,7 @@ where
                         subject = %message.subject,
                         "Received typed message"
                     );
-                    return Ok(Some(TypedMessage { payload, message }));
+                    return Ok(Some((payload, message)));
                 }
                 Err(err) => {
                     // A payload that cannot be deserialized will never succeed, so
@@ -134,140 +134,5 @@ where
                 }
             }
         }
-    }
-}
-
-/// A typed message from the stream.
-pub struct TypedMessage<T> {
-    /// The deserialized payload.
-    pub payload: T,
-    /// The underlying NATS message for metadata and acknowledgment.
-    message: Message,
-}
-
-impl<T> TypedMessage<T> {
-    /// Splits the message into its payload and the raw message that settles it.
-    pub(crate) fn into_parts(self) -> (T, Message) {
-        (self.payload, self.message)
-    }
-
-    /// Get the message subject.
-    pub fn subject(&self) -> &str {
-        &self.message.subject
-    }
-
-    /// Get the message metadata.
-    ///
-    /// # Errors
-    ///
-    /// - `Operation` if the message's reply subject cannot be parsed into
-    ///   `JetStream` metadata (e.g. it is not a `JetStream` message).
-    pub fn info(&self) -> Result<jetstream::message::Info<'_>> {
-        self.message
-            .info()
-            .map_err(|e| Error::operation("message_info", e.to_string()))
-    }
-
-    /// Acknowledge the message.
-    ///
-    /// # Errors
-    ///
-    /// - `Operation` if sending the ack to the server fails (e.g. the connection
-    ///   is down).
-    pub async fn ack(&mut self) -> Result<()> {
-        self.message
-            .ack()
-            .await
-            .map_err(|e| Error::operation("message_ack", e.to_string()))
-    }
-
-    /// Negative acknowledge the message (trigger redelivery).
-    ///
-    /// # Errors
-    ///
-    /// - `Operation` if sending the nack to the server fails (e.g. the connection
-    ///   is down).
-    pub async fn nack(&mut self) -> Result<()> {
-        self.message
-            .ack_with(jetstream::AckKind::Nak(None))
-            .await
-            .map_err(|e| Error::operation("message_nack", e.to_string()))
-    }
-
-    /// Get a reference to the typed payload.
-    pub fn payload(&self) -> &T {
-        &self.payload
-    }
-
-    /// Consume the message and return the payload.
-    pub fn into_payload(self) -> T {
-        self.payload
-    }
-
-    /// Get message headers if available.
-    pub fn headers(&self) -> Option<&async_nats::HeaderMap> {
-        self.message.headers.as_ref()
-    }
-
-    /// Get message sequence number.
-    ///
-    /// # Errors
-    ///
-    /// - `Operation` if the message metadata cannot be read (see
-    ///   [`info`](Self::info)).
-    pub fn sequence(&self) -> Result<u64> {
-        self.info()
-            .map(|info| info.stream_sequence)
-            .map_err(|e| Error::operation("get_sequence", e.to_string()))
-    }
-
-    /// Check if this message is a redelivery.
-    ///
-    /// # Errors
-    ///
-    /// - `Operation` if the message metadata cannot be read (see
-    ///   [`info`](Self::info)).
-    pub fn is_redelivery(&self) -> Result<bool> {
-        self.info()
-            .map(|info| info.delivered > 1)
-            .map_err(|e| Error::operation("check_redelivery", e.to_string()))
-    }
-
-    /// Get the number of delivery attempts.
-    ///
-    /// # Errors
-    ///
-    /// - `Operation` if the message metadata cannot be read (see
-    ///   [`info`](Self::info)).
-    pub fn delivery_count(&self) -> Result<usize> {
-        self.info()
-            .map(|info| usize::try_from(info.delivered).unwrap_or(0))
-            .map_err(|e| Error::operation("get_delivery_count", e.to_string()))
-    }
-
-    /// Acknowledge with explicit acknowledgment kind.
-    ///
-    /// # Errors
-    ///
-    /// - `Operation` if sending the acknowledgment to the server fails (e.g. the
-    ///   connection is down).
-    pub async fn ack_with(&mut self, ack_kind: jetstream::AckKind) -> Result<()> {
-        self.message
-            .ack_with(ack_kind)
-            .await
-            .map_err(|e| Error::operation("message_ack_with", e.to_string()))
-    }
-
-    /// Double acknowledge (useful for at-least-once processing).
-    ///
-    /// # Errors
-    ///
-    /// - `Operation` if the ack is sent but the server's confirmation is not
-    ///   received (e.g. the connection is down).
-    pub async fn double_ack(&mut self) -> Result<()> {
-        self.message
-            .double_ack()
-            .await
-            .map_err(|e| Error::operation("message_double_ack", e.to_string()))
     }
 }

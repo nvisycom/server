@@ -11,30 +11,34 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt};
-use nvisy_core::{ByteStream, Error, ErrorKind};
+use nvisy_core::{Error, ErrorKind};
+use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use object_store::{
-    Attribute, Attributes, ObjectMeta, ObjectStore, ObjectStoreExt, PutMode, PutMultipartOptions,
-    PutOptions, PutPayload, WriteMultipart,
+    Attribute, Attributes, ObjectMeta, ObjectStore, ObjectStoreExt, PutMode, PutOptions, PutPayload,
 };
+use tokio::io::AsyncWriteExt;
 
 mod get_output;
+mod get_stream;
 mod put_output;
 mod service;
 
 pub use get_output::GetOutput;
+pub use get_stream::GetStream;
 pub use put_output::PutOutput;
 pub use service::ExternalObjectStore;
 
 /// Maximum number of in-flight multipart part uploads, bounding memory and
-/// concurrent requests during a streaming [`put_multipart`](ObjectStoreClient::put_multipart).
+/// concurrent requests during a [`put_stream`](ObjectStoreClient::put_stream).
 const MULTIPART_MAX_CONCURRENCY: usize = 8;
 
-/// Size each streamed chunk is split into before upload, so backpressure is
-/// applied per part. Matches `WriteMultipart`'s internal 5 MiB part size (also
-/// the S3 minimum part size), so no part is further subdivided past the capacity
-/// check.
-const MULTIPART_PART_SIZE: usize = 5 * 1024 * 1024;
+/// Size of each multipart part, and the most a [`put_stream`] buffers before
+/// switching from a single put to a multipart upload. At 8 MiB, S3's limit of
+/// 10,000 parts allows uploads of up to about 78 GiB.
+///
+/// [`put_stream`]: ObjectStoreClient::put_stream
+const PART_SIZE: usize = 8 * 1024 * 1024;
 
 /// Parses a caller-supplied key into an object-store [`Path`], surfacing a
 /// malformed key as an error rather than silently normalizing it.
@@ -58,6 +62,29 @@ fn store_error(err: object_store::Error) -> Error {
     Error::new(kind, err.to_string()).with_source(err)
 }
 
+/// Classifies an I/O error from a [`BufWriter`], recovering the
+/// [`object_store::Error`] it wraps when there is one.
+fn io_store_error(err: std::io::Error) -> Error {
+    let message = err.to_string();
+    let Some(inner) = err.into_inner() else {
+        return Error::runtime(message);
+    };
+    match inner.downcast::<object_store::Error>() {
+        Ok(store) => store_error(*store),
+        Err(other) => Error::runtime(message).with_source(other),
+    }
+}
+
+/// Writes `bytes` in part-sized slices, so one large chunk waits for upload
+/// capacity per part rather than queueing every part at once.
+async fn write_in_parts(writer: &mut BufWriter, mut bytes: Bytes) -> Result<(), Error> {
+    while !bytes.is_empty() {
+        let part = bytes.split_to(bytes.len().min(PART_SIZE));
+        writer.put(part).await.map_err(store_error)?;
+    }
+    Ok(())
+}
+
 /// Cloneable handle to any [`ObjectStore`] backend (S3, Azure, GCS, ...).
 ///
 /// All methods accept human-readable string keys and convert them to
@@ -73,7 +100,7 @@ impl ObjectStoreClient {
 
     /// Verify that the backing store is reachable and the credentials work.
     ///
-    /// Performs a bounded top-level listing: it succeeds for any reachable
+    /// Requests a single listing page: it succeeds for any reachable
     /// bucket/container (including an empty one) and surfaces authorization
     /// failures (`PermissionDenied`/`Unauthenticated`) as errors, so callers
     /// can distinguish a bad connection from bad credentials. Unlike a HEAD on
@@ -85,11 +112,12 @@ impl ObjectStoreClient {
     /// rejected (`PermissionDenied`/`Unauthenticated`).
     #[tracing::instrument(name = "object.verify", skip(self))]
     pub async fn verify_reachable(&self) -> Result<(), Error> {
-        self.0
-            .list_with_delimiter(None)
-            .await
-            .map(|_| ())
-            .map_err(store_error)
+        // The listing stream fetches pages lazily, so reading one entry sends one
+        // request; an empty bucket ends the stream without an error.
+        match self.0.list(None).next().await {
+            Some(Err(err)) => Err(store_error(err)),
+            Some(Ok(_)) | None => Ok(()),
+        }
     }
 
     /// List object keys under `prefix`.
@@ -151,22 +179,22 @@ impl ObjectStoreClient {
         })
     }
 
-    /// Stream the body of the object at `key` as chunks, without buffering the
-    /// whole object in memory.
-    ///
-    /// The read half of an object-to-elsewhere pipe (e.g. streaming an object
-    /// into NATS); pair with a chunk-consuming sink.
+    /// Opens the object at `key` as a stream of chunks, with its size, without
+    /// buffering the whole object in memory.
     ///
     /// # Errors
     ///
-    /// - A `Runtime` error if `key` is not a valid object-store path.
+    /// - An `Invalid` error if `key` is not a valid object-store path.
     /// - A storage error (including `NotFound`) if the object cannot be opened.
     ///   Errors reading individual chunks are yielded by the returned stream.
     #[tracing::instrument(name = "object.get_stream", skip(self), fields(key = %key))]
-    pub async fn get_stream(&self, key: &str) -> Result<ByteStream, Error> {
+    pub async fn get_stream(&self, key: &str) -> Result<GetStream, Error> {
         let path = parse_key(key)?;
         let result = self.0.get(&path).await.map_err(store_error)?;
-        Ok(Box::pin(result.into_stream().map_err(store_error)))
+        Ok(GetStream {
+            size: result.meta.size,
+            body: Box::pin(result.into_stream().map_err(store_error)),
+        })
     }
 
     /// Upload `data` to `key`, optionally setting the content-type.
@@ -285,83 +313,61 @@ impl ObjectStoreClient {
         self.0.get_range(&path, range).await.map_err(store_error)
     }
 
-    /// Upload the contents of a byte stream to `key` using a multipart upload.
+    /// Streams `stream` into `key`, optionally setting the content type, and
+    /// returns the number of bytes written.
     ///
-    /// Chunks are uploaded as they arrive, so the whole object never needs to
-    /// be buffered in memory. If the stream yields an error, or any part fails,
-    /// the multipart upload is aborted so no orphaned parts are left behind.
+    /// Content up to one part (8 MiB) is buffered and written with a single put;
+    /// anything larger streams as a multipart upload with at most 8 parts in
+    /// flight, so the whole object is never held in memory. If the stream yields
+    /// an error, or an upload fails, the upload is aborted so no partial object
+    /// or orphaned parts are left behind.
     ///
     /// # Errors
     ///
-    /// - A `Runtime` error if `key` is not a valid object-store path.
+    /// - An `Invalid` error if `key` is not a valid object-store path.
     /// - The stream's own error if it yields one (the upload is aborted first).
-    /// - A storage error if starting, uploading a part, or completing the
-    ///   multipart upload fails.
-    #[tracing::instrument(name = "object.put_multipart", skip(self, stream), fields(key = %key))]
-    pub async fn put_multipart<S>(
+    /// - A storage error if a put, a part, or completing the upload fails.
+    #[tracing::instrument(name = "object.put_stream", skip(self, stream), fields(key = %key))]
+    pub async fn put_stream<S>(
         &self,
         key: &str,
         content_type: Option<&str>,
         mut stream: S,
-    ) -> Result<PutOutput, Error>
+    ) -> Result<u64, Error>
     where
         S: Stream<Item = Result<Bytes, Error>> + Unpin + Send,
     {
         let path = parse_key(key)?;
-        let opts = match content_type {
-            Some(ct) => {
-                let mut attributes = Attributes::new();
-                attributes.insert(Attribute::ContentType, ct.to_string().into());
-                PutMultipartOptions {
-                    attributes,
-                    ..Default::default()
-                }
-            }
-            None => PutMultipartOptions::default(),
-        };
+        let mut attributes = Attributes::new();
+        if let Some(content_type) = content_type {
+            attributes.insert(Attribute::ContentType, content_type.to_owned().into());
+        }
+        let mut writer = BufWriter::with_capacity(Arc::clone(&self.0), path, PART_SIZE)
+            .with_max_concurrency(MULTIPART_MAX_CONCURRENCY)
+            .with_attributes(attributes);
 
-        let upload = self
-            .0
-            .put_multipart_opts(&path, opts)
-            .await
-            .map_err(store_error)?;
-        let mut writer = WriteMultipart::new(upload);
-
+        let mut size: u64 = 0;
         while let Some(chunk) = stream.next().await {
-            let mut bytes = match chunk {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    // Abort so the backend does not retain orphaned parts.
-                    let _ = writer.abort().await;
-                    return Err(e);
+            let written = match chunk {
+                Ok(bytes) => {
+                    size += u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+                    write_in_parts(&mut writer, bytes).await
                 }
+                Err(err) => Err(err),
             };
-
-            // A single stream item can be arbitrarily large, and `put` splits it
-            // into part-sized uploads internally. Split it here and wait for
-            // capacity before *each* part, so one big item cannot exceed the
-            // in-flight bound (a single check per item could not).
-            while !bytes.is_empty() {
-                let part = bytes.split_to(bytes.len().min(MULTIPART_PART_SIZE));
-                if let Err(e) = writer.wait_for_capacity(MULTIPART_MAX_CONCURRENCY).await {
-                    let _ = writer.abort().await;
-                    return Err(store_error(e));
+            if let Err(err) = written {
+                // Abort so the backend keeps no partial upload.
+                if let Err(abort) = writer.abort().await {
+                    tracing::warn!(key = %key, error = %abort, "Failed to abort an upload");
                 }
-                writer.put(part);
+                return Err(err);
             }
         }
 
-        // Drain all in-flight parts first, so a part error here aborts the upload
-        // rather than leaking parts. `finish` also waits internally, but consumes
-        // the writer, leaving nothing to abort if that wait fails; doing it here
-        // on `&mut writer` keeps the writer available to abort. `finish`'s own
-        // `complete` step already aborts on failure.
-        if let Err(e) = writer.wait_for_capacity(0).await {
-            let _ = writer.abort().await;
-            return Err(store_error(e));
-        }
-
-        writer.finish().await.map(Into::into).map_err(store_error)
+        // Completes the single put or the multipart upload; a failed complete
+        // aborts the multipart upload itself.
+        writer.shutdown().await.map_err(io_store_error)?;
+        Ok(size)
     }
 }
 
@@ -396,26 +402,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn put_multipart_single_item_larger_than_concurrency() {
-        // One stream item bigger than MAX_CONCURRENCY parts: the per-part
-        // capacity wait must split and bound it rather than spawn every part at
-        // once. Correctness check: the reassembled object matches the input.
+    async fn put_stream_splits_one_large_chunk_into_parts() {
+        // One stream item spanning more parts than may be in flight: it is
+        // written a part at a time, so the upload stays bounded. The written
+        // size and the reassembled object must both match the input.
         let client = test_client();
-        let size = MULTIPART_PART_SIZE * (MULTIPART_MAX_CONCURRENCY + 3) + 123;
+        let size = PART_SIZE * (MULTIPART_MAX_CONCURRENCY + 3) + 123;
         let data = Bytes::from(vec![7u8; size]);
         let stream = futures::stream::once({
             let data = data.clone();
             async move { Ok(data) }
         });
 
-        client
-            .put_multipart(
+        let written = client
+            .put_stream(
                 "big.bin",
                 Some("application/octet-stream"),
                 Box::pin(stream),
             )
             .await
             .unwrap();
+        assert_eq!(written, u64::try_from(size).unwrap());
 
         let result = client.get("big.bin").await.unwrap();
         assert_eq!(result.data.len(), size);
@@ -431,7 +438,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn put_multipart_streams_chunks() {
+    async fn put_stream_writes_every_chunk() {
         let client = test_client();
         let chunks = vec![
             Ok(Bytes::from("hello ")),
@@ -439,7 +446,7 @@ mod tests {
             Ok(Bytes::from("world")),
         ];
         client
-            .put_multipart("mp.txt", Some("text/plain"), futures::stream::iter(chunks))
+            .put_stream("mp.txt", Some("text/plain"), futures::stream::iter(chunks))
             .await
             .unwrap();
 
@@ -449,14 +456,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn put_multipart_aborts_on_stream_error() {
+    async fn put_stream_aborts_on_stream_error() {
         let client = test_client();
         let chunks = vec![
             Ok(Bytes::from("partial")),
             Err(Error::runtime("stream broke")),
         ];
         let err = client
-            .put_multipart("aborted.txt", None, futures::stream::iter(chunks))
+            .put_stream("aborted.txt", None, futures::stream::iter(chunks))
             .await
             .unwrap_err();
         assert_eq!(err.to_string(), "stream broke");

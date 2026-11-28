@@ -31,11 +31,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use nvisy_core::http::OAuthHttpClient;
 use nvisy_nats::NatsClient;
-use nvisy_nats::kv::{
-    OidcStateBucket as OidcStateKvBucket, OidcStateKey, ReauthProofBucket as ReauthProofKvBucket,
-    ReauthProofKey,
-};
+use nvisy_nats::kv::TokenKey;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::AccountIdentityRepository;
 use nvisy_postgres::types::IdentityProvider;
@@ -43,7 +41,7 @@ use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetada
 use openidconnect::{
     AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet, EndpointNotSet,
     EndpointSet, IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
-    TokenResponse, reqwest,
+    TokenResponse,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -143,7 +141,7 @@ const OIDC_HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// application state, so the per-request [`OidcService`] is assembled by cloning
 /// this handle and composing the (also `Arc`-backed) collaborators around it.
 struct OidcCore {
-    http: reqwest::Client,
+    http: OAuthHttpClient,
     providers: Vec<OidcProvider>,
     /// Frontend origins (`scheme://host[:port]`) the sign-in callback may redirect
     /// to. A caller-supplied redirect must match one of these, or it is refused —
@@ -202,7 +200,7 @@ pub enum OidcPurpose {
 /// The stashed state of an in-flight OIDC flow, held between `begin_flow` and the
 /// callback in the [`OidcStateBucket`]. Keyed by the CSRF state token.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct OidcFlowState {
+pub(crate) struct OidcFlowState {
     /// The provider the flow is against.
     provider: IdentityProvider,
     /// The PKCE verifier to present when exchanging the code.
@@ -215,8 +213,17 @@ struct OidcFlowState {
     purpose: OidcPurpose,
 }
 
-/// The OIDC-state bucket pinned to this server's flow-state value.
-type OidcStateBucket = OidcStateKvBucket<OidcFlowState>;
+nvisy_nats::kv_bucket! {
+    /// In-flight OIDC sign-in state (CSRF token, PKCE verifier, and nonce), held
+    /// between starting a sign-in and its callback, keyed by the state token.
+    /// Separate from the connection-OAuth bucket: a sign-in carries a nonce and
+    /// serves a different flow.
+    pub(crate) OidcStateBucket: OidcFlowState {
+        name: "oidc_state",
+        description: "In-flight OIDC sign-in state",
+        ttl: Duration::from_mins(10),
+    }
+}
 
 /// What a step-up re-authentication proof attests: the account it authorizes a
 /// credential-adding action for.
@@ -229,12 +236,20 @@ type OidcStateBucket = OidcStateKvBucket<OidcFlowState>;
 /// credential-add needs. Single-use + TTL + account-binding keep that from being
 /// a standing capability; consuming it atomically keeps it from being used twice.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ReauthProof {
+pub(crate) struct ReauthProof {
     account_id: Uuid,
 }
 
-/// The reauth-proof bucket pinned to this server's proof value.
-type ReauthProofBucket = ReauthProofKvBucket<ReauthProof>;
+nvisy_nats::kv_bucket! {
+    /// Step-up re-authentication proofs, keyed by the proof id. Short-lived: a
+    /// step-up action follows its re-auth within minutes, and an unused proof
+    /// should not linger as a standing capability.
+    pub(crate) ReauthProofBucket: ReauthProof {
+        name: "reauth_proof",
+        description: "Step-up re-authentication proofs",
+        ttl: Duration::from_mins(5),
+    }
+}
 
 /// The result of a completed callback flow, by purpose. The handler turns this
 /// into the browser response (a cookie, a deep-link, or a fragment redirect).
@@ -322,7 +337,7 @@ impl OidcConfigured {
 
         Ok(Self {
             core: Arc::new(OidcCore {
-                http,
+                http: OAuthHttpClient::new(http),
                 providers,
                 allowed_redirect_origins: config.allowed_redirect_origins(),
                 allowed_redirect_schemes: config.desktop_allowed_redirect_schemes(),
@@ -567,9 +582,7 @@ impl OidcService {
             purpose,
         };
         let store = self.nats.kv_store::<OidcStateBucket>().await?;
-        store
-            .put(&csrf_state.parse::<OidcStateKey>()?, &flow)
-            .await?;
+        store.put(&csrf_state.parse::<TokenKey>()?, &flow).await?;
 
         Ok(authorize_url)
     }
@@ -587,7 +600,7 @@ impl OidcService {
     pub async fn consume_flow(&self, query: &OidcCallbackQuery) -> Result<ConsumedFlow> {
         // Validate the state before touching the store so a malformed value maps to
         // a clean BadRequest rather than a KV error.
-        let key = OidcStateKey::from_str(&query.state)
+        let key = TokenKey::from_str(&query.state)
             .map_err(|_| ErrorKind::BadRequest.with_message("Invalid authorization state"))?;
 
         // `take` consumes single-use and atomically, so two concurrent callbacks
@@ -726,10 +739,7 @@ impl OidcService {
         let proof = generate_proof_token();
         let store = self.nats.kv_store::<ReauthProofBucket>().await?;
         store
-            .put(
-                &proof.parse::<ReauthProofKey>()?,
-                &ReauthProof { account_id },
-            )
+            .put(&proof.parse::<TokenKey>()?, &ReauthProof { account_id })
             .await?;
         Ok(proof)
     }
@@ -748,7 +758,7 @@ impl OidcService {
     ///   or belongs to a different account.
     /// - A messaging error if opening the KV store or the atomic take fails.
     pub async fn consume_reauth_proof(&self, account_id: Uuid, proof: &str) -> Result<()> {
-        let key = ReauthProofKey::from_str(proof)
+        let key = TokenKey::from_str(proof)
             .map_err(|_| ErrorKind::Unauthorized.with_message("Invalid re-authentication proof"))?;
         let store = self.nats.kv_store::<ReauthProofBucket>().await?;
         // Consume single-use and atomically (`take`), so the same proof cannot be
@@ -788,7 +798,7 @@ mod tests {
 
     fn service_with(origins: &[&str], schemes: &[&str]) -> OidcCore {
         OidcCore {
-            http: reqwest::Client::new(),
+            http: OAuthHttpClient::new(reqwest::Client::new()),
             providers: Vec::new(),
             allowed_redirect_origins: origins.iter().map(ToString::to_string).collect(),
             allowed_redirect_schemes: schemes.iter().map(ToString::to_string).collect(),

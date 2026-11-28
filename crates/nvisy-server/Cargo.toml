@@ -49,9 +49,7 @@ test_util = [
 ]
 
 [dependencies]
-# Elide crates. The workspace dep disables default features, so re-enable every
-# modality (all-modalities: tabular/image/audio/document) plus JSON/CSV audit
-# export. elide-pipeline re-exports every engine type this crate uses.
+# Elide crates
 elide-pipeline = { workspace = true, features = [
     "all-modalities",
     "audit-json",
@@ -60,7 +58,7 @@ elide-pipeline = { workspace = true, features = [
 ] }
 
 # Internal crates
-nvisy-core = { workspace = true, features = ["schema"] }
+nvisy-core = { workspace = true, features = ["schema", "oauth2"] }
 nvisy-nats = { workspace = true, features = [] }
 nvisy-assistant = { workspace = true, features = ["schema"] }
 nvisy-object-store = { workspace = true, features = ["schema"] }
@@ -69,13 +67,21 @@ nvisy-postgres = { workspace = true, features = ["schema"] }
 nvisy-s3 = { workspace = true, features = [] }
 nvisy-webhook = { workspace = true, features = ["schema"] }
 
+# CLI
+clap = { workspace = true, features = ["derive", "env"], optional = true }
+
 # Async runtime
 tokio = { workspace = true, features = [] }
 tokio-util = { workspace = true, features = ["io"] }
 futures = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
 async-stream = { workspace = true, features = [] }
-pin-project-lite = { workspace = true, features = [] }
+
+# HTTP client & middleware
+reqwest = { workspace = true, features = [] }
+
+# OAuth & OIDC
+openidconnect = { workspace = true, features = [] }
 
 # HTTP server & middleware
 axum = { workspace = true, features = ["http2", "macros", "multipart"] }
@@ -83,6 +89,7 @@ axum-client-ip = { workspace = true, features = [] }
 axum-extra = { workspace = true, features = ["typed-header", "attachment", "query", "cookie"] }
 tower = { workspace = true, features = [] }
 tower-http = { workspace = true, features = [] }
+axum-test = { workspace = true, features = [], optional = true }
 
 # OpenAPI/Documentation
 aide = { workspace = true, features = ["axum", "axum-query", "axum-extra-query", "axum-form", "axum-json", "axum-multipart", "axum-extra", "bytes", "http"] }
@@ -93,10 +100,9 @@ indexmap = { workspace = true, features = [] }
 jsonwebtoken = { workspace = true, features = [] }
 argon2 = { workspace = true, features = [] }
 zxcvbn = { workspace = true, features = [] }
-sha2 = { workspace = true, features = [] }
-openidconnect = { workspace = true, features = ["reqwest", "rustls-tls"] }
 
 # Encryption & Cryptography
+sha2 = { workspace = true, features = [] }
 chacha20poly1305 = { workspace = true, features = [] }
 aead-stream = { workspace = true, features = ["alloc"] }
 hkdf = { workspace = true, features = [] }
@@ -104,7 +110,7 @@ hkdf = { workspace = true, features = [] }
 # Encoding
 base64 = { workspace = true, features = ["std"] }
 hex = { workspace = true, features = [] }
-mime_guess = { workspace = true }
+mime_guess = { workspace = true, features = [] }
 
 # Randomness
 rand = { workspace = true, features = [] }
@@ -112,44 +118,39 @@ rand = { workspace = true, features = [] }
 # Observability
 tracing = { workspace = true, features = [] }
 
-# CLI
-clap = { workspace = true, features = ["derive", "env"], optional = true }
-
 # (De)serialization
 csv = { workspace = true, features = [] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
-bytes = { workspace = true, features = [] }
-http-body = { workspace = true, features = [] }
 garde = { workspace = true, features = [] }
 
 # Text processing
 woothee = { workspace = true, features = [] }
 
 # Derive macros & utilities
+pin-project-lite = { workspace = true, features = [] }
+http-body = { workspace = true, features = [] }
 thiserror = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["full"] }
 strum = { workspace = true, features = ["derive"] }
 anyhow = { workspace = true, features = [] }
 
 # Primitive datatypes
+bytes = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
 time = { workspace = true, features = [] }
-ipnet = { workspace = true, features = [] }
 
 # Image processing
-image = { workspace = true }
+image = { workspace = true, features = [] }
 
 # Cron parsing
 croner = { workspace = true, features = [] }
 chrono = { workspace = true, features = [] }
 
 # Domain datatypes & data structures
+ipnet = { workspace = true, features = [] }
 url = { workspace = true, features = [] }
-
-# Test-only harness dep (gated on the `test_util` feature).
-axum-test = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
 # Internal crates
@@ -157,11 +158,22 @@ nvisy-nats = { workspace = true, features = [] }
 nvisy-postgres = { workspace = true, features = ["schema", "test_util"] }
 nvisy-webhook = { workspace = true, features = ["reqwest"] }
 
-axum-test = { workspace = true, features = [] }
-anyhow = { workspace = true, features = ["backtrace"] }
-tempfile = { workspace = true, features = [] }
+# CLI
 dotenvy = { workspace = true, features = [] }
+
+# Async runtime
 tokio = { workspace = true, features = ["macros", "rt"] }
+
+# HTTP server & middleware
+axum-test = { workspace = true, features = [] }
+
+# Testing utilities
+tempfile = { workspace = true, features = [] }
+
+# Derive macros & utilities
+anyhow = { workspace = true, features = ["backtrace"] }
+
+# Primitive datatypes
 uuid = { workspace = true, features = ["v7"] }
 
 [lints]

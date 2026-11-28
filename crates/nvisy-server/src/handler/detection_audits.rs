@@ -17,14 +17,13 @@ use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue};
 use elide_pipeline::export::{ExportCsv, ExportJson};
 use elide_pipeline::{ArtifactSet, Audit};
-use nvisy_postgres::PgClient;
 
 use crate::domain;
 use crate::extract::{Authorized, Json, Path, Query, markers};
 use crate::handler::request::{ExportFormat, ExportQuery, WorkspaceDetectionPathParams};
 use crate::handler::utility::DownloadDocs;
 use crate::response::{Error, ErrorKind, ErrorResponse, Result, attachment_headers};
-use crate::service::{ArtifactReader, EngineService, ServiceState};
+use crate::service::ServiceState;
 
 /// Tracing target for detection audit operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::detection_audits";
@@ -40,29 +39,15 @@ const TRACING_TARGET: &str = "nvisy_server::handler::detection_audits";
     )
 )]
 async fn get_detection_analysis(
-    State(pg_client): State<PgClient>,
     State(detections): State<domain::WorkspaceDetectionService>,
-    State(blob): State<ArtifactReader>,
-    State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadAudit>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
 ) -> Result<Json<Audit>> {
     tracing::debug!(target: TRACING_TARGET, "Getting detection analysis");
 
-    let workspace = &authz.workspace;
-
-    // Resolve the detection through the service, then resolve its audit file row on
-    // a scoped connection released before the object-store load below so the pooled
-    // connection is not held across the NATS round-trip.
-    let detection = detections
-        .find(workspace.id, path_params.detection_id.as_uuid())
+    let analyzed = detections
+        .audit(authz.workspace.id, path_params.detection_id.as_uuid())
         .await?;
-    let audit_blob = {
-        let mut conn = pg_client.get_connection().await?;
-        blob.resolve_audit_blob(&mut conn, &detection).await?
-    };
-
-    let analyzed = blob.load_audit(&engine, workspace.id, &audit_blob).await?;
 
     tracing::debug!(target: TRACING_TARGET, "Detection analysis retrieved");
 
@@ -93,32 +78,14 @@ fn get_detection_analysis_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn get_detection_intermediates(
-    State(pg_client): State<PgClient>,
     State(detections): State<domain::WorkspaceDetectionService>,
-    State(blob): State<ArtifactReader>,
-    State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadOriginalDocuments>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
 ) -> Result<Json<ArtifactSet>> {
     tracing::debug!(target: TRACING_TARGET, "Getting detection intermediates");
 
-    let workspace = &authz.workspace;
-
-    // Resolve the detection through the service, then resolve its intermediates
-    // file row on a scoped connection released before the object-store load so the
-    // pooled connection is not held across the NATS round-trip.
-    let detection = detections
-        .find(workspace.id, path_params.detection_id.as_uuid())
-        .await?;
-    let intermediates_blob = {
-        let mut conn = pg_client.get_connection().await?;
-
-        blob.resolve_intermediates_blob(&mut conn, &detection)
-            .await?
-    };
-
-    let intermediates = blob
-        .load_intermediates(&engine, workspace.id, &intermediates_blob)
+    let intermediates = detections
+        .intermediates(authz.workspace.id, path_params.detection_id.as_uuid())
         .await?;
 
     tracing::debug!(target: TRACING_TARGET, "Detection intermediates retrieved");
@@ -155,29 +122,15 @@ fn get_detection_intermediates_docs(op: TransformOperation) -> TransformOperatio
     )
 )]
 async fn download_detection_audit(
-    State(pg_client): State<PgClient>,
     State(detections): State<domain::WorkspaceDetectionService>,
-    State(blob): State<ArtifactReader>,
-    State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadAudit>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
     Query(query): Query<ExportQuery>,
 ) -> Result<(HeaderMap, Body)> {
     tracing::debug!(target: TRACING_TARGET, "Downloading detection audit");
 
-    let workspace = &authz.workspace;
-
-    // Resolve the detection through the service, then resolve its audit file row on
-    // a scoped connection released before the object-store load below so the pooled
-    // connection is not held across the NATS round-trip.
     let detection_id = path_params.detection_id.as_uuid();
-    let detection = detections.find(workspace.id, detection_id).await?;
-    let audit_blob = {
-        let mut conn = pg_client.get_connection().await?;
-        blob.resolve_audit_blob(&mut conn, &detection).await?
-    };
-
-    let audit = blob.load_audit(&engine, workspace.id, &audit_blob).await?;
+    let audit = detections.audit(authz.workspace.id, detection_id).await?;
 
     let (content_type, filename, body) = match query.format {
         ExportFormat::Json => {

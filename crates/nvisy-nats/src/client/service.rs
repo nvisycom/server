@@ -116,6 +116,7 @@ impl NatsClient {
         )
         .await
         .map_err(|_| Error::Timeout {
+            operation: "connect",
             timeout: connect_timeout,
         })?
         .map_err(|e| Error::Connection(Box::new(e)))?;
@@ -162,6 +163,7 @@ impl NatsClient {
         timeout(Duration::from_secs(10), self.inner.client.flush())
             .await
             .map_err(|_| Error::Timeout {
+                operation: "ping",
                 timeout: Duration::from_secs(10),
             })?
             .map_err(|e| Error::Connection(Box::new(e)))?;
@@ -184,27 +186,28 @@ impl NatsClient {
 
 // Key-value store getters
 impl NatsClient {
-    /// Get or create the KV store for a bucket. The bucket fixes the key and
-    /// value types, so it is the only type argument.
+    /// Creates a bucket from its configuration if it does not exist yet. Call
+    /// once per bucket at startup, so [`kv_store`](Self::kv_store) only opens.
     ///
     /// # Errors
     ///
-    /// - `Operation` if the bucket cannot be retrieved or created (a `JetStream`
+    /// - `Operation` if the bucket cannot be looked up or created (a `JetStream`
     ///   request fails, or the server rejects the bucket config).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn kv_store<B: KvBucket>(&self) -> Result<KvStore<B>> {
-        KvStore::new(&self.inner.jetstream).await
+    pub async fn ensure_kv_bucket<B: KvBucket>(&self) -> Result<()> {
+        KvStore::<B>::ensure(&self.inner.jetstream).await
     }
 
-    /// Get or create the KV store for a bucket with a custom TTL.
+    /// Opens the KV store for a bucket created by
+    /// [`ensure_kv_bucket`](Self::ensure_kv_bucket). The bucket fixes the value
+    /// type, so it is the only type argument.
     ///
     /// # Errors
     ///
-    /// - `Operation` if the bucket cannot be retrieved or created (a `JetStream`
-    ///   request fails, or the server rejects the bucket config).
+    /// - `Operation` if the bucket does not exist or the lookup fails.
     #[tracing::instrument(skip(self), target = TRACING_TARGET_CLIENT)]
-    pub async fn kv_store_with_ttl<B: KvBucket>(&self, ttl: Duration) -> Result<KvStore<B>> {
-        KvStore::with_ttl(&self.inner.jetstream, ttl).await
+    pub async fn kv_store<B: KvBucket>(&self) -> Result<KvStore<B>> {
+        KvStore::open(&self.inner.jetstream).await
     }
 }
 

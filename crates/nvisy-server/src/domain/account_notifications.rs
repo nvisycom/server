@@ -3,9 +3,10 @@
 //! Owns the read-status rules a handler would otherwise inline — marking one or
 //! all notifications read (scoped to the owning account) and broadcasting the
 //! resulting unread count so a watching badge updates live. The unread-count SSE
-//! stream stays in the handler (it is transport), subscribing through the same
-//! [`NotificationEmitter`].
+//! stream stays in the handler (it is transport), subscribing and re-reading
+//! through this service.
 
+use nvisy_nats::stream::BroadcastStream;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::AccountNotification;
 use nvisy_postgres::query::AccountNotificationRepository;
@@ -13,7 +14,7 @@ use nvisy_postgres::types::{CursorPage, CursorPagination, TimeCursor};
 use uuid::Uuid;
 
 use crate::response::{Error, Resource, Result};
-use crate::service::NotificationEmitter;
+use crate::service::{NotificationEmitter, UnreadCountEvent};
 
 /// Tracing target for account notification domain operations.
 const TRACING_TARGET: &str = "nvisy_server::domain::account";
@@ -53,6 +54,18 @@ impl AccountNotificationService {
         Ok(conn
             .cursor_list_account_notifications(account_id, pagination)
             .await?)
+    }
+
+    /// Subscribes to the account's live unread-count broadcasts.
+    ///
+    /// # Errors
+    ///
+    /// - A NATS error if the subscription cannot be opened.
+    pub async fn subscribe_unread(
+        &self,
+        account_id: Uuid,
+    ) -> Result<BroadcastStream<UnreadCountEvent>> {
+        self.emitter.subscribe_unread(account_id).await
     }
 
     /// Returns the account's unread notification count.

@@ -12,12 +12,10 @@ use bytes::Bytes;
 use futures::stream::{self, StreamExt};
 use nvisy_core::{ByteStream, Error, FileUpload, Result, Secret};
 
-use super::{ProviderRequest, encode_path_segment, response_stream};
+use super::session::Session;
+use super::{FileServiceProvider, encode_path_segment, response_stream};
 use crate::client::FileServiceClient;
 use crate::oauth::OAuthProvider;
-
-/// Provider identifier stored in the connection's `provider` column.
-pub const PROVIDER_ID: &str = "google_drive";
 
 /// Drive OAuth authorize endpoint.
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -50,8 +48,7 @@ pub fn oauth_provider() -> OAuthProvider {
 
 /// A connected Google Drive client, holding a valid access token.
 pub struct DriveClient {
-    http: reqwest::Client,
-    access_token: Secret<String>,
+    session: Session,
     /// The Drive folder id that new exports are created in; `None` uses the
     /// user's root.
     root_folder_id: Option<String>,
@@ -66,8 +63,7 @@ impl DriveClient {
         root_folder_id: Option<String>,
     ) -> Self {
         Self {
-            http,
-            access_token,
+            session: Session::new(http, access_token, FileServiceProvider::GoogleDrive),
             root_folder_id,
         }
     }
@@ -78,10 +74,11 @@ impl FileServiceClient for DriveClient {
     async fn verify(&self) -> Result<()> {
         // Fetch the lightweight `about` resource: reachable and authorized iff
         // it returns, without listing or transferring any file.
-        self.http
-            .get(format!("{API_BASE}/about?fields=user(emailAddress)"))
-            .bearer_auth(self.access_token.expose())
-            .send_checked(PROVIDER_ID)
+        self.session
+            .send(
+                self.session
+                    .get(format!("{API_BASE}/about?fields=user(emailAddress)")),
+            )
             .await?;
         Ok(())
     }
@@ -91,10 +88,8 @@ impl FileServiceClient for DriveClient {
         // normally URL-safe, but a stored key must never alter the request URL.
         let id = encode_path_segment(id);
         let response = self
-            .http
-            .get(format!("{API_BASE}/files/{id}?alt=media"))
-            .bearer_auth(self.access_token.expose())
-            .send_checked(PROVIDER_ID)
+            .session
+            .send(self.session.get(format!("{API_BASE}/files/{id}?alt=media")))
             .await?;
         Ok(response_stream(response))
     }
@@ -134,15 +129,16 @@ impl FileServiceClient for DriveClient {
             .chain(body)
             .chain(stream::once(async { Ok(Bytes::from(epilogue)) }));
 
-        self.http
-            .post(format!("{UPLOAD_BASE}/files?uploadType=multipart"))
-            .bearer_auth(self.access_token.expose())
-            .header(
-                "Content-Type",
-                format!("multipart/related; boundary={boundary}"),
+        self.session
+            .send(
+                self.session
+                    .post(format!("{UPLOAD_BASE}/files?uploadType=multipart"))
+                    .header(
+                        "Content-Type",
+                        format!("multipart/related; boundary={boundary}"),
+                    )
+                    .body(reqwest::Body::wrap_stream(related)),
             )
-            .body(reqwest::Body::wrap_stream(related))
-            .send_checked(PROVIDER_ID)
             .await?;
         Ok(())
     }

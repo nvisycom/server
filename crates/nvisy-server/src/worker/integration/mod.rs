@@ -24,6 +24,7 @@ use std::future::Future;
 pub use engine::TransferEngine;
 pub use file_source::SourceEntry;
 use futures::stream::{self, StreamExt};
+pub(crate) use worker::SchedulerLocksBucket;
 pub use worker::{ConnectionSyncJob, ConnectionSyncWorker, SyncStream};
 
 /// Runs `transfer` over `items`, at most `concurrency` at once, and counts the

@@ -71,19 +71,19 @@ impl ObjectStoreSource {
 #[async_trait::async_trait]
 impl FileSource for ObjectStoreSource {
     async fn get_stream(&self, key: &str) -> Result<ByteStream> {
-        Ok(self.0.get_stream(key).await?)
+        Ok(self.0.get_stream(key).await?.body)
     }
 
     async fn put_stream(&self, upload: FileUpload<'_>) -> Result<()> {
-        // Object stores stream via multipart, which frames its own parts, so the
-        // known length is unused here.
+        // An object store frames its own upload (a single put, or multipart for
+        // large content), so the known length is unused here.
         let FileUpload {
             key,
             content_type,
             body,
             ..
         } = upload;
-        self.0.put_multipart(key, Some(content_type), body).await?;
+        self.0.put_stream(key, Some(content_type), body).await?;
         Ok(())
     }
 }

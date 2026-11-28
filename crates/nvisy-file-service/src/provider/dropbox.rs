@@ -11,12 +11,10 @@ use std::fmt::Write;
 use nvisy_core::{ByteStream, FileUpload, Result, Secret};
 use reqwest::header::CONTENT_LENGTH;
 
-use super::{ProviderRequest, response_stream};
+use super::session::Session;
+use super::{FileServiceProvider, response_stream};
 use crate::client::FileServiceClient;
 use crate::oauth::OAuthProvider;
-
-/// Provider identifier stored in the connection's `provider` column.
-pub const PROVIDER_ID: &str = "dropbox";
 
 /// Dropbox OAuth authorize endpoint.
 const AUTH_URL: &str = "https://www.dropbox.com/oauth2/authorize";
@@ -46,8 +44,7 @@ pub fn oauth_provider() -> OAuthProvider {
 
 /// A connected Dropbox client holding a valid access token.
 pub struct DropboxClient {
-    http: reqwest::Client,
-    access_token: Secret<String>,
+    session: Session,
     /// The folder path new exports are written into; `None` (or empty) is the
     /// account root.
     root_path: Option<String>,
@@ -66,8 +63,7 @@ impl DropboxClient {
         root_path: Option<String>,
     ) -> Self {
         Self {
-            http,
-            access_token,
+            session: Session::new(http, access_token, FileServiceProvider::Dropbox),
             root_path: normalize_root(root_path),
         }
     }
@@ -106,10 +102,11 @@ fn api_arg(value: &serde_json::Value) -> String {
 impl FileServiceClient for DropboxClient {
     async fn verify(&self) -> Result<()> {
         // get_current_account is the idiomatic whoami; it takes an empty body.
-        self.http
-            .post(format!("{API_BASE}/users/get_current_account"))
-            .bearer_auth(self.access_token.expose())
-            .send_checked(PROVIDER_ID)
+        self.session
+            .send(
+                self.session
+                    .post(format!("{API_BASE}/users/get_current_account")),
+            )
             .await?;
         Ok(())
     }
@@ -117,11 +114,12 @@ impl FileServiceClient for DropboxClient {
     async fn get_stream(&self, id: &str) -> Result<ByteStream> {
         let arg = api_arg(&serde_json::json!({ "path": id }));
         let response = self
-            .http
-            .post(format!("{CONTENT_BASE}/files/download"))
-            .bearer_auth(self.access_token.expose())
-            .header("Dropbox-API-Arg", arg)
-            .send_checked(PROVIDER_ID)
+            .session
+            .send(
+                self.session
+                    .post(format!("{CONTENT_BASE}/files/download"))
+                    .header("Dropbox-API-Arg", arg),
+            )
             .await?;
         Ok(response_stream(response))
     }
@@ -147,14 +145,15 @@ impl FileServiceClient for DropboxClient {
         // known Content-Length. The body is streamed (not buffered), so set the
         // length explicitly from the caller's known size. Simple upload is capped
         // at 150 MiB by Dropbox; larger files would need an upload session.
-        self.http
-            .post(format!("{CONTENT_BASE}/files/upload"))
-            .bearer_auth(self.access_token.expose())
-            .header("Dropbox-API-Arg", arg)
-            .header("Content-Type", "application/octet-stream")
-            .header(CONTENT_LENGTH, content_length)
-            .body(reqwest::Body::wrap_stream(body))
-            .send_checked(PROVIDER_ID)
+        self.session
+            .send(
+                self.session
+                    .post(format!("{CONTENT_BASE}/files/upload"))
+                    .header("Dropbox-API-Arg", arg)
+                    .header("Content-Type", "application/octet-stream")
+                    .header(CONTENT_LENGTH, content_length)
+                    .body(reqwest::Body::wrap_stream(body)),
+            )
             .await?;
         Ok(())
     }

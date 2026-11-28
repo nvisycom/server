@@ -69,9 +69,9 @@ impl<S: EventStream> EventPublisher<S> {
         self.jetstream
             .publish(subject.to_owned(), payload.into())
             .await
-            .map_err(|e| Error::delivery_failed(subject, e.to_string()))?
+            .map_err(|e| Error::operation("stream_publish", format!("{subject}: {e}")))?
             .await
-            .map_err(|e| Error::operation("stream_publish", e.to_string()))?;
+            .map_err(|e| Error::operation("stream_publish_ack", format!("{subject}: {e}")))?;
 
         tracing::debug!(
             target: TRACING_TARGET_STREAM,
@@ -80,19 +80,5 @@ impl<S: EventStream> EventPublisher<S> {
             "Published typed event"
         );
         Ok(())
-    }
-
-    /// Returns the stream name.
-    #[inline]
-    #[must_use]
-    pub fn stream_name(&self) -> &'static str {
-        S::NAME
-    }
-
-    /// Returns the subject.
-    #[inline]
-    #[must_use]
-    pub fn subject(&self) -> &'static str {
-        S::SUBJECT
     }
 }

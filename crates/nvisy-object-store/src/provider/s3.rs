@@ -2,7 +2,6 @@
 //!
 //! Works with AWS S3, `MinIO`, and any S3-compatible service.
 
-use derive_more::Deref;
 use nvisy_core::net::EndpointPolicy;
 use nvisy_core::{Error, Secret};
 use object_store::aws::AmazonS3Builder;
@@ -10,7 +9,6 @@ use object_store::aws::AmazonS3Builder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::Client;
 use crate::client::ObjectStoreClient;
 
 /// Typed credentials for S3-compatible provider.
@@ -45,23 +43,16 @@ fn default_region() -> String {
     "us-east-1".to_string()
 }
 
-/// S3-backed object storage client.
-#[derive(Deref)]
-pub struct S3Provider(ObjectStoreClient);
-
-impl Client for S3Provider {
-    type Credentials = S3Credentials;
-
-    const ID: &str = "s3";
-
-    async fn connect(creds: &Self::Credentials, policy: EndpointPolicy) -> Result<Self, Error> {
+impl S3Credentials {
+    /// Connects to the store, validating any custom endpoint under `policy`.
+    pub(super) async fn connect(&self, policy: EndpointPolicy) -> Result<ObjectStoreClient, Error> {
         let mut builder = AmazonS3Builder::new()
-            .with_bucket_name(&creds.bucket)
-            .with_region(&creds.region)
-            .with_access_key_id(creds.access_key_id.expose())
-            .with_secret_access_key(creds.secret_access_key.expose());
+            .with_bucket_name(&self.bucket)
+            .with_region(&self.region)
+            .with_access_key_id(self.access_key_id.expose())
+            .with_secret_access_key(self.secret_access_key.expose());
 
-        if let Some(endpoint) = &creds.endpoint {
+        if let Some(endpoint) = &self.endpoint {
             // Validate the custom endpoint and enable plaintext HTTP only for a
             // local emulator (e.g. MinIO), never for a remote host.
             let allow_http = super::endpoint_allow_http(policy, endpoint).await?;
@@ -71,14 +62,14 @@ impl Client for S3Provider {
             }
         }
 
-        if let Some(token) = &creds.session_token {
+        if let Some(token) = &self.session_token {
             builder = builder.with_token(token.expose());
         }
 
         let store = builder
             .build()
-            .map_err(|e| Error::invalid(format!("{}: {e}", Self::ID)))?;
+            .map_err(|e| Error::invalid(format!("{}: {e}", "s3")))?;
 
-        Ok(Self(ObjectStoreClient::new(store)))
+        Ok(ObjectStoreClient::new(store))
     }
 }

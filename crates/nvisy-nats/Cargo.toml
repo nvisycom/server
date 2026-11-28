@@ -32,31 +32,33 @@ cli = ["dep:clap", "nvisy-core/cli"]
 
 # Test support: an ephemeral NATS (JetStream) container + connected client, for
 # this crate's tests and for downstream crates that compose a real server.
-test_util = ["dep:testcontainers-modules", "tokio/sync"]
+test_util = ["dep:testcontainers-modules", "nvisy-core/test_util"]
 
 [dependencies]
 # Internal crates
-nvisy-core = { workspace = true }
+nvisy-core = { workspace = true, features = [] }
+
+# CLI
+clap = { workspace = true, features = ["derive", "env"], optional = true }
 
 # Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
 tokio-util = { workspace = true, features = ["rt"] }
 futures = { workspace = true, features = [] }
-async-trait = { workspace = true }
+async-trait = { workspace = true, features = [] }
 
 # Messaging (NATS)
-async-nats = { workspace = true }
+async-nats = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
 
+# Testing utilities
+testcontainers-modules = { workspace = true, features = ["nats"], optional = true }
+
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
-clap = { workspace = true, features = ["derive", "env"], optional = true }
-
-# Test-only: ephemeral NATS container (gated on the `test_util` feature).
-testcontainers-modules = { workspace = true, features = ["nats"], optional = true }
 
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
