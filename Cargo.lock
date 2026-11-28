@@ -4484,9 +4484,9 @@ dependencies = [
 
 [[package]]
 name = "hipstr"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07a5072958d04f9147e517881d929d3f4706612712f8f4cfcd247f2b716d5262"
+checksum = "637f99a632c30b144cb58da2b75a6f7e7f6aa76bf19e5291a154af518fa17aae"
 dependencies = [
  "loom",
  "serde",
