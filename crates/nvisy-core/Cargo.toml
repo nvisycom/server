@@ -33,13 +33,25 @@ schema = ["dep:schemars"]
 # the duration parser config flags use.
 cli = ["dep:clap", "dep:jiff"]
 
+# HTTP client support: classifies reqwest and reqwest-middleware failures into
+# the shared error kinds.
+reqwest = ["dep:reqwest", "dep:reqwest-middleware"]
+
 [dependencies]
 # Async runtime
 async-trait = { workspace = true }
+futures = { workspace = true, features = [] }
 tokio = { workspace = true, features = ["net"] }
 
 # CLI
 clap = { workspace = true, features = ["derive"], optional = true }
+
+# HTTP client
+reqwest = { workspace = true, features = [], optional = true }
+reqwest-middleware = { workspace = true, features = [], optional = true }
+
+# Observability
+tracing = { workspace = true, features = [] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
@@ -49,10 +61,12 @@ schemars = { workspace = true, optional = true }
 thiserror = { workspace = true, features = [] }
 
 # Primitive datatypes
+bytes = { workspace = true, features = [] }
 jiff = { workspace = true, features = [], optional = true }
 url = { workspace = true, features = [] }
 
 [dev-dependencies]
+serde_json = { workspace = true, features = [] }
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]

@@ -13,12 +13,10 @@
 
 use std::time::Duration;
 
-use bytes::Bytes;
-use futures::stream::BoxStream;
+use nvisy_core::{ByteStream, Error, ErrorKind, FileUpload, Result, Secret};
 
 use super::apps::OAuthApps;
 use super::connected::ConnectedFileService;
-use crate::error::{Error, ErrorKind, Result};
 use crate::oauth::{OAuthClient, OAuthTokens};
 use crate::provider::{FileServiceConfig, FileServiceProvider};
 
@@ -83,12 +81,12 @@ impl FileService {
     ///
     /// # Errors
     ///
-    /// Returns a `BadRequest` error if the host has not configured an OAuth app
+    /// Returns an `Invalid` error if the host has not configured an OAuth app
     /// for `provider`.
     pub fn oauth_client(&self, provider: FileServiceProvider) -> Result<OAuthClient> {
         let app = self.apps.for_provider(provider).ok_or_else(|| {
             Error::new(
-                ErrorKind::BadRequest,
+                ErrorKind::Invalid,
                 "this cloud file provider is not configured",
             )
         })?;
@@ -128,7 +126,7 @@ impl FileService {
         tracing::debug!(target: TRACING_TARGET, "Refreshing cloud file OAuth token");
         let new_tokens: OAuthTokens = self
             .oauth_client(config.provider)?
-            .refresh_tokens(&refresh_token)
+            .refresh_tokens(refresh_token.expose())
             .await?;
         let access_token = new_tokens.access_token.clone();
 
@@ -162,7 +160,7 @@ impl FileService {
             )
         })?;
         self.oauth_client(config.provider)?
-            .refresh_with_scopes(&refresh_token, scopes)
+            .refresh_with_scopes(refresh_token.expose(), scopes)
             .await
     }
 
@@ -217,7 +215,7 @@ impl FileService {
 #[must_use]
 pub struct FreshToken {
     /// The access token to use for the request.
-    pub access_token: String,
+    pub access_token: Secret<String>,
     /// The updated config to persist, present only if a refresh happened.
     pub refreshed: Option<FileServiceConfig>,
 }
@@ -228,32 +226,11 @@ pub struct FreshToken {
 #[must_use]
 pub struct PickerAccessToken {
     /// The access token to hand to the picker.
-    pub access_token: String,
+    pub access_token: Secret<String>,
     /// Expiry as a Unix timestamp, if known.
     pub expires_at: Option<i64>,
     /// The updated config to persist, present only if the refresh token rotated.
     pub refreshed: Option<FileServiceConfig>,
-}
-
-/// A byte stream, the shape both directions of a transfer move data in.
-pub type ByteStream = BoxStream<'static, Result<Bytes>>;
-
-/// A streamed file upload: the destination name, its content type, the exact
-/// byte length, and the body stream.
-///
-/// `content_length` must equal the number of bytes `body` yields — a provider
-/// that needs the length up front (Dropbox rejects a chunked body) sets it as
-/// the request `Content-Length`, and a mismatch fails the upload.
-#[must_use]
-pub struct FileUpload<'a> {
-    /// The name of the new file to create on the provider.
-    pub name: &'a str,
-    /// The MIME type of the content.
-    pub content_type: &'a str,
-    /// The exact number of bytes `body` yields.
-    pub content_length: u64,
-    /// The file's bytes, streamed to the provider.
-    pub body: ByteStream,
 }
 
 /// FileServiceProvider-neutral read/write access to a connected file service.

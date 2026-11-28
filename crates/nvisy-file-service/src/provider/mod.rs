@@ -12,6 +12,7 @@ mod dropbox;
 mod onedrive;
 
 use futures::TryStreamExt;
+use nvisy_core::{ByteStream, Error, ErrorKind, Result, Secret, kind_for_status};
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use reqwest::Response;
 #[cfg(feature = "schema")]
@@ -19,8 +20,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::EnumIter;
 
-use crate::client::{ByteStream, FileService, FileServiceClient, PickerAccessToken};
-use crate::error::{Error, ErrorKind, Result, kind_for_status};
+use crate::client::{FileService, FileServiceClient, PickerAccessToken};
 use crate::oauth::{OAuthProvider, OAuthTokens};
 
 /// Tracing target for provider requests.
@@ -177,7 +177,7 @@ impl FileServiceProvider {
     fn connect(
         self,
         http: reqwest::Client,
-        access_token: String,
+        access_token: Secret<String>,
         root: Option<String>,
     ) -> Box<dyn FileServiceClient> {
         match self {
@@ -231,7 +231,7 @@ impl FileServiceProvider {
                 })
             }
             Self::Dropbox => Err(Error::new(
-                ErrorKind::BadRequest,
+                ErrorKind::Invalid,
                 "this provider's picker uses a client-side app key, not a server token",
             )),
         }
@@ -297,7 +297,7 @@ impl FileServiceConfig {
     pub fn connect(
         &self,
         http: reqwest::Client,
-        access_token: String,
+        access_token: Secret<String>,
     ) -> Box<dyn FileServiceClient> {
         self.provider
             .connect(http, access_token, self.settings.root.clone())

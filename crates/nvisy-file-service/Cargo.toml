@@ -21,11 +21,14 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-schema = ["dep:schemars"]
+schema = ["dep:schemars", "nvisy-core/schema"]
 # CLI support: derives clap::Args on config structs so the binary can parse them.
 cli = ["dep:clap"]
 
 [dependencies]
+# Internal crates
+nvisy-core = { workspace = true, features = ["reqwest"] }
+
 # CLI
 clap = { workspace = true, features = ["derive", "env"], optional = true }
 

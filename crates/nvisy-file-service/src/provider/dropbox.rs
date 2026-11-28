@@ -8,11 +8,11 @@
 
 use std::fmt::Write;
 
+use nvisy_core::{ByteStream, FileUpload, Result, Secret};
 use reqwest::header::CONTENT_LENGTH;
 
 use super::{ProviderRequest, response_stream};
-use crate::client::{ByteStream, FileServiceClient, FileUpload};
-use crate::error::Result;
+use crate::client::FileServiceClient;
 use crate::oauth::OAuthProvider;
 
 /// Provider identifier stored in the connection's `provider` column.
@@ -47,7 +47,7 @@ pub fn oauth_provider() -> OAuthProvider {
 /// A connected Dropbox client holding a valid access token.
 pub struct DropboxClient {
     http: reqwest::Client,
-    access_token: String,
+    access_token: Secret<String>,
     /// The folder path new exports are written into; `None` (or empty) is the
     /// account root.
     root_path: Option<String>,
@@ -60,7 +60,11 @@ impl DropboxClient {
     /// the account root is the empty string, and a folder must begin with `/`
     /// and carry no trailing slash. This makes a user-entered `Team/Reports`
     /// behave the same as `/Team/Reports/`.
-    pub fn new(http: reqwest::Client, access_token: String, root_path: Option<String>) -> Self {
+    pub fn new(
+        http: reqwest::Client,
+        access_token: Secret<String>,
+        root_path: Option<String>,
+    ) -> Self {
         Self {
             http,
             access_token,
@@ -104,7 +108,7 @@ impl FileServiceClient for DropboxClient {
         // get_current_account is the idiomatic whoami; it takes an empty body.
         self.http
             .post(format!("{API_BASE}/users/get_current_account"))
-            .bearer_auth(&self.access_token)
+            .bearer_auth(self.access_token.expose())
             .send_checked(PROVIDER_ID)
             .await?;
         Ok(())
@@ -115,7 +119,7 @@ impl FileServiceClient for DropboxClient {
         let response = self
             .http
             .post(format!("{CONTENT_BASE}/files/download"))
-            .bearer_auth(&self.access_token)
+            .bearer_auth(self.access_token.expose())
             .header("Dropbox-API-Arg", arg)
             .send_checked(PROVIDER_ID)
             .await?;
@@ -124,7 +128,7 @@ impl FileServiceClient for DropboxClient {
 
     async fn put_stream(&self, upload: FileUpload<'_>) -> Result<()> {
         let FileUpload {
-            name,
+            key: name,
             content_length,
             body,
             ..
@@ -145,7 +149,7 @@ impl FileServiceClient for DropboxClient {
         // at 150 MiB by Dropbox; larger files would need an upload session.
         self.http
             .post(format!("{CONTENT_BASE}/files/upload"))
-            .bearer_auth(&self.access_token)
+            .bearer_auth(self.access_token.expose())
             .header("Dropbox-API-Arg", arg)
             .header("Content-Type", "application/octet-stream")
             .header(CONTENT_LENGTH, content_length)

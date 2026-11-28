@@ -19,7 +19,6 @@
 
 mod client;
 mod config;
-mod error;
 
 pub use client::ReqwestClient;
 pub use config::ReqwestConfig;

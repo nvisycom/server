@@ -5,7 +5,6 @@
 //! never used directly for workspace data. Master-scoped variants are also
 //! available for data not tied to a workspace.
 
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -51,7 +50,7 @@ impl Default for CryptoConfig {
 ///
 /// Holds the master key and derives per-workspace keys on demand. Cheap to
 /// clone (the key is shared through an `Arc`).
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct CryptoService {
     master_key: Arc<EncryptionKey>,
 }
@@ -221,14 +220,6 @@ impl CryptoConfig {
         let service = CryptoService::from_key_bytes(&bytes)?;
         tracing::info!(target: TRACING_TARGET, "Master encryption key loaded");
         Ok(service)
-    }
-}
-
-impl fmt::Debug for CryptoService {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CryptoService")
-            .field("master_key", &"[REDACTED]")
-            .finish()
     }
 }
 

@@ -7,6 +7,8 @@
 use std::fmt;
 use std::time::Duration;
 
+use nvisy_core::REDACTED;
+
 use crate::{Error, PgClient, Result, TRACING_TARGET_CONNECTION};
 
 /// Complete database configuration including connection string and pool settings.
@@ -117,7 +119,7 @@ impl PgConfig {
     #[inline]
     #[must_use]
     pub fn database_url_masked(&self) -> String {
-        Self::mask_url(&self.postgres_url)
+        mask_url(&self.postgres_url)
     }
 
     /// Returns the database URL.
@@ -125,23 +127,6 @@ impl PgConfig {
     #[must_use]
     pub fn database_url(&self) -> &str {
         &self.postgres_url
-    }
-
-    /// Masks sensitive information in a database URL.
-    #[inline]
-    fn mask_url(url: &str) -> String {
-        // Simple password masking without url crate dependency
-        if let Some(at_pos) = url.find('@') {
-            if let Some(colon_pos) = url[..at_pos].rfind(':') {
-                let mut masked = url.to_string();
-                masked.replace_range(colon_pos + 1..at_pos, "***");
-                masked
-            } else {
-                url.to_string()
-            }
-        } else {
-            url.to_string()
-        }
     }
 
     /// Sets the database URL.
@@ -262,6 +247,18 @@ impl PgConfig {
     }
 }
 
+/// Masks the password in a database URL for logs and `Debug`.
+pub(crate) fn mask_url(url: &str) -> String {
+    if let Some(at_pos) = url.find('@')
+        && let Some(colon_pos) = url[..at_pos].rfind(':')
+    {
+        let mut masked = url.to_owned();
+        masked.replace_range(colon_pos + 1..at_pos, REDACTED);
+        return masked;
+    }
+    url.to_owned()
+}
+
 impl fmt::Debug for PgConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PgConfig")
@@ -349,7 +346,7 @@ mod tests {
         let config = PgConfig::new("postgresql://user:secret@localhost/db");
         assert_eq!(
             config.database_url_masked(),
-            "postgresql://user:***@localhost/db"
+            "postgresql://user:<redacted>@localhost/db"
         );
     }
 

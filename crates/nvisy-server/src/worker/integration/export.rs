@@ -10,6 +10,7 @@ use std::str::FromStr;
 
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
+use nvisy_core::{ByteStream, Error as CoreError, FileUpload};
 use nvisy_postgres::model::{Blob, WorkspaceConnection, WorkspaceDocument};
 use nvisy_postgres::query::{DocumentWithBlob, WorkspaceDocumentRepository};
 use nvisy_s3::DocumentKey;
@@ -19,7 +20,7 @@ use uuid::Uuid;
 
 use super::connector::Connector;
 use super::count_transferred;
-use super::file_source::{ByteStream, FileSource, FileUpload};
+use super::file_source::FileSource;
 use super::naming::{export_key, mime_from_extension};
 use crate::response::{ErrorKind, Result};
 use crate::service::{ConnectionConfig, CryptoService, Infra};
@@ -212,9 +213,7 @@ impl Exporter {
                 .decrypt_reader(connection.workspace_id, stored.into_reader()),
         );
         let body: ByteStream = Box::pin(reader_to_stream(plaintext).map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Failed to read stored file for export")
-                .with_context(err.to_string())
+            CoreError::internal("failed to read the stored file for export").with_source(err)
         }));
         let content_type = mime_from_extension(&document.file_extension);
         // The blob's `file_size_bytes` is the plaintext size (measured on import

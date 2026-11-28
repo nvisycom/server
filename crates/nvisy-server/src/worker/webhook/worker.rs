@@ -236,13 +236,19 @@ impl WebhookDeliveryWorker {
             "Delivering webhook"
         );
 
-        // A transport error (connection refused, timeout, SSRF rejection) is a
-        // failure worth retrying.
+        // A transient failure (unreachable endpoint, timeout, unresolvable host)
+        // is retried; a permanent one (a disallowed scheme, an internal address,
+        // a payload that cannot be serialized) fails the delivery outright.
         let response = match self.webhook.deliver(&request).await {
             Ok(response) => response,
             Err(err) => {
+                let retryable = err.is_retryable();
                 let err = Error::external("webhook", format!("Delivery failed: {err}"));
-                return DeliveryOutcome::retryable_for(webhook, err);
+                return if retryable {
+                    DeliveryOutcome::retryable_for(webhook, err)
+                } else {
+                    DeliveryOutcome::permanent(webhook, err)
+                };
             }
         };
 

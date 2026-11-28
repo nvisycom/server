@@ -3,9 +3,11 @@
 use std::fmt;
 use std::time::Duration;
 
+use nvisy_core::{REDACTED, Secret};
+
 /// Configuration for NATS connections with sensible defaults.
 ///
-/// The token is masked in the [`Debug`] output.
+/// Credentials embedded in the URL are masked in the [`Debug`] output.
 #[derive(Clone)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct NatsConfig {
@@ -15,7 +17,7 @@ pub struct NatsConfig {
 
     /// Authentication token
     #[cfg_attr(feature = "cli", arg(long = "nats-token", env = "NATS_TOKEN"))]
-    pub nats_token: String,
+    pub nats_token: Secret<String>,
 
     /// Client connection name for debugging and monitoring
     #[cfg_attr(
@@ -58,7 +60,7 @@ impl fmt::Debug for NatsConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("NatsConfig")
             .field("nats_url", &self.redacted_url())
-            .field("nats_token", &"<redacted>")
+            .field("nats_token", &self.nats_token)
             .field("nats_client_name", &self.nats_client_name)
             .field("nats_connect_timeout", &self.nats_connect_timeout)
             .field("nats_request_timeout", &self.nats_request_timeout)
@@ -78,7 +80,7 @@ impl NatsConfig {
     pub fn new(server_url: impl Into<String>, token: impl Into<String>) -> Self {
         Self {
             nats_url: server_url.into(),
-            nats_token: token.into(),
+            nats_token: Secret::new(token.into()),
             nats_client_name: None,
             nats_connect_timeout: None,
             nats_request_timeout: None,
@@ -94,9 +96,9 @@ impl NatsConfig {
             .split(',')
             .map(|url| match (url.find("://"), url.rfind('@')) {
                 (Some(scheme), Some(at)) if at > scheme => {
-                    format!("{}<redacted>{}", &url[..scheme + 3], &url[at..])
+                    format!("{}{REDACTED}{}", &url[..scheme + 3], &url[at..])
                 }
-                (None, Some(at)) => format!("<redacted>{}", &url[at..]),
+                (None, Some(at)) => format!("{REDACTED}{}", &url[at..]),
                 _ => url.to_owned(),
             })
             .collect::<Vec<_>>()
@@ -161,7 +163,7 @@ mod tests {
     fn test_new_config() {
         let config = NatsConfig::new("nats://localhost:4222", "my-token");
         assert_eq!(config.nats_url, "nats://localhost:4222");
-        assert_eq!(config.nats_token, "my-token");
+        assert_eq!(config.nats_token.expose(), "my-token");
         assert_eq!(config.name(), "nvisy-nats");
         assert_eq!(config.nats_connect_timeout, None);
         assert_eq!(config.nats_request_timeout, None);

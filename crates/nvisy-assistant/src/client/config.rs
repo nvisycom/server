@@ -1,7 +1,6 @@
 //! The typed LLM connection configuration.
 
-use std::fmt;
-
+use nvisy_core::Secret;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -16,29 +15,18 @@ use crate::provider::{
 ///
 /// The `api_key` is masked in [`Debug`], so neither this struct nor any config
 /// that embeds it leaks the key.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AuthenticatedProvider {
     /// The provider API key.
-    pub api_key: String,
+    pub api_key: Secret<String>,
     /// Override the API base URL (for a compatible endpoint or a proxy). Optional.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
     /// Default model to use when a request does not specify one. Optional.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
-}
-
-impl fmt::Debug for AuthenticatedProvider {
-    /// Masks `api_key`; only its presence is shown.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AuthenticatedProvider")
-            .field("api_key", &"<set>")
-            .field("base_url", &self.base_url)
-            .field("default_model", &self.default_model)
-            .finish()
-    }
 }
 
 /// Configuration for a provider reached without an API key (Ollama), addressed
@@ -128,7 +116,7 @@ impl LlmConfig {
     pub async fn validate(&self) -> Result<()> {
         match self {
             Self::OpenAi(p) => {
-                OpenAiProvider::connect(&p.api_key, p.base_url.as_deref())
+                OpenAiProvider::connect(p.api_key.expose(), p.base_url.as_deref())
                     .verify()
                     .await
             }
@@ -138,7 +126,7 @@ impl LlmConfig {
                     .await
             }
             Self::Anthropic(p) => {
-                AnthropicProvider::connect(&p.api_key, p.base_url.as_deref())
+                AnthropicProvider::connect(p.api_key.expose(), p.base_url.as_deref())
                     .verify()
                     .await
             }
@@ -160,13 +148,13 @@ impl LlmConfig {
         let model = model.or_else(|| self.default_model()).unwrap_or_default();
         let client = match self {
             Self::OpenAi(p) => {
-                OpenAiProvider::connect(&p.api_key, p.base_url.as_deref()).model(model)
+                OpenAiProvider::connect(p.api_key.expose(), p.base_url.as_deref()).model(model)
             }
             Self::Ollama(p) => {
                 OllamaProvider::connect(&OllamaCredentials, Some(&p.base_url)).model(model)
             }
             Self::Anthropic(p) => {
-                AnthropicProvider::connect(&p.api_key, p.base_url.as_deref()).model(model)
+                AnthropicProvider::connect(p.api_key.expose(), p.base_url.as_deref()).model(model)
             }
         };
         Ok(client)

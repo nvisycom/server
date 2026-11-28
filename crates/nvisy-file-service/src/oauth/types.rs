@@ -1,7 +1,6 @@
 //! The data types the OAuth flow is described and driven by.
 
-use std::fmt;
-
+use nvisy_core::Secret;
 use serde::{Deserialize, Serialize};
 
 /// The `OAuth2` endpoints and scopes for one provider (e.g. Google).
@@ -21,60 +20,30 @@ pub struct OAuthProvider {
 }
 
 /// The OAuth application's credentials and redirect, supplied by configuration.
-/// The client secret is masked in the [`Debug`] output.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct OAuthApp {
     /// The OAuth client id.
     pub client_id: String,
     /// The OAuth client secret.
-    pub client_secret: String,
+    pub client_secret: Secret<String>,
     /// The redirect URI registered with the provider; the callback route.
     pub redirect_uri: String,
 }
 
-impl fmt::Debug for OAuthApp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OAuthApp")
-            .field("client_id", &self.client_id)
-            .field("client_secret", &"<redacted>")
-            .field("redirect_uri", &self.redirect_uri)
-            .finish()
-    }
-}
-
 /// A persisted OAuth token set. Stored encrypted with the rest of a
-/// connection's config; never returned in API responses. The tokens are masked
-/// in [`Debug`] so a connection config's derived `Debug` cannot leak them.
-#[derive(Clone, Deserialize, Serialize)]
+/// connection's config; never returned in API responses.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct OAuthTokens {
     /// The current access token, sent as a bearer credential.
-    pub access_token: String,
+    pub access_token: Secret<String>,
     /// The refresh token, used to mint a new access token when it expires.
     /// Providers may omit it on refresh, so it is retained across refreshes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub refresh_token: Option<String>,
+    pub refresh_token: Option<Secret<String>>,
     /// Unix seconds at which the access token expires, if known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<i64>,
-}
-
-impl fmt::Debug for OAuthTokens {
-    /// Masks the access and refresh tokens; only their presence and the expiry
-    /// are shown.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OAuthTokens")
-            .field("access_token", &"<set>")
-            .field(
-                "refresh_token",
-                match self.refresh_token {
-                    Some(_) => &"<set>",
-                    None => &"<unset>",
-                },
-            )
-            .field("expires_at", &self.expires_at)
-            .finish()
-    }
 }
 
 impl OAuthTokens {

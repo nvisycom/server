@@ -25,7 +25,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 
 # Reqwest-based HTTP client for webhook delivery
-reqwest = ["dep:reqwest", "dep:reqwest-middleware", "dep:reqwest-retry", "dep:reqwest-tracing", "dep:tokio", "dep:hmac", "dep:sha2", "dep:hex"]
+reqwest = ["dep:reqwest", "dep:reqwest-middleware", "dep:reqwest-retry", "dep:reqwest-tracing", "dep:hmac", "dep:sha2", "dep:hex", "nvisy-core/reqwest"]
 
 # JSON Schema support: enables JsonSchema derives on webhook types
 # This allows webhook types to be used directly in API documentation without
@@ -48,7 +48,6 @@ reqwest = { workspace = true, features = ["json"], optional = true }
 reqwest-middleware = { workspace = true, optional = true }
 reqwest-retry = { workspace = true, optional = true }
 reqwest-tracing = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["net"], optional = true }
 
 # Encryption & Cryptography
 hmac = { workspace = true, optional = true, features = [] }
@@ -68,14 +67,9 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 schemars = { workspace = true, optional = true }
 
-# Derive macros & utilities
-thiserror = { workspace = true }
-strum = { workspace = true, features = [] }
-
 # Primitive datatypes
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 jiff = { workspace = true, features = ["serde"] }
-hipstr = { workspace = true, features = [] }
 
 # Domain datatypes & data structures
 url = { workspace = true, features = ["serde"] }

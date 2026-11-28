@@ -1,11 +1,11 @@
 //! [`RedactionKey`]: a caller-held key for the keyed redaction operators.
 
 use std::borrow::Cow;
-use std::fmt;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use elide_pipeline::provider::KeyConfig;
+use nvisy_core::Secret;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::Deserialize;
 
@@ -19,19 +19,16 @@ const REDACTION_KEY_BYTES: usize = 32;
 /// The caller holds it, so only the caller can decrypt encrypted values or match
 /// HMAC pseudonyms to its own systems. It is used for one request and never
 /// stored: it has no `Serialize`, and its `Debug` prints no key bytes.
-pub struct RedactionKey(Vec<u8>);
+#[derive(Debug)]
+pub struct RedactionKey(Secret<Vec<u8>>);
 
 impl RedactionKey {
     /// The engine key configuration for this key.
     #[must_use]
     pub fn into_key_config(self) -> KeyConfig {
-        KeyConfig::Static { key: self.0 }
-    }
-}
-
-impl fmt::Debug for RedactionKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("RedactionKey([REDACTED])")
+        KeyConfig::Static {
+            key: self.0.into_inner(),
+        }
     }
 }
 
@@ -47,7 +44,7 @@ impl<'de> Deserialize<'de> for RedactionKey {
                 bytes.len()
             )));
         }
-        Ok(Self(bytes))
+        Ok(Self(Secret::new(bytes)))
     }
 }
 
@@ -69,6 +66,8 @@ impl JsonSchema for RedactionKey {
 
 #[cfg(test)]
 mod tests {
+    use nvisy_core::REDACTED;
+
     use super::*;
 
     fn parse(value: &str) -> serde_json::Result<RedactionKey> {
@@ -85,6 +84,6 @@ mod tests {
     #[test]
     fn a_key_never_prints_its_bytes() {
         let key = parse(&STANDARD.encode([7u8; 32])).unwrap();
-        assert_eq!(format!("{key:?}"), "RedactionKey([REDACTED])");
+        assert_eq!(format!("{key:?}"), format!("RedactionKey({REDACTED})"));
     }
 }

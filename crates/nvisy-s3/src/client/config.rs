@@ -1,5 +1,7 @@
 //! Connection configuration for the blob store.
 
+use nvisy_core::Secret;
+
 /// Connection settings for the first-party S3-compatible blob store.
 ///
 /// A single S3 bucket holds every logical store (files, audits, avatars);
@@ -8,7 +10,7 @@
 /// AWS S3, set targets an S3-compatible server (`RustFS`, `MinIO`, R2, …).
 ///
 /// [`Bucket`]: crate::Bucket
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 #[must_use = "config does nothing unless you use it"]
 pub struct S3Config {
@@ -46,29 +48,9 @@ pub struct S3Config {
     /// Access key id. When unset (alongside `secret_access_key`), the SDK's
     /// default credential chain is used (environment, profile, IAM role, …).
     #[cfg_attr(feature = "cli", arg(long, env = "S3_ACCESS_KEY_ID"))]
-    pub access_key_id: Option<String>,
+    pub access_key_id: Option<Secret<String>>,
 
     /// Secret access key, paired with `access_key_id` for static credentials.
     #[cfg_attr(feature = "cli", arg(long, env = "S3_SECRET_ACCESS_KEY"))]
-    pub secret_access_key: Option<String>,
-}
-
-impl std::fmt::Debug for S3Config {
-    /// Redacts the secret access key so effective-config dumps never leak it.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("S3Config")
-            .field("bucket", &self.bucket)
-            .field("region", &self.region)
-            .field("endpoint", &self.endpoint)
-            .field("force_path_style", &self.force_path_style)
-            .field(
-                "access_key_id",
-                &self.access_key_id.as_deref().map(|_| "***"),
-            )
-            .field(
-                "secret_access_key",
-                &self.secret_access_key.as_deref().map(|_| "***"),
-            )
-            .finish()
-    }
+    pub secret_access_key: Option<Secret<String>>,
 }

@@ -11,11 +11,8 @@
 //! the trait — [`ObjectStoreSource::list`] exposes it directly for the
 //! whole-listing import.
 
-use bytes::Bytes;
-use futures::TryStreamExt;
-use futures::stream::BoxStream;
+use nvisy_core::{ByteStream, FileUpload};
 use nvisy_file_service::client::FileServiceClient;
-use nvisy_object_store::Error as ObjectError;
 use nvisy_object_store::client::ObjectStoreClient;
 
 use crate::response::Result;
@@ -33,9 +30,6 @@ pub struct SourceEntry {
     pub name: String,
 }
 
-/// A byte stream, the shape both directions of a transfer move data in.
-pub type ByteStream = BoxStream<'static, Result<Bytes>>;
-
 /// Provider-neutral read/write access to a connection's files.
 ///
 /// Implemented by [`ObjectStoreSource`] and [`FileServiceSource`], each
@@ -47,24 +41,6 @@ pub trait FileSource: Send + Sync {
 
     /// Uploads a file to `upload.key`, streaming its body to the provider.
     async fn put_stream(&self, upload: FileUpload<'_>) -> Result<()>;
-}
-
-/// A streamed upload to a [`FileSource`]: the destination key, content type,
-/// exact byte length, and body.
-///
-/// `content_length` must equal the bytes `body` yields; a file service that
-/// needs the length up front (Dropbox) sets it as the request `Content-Length`,
-/// while an object store streams via multipart and ignores it.
-#[must_use]
-pub struct FileUpload<'a> {
-    /// The destination key: an object path, or a file service's new file name.
-    pub key: &'a str,
-    /// The MIME type of the content.
-    pub content_type: &'a str,
-    /// The exact number of bytes `body` yields.
-    pub content_length: u64,
-    /// The file's bytes, streamed to the provider.
-    pub body: ByteStream,
 }
 
 /// A [`FileSource`] over an object store (S3/Azure/GCS).
@@ -95,8 +71,7 @@ impl ObjectStoreSource {
 #[async_trait::async_trait]
 impl FileSource for ObjectStoreSource {
     async fn get_stream(&self, key: &str) -> Result<ByteStream> {
-        let stream = self.0.get_stream(key).await?;
-        Ok(Box::pin(stream.map_err(Into::into)))
+        Ok(self.0.get_stream(key).await?)
     }
 
     async fn put_stream(&self, upload: FileUpload<'_>) -> Result<()> {
@@ -108,9 +83,6 @@ impl FileSource for ObjectStoreSource {
             body,
             ..
         } = upload;
-        // The multipart API wants an object-store-error stream; the body carries
-        // the server error type, so map each item back at the boundary.
-        let body = body.map_err(|err| ObjectError::runtime(err, "source-read"));
         self.0.put_multipart(key, Some(content_type), body).await?;
         Ok(())
     }
@@ -126,30 +98,12 @@ pub struct FileServiceSource(pub Box<dyn FileServiceClient>);
 #[async_trait::async_trait]
 impl FileSource for FileServiceSource {
     async fn get_stream(&self, key: &str) -> Result<ByteStream> {
-        let stream = self.0.get_stream(key).await?;
-        Ok(Box::pin(stream.map_err(Into::into)))
+        Ok(self.0.get_stream(key).await?)
     }
 
     async fn put_stream(&self, upload: FileUpload<'_>) -> Result<()> {
         // A file service creates a new file named by `key`; the caller passes the
         // desired file name as the key for an export.
-        let FileUpload {
-            key,
-            content_type,
-            content_length,
-            body,
-        } = upload;
-        let body = body.map_err(|err| {
-            nvisy_file_service::Error::runtime(format!("export stream failed: {err}"))
-        });
-        self.0
-            .put_stream(nvisy_file_service::client::FileUpload {
-                name: key,
-                content_type,
-                content_length,
-                body: Box::pin(body),
-            })
-            .await?;
-        Ok(())
+        Ok(self.0.put_stream(upload).await?)
     }
 }

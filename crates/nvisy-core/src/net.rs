@@ -99,6 +99,49 @@ impl EndpointPolicy {
     }
 }
 
+/// Checks a URL the server sends to on a tenant's behalf (a webhook) without
+/// DNS: `http` or `https`, and a literal-IP host must be globally routable.
+///
+/// Fast write-time feedback; [`check_outbound`] adds the resolved-address check
+/// a hostname needs.
+///
+/// # Errors
+///
+/// - `Invalid` for a scheme other than `http` or `https`.
+/// - `PermissionDenied` for a literal non-routable host.
+pub fn check_outbound_literal(url: &Url) -> Result<()> {
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(Error::invalid(format!(
+            "outbound URL must use http or https, got {}",
+            url.scheme()
+        )));
+    }
+    let literal = match url.host() {
+        Some(Host::Ipv4(ip)) => Some(IpAddr::V4(ip)),
+        Some(Host::Ipv6(ip)) => Some(IpAddr::V6(ip)),
+        _ => None,
+    };
+    match literal {
+        Some(addr) => reject_non_global(url, [addr]),
+        None => Ok(()),
+    }
+}
+
+/// Checks a URL the server sends to on a tenant's behalf (a webhook) before
+/// each request: the [`check_outbound_literal`] rules, plus every address the
+/// host resolves to must be globally routable, whatever the deployment's
+/// [`EndpointPolicy`].
+///
+/// # Errors
+///
+/// - `Invalid` for a disallowed scheme or a URL with no host.
+/// - `PermissionDenied` if the host resolves to a non-routable address.
+/// - `Connection` if the host does not resolve.
+pub async fn check_outbound(url: &Url) -> Result<()> {
+    check_outbound_literal(url)?;
+    reject_non_global(url, resolve_host(url).await?)
+}
+
 /// Whether a parsed URL host is the local loopback interface: `localhost`, an
 /// IPv4 loopback (`127.0.0.0/8`), or `::1`.
 fn is_loopback_host(host: Option<&Host<&str>>) -> bool {
@@ -128,16 +171,15 @@ async fn resolve_host(url: &Url) -> Result<Vec<IpAddr>> {
 
 /// Rejects the endpoint if the resolution is empty or any address is not a
 /// globally routable unicast address.
-fn reject_non_global(url: &Url, addrs: Vec<IpAddr>) -> Result<()> {
+fn reject_non_global(url: &Url, addrs: impl IntoIterator<Item = IpAddr>) -> Result<()> {
     let mut resolved = false;
     for addr in addrs {
         resolved = true;
         if !is_globally_routable(addr) {
-            return Err(
-                Error::new(ErrorKind::PermissionDenied).with_message(format!(
-                    "endpoint host resolves to a non-routable address: {addr}"
-                )),
-            );
+            return Err(Error::new(
+                ErrorKind::PermissionDenied,
+                format!("endpoint host resolves to a non-routable address: {addr}"),
+            ));
         }
     }
     if resolved {
@@ -284,6 +326,41 @@ mod tests {
             let addr: IpAddr = ip.parse().unwrap();
             assert!(!is_globally_routable(addr), "{ip}");
         }
+    }
+
+    #[test]
+    fn outbound_allows_only_http_schemes() {
+        for (url, ok) in [
+            ("https://example.com/hook", true),
+            ("http://example.com/hook", true),
+            ("ftp://example.com", false),
+            ("file:///etc/passwd", false),
+        ] {
+            let url = Url::parse(url).unwrap();
+            assert_eq!(check_outbound_literal(&url).is_ok(), ok, "{url}");
+        }
+    }
+
+    #[test]
+    fn outbound_rejects_a_literal_internal_host() {
+        for url in [
+            "http://169.254.169.254/latest",
+            "http://[::1]/",
+            "http://10.0.0.1/",
+        ] {
+            let err = check_outbound_literal(&Url::parse(url).unwrap()).unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::PermissionDenied, "{url}");
+        }
+        assert!(check_outbound_literal(&Url::parse("http://93.184.216.34/").unwrap()).is_ok());
+    }
+
+    #[test]
+    fn a_resolution_must_be_non_empty_and_all_public() {
+        let url = Url::parse("https://example.com").unwrap();
+        let public = IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34));
+        assert!(reject_non_global(&url, [public]).is_ok());
+        assert!(reject_non_global(&url, [public, IpAddr::V4(Ipv4Addr::LOCALHOST)]).is_err());
+        assert!(reject_non_global(&url, []).is_err());
     }
 
     #[test]

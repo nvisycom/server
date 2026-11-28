@@ -79,7 +79,7 @@ impl NatsClient {
         let mut connect_opts = ConnectOptions::new()
             .name(config.name())
             .ping_interval(config.ping_interval())
-            .token(config.nats_token.clone());
+            .token(config.nats_token.expose().clone());
 
         // Set connection timeout if specified
         if let Some(timeout) = config.nats_connect_timeout {
@@ -309,27 +309,11 @@ impl HealthCheck for NatsClient {
     /// Probes NATS by checking the connection state, then pinging the server.
     async fn check_health(&self) -> ComponentHealth {
         if !self.is_connected() {
-            tracing::warn!(target: TRACING_TARGET_CONNECTION, "NATS is not connected");
-            return ComponentHealth::unhealthy(HEALTH_COMPONENT_NAME);
+            return ComponentHealth::from_probe(
+                HEALTH_COMPONENT_NAME,
+                Err::<(), _>("not connected"),
+            );
         }
-
-        match self.ping().await {
-            Ok(latency) => {
-                tracing::debug!(
-                    target: TRACING_TARGET_CONNECTION,
-                    ping_ms = latency.as_millis(),
-                    "NATS health check passed"
-                );
-                ComponentHealth::healthy(HEALTH_COMPONENT_NAME)
-            }
-            Err(e) => {
-                tracing::warn!(
-                    target: TRACING_TARGET_CONNECTION,
-                    error = %e,
-                    "NATS health check failed"
-                );
-                ComponentHealth::unhealthy(HEALTH_COMPONENT_NAME)
-            }
-        }
+        ComponentHealth::from_probe(HEALTH_COMPONENT_NAME, self.ping().await)
     }
 }
