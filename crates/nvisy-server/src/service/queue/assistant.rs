@@ -1,36 +1,20 @@
 //! The request-side handle for the assistant subsystem.
 
-use crate::response::Result;
-use crate::service::Infra;
 use crate::worker::Coordinator;
-use crate::worker::assistant::{AssistantJob, AssistantStream};
 
-/// Enqueues assistant-reply jobs onto the work-queue.
+/// Wakes the assistant-job outbox drainer after a reply job is committed.
 ///
-/// Cheaply cloneable (holds the shared [`Infra`] clients and the [`Coordinator`],
-/// all `Arc`-backed).
+/// Cheaply cloneable (the [`Coordinator`] is `Arc`-backed).
 #[derive(Clone)]
-#[must_use = "service does nothing unless you enqueue with it"]
+#[must_use = "service does nothing unless you wake the drainer with it"]
 pub struct AssistantQueue {
-    infra: Infra,
     coordinator: Coordinator,
 }
 
 impl AssistantQueue {
     /// Creates a new [`AssistantQueue`].
-    pub fn new(infra: Infra, coordinator: Coordinator) -> Self {
-        Self { infra, coordinator }
-    }
-
-    /// Enqueues an assistant reply onto the work-queue for the worker to pick up.
-    ///
-    /// # Errors
-    ///
-    /// - A messaging error if publishing the job to NATS fails.
-    pub async fn enqueue(&self, job: AssistantJob) -> Result<()> {
-        let publisher = self.infra.nats.event_publisher::<AssistantStream>();
-        publisher.publish(&job).await?;
-        Ok(())
+    pub fn new(coordinator: Coordinator) -> Self {
+        Self { coordinator }
     }
 
     /// Wakes the assistant-job outbox drainer so a just-committed job is drained

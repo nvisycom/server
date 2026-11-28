@@ -286,6 +286,25 @@ impl BlobStore {
         }))
     }
 
+    /// Fetches an object's whole content, or `None` if it does not exist.
+    ///
+    /// # Errors
+    ///
+    /// `Operation` if the fetch fails for any reason other than a missing object,
+    /// or reading the body fails.
+    pub async fn get_bytes<K: ObjectKey>(&self, key: &K) -> Result<Option<Vec<u8>>> {
+        let Some(object) = self.get(key).await? else {
+            return Ok(None);
+        };
+        let mut bytes = Vec::with_capacity(usize::try_from(object.size).unwrap_or(0));
+        object
+            .into_reader()
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|err| Error::operation("read", err))?;
+        Ok(Some(bytes))
+    }
+
     /// Deletes an object. Idempotent: deleting a missing object succeeds.
     ///
     /// # Errors

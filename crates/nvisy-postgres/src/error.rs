@@ -6,9 +6,9 @@
 use std::borrow::Cow;
 
 pub use deadpool::managed::TimeoutType;
-use diesel::result::ConnectionError;
 /// Re-export diesel's error type for use in transactions.
 pub use diesel::result::Error as DieselError;
+use diesel::result::{ConnectionError, DatabaseErrorKind};
 use diesel_async::pooled_connection::PoolError as DieselPoolError;
 use diesel_async::pooled_connection::deadpool::PoolError as DeadpoolError;
 
@@ -142,13 +142,19 @@ impl Error {
 
     /// Returns whether this error indicates a transient failure that might succeed on retry.
     ///
-    /// Transient errors include timeouts and certain connection issues that may
-    /// be resolved by retrying the operation.
+    /// Transient errors are pool timeouts and a lost connection (one that went
+    /// bad, or that the server closed mid-query): a retry on a fresh connection
+    /// may succeed.
     #[must_use]
     pub fn is_transient(&self) -> bool {
         matches!(
             self,
-            Error::Timeout(_) | Error::Connection(ConnectionError::BadConnection(_))
+            Error::Timeout(_)
+                | Error::Connection(ConnectionError::BadConnection(_))
+                | Error::Query(DieselError::DatabaseError(
+                    DatabaseErrorKind::ClosedConnection,
+                    _
+                ))
         )
     }
 

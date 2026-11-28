@@ -11,9 +11,9 @@ use super::core::EventStream;
 /// Stream for webhook delivery.
 ///
 /// Messages expire after 1 day. NATS redelivery is the primary retry layer for
-/// self-hosted delivery; `ACK_WAIT` exceeds the per-attempt delivery timeout so
-/// a slow-but-healthy endpoint is not redelivered while the first attempt is
-/// still in flight, and spaces the (at most `MAX_DELIVER`) attempts ~90s apart.
+/// self-hosted delivery: the worker redelivers a failed attempt after a linear
+/// backoff, up to `MAX_DELIVER` attempts. `ACK_WAIT` exceeds the per-attempt
+/// delivery timeout, so an attempt still in flight is not redelivered.
 ///
 /// The payload is left to the consumer (the job type it enqueues), so the stream
 /// is generic over `M`; a consumer pins it with a type alias, e.g.
@@ -42,8 +42,8 @@ where
 ///
 /// Scheduled syncs are enqueued here. A single shared durable consumer delivers
 /// each job to one instance at a time (at-least-once); consumers make jobs
-/// idempotent so a redelivery is safe. Messages expire after 1 hour so a
-/// backlog cannot pile up.
+/// idempotent so a redelivery is safe. Messages expire after 3 hours, long
+/// enough for every attempt, so a backlog cannot pile up.
 ///
 /// Generic over its payload `M`; a consumer pins it with a type alias, e.g.
 /// `type ConnectionSyncStream = nvisy_nats::stream::ConnectionSyncStream<SyncJob>`.
@@ -58,12 +58,19 @@ where
 {
     type Message = M;
 
-    // A sync transfer is bounded by a 30-minute timeout; allow ack time to
-    // exceed that so a slow-but-healthy job is not redelivered mid-run.
+    // The consumer extends the lease while a transfer runs; the lease still
+    // exceeds the 30-minute transfer timeout, as a margin for a handler too busy
+    // to send its heartbeat.
     const ACK_WAIT: Option<Duration> = Some(Duration::from_mins(35));
     const CONSUMER_NAME: &'static str = "connection-sync-worker";
     const DESCRIPTION: &'static str = "Connection sync jobs";
-    const MAX_AGE: Option<Duration> = Some(Duration::from_hours(1));
+    // A retry redelivers the same message, so its age runs from the first
+    // publish: cover three 30-minute transfers, their backoffs, and time queued
+    // behind other syncs.
+    const MAX_AGE: Option<Duration> = Some(Duration::from_hours(3));
+    // A failed scheduled sync is redelivered with a backoff; three attempts in
+    // all, then it is left failed.
+    const MAX_DELIVER: Option<i64> = Some(3);
     const NAME: &'static str = "CONNECTION_SYNCS";
     const SUBJECT: &'static str = "connection.sync.jobs";
 }
@@ -73,7 +80,7 @@ where
 /// A detection is created synchronously, then its analyze step is enqueued here
 /// and handled by a background worker. A single shared durable consumer delivers
 /// each job to one instance at a time (at-least-once); the worker is idempotent
-/// on the detection so a redelivery is safe. Messages expire after 1 hour so a
+/// on the detection so a redelivery is safe. Messages expire after 3 hours so a
 /// backlog cannot pile up.
 ///
 /// Generic over its payload `M`; a consumer pins it with a type alias, e.g.
@@ -89,12 +96,15 @@ where
 {
     type Message = M;
 
-    // Detection can be slow (LLM/OCR); allow ack time to exceed the longest
-    // expected analyze so a slow-but-healthy job is not redelivered mid-run.
+    // The consumer extends the lease while an analysis runs; the lease still
+    // exceeds the longest expected analysis (LLM/OCR), as a margin for a handler
+    // too busy to send its heartbeat.
     const ACK_WAIT: Option<Duration> = Some(Duration::from_mins(15));
     const CONSUMER_NAME: &'static str = "detection-worker";
     const DESCRIPTION: &'static str = "Detection jobs";
-    const MAX_AGE: Option<Duration> = Some(Duration::from_hours(1));
+    // A retry after a failed attempt waits out the worker's 30-minute claim
+    // lease and redelivers the same message, so its age covers several leases.
+    const MAX_AGE: Option<Duration> = Some(Duration::from_hours(3));
     const NAME: &'static str = "DETECTIONS";
     const SUBJECT: &'static str = "detection.jobs";
 }

@@ -20,7 +20,7 @@ use super::response::{Account, PublicAccount};
 use crate::domain::AccountService;
 use crate::extract::{AuthState, AvatarUpload, Json, Path, ValidateJson};
 use crate::response::{ErrorKind, ErrorResponse, Result};
-use crate::service::{AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState};
+use crate::service::{AvatarOwner, AvatarService, MAX_AVATAR_UPLOAD_BYTES, ServiceState};
 
 /// Tracing target for account operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::accounts";
@@ -147,7 +147,8 @@ async fn upload_account_avatar(
     let account = accounts.find(auth_state.account_id).await?;
     authorize_self(&account, path_params.account_id)?;
 
-    let updated = avatar.set_account_avatar(account.id, bytes).await?;
+    avatar.set(AvatarOwner::Account(account.id), bytes).await?;
+    let updated = accounts.find(account.id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Account avatar set");
     Ok((StatusCode::OK, Json(Account::from_model(updated))))
@@ -178,7 +179,7 @@ async fn delete_account_avatar(
     let account = accounts.find(auth_state.account_id).await?;
     authorize_self(&account, path_params.account_id)?;
 
-    avatar.delete_account_avatar(account.id).await?;
+    avatar.delete(AvatarOwner::Account(account.id)).await?;
     tracing::info!(target: TRACING_TARGET, "Account avatar deleted");
     Ok(StatusCode::NO_CONTENT)
 }

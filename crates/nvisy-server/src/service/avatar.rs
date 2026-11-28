@@ -1,8 +1,9 @@
 //! Avatar service: stores, serves, and removes account and workspace avatars.
 //!
 //! Uploads are normalized to WebP (decoded, bounded, resized, re-encoded) and
-//! stored unencrypted in the blob store, keyed by `(owner, content hash)`
-//! so each version is its own object and the serve URL can be cached immutably.
+//! stored unencrypted in the blob store, keyed by `(owner, version)` where each
+//! upload draws a fresh random version, so every upload is its own object and
+//! the serve URL can be cached immutably.
 //! Because the stored bytes are always WebP, the serve `Content-Type` is
 //! constant and no per-object mime is persisted; re-encoding also strips
 //! EXIF/metadata.
@@ -11,10 +12,9 @@ use std::io::Cursor;
 
 use bytes::Bytes;
 use image::{ImageFormat, ImageReader};
-use nvisy_postgres::model::{Account, UpdateAccount, UpdateWorkspace};
+use nvisy_postgres::PgConn;
 use nvisy_postgres::query::{AccountRepository, WorkspaceRepository};
-use nvisy_s3::{AccountAvatarKey, GetObject, WorkspaceAvatarKey};
-use sha2::{Digest, Sha256};
+use nvisy_s3::{AccountAvatarKey, BlobStore, WorkspaceAvatarKey};
 use uuid::Uuid;
 
 use crate::response::{ErrorKind, Result};
@@ -34,6 +34,93 @@ const MAX_SOURCE_DIMENSION: u32 = 4096;
 /// Longest side of the stored avatar; larger images are scaled down to fit.
 const TARGET_DIMENSION: u32 = 512;
 
+/// Tracing target for avatar operations.
+const TRACING_TARGET: &str = "nvisy_server::service::avatar";
+
+/// Whose avatar: an account's or a workspace's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AvatarOwner {
+    /// An account's avatar.
+    Account(Uuid),
+    /// A workspace's avatar.
+    Workspace(Uuid),
+}
+
+impl AvatarOwner {
+    /// The serve URL of a version, `/avatars/{kind}/{id}/{version}`.
+    fn url(self, version: &str) -> String {
+        match self {
+            Self::Account(id) => format!("/avatars/accounts/{id}/{version}"),
+            Self::Workspace(id) => format!("/avatars/workspaces/{id}/{version}"),
+        }
+    }
+
+    /// Writes a version's bytes.
+    async fn put(self, blobs: &BlobStore, version: &str, webp: Vec<u8>) -> Result<()> {
+        let bytes = Cursor::new(webp);
+        match self {
+            Self::Account(id) => {
+                blobs
+                    .put(&AccountAvatarKey::new(id, version), bytes)
+                    .await?
+            }
+            Self::Workspace(id) => {
+                blobs
+                    .put(&WorkspaceAvatarKey::new(id, version), bytes)
+                    .await?
+            }
+        };
+        Ok(())
+    }
+
+    /// Reads a version's bytes, or `None` if absent.
+    async fn get(self, blobs: &BlobStore, version: &str) -> Result<Option<Vec<u8>>> {
+        Ok(match self {
+            Self::Account(id) => blobs.get_bytes(&AccountAvatarKey::new(id, version)).await?,
+            Self::Workspace(id) => {
+                blobs
+                    .get_bytes(&WorkspaceAvatarKey::new(id, version))
+                    .await?
+            }
+        })
+    }
+
+    /// Deletes a version's bytes.
+    async fn delete(self, blobs: &BlobStore, version: &str) -> Result<()> {
+        match self {
+            Self::Account(id) => blobs.delete(&AccountAvatarKey::new(id, version)).await?,
+            Self::Workspace(id) => blobs.delete(&WorkspaceAvatarKey::new(id, version)).await?,
+        }
+        Ok(())
+    }
+
+    /// The owner's current avatar version, if it has one.
+    async fn current_version(self, conn: &mut PgConn) -> Result<Option<String>> {
+        let url = match self {
+            Self::Account(id) => conn
+                .find_account_by_id(id)
+                .await?
+                .and_then(|a| a.avatar_url),
+            Self::Workspace(id) => conn
+                .find_workspace_by_id(id)
+                .await?
+                .and_then(|w| w.avatar_url),
+        };
+        Ok(avatar_version(url.as_deref()))
+    }
+
+    /// Points the owner's `avatar_url` at `url` (or clears it), returning the
+    /// version it named before. The read and the write are one locked step, so
+    /// each concurrent replacement sees exactly the version it replaced.
+    async fn replace_url(self, conn: &mut PgConn, url: Option<String>) -> Result<Option<String>> {
+        let previous = match self {
+            Self::Account(id) => conn.replace_account_avatar(id, url).await?,
+            Self::Workspace(id) => conn.replace_workspace_avatar(id, url).await?,
+        };
+        Ok(avatar_version(previous.as_deref()))
+    }
+}
+
 /// Stores, serves, and removes account and workspace avatars.
 #[derive(Clone)]
 #[must_use = "service does nothing unless you use it"]
@@ -47,117 +134,18 @@ impl AvatarService {
         Self { infra }
     }
 
-    /// Normalizes and stores an account avatar as a new content-versioned object,
-    /// deletes the previous version, and points the account's `avatar_url` at it.
-    /// Returns the updated account.
+    /// Normalizes and stores an avatar as a new object, points the owner's
+    /// `avatar_url` at it, and deletes the version it replaced.
     ///
-    /// The stored object is keyed by `(account_id, content hash)` and the URL
-    /// embeds the same hash, so a versioned URL maps to immutable bytes. The new
-    /// object is written and the URL updated before the previous version is
-    /// deleted, so a reader never sees a missing avatar; a crash between the
-    /// update and the delete can leave the previous object orphaned (see #192).
-    ///
-    /// # Errors
-    ///
-    /// - `BadRequest` if the upload exceeds the size cap, does not decode as an
-    ///   image, or exceeds the source-dimension cap.
-    /// - `InternalServerError` if avatar processing fails (the blocking
-    ///   decode/resize task, or WebP re-encoding).
-    /// - A storage error if writing or deleting the avatar object fails.
-    /// - A database error if acquiring the connection, reading the previous
-    ///   account, or updating `avatar_url` fails.
-    pub async fn set_account_avatar(&self, account_id: Uuid, upload: Bytes) -> Result<Account> {
-        let webp = process_avatar(upload).await?;
-        let version = content_version(&webp);
-
-        self.infra
-            .blobs
-            .put(
-                &AccountAvatarKey::new(account_id, &version),
-                Cursor::new(webp),
-            )
-            .await?;
-
-        let mut conn = self.infra.postgres.get_connection().await?;
-        let previous = conn.find_account_by_id(account_id).await?;
-
-        let avatar_url = format!("/avatars/accounts/{account_id}/{version}/");
-        let account = conn
-            .update_account(
-                account_id,
-                UpdateAccount {
-                    avatar_url: Some(Some(avatar_url)),
-                    ..Default::default()
-                },
-            )
-            .await?;
-
-        if let Some(old_version) = previous.and_then(|a| avatar_version(a.avatar_url.as_deref()))
-            && old_version != version
-        {
-            self.infra
-                .blobs
-                .delete(&AccountAvatarKey::new(account_id, old_version))
-                .await?;
-        }
-
-        Ok(account)
-    }
-
-    /// Streams the account avatar for a specific version, or `None` if absent.
-    ///
-    /// # Errors
-    ///
-    /// - A storage error if the object store rejects the read.
-    /// - `InternalServerError` if reading the object's bytes into memory fails.
-    pub async fn account_avatar(&self, account_id: Uuid, version: &str) -> Result<Option<Vec<u8>>> {
-        read_object(
-            self.infra
-                .blobs
-                .get(&AccountAvatarKey::new(account_id, version))
-                .await?,
-        )
-        .await
-    }
-
-    /// Removes an account's current avatar object and clears its `avatar_url`.
-    ///
-    /// # Errors
-    ///
-    /// - A storage error if deleting the avatar object fails.
-    /// - A database error if acquiring the connection, reading the account, or
-    ///   clearing `avatar_url` fails.
-    pub async fn delete_account_avatar(&self, account_id: Uuid) -> Result<()> {
-        let mut conn = self.infra.postgres.get_connection().await?;
-        let account = conn.find_account_by_id(account_id).await?;
-
-        if let Some(version) = account.and_then(|a| avatar_version(a.avatar_url.as_deref())) {
-            self.infra
-                .blobs
-                .delete(&AccountAvatarKey::new(account_id, version))
-                .await?;
-        }
-
-        conn.update_account(
-            account_id,
-            UpdateAccount {
-                avatar_url: Some(None),
-                ..Default::default()
-            },
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// Normalizes and stores a workspace avatar as a new content-versioned
-    /// object, deletes the previous version, and points the workspace's
-    /// `avatar_url` at it.
-    ///
-    /// The stored object is keyed by `(workspace_id, content hash)` and the URL
-    /// embeds the same hash, so a versioned URL maps to immutable bytes. The new
-    /// object is written and the URL updated before the previous version is
-    /// deleted, so a reader never sees a missing avatar; a crash between the
-    /// update and the delete can leave the previous object orphaned (see #192).
+    /// Each upload draws a fresh random version, and the URL embeds it, so a
+    /// versioned URL maps to immutable bytes and no two uploads share an object:
+    /// an object is only ever deleted by the upload that replaced it, or by this
+    /// upload when its own URL update did not land, so concurrent uploads and
+    /// deletes never remove an object a URL still names. The new object is
+    /// written and the URL updated before the previous version is deleted, so a
+    /// reader never sees a missing avatar. Deleting an unreferenced object is
+    /// best effort, so a failure (or a crash before it) can leave it orphaned
+    /// (see #192).
     ///
     /// # Errors
     ///
@@ -165,134 +153,102 @@ impl AvatarService {
     ///   image, or exceeds the source-dimension cap.
     /// - `InternalServerError` if avatar processing fails (the blocking
     ///   decode/resize task, or WebP re-encoding).
-    /// - A storage error if writing or deleting the avatar object fails.
-    /// - A database error if acquiring the connection, reading the previous
-    ///   workspace, or updating `avatar_url` fails.
-    pub async fn set_workspace_avatar(&self, workspace_id: Uuid, upload: Bytes) -> Result<()> {
+    /// - A storage error if writing the avatar object fails.
+    /// - A database error if reading or updating the owner fails.
+    pub async fn set(&self, owner: AvatarOwner, upload: Bytes) -> Result<()> {
         let webp = process_avatar(upload).await?;
-        let version = content_version(&webp);
+        let version = new_version();
+        owner.put(&self.infra.blobs, &version, webp).await?;
 
-        self.infra
-            .blobs
-            .put(
-                &WorkspaceAvatarKey::new(workspace_id, &version),
-                Cursor::new(webp),
-            )
-            .await?;
+        let previous = match self.point_at(owner, &version).await {
+            Ok(previous) => previous,
+            Err(err) => {
+                // The object just written is unreferenced unless this update
+                // landed, as no other upload can point the URL at its version.
+                // Remove it only when the URL is known not to name it: if the
+                // lookup fails too, the update may have landed, so it is kept.
+                match self.current_version(owner).await {
+                    Ok(current) if current.as_deref() != Some(version.as_str()) => {
+                        self.discard(owner, &version).await;
+                    }
+                    Ok(_) => {}
+                    Err(lookup) => {
+                        tracing::warn!(target: TRACING_TARGET, ?owner, %version, error = %lookup, "Could not tell whether a new avatar object is referenced; keeping it");
+                    }
+                }
+                return Err(err);
+            }
+        };
 
-        let mut conn = self.infra.postgres.get_connection().await?;
-        let previous = conn.find_workspace_by_id(workspace_id).await?;
-
-        let avatar_url = format!("/avatars/workspaces/{workspace_id}/{version}/");
-        conn.update_workspace(
-            workspace_id,
-            UpdateWorkspace {
-                avatar_url: Some(Some(avatar_url)),
-                ..Default::default()
-            },
-        )
-        .await?;
-
-        if let Some(old_version) = previous.and_then(|w| avatar_version(w.avatar_url.as_deref()))
-            && old_version != version
-        {
-            self.infra
-                .blobs
-                .delete(&WorkspaceAvatarKey::new(workspace_id, old_version))
-                .await?;
+        if let Some(previous) = previous {
+            self.discard(owner, &previous).await;
         }
-
         Ok(())
     }
 
-    /// Streams the workspace avatar for a specific version, or `None` if absent.
+    /// Points the owner's `avatar_url` at `version`, returning the version it
+    /// named before.
+    async fn point_at(&self, owner: AvatarOwner, version: &str) -> Result<Option<String>> {
+        let mut conn = self.infra.postgres.get_connection().await?;
+        owner.replace_url(&mut conn, Some(owner.url(version))).await
+    }
+
+    /// The version the owner's `avatar_url` currently names.
+    async fn current_version(&self, owner: AvatarOwner) -> Result<Option<String>> {
+        let mut conn = self.infra.postgres.get_connection().await?;
+        owner.current_version(&mut conn).await
+    }
+
+    /// Removes an avatar object no URL references, best-effort: a failure only
+    /// leaves the object orphaned, so it is logged rather than returned.
+    async fn discard(&self, owner: AvatarOwner, version: &str) {
+        if let Err(err) = owner.delete(&self.infra.blobs, version).await {
+            tracing::warn!(target: TRACING_TARGET, ?owner, version, error = %err, "Failed to remove an unreferenced avatar object");
+        }
+    }
+
+    /// Reads one version of an avatar, or `None` if absent. Avatars are small
+    /// (bounded by the target dimension), so buffering is fine.
     ///
     /// # Errors
     ///
     /// - A storage error if the object store rejects the read.
-    /// - `InternalServerError` if reading the object's bytes into memory fails.
-    pub async fn workspace_avatar(
-        &self,
-        workspace_id: Uuid,
-        version: &str,
-    ) -> Result<Option<Vec<u8>>> {
-        read_object(
-            self.infra
-                .blobs
-                .get(&WorkspaceAvatarKey::new(workspace_id, version))
-                .await?,
-        )
-        .await
+    pub async fn get(&self, owner: AvatarOwner, version: &str) -> Result<Option<Vec<u8>>> {
+        owner.get(&self.infra.blobs, version).await
     }
 
-    /// Removes a workspace's current avatar object and clears its `avatar_url`.
+    /// Clears the owner's `avatar_url`, then removes the object it named. The
+    /// URL goes first, so a failure never leaves it naming a missing object;
+    /// removing the object is best-effort.
     ///
     /// # Errors
     ///
-    /// - A storage error if deleting the avatar object fails.
-    /// - A database error if acquiring the connection, reading the workspace, or
-    ///   clearing `avatar_url` fails.
-    pub async fn delete_workspace_avatar(&self, workspace_id: Uuid) -> Result<()> {
+    /// - A database error if reading or updating the owner fails.
+    pub async fn delete(&self, owner: AvatarOwner) -> Result<()> {
         let mut conn = self.infra.postgres.get_connection().await?;
-        let workspace = conn.find_workspace_by_id(workspace_id).await?;
+        let current = owner.replace_url(&mut conn, None).await?;
+        drop(conn);
 
-        if let Some(version) = workspace.and_then(|w| avatar_version(w.avatar_url.as_deref())) {
-            self.infra
-                .blobs
-                .delete(&WorkspaceAvatarKey::new(workspace_id, version))
-                .await?;
+        if let Some(version) = current {
+            self.discard(owner, &version).await;
         }
-
-        conn.update_workspace(
-            workspace_id,
-            UpdateWorkspace {
-                avatar_url: Some(None),
-                ..Default::default()
-            },
-        )
-        .await?;
         Ok(())
     }
 }
 
-/// Reads a stored object's bytes into memory, or `None` when absent. Avatars are
-/// small (bounded by the target dimension), so buffering is fine.
-async fn read_object(result: Option<GetObject>) -> Result<Option<Vec<u8>>> {
-    use tokio::io::AsyncReadExt;
-
-    let Some(stored) = result else {
-        return Ok(None);
-    };
-    let mut reader = stored.into_reader();
-    let mut buf = Vec::new();
-    reader.read_to_end(&mut buf).await.map_err(|err| {
-        ErrorKind::InternalServerError
-            .with_message("Failed to read avatar")
-            .with_context(err.to_string())
-    })?;
-    Ok(Some(buf))
-}
-
-/// Returns a short content hash of the stored bytes, used as the avatar's
-/// version segment.
+/// Draws a fresh avatar version: 8 random bytes, hex-encoded.
 ///
-/// The hash changes only when the image does, so an identical re-upload keeps
-/// the same object key and URL (cache stays warm) while a new image produces a
-/// new one (cache is busted), letting the serve route mark the response
-/// immutable.
-fn content_version(webp: &[u8]) -> String {
-    let digest = Sha256::digest(webp);
-    hex::encode(&digest[..8])
+/// Every upload gets its own version, so a new upload always busts the cache
+/// and its object belongs to it alone, letting the serve route mark the
+/// response immutable.
+fn new_version() -> String {
+    hex::encode(rand::random::<[u8; 8]>())
 }
 
 /// Extracts the version segment from a stored avatar URL of the form
-/// `/avatars/{kind}/{id}/{version}/`, if present.
+/// `/avatars/{kind}/{id}/{version}`, if present.
 fn avatar_version(avatar_url: Option<&str>) -> Option<String> {
-    avatar_url?
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .map(str::to_owned)
+    avatar_url?.rsplit('/').next().map(str::to_owned)
 }
 
 /// Rejects payloads that are too large, do not decode as an image, or exceed the

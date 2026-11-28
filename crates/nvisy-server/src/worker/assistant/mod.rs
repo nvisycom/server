@@ -14,6 +14,6 @@ mod drainer;
 mod job;
 mod worker;
 
-pub use drainer::AssistantOutboxDrainer;
+pub use drainer::{AssistantJobRelay, AssistantOutboxDrainer};
 pub use job::{AssistantJob, AssistantStream};
 pub use worker::AssistantWorker;

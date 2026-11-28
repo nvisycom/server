@@ -26,7 +26,7 @@ use super::connector::Connector;
 use super::export::Exporter;
 use super::import::Importer;
 use crate::extract::SecurityContext;
-use crate::response::{ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Result};
 use crate::service::event::EventEmitter;
 use crate::service::{
     CryptoService, ExternalObjectStore, Infra, TransferKind, TransferRequest, event,
@@ -206,7 +206,7 @@ impl TransferEngine {
                 event::WorkspaceEvent::ConnectionSyncFailed(event::ConnectionSyncFailed {
                     connection_id,
                     connection_name: connection_name.to_owned(),
-                    error: Some(err.message.as_deref().unwrap_or("Sync failed").to_owned()),
+                    error: Some(safe_failure(err).to_owned()),
                     notify: Some(origin.account_id),
                 })
             }
@@ -225,28 +225,23 @@ impl TransferEngine {
                 // The guarded update returns `Some` only if it transitioned an
                 // active run; a run already terminal (cancelled/reaped) returns
                 // `None`, and we record no event for it.
-                let transitioned = if let Ok(records_synced) = &result {
-                    conn.complete_workspace_connection_sync(
-                        run_id,
-                        i64::try_from(*records_synced).unwrap_or(i64::MAX),
-                    )
-                    .await?
-                    .is_some()
-                } else {
-                    let safe_message = match &event {
-                        event::WorkspaceEvent::ConnectionSyncFailed(e) => {
-                            e.error.clone().unwrap_or_else(|| "Sync failed".to_owned())
-                        }
-                        _ => "Sync failed".to_owned(),
-                    };
-                    conn.fail_workspace_connection_sync(run_id, &safe_message)
+                let transitioned = match &result {
+                    Ok(records_synced) => conn
+                        .complete_workspace_connection_sync(
+                            run_id,
+                            i64::try_from(*records_synced).unwrap_or(i64::MAX),
+                        )
                         .await?
-                        .is_some()
+                        .is_some(),
+                    Err(err) => conn
+                        .fail_workspace_connection_sync(run_id, safe_failure(err))
+                        .await?
+                        .is_some(),
                 };
                 if transitioned {
                     conn.emit_event(origin, event).await?;
                 }
-                Ok::<_, crate::response::Error>(transitioned)
+                Ok::<_, Error>(transitioned)
             })
             .await;
 
@@ -280,4 +275,10 @@ impl TransferEngine {
             tracing::error!(target: TRACING_TARGET, %run_id, error = %err, "Failed to record sync cancellation");
         }
     }
+}
+
+/// The client-safe summary of a failed sync: the error's public message, never
+/// its context (which may carry backend URLs or details).
+fn safe_failure<'a>(err: &'a Error<'_>) -> &'a str {
+    err.message.as_deref().unwrap_or("Sync failed")
 }

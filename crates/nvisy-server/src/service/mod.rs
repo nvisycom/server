@@ -33,7 +33,10 @@ pub use crate::service::auth::{
     OidcAuthorization, OidcConfig, OidcConfigured, OidcError, OidcIdentity, OidcPurpose,
     OidcService, PasswordService, RedirectKind, SignInService,
 };
-pub use crate::service::avatar::{AVATAR_CONTENT_TYPE, AvatarService, MAX_AVATAR_UPLOAD_BYTES};
+pub use crate::service::avatar::{
+    AVATAR_CONTENT_TYPE, AvatarOwner, AvatarService, MAX_AVATAR_UPLOAD_BYTES,
+};
+pub(crate) use crate::service::blob::delete_object;
 pub use crate::service::blob::{ArtifactReader, ArtifactWriter, StagedBlob};
 pub use crate::service::crypto::{CryptoConfig, CryptoService};
 pub(crate) use crate::service::crypto::{CryptoError, HashingReader, LimitedReader, Measurements};
@@ -50,9 +53,9 @@ pub use crate::service::integration::{
 };
 pub use crate::service::queue::{AssistantQueue, DetectionQueue};
 pub use crate::service::user_agent::UserAgentParser;
-use crate::worker::assistant::{AssistantOutboxDrainer, AssistantWorker};
-use crate::worker::detection::{DetectionOutboxDrainer, DetectionWorker};
-use crate::worker::event::EventOutboxDrainer;
+use crate::worker::assistant::{AssistantJobRelay, AssistantOutboxDrainer, AssistantWorker};
+use crate::worker::detection::{DetectionJobRelay, DetectionOutboxDrainer, DetectionWorker};
+use crate::worker::event::{EventOutboxDrainer, EventProjection};
 use crate::worker::integration::ConnectionSyncWorker;
 use crate::worker::purge::{PurgeConfig, WorkspacePurgeWorker};
 use crate::worker::reaper::BlobReaper;
@@ -270,7 +273,7 @@ impl ServiceState {
     ///
     /// The stateless collaborators the detection worker needs are composed
     /// through the same [`FromRef`] wiring handlers use. Call
-    /// [`WorkerSet::shutdown`] to stop and join them.
+    /// [`WorkerSet::shutdown_with_timeout`] to stop and join them.
     ///
     /// [`shutdown`]: Self::shutdown
     /// [`FromRef`]: axum::extract::FromRef
@@ -293,19 +296,26 @@ impl ServiceState {
             self.infra.clone(),
             self.purge_config.clone(),
         ));
-        workers.spawn(EventOutboxDrainer::new(self.infra.clone()));
+        workers.spawn(EventOutboxDrainer::new(
+            self.infra.clone(),
+            None,
+            EventProjection::new(&self.infra),
+        ));
         workers.spawn(DetectionOutboxDrainer::new(
             self.infra.clone(),
-            self.detection.clone(),
+            Some(self.detection.clone()),
+            DetectionJobRelay::new(self.infra.clone()),
         ));
         workers.spawn(DetectionWorker::new(
             self.infra.clone(),
             self.engine.clone(),
+            ArtifactReader::from_ref(self),
             ArtifactWriter::from_ref(self),
         ));
         workers.spawn(AssistantOutboxDrainer::new(
             self.infra.clone(),
-            self.assistant.clone(),
+            Some(self.assistant.clone()),
+            AssistantJobRelay::new(&self.infra),
         ));
         workers.spawn(AssistantWorker::new(
             self.infra.clone(),

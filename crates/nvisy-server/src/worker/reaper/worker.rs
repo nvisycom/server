@@ -5,10 +5,10 @@ use std::time::Duration;
 use nvisy_postgres::query::WorkspaceBlobRepository;
 use tokio_util::sync::CancellationToken;
 
-use crate::response::Result;
+use crate::response::{Error, Result};
 use crate::service::Infra;
-use crate::worker::Worker;
 use crate::worker::reaper::reclaimer::{BlobReclaimer, PurgeOutcome};
+use crate::worker::{Worker, every};
 
 /// Tracing target for the blob reaper.
 const TRACING_TARGET: &str = "nvisy_server::worker::reaper";
@@ -27,24 +27,15 @@ pub struct BlobReaper {
 }
 
 impl Worker for BlobReaper {
-    type Output = Result<()>;
+    type Error = Error<'static>;
 
-    fn name(&self) -> &'static str {
-        "blob_reaper"
-    }
+    const NAME: &'static str = "blob_reaper";
 
-    /// Runs the reaper until cancelled, logging its lifecycle.
     async fn run(&self, cancel: CancellationToken) -> Result<()> {
-        tracing::info!(target: TRACING_TARGET, "Starting blob reaper");
-
-        let mut ticker = tokio::time::interval(TICK_INTERVAL);
-        loop {
-            tokio::select! {
-                () = cancel.cancelled() => break,
-                _ = ticker.tick() => self.tick(&cancel).await,
-            }
-        }
-
+        every(TICK_INTERVAL, &cancel, None, async || {
+            self.tick(&cancel).await;
+        })
+        .await;
         Ok(())
     }
 }
@@ -112,7 +103,8 @@ impl BlobReaper {
     /// `reclaimed_at`), so the loop advances on *confirmed* reclaims rather than
     /// rows fetched: it stops once a page is short (nothing more due) or a full
     /// page made no progress (every blob in it failed), logging a stuck batch once
-    /// per tick instead of spinning on it.
+    /// per tick instead of spinning on it. A failed connection checkout ends the
+    /// sweep, and cancellation is checked before each blob.
     async fn sweep(&self, sweep: Sweep, cancel: &CancellationToken) -> Result<()> {
         loop {
             if cancel.is_cancelled() {
@@ -129,26 +121,20 @@ impl BlobReaper {
             let fetched = i64::try_from(batch.len()).unwrap_or(i64::MAX);
             let mut reclaimed = 0i64;
             for blob in batch {
-                let mut conn = self.infra.postgres.get_connection().await?;
+                // Checked per blob, so shutdown never waits out a whole page.
+                if cancel.is_cancelled() {
+                    return Ok(());
+                }
+                // Only a confirmed reclaim is progress. A pending one leaves the
+                // blob in the sweep's set, so counting it would re-fetch the same
+                // batch forever. An error means no connection is available, so
+                // the sweep stops until the next tick.
                 let outcome = match sweep {
-                    Sweep::Purge => self.blob.purge_blob(&mut conn, &blob).await,
-                    Sweep::Reconcile => {
-                        Ok(self.blob.reclaim_claimed_object(&mut conn, &blob).await)
-                    }
+                    Sweep::Purge => self.blob.purge_blob(&blob).await?,
+                    Sweep::Reconcile => self.blob.reclaim_claimed_object(&blob).await?,
                 };
-                match outcome {
-                    // Only a confirmed reclaim is progress. A pending one leaves the
-                    // blob in the sweep's set, so counting it would re-fetch the same
-                    // batch forever.
-                    Ok(PurgeOutcome::Purged) => reclaimed += 1,
-                    Ok(PurgeOutcome::Pending) => {}
-                    Err(err) => tracing::error!(
-                        target: TRACING_TARGET,
-                        sweep = sweep.label(),
-                        blob_id = %blob.id,
-                        error = %err,
-                        "Failed to reclaim blob",
-                    ),
+                if outcome == PurgeOutcome::Purged {
+                    reclaimed += 1;
                 }
             }
 

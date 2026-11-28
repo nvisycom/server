@@ -39,6 +39,11 @@ impl From<ConstraintViolation> for Error<'static> {
     }
 }
 
+/// The retryable error for a database that is not answering.
+fn database_unavailable() -> Error<'static> {
+    ErrorKind::ServiceUnavailable.with_message("The database is unavailable; retry shortly")
+}
+
 impl From<PgError> for Error<'static> {
     fn from(error: PgError) -> Self {
         match error {
@@ -56,16 +61,26 @@ impl From<PgError> for Error<'static> {
                     timeout = ?timeout,
                     "database timeout",
                 );
-                // A wait timeout means the pool was saturated — the service is
-                // momentarily overloaded, not broken — so surface a retryable 503
-                // rather than a 500. A create/recycle timeout is a backend fault.
+                // A timeout is transient, so surface a retryable 503: a wait
+                // timeout means the pool was saturated, a create/recycle timeout
+                // that the database is not answering.
                 match timeout {
                     TimeoutType::Wait => ErrorKind::ServiceUnavailable
                         .with_message("The server is busy; retry shortly"),
-                    TimeoutType::Create | TimeoutType::Recycle => {
-                        ErrorKind::InternalServerError.into_error()
-                    }
+                    TimeoutType::Create | TimeoutType::Recycle => database_unavailable(),
                 }
+            }
+            // A lost connection is transient: a retry on a fresh one may succeed,
+            // so surface a retryable 503 that callers (and workers) can classify.
+            ref transient @ (PgError::Connection(_) | PgError::Query(_))
+                if transient.is_transient() =>
+            {
+                tracing::error!(
+                    target: TRACING_TARGET,
+                    error = %transient,
+                    "database connection lost"
+                );
+                database_unavailable()
             }
             PgError::Connection(connection_error) => {
                 tracing::error!(

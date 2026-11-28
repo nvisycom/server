@@ -8,6 +8,7 @@
 //! [`service`]: crate::service
 
 mod coordinator;
+mod outbox;
 mod set;
 
 pub mod assistant;
@@ -22,6 +23,7 @@ pub use coordinator::Coordinator;
 use nvisy_nats::NatsClient;
 pub use purge::WorkspacePurgeWorker;
 pub use reaper::BlobReaper;
+pub(crate) use set::every;
 pub use set::{Worker, WorkerSet};
 
 use crate::Result;

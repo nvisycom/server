@@ -232,6 +232,23 @@ impl AccountProvisioner {
         self.load_active(conn, account_id).await
     }
 
+    /// Refuses a sign-in or credential change for a suspended or deleted account,
+    /// before any session token or proof is minted. Every sign-in path (password,
+    /// OIDC) and every OIDC link or step-up gates on this.
+    ///
+    /// # Errors
+    ///
+    /// - `Forbidden` if the account is suspended or deleted.
+    pub fn ensure_can_sign_in(account: &Account) -> Result<()> {
+        if account.is_suspended() {
+            return Err(ErrorKind::Forbidden.with_message("Account is suspended"));
+        }
+        if account.is_deleted() {
+            return Err(ErrorKind::Forbidden.with_message("Account has been deleted"));
+        }
+        Ok(())
+    }
+
     /// Loads a live account by id, or a not-found error (e.g. the account was
     /// deleted between starting a link flow and its callback).
     ///

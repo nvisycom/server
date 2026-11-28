@@ -143,6 +143,14 @@ impl_di_new! {
     // Crypto (mint/decrypt the signing secret) and the delivery client (send a test).
     crate::domain::WorkspaceWebhookService =>
         |state| state.infra.postgres.clone(), state.crypto.clone(), state.webhook.clone();
+    // The request-side queue handles: the shared `Infra` and each subsystem's
+    // drainer `Coordinator`.
+    DetectionQueue => |state| state.infra.clone(), state.detection.clone();
+    AssistantQueue => |state| state.assistant.clone();
+    // The deployment's endpoint policy, for external tenant object stores.
+    ExternalObjectStore => |state| state.endpoint_policy;
+    // The JWT signing keys and the user-agent parser (for session display names).
+    AuthIssuer => |state| state.session_keys.clone(), state.user_agent_parser.clone();
     // The assistant queue (wake the reply drainer when a comment addresses it).
     crate::domain::WorkspaceReviewService =>
         |state| state.infra.postgres.clone(), AssistantQueue::from_ref(state);
@@ -163,38 +171,6 @@ impl_di_new! {
     // from `Infra` plus the crypto service.
     ArtifactWriter => |state| state.infra.clone(), state.crypto.clone();
     ArtifactReader => |state| state.infra.clone(), state.crypto.clone();
-}
-
-// `DetectionQueue` composes from two singletons — `Infra` and the shared
-// detection `Coordinator` — so it needs a hand-written `FromRef` rather than the
-// compose-from-`Infra`-alone macro above.
-impl FromRef<ServiceState> for DetectionQueue {
-    fn from_ref(state: &ServiceState) -> Self {
-        DetectionQueue::new(state.infra.clone(), state.detection.clone())
-    }
-}
-
-// `AssistantQueue` likewise composes from `Infra` and the shared assistant
-// `Coordinator`, so it needs a hand-written `FromRef`.
-impl FromRef<ServiceState> for AssistantQueue {
-    fn from_ref(state: &ServiceState) -> Self {
-        AssistantQueue::new(state.infra.clone(), state.assistant.clone())
-    }
-}
-
-// `ExternalObjectStore` holds only the deployment's endpoint policy:
-impl FromRef<ServiceState> for ExternalObjectStore {
-    fn from_ref(state: &ServiceState) -> Self {
-        ExternalObjectStore::new(state.endpoint_policy)
-    }
-}
-
-// `AuthIssuer` composes from two security fields — the JWT signing keys and the
-// user-agent parser (for session display names):
-impl FromRef<ServiceState> for AuthIssuer {
-    fn from_ref(state: &ServiceState) -> Self {
-        AuthIssuer::new(state.session_keys.clone(), state.user_agent_parser.clone())
-    }
 }
 
 // `OidcService` is composed per request from the stored startup configuration

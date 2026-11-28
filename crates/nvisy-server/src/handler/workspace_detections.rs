@@ -560,7 +560,7 @@ async fn redact_detection(
     // The bytes can be purged between the blob lookup and this read (the
     // reaper released them as their window passed); that is the same "source
     // gone" outcome as a cleared pointer.
-    let document = writer
+    let document = reader
         .build_document(&inputs.document, &inputs.source_blob, inputs.detection.id)
         .await
         .map_err(|err| match err.kind() {
@@ -604,7 +604,7 @@ async fn redact_detection(
     // Staging the review audit after the output means a failure here would strand
     // the already-written output object (no blob to reclaim it); discard it first.
     let staged_review = match writer
-        .stage_review_audit(
+        .stage_audit(
             inputs.detection.workspace_id,
             retention_override.as_ref(),
             &retention,

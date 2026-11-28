@@ -24,7 +24,7 @@ use crate::extract::SecurityContext;
 use crate::handler::request::{Login, Signup};
 use crate::handler::utility::build_password_user_inputs;
 use crate::response::{ErrorKind, Result};
-use crate::service::{AuthIssuer, PasswordService};
+use crate::service::{AccountProvisioner, AuthIssuer, PasswordService};
 
 /// Tracing target for authentication-flow operations.
 const TRACING_TARGET: &str = "nvisy_server::service::auth_flow";
@@ -106,16 +106,12 @@ impl SignInService {
                 tracing::warn!(target: TRACING_TARGET, reason = "invalid_password", "Login failed");
                 return Err(ErrorKind::Unauthorized.with_message("Invalid credentials"));
             }
-            Some(acc) if acc.is_suspended() => {
-                tracing::warn!(target: TRACING_TARGET, reason = "account_suspended", "Login failed");
-                return Err(ErrorKind::Forbidden.with_message("Account is suspended"));
-            }
-            Some(acc) if acc.is_deleted() => {
-                tracing::warn!(target: TRACING_TARGET, reason = "account_deleted", "Login failed");
-                return Err(ErrorKind::Forbidden.with_message("Account has been deleted"));
-            }
             Some(acc) => acc,
         };
+        if let Err(err) = AccountProvisioner::ensure_can_sign_in(&account) {
+            tracing::warn!(target: TRACING_TARGET, reason = "account_inactive", error = %err, "Login failed");
+            return Err(err);
+        }
 
         let jwt = self
             .issuer

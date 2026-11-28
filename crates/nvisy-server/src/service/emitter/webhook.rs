@@ -89,17 +89,6 @@ impl WebhookEmitter {
         );
 
         let event_subject = event.as_subject();
-        let jobs: Vec<WebhookJob> = webhooks
-            .into_iter()
-            .map(|webhook| WebhookJob {
-                webhook_id: webhook.id,
-                workspace_id,
-                event,
-                resource_id,
-                triggered_by,
-                data: data.clone(),
-            })
-            .collect();
 
         // Publish every job before surfacing any error, so one failing publish
         // does not silently drop the webhooks that follow it in the batch.
@@ -108,8 +97,16 @@ impl WebhookEmitter {
 
         let mut publish_count = 0usize;
         let mut first_error = None;
-        for job in &jobs {
-            match publisher.publish_to(&subject, job).await {
+        for webhook in &webhooks {
+            let job = WebhookJob {
+                webhook_id: webhook.id,
+                workspace_id,
+                event,
+                resource_id,
+                triggered_by,
+                data: data.clone(),
+            };
+            match publisher.publish_to(&subject, &job).await {
                 Ok(()) => publish_count += 1,
                 Err(err) => {
                     tracing::error!(

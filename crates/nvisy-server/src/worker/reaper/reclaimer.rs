@@ -1,13 +1,9 @@
 //! Blob object reclamation for the reaper's GC path.
 
-use std::str::FromStr;
-
-use nvisy_postgres::PgConn;
 use nvisy_postgres::query::{ReclaimableBlob, WorkspaceBlobRepository};
-use nvisy_s3::{AuditKey, Bucket, DocumentKey, IntermediateKey};
 
-use crate::response::{Error, ErrorKind, Result};
-use crate::service::Infra;
+use crate::response::Result;
+use crate::service::{Infra, delete_object};
 
 /// Tracing target for blob-reclamation operations.
 const TRACING_TARGET: &str = "nvisy_server::worker::reaper";
@@ -24,19 +20,14 @@ pub(super) enum PurgeOutcome {
     Pending,
 }
 
-/// Wraps a storage-key parse failure as an internal error.
-fn invalid_key(err: impl std::fmt::Display) -> Error<'static> {
-    ErrorKind::InternalServerError
-        .with_message("Invalid blob storage key")
-        .with_context(err.to_string())
-}
-
 /// Reclaims a run's blob objects in the first-party blob store — the reaper's
 /// GC-side counterpart to the [`ArtifactWriter`]/[`ArtifactReader`] request-path
 /// services.
 ///
-/// It holds only the shared [`Infra`] clients (all `Arc`-backed) and takes the
-/// per-sweep database connection as a method argument. Unlike that pair it needs
+/// It holds only the shared [`Infra`] clients (all `Arc`-backed) and checks out
+/// a pooled connection for each database step alone, so no connection is held
+/// across an object delete and a session lost mid-sweep costs only the step it
+/// broke. Unlike that pair it needs
 /// no crypto — object deletion is content-agnostic — so the reaper depends on the
 /// object store alone, not the workspace keys.
 ///
@@ -65,21 +56,27 @@ impl BlobReclaimer {
     ///
     /// # Errors
     ///
-    /// - A database error if the claim query fails. Once the blob is claimed, the
-    ///   object reclaim is folded into the returned [`PurgeOutcome`] (a failed
-    ///   delete yields `Pending`, not an error).
-    pub(super) async fn purge_blob(
-        &self,
-        conn: &mut PgConn,
-        blob: &ReclaimableBlob,
-    ) -> Result<PurgeOutcome> {
+    /// - A database error if no connection can be checked out, so the sweep
+    ///   stops rather than waiting out the pool for every remaining blob. A
+    ///   failed claim, delete, or mark only affects this blob: it is logged and
+    ///   yields `Pending`.
+    pub(super) async fn purge_blob(&self, blob: &ReclaimableBlob) -> Result<PurgeOutcome> {
         // Claim first, in its own committed step: once purged_at is set the blob no
         // longer deduplicates, so deleting its object next cannot strand a live
         // reference even if this process crashes before the delete.
-        if conn.claim_blob_for_purge(blob.id).await?.is_none() {
+        let mut conn = self.infra.postgres.get_connection().await?;
+        let claimed = match conn.claim_blob_for_purge(blob.id).await {
+            Ok(claimed) => claimed.is_some(),
+            Err(err) => {
+                tracing::error!(target: TRACING_TARGET, blob_id = %blob.id, error = %err, "Failed to claim blob for purge");
+                return Ok(PurgeOutcome::Pending);
+            }
+        };
+        drop(conn);
+        if !claimed {
             return Ok(PurgeOutcome::Pending);
         }
-        Ok(self.reclaim_claimed_object(conn, blob).await)
+        self.reclaim_claimed_object(blob).await
     }
 
     /// Reclaims the object of a blob already claimed for purge (`purged_at` set),
@@ -87,14 +84,17 @@ impl BlobReclaimer {
     ///
     /// A failed delete leaves `reclaimed_at` NULL so the blob is retried; the blob
     /// is already out of the dedup set, so its bytes are never reused meanwhile.
+    ///
+    /// # Errors
+    ///
+    /// - A database error if no connection can be checked out to mark the blob
+    ///   reclaimed. A failed delete or mark is logged and yields `Pending`.
     pub(super) async fn reclaim_claimed_object(
         &self,
-        conn: &mut PgConn,
         blob: &ReclaimableBlob,
-    ) -> PurgeOutcome {
-        if let Err(err) = self
-            .delete_object(&blob.storage_bucket, &blob.storage_path)
-            .await
+    ) -> Result<PurgeOutcome> {
+        if let Err(err) =
+            delete_object(&self.infra.blobs, &blob.storage_bucket, &blob.storage_path).await
         {
             tracing::error!(
                 target: TRACING_TARGET,
@@ -102,9 +102,10 @@ impl BlobReclaimer {
                 error = %err,
                 "Failed to delete claimed blob object; left for the reaper to retry",
             );
-            return PurgeOutcome::Pending;
+            return Ok(PurgeOutcome::Pending);
         }
 
+        let mut conn = self.infra.postgres.get_connection().await?;
         if let Err(err) = conn.mark_blob_reclaimed(blob.id).await {
             tracing::error!(
                 target: TRACING_TARGET,
@@ -112,44 +113,8 @@ impl BlobReclaimer {
                 error = %err,
                 "Deleted blob object but failed to mark it reclaimed; will retry",
             );
-            return PurgeOutcome::Pending;
+            return Ok(PurgeOutcome::Pending);
         }
-        PurgeOutcome::Purged
-    }
-
-    /// Removes an object from whichever store its blob names. An unparseable
-    /// storage key or an unknown store is an error, not a silent success: the
-    /// object was not reclaimed, so the blob stays pending.
-    async fn delete_object(&self, bucket: &str, storage_path: &str) -> Result<()> {
-        let store = Bucket::from_name(bucket).ok_or_else(|| {
-            ErrorKind::InternalServerError
-                .with_message("Blob references an unknown storage bucket")
-                .with_context(format!("bucket: {bucket}"))
-        })?;
-
-        // Each store's key type differs, so parse the key for the store this blob
-        // names before deleting.
-        match store {
-            Bucket::Documents => {
-                let key = DocumentKey::from_str(storage_path).map_err(invalid_key)?;
-                self.infra.blobs.delete(&key).await?;
-            }
-            Bucket::Audits => {
-                let key = AuditKey::from_str(storage_path).map_err(invalid_key)?;
-                self.infra.blobs.delete(&key).await?;
-            }
-            Bucket::Intermediates => {
-                let key = IntermediateKey::from_str(storage_path).map_err(invalid_key)?;
-                self.infra.blobs.delete(&key).await?;
-            }
-            Bucket::Avatars => {
-                return Err(ErrorKind::InternalServerError
-                    .with_message(
-                        "Avatar objects are not reclaimed through the blob store's blob purge",
-                    )
-                    .with_context(format!("bucket: {bucket}")));
-            }
-        }
-        Ok(())
+        Ok(PurgeOutcome::Purged)
     }
 }

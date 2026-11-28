@@ -31,8 +31,7 @@ pub async fn persist_refreshed_tokens(
     connection_id: Uuid,
     new_tokens: OAuthTokens,
 ) -> Result<()> {
-    let crypto = crypto.clone();
-    conn.transaction(async move |conn| {
+    conn.transaction(async |conn| {
         // Lock the row for the transaction so a concurrent config replace cannot
         // overwrite this token update from a stale read, and vice versa.
         let Some(current) = conn

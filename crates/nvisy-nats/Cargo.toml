@@ -39,7 +39,8 @@ test_util = ["dep:testcontainers-modules", "tokio/sync"]
 nvisy-core = { workspace = true }
 
 # Async runtime
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio-util = { workspace = true, features = ["rt"] }
 futures = { workspace = true, features = [] }
 async-trait = { workspace = true }
 

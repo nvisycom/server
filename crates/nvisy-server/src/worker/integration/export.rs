@@ -18,6 +18,7 @@ use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
 use super::connector::Connector;
+use super::count_transferred;
 use super::file_source::{ByteStream, FileSource, FileUpload};
 use super::naming::{export_key, mime_from_extension};
 use crate::response::{ErrorKind, Result};
@@ -152,34 +153,27 @@ impl Exporter {
         files: Vec<DocumentWithBlob>,
         object_prefix: &str,
     ) -> Result<u64> {
-        use futures::stream::{self, StreamExt};
-
         let source = self.connector.file_source(connection, config).await?;
         let source = source.as_ref();
         let object_store = matches!(config, ConnectionConfig::ObjectStore(_));
 
-        let exported = stream::iter(files)
-            .map(|file| async move {
+        Ok(
+            count_transferred(files, self.export_concurrency, |file| async move {
                 let remote_key = export_key(&file.document, object_store, object_prefix);
-                match self
+                let exported = self
                     .export_one(source, connection, &file.document, &file.blob, &remote_key)
-                    .await
-                {
-                    Ok(()) => 1u64,
-                    Err(err) => {
-                        tracing::warn!(
-                            target: TRACING_TARGET,
-                            file_id = %file.document.id, error = %err,
-                            "Skipping file that failed to export",
-                        );
-                        0
-                    }
+                    .await;
+                if let Err(err) = &exported {
+                    tracing::warn!(
+                        target: TRACING_TARGET,
+                        file_id = %file.document.id, error = %err,
+                        "Skipping file that failed to export",
+                    );
                 }
+                exported.is_ok()
             })
-            .buffer_unordered(self.export_concurrency)
-            .fold(0u64, |total, exported| std::future::ready(total + exported))
-            .await;
-        Ok(exported)
+            .await,
+        )
     }
 
     /// Exports one stored workspace file to `remote_key` on an already-connected

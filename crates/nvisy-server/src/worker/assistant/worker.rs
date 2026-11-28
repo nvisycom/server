@@ -8,10 +8,10 @@
 //! timeline and mention notifications need no special handling here.
 
 use std::num::NonZero;
-use std::sync::Arc;
 use std::time::Duration;
 
 use nvisy_assistant::{AssistantClient, AssistantConfig, ChatTurn};
+use nvisy_nats::stream::Settle;
 use nvisy_postgres::model::{NewWorkspaceReviewComment, WorkspaceReview, WorkspaceReviewComment};
 use nvisy_postgres::query::{
     OutboxRepository, WorkspaceProviderRepository, WorkspaceReviewCommentRepository,
@@ -19,8 +19,6 @@ use nvisy_postgres::query::{
 };
 use nvisy_postgres::types::ProviderType;
 use nvisy_postgres::{ASSISTANT_ACCOUNT_ID, AsyncConnection, PgConn};
-use tokio::sync::Semaphore;
-use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -60,26 +58,29 @@ pub struct AssistantWorker {
     /// Bounds how many assistant turns run at once. Inference is I/O-bound on the
     /// model provider, but the bound keeps a burst of mentions from opening an
     /// unbounded number of concurrent provider requests.
-    concurrency: Arc<Semaphore>,
+    concurrency: usize,
 }
 
 impl Worker for AssistantWorker {
-    type Output = Result<()>;
+    type Error = Error<'static>;
 
-    fn name(&self) -> &'static str {
-        "assistant"
-    }
+    const NAME: &'static str = "assistant";
 
+    /// At-least-once: a job is acked once it reaches a terminal outcome (a reply
+    /// posted, or nothing left to do), and redelivered on a transient error (a
+    /// DB/pool blip). Redelivery is idempotent because a job whose reply already
+    /// landed is detected and skipped before a second reply is posted.
     async fn run(&self, cancel: CancellationToken) -> Result<()> {
-        tracing::info!(target: TRACING_TARGET, "Starting assistant worker");
-
-        let result = self.run_inner(cancel).await;
-
-        if let Err(err) = &result {
-            tracing::error!(target: TRACING_TARGET, error = %err, "Assistant worker failed");
-        }
-
-        result
+        let worker = self.clone();
+        self.infra
+            .nats
+            .event_subscriber::<AssistantStream>()
+            .consume(self.concurrency, &cancel, move |job, _delivery| {
+                let worker = worker.clone();
+                async move { worker.run_job(job).await }
+            })
+            .await?;
+        Ok(())
     }
 }
 
@@ -92,104 +93,27 @@ impl AssistantWorker {
         Self {
             infra,
             crypto,
-            concurrency: Arc::new(Semaphore::new(concurrency)),
+            concurrency,
         }
-    }
-
-    /// Consumes assistant jobs until cancelled.
-    ///
-    /// At-least-once: a job is acked once it reaches a terminal outcome (a reply
-    /// posted, or nothing left to do), and nacked for redelivery on a transient
-    /// error (a DB/pool blip). Redelivery is idempotent because a job whose reply
-    /// already landed is detected and skipped before a second reply is posted.
-    async fn run_inner(&self, cancel: CancellationToken) -> Result<()> {
-        let subscriber = self.infra.nats.event_subscriber::<AssistantStream>();
-        let mut stream = subscriber.subscribe().await?;
-
-        // In-flight per-job tasks are owned here rather than detached, so shutdown
-        // can wait for them to settle their message (ack/nack). `JoinSet` also reaps
-        // finished tasks so the set does not grow unbounded.
-        let mut tasks: JoinSet<()> = JoinSet::new();
-
-        loop {
-            // Acquire a permit before pulling the next job so no more than
-            // `concurrency` turns are ever in flight; the pull, and thus the
-            // stream's redelivery lease, does not advance while every slot is busy.
-            let permit = tokio::select! {
-                () = cancel.cancelled() => {
-                    break;
-                }
-                Some(_) = tasks.join_next() => continue,
-                permit = self.concurrency.clone().acquire_owned() => match permit {
-                    Ok(permit) => permit,
-                    Err(_) => break,
-                },
-            };
-
-            tokio::select! {
-                () = cancel.cancelled() => {
-                    break;
-                }
-                result = stream.next_with_timeout(Duration::from_secs(5)) => {
-                    match result {
-                        Ok(Some(mut message)) => {
-                            let job = message.payload().clone();
-                            let worker = self.clone();
-                            tasks.spawn(async move {
-                                let _permit = permit;
-                                let outcome = worker.run_job(job).await;
-                                let ack_result = match outcome {
-                                    JobOutcome::Done => message.ack().await,
-                                    JobOutcome::Retry => message.nack().await,
-                                };
-                                if let Err(err) = ack_result {
-                                    tracing::error!(target: TRACING_TARGET, error = %err, ?outcome, "Failed to ack/nack assistant job");
-                                }
-                            });
-                        }
-                        Ok(None) => drop(permit),
-                        Err(err) => {
-                            drop(permit);
-                            tracing::error!(target: TRACING_TARGET, error = %err, "Error receiving assistant job");
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Shutdown: stop pulling and let in-flight turns finish so each settles its
-        // message. The app-wide shutdown timeout bounds this; a turn still running
-        // when it fires is aborted and its message redelivered, which the reply
-        // dedup makes idempotent.
-        if !tasks.is_empty() {
-            tracing::info!(
-                target: TRACING_TARGET,
-                in_flight = tasks.len(),
-                "Draining in-flight assistant jobs before stopping",
-            );
-            while tasks.join_next().await.is_some() {}
-        }
-        Ok(())
     }
 
     /// Runs one assistant job: reads the review, runs the model, posts the reply.
     ///
-    /// Returns [`JobOutcome::Retry`] only for transient errors (no connection, a
+    /// Returns [`Settle::Retry`] only for transient errors (no connection, a
     /// failed load or persist), so the reply is eventually posted. Terminal
     /// conditions — a missing review/comment, a reply already posted, or no model
-    /// provider configured — return [`JobOutcome::Done`]: retrying would not help.
+    /// provider configured — return [`Settle::Ack`]: retrying would not help.
     #[tracing::instrument(skip_all, fields(review_id = %job.review_id, comment_id = %job.comment_id, workspace_id = %job.workspace_id))]
-    async fn run_job(&self, job: AssistantJob) -> JobOutcome {
+    async fn run_job(&self, job: AssistantJob) -> Settle {
         match self.reply(&job).await {
-            Ok(()) => JobOutcome::Done,
+            Ok(()) => Settle::Ack,
             Err(ReplyError::Transient(err)) => {
                 tracing::error!(target: TRACING_TARGET, error = %err, "Assistant reply failed transiently; will retry");
-                JobOutcome::Retry
+                Settle::Retry
             }
             Err(ReplyError::Terminal(reason)) => {
                 tracing::warn!(target: TRACING_TARGET, %reason, "Assistant reply not posted; dropping job");
-                JobOutcome::Done
+                Settle::Ack
             }
         }
     }
@@ -449,15 +373,6 @@ fn turn_for(comment: &WorkspaceReviewComment) -> ChatTurn {
     } else {
         ChatTurn::user(comment.body.clone())
     }
-}
-
-/// Whether a consumed assistant job should be acked (done) or nacked (retry).
-#[derive(Debug, Clone, Copy)]
-enum JobOutcome {
-    /// Reached a terminal outcome or is safe to drop; ack the message.
-    Done,
-    /// Transient error; nack for redelivery.
-    Retry,
 }
 
 /// Why an assistant reply did not complete: a transient error (redeliver) or a

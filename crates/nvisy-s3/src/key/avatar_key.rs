@@ -12,8 +12,9 @@ use crate::error::{Error, Result};
 /// A validated key for an account-scoped object (an avatar).
 ///
 /// The key format is `account_{account_id}_{version}`, where `version` is a
-/// content hash. Each avatar version is a distinct object, so a versioned URL
-/// maps to immutable bytes and a stale version simply does not exist.
+/// random version drawn per upload. Each avatar version is a distinct object, so
+/// a versioned URL maps to immutable bytes and a stale version simply does not
+/// exist.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AccountAvatarKey {
     pub account_id: Uuid,
@@ -55,8 +56,9 @@ impl FromStr for AccountAvatarKey {
 /// A validated key for a workspace-scoped object (an avatar/logo).
 ///
 /// The key format is `workspace_{workspace_id}_{version}`, where `version` is a
-/// content hash. Each avatar version is a distinct object, so a versioned URL
-/// maps to immutable bytes and a stale version simply does not exist.
+/// random version drawn per upload. Each avatar version is a distinct object, so
+/// a versioned URL maps to immutable bytes and a stale version simply does not
+/// exist.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WorkspaceAvatarKey {
     pub workspace_id: Uuid,

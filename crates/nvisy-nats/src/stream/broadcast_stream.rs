@@ -1,12 +1,27 @@
 //! Typed stream over a core-NATS (non-JetStream) subscription.
 
+use std::fmt::Display;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use async_nats::Subscriber;
 use futures::Stream;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
+
+/// A core-NATS (non-JetStream) broadcast topic: the event it carries and the
+/// subject an event about one resource is published on.
+///
+/// Broadcasts fan out live updates to whichever subscribers are connected; the
+/// topic's source of truth lives elsewhere, so a missed event is recoverable.
+pub trait BroadcastTopic: 'static {
+    /// The event broadcast on this topic.
+    type Event: Serialize + DeserializeOwned + Send + 'static;
+
+    /// The subject `id`'s events are broadcast on.
+    fn subject(id: &dyn Display) -> String;
+}
 
 /// A typed stream of messages from a core-NATS subject subscription.
 ///
