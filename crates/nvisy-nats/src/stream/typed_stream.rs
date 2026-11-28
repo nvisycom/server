@@ -50,7 +50,9 @@ where
     /// Pulls the next message, waiting up to `wait` for one to arrive.
     ///
     /// The wait is the pull request's server-side expiry, so a request the
-    /// server still holds never outlives the caller's interest in it. A payload
+    /// server still holds never outlives the caller's interest in it. Every step
+    /// (sending the request, receiving, terminating a poison message) is bounded
+    /// by one absolute deadline, `wait` plus a short grace. A payload
     /// that cannot be deserialized is terminated (so the server stops
     /// redelivering it) and the pull continues within the same wait; a failure
     /// to terminate it is only logged.
@@ -67,17 +69,23 @@ where
                 return Ok(None);
             }
 
-            let mut batch = self
+            // Sending the request is bounded by the same deadline, so a stalled
+            // connection cannot hold the caller past it.
+            let request = self
                 .consumer
                 .batch()
                 .max_messages(1)
                 .expires(remaining)
-                .messages()
-                .await
-                .map_err(|e| Error::operation("pull_request", e.to_string()))?;
-            // The server ends the batch when the request expires; the client-side
-            // bound only guards against a server that never answers.
-            let pulled = tokio::time::timeout(remaining + PULL_GRACE, batch.next())
+                .messages();
+            let mut batch = match tokio::time::timeout_at(deadline, request).await {
+                Ok(batch) => batch.map_err(|e| Error::operation("pull_request", e.to_string()))?,
+                Err(_) => return Ok(None),
+            };
+            // The server ends the batch when the request expires. The inbox stays
+            // open for a grace past the expiry, so a delivery already in transit
+            // is received rather than abandoned; the bound only guards against a
+            // server that never answers.
+            let pulled = tokio::time::timeout_at(deadline + PULL_GRACE, batch.next())
                 .await
                 .ok()
                 .flatten();
@@ -110,12 +118,18 @@ where
                         error = %err,
                         "Terminating undeserializable message"
                     );
-                    if let Err(ack_err) = message.ack_with(jetstream::AckKind::Term).await {
-                        tracing::warn!(
+                    let term = message.ack_with(jetstream::AckKind::Term);
+                    match tokio::time::timeout_at(deadline + PULL_GRACE, term).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(ack_err)) => tracing::warn!(
                             target: TRACING_TARGET_STREAM,
                             error = %ack_err,
                             "Failed to terminate undeserializable message"
-                        );
+                        ),
+                        Err(_) => tracing::warn!(
+                            target: TRACING_TARGET_STREAM,
+                            "Timed out terminating undeserializable message"
+                        ),
                     }
                 }
             }

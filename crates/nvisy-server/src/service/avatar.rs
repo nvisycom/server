@@ -177,10 +177,17 @@ impl AvatarService {
         let previous = match self.point_at(owner, &version).await {
             Ok(previous) => previous,
             Err(err) => {
-                // The URL still names the previous version, so the object just
-                // written is unreferenced, unless it is that same version.
-                if self.current_version(owner).await.ok().flatten().as_deref() != Some(&version) {
-                    self.discard(owner, &version).await;
+                // The object just written is unreferenced unless the URL names
+                // it. Remove it only when the URL is known not to: if the lookup
+                // fails too, the update may have landed, so the object is kept.
+                match self.current_version(owner).await {
+                    Ok(current) if current.as_deref() != Some(version.as_str()) => {
+                        self.discard(owner, &version).await;
+                    }
+                    Ok(_) => {}
+                    Err(lookup) => {
+                        tracing::warn!(target: TRACING_TARGET, ?owner, %version, error = %lookup, "Could not tell whether a new avatar object is referenced; keeping it");
+                    }
                 }
                 return Err(err);
             }

@@ -4,9 +4,10 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::jetstream::AckKind;
+use async_nats::jetstream::{AckKind, Message};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
+use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
 use super::core::EventStream;
@@ -22,10 +23,26 @@ const PULL_ERROR_BACKOFF: Duration = Duration::from_secs(1);
 /// The ack lease the server applies when a stream sets none.
 const DEFAULT_ACK_WAIT: Duration = Duration::from_secs(30);
 
-/// How often a running handler extends its message's ack lease: a third of the
-/// lease, so two missed beats still leave it alive.
-fn heartbeat_period<S: EventStream>() -> Duration {
-    S::ACK_WAIT.unwrap_or(DEFAULT_ACK_WAIT) / 3
+/// Extends a message's ack lease every third of the lease, so two missed beats
+/// still leave it alive, until the task is aborted. Each progress ack is bounded
+/// by the period, so a stalled send skips a beat rather than piling up.
+async fn extend_lease<S: EventStream>(message: Message) {
+    let period = S::ACK_WAIT.unwrap_or(DEFAULT_ACK_WAIT) / 3;
+    let mut beat = tokio::time::interval(period);
+    beat.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    beat.tick().await;
+    loop {
+        beat.tick().await;
+        match tokio::time::timeout(period, message.ack_with(AckKind::Progress)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                tracing::warn!(target: TRACING_TARGET_STREAM, stream = S::NAME, error = %err, "Failed to extend a message's ack lease");
+            }
+            Err(_) => {
+                tracing::warn!(target: TRACING_TARGET_STREAM, stream = S::NAME, "Timed out extending a message's ack lease");
+            }
+        }
+    }
 }
 
 /// How a handled message is settled.
@@ -95,8 +112,7 @@ impl<S: EventStream> EventSubscriber<S> {
 
             // The pull is not raced against cancellation: dropping it mid-flight
             // could strand a message the server already sent to its inbox until
-            // the ack lease ran out. It ends within `PULL_TIMEOUT`, and a message
-            // pulled after cancellation is handed back at once.
+            // the ack lease ran out. It ends within `PULL_TIMEOUT`.
             let message = match stream.next(PULL_TIMEOUT).await {
                 Ok(Some(message)) => message,
                 Ok(None) => continue,
@@ -107,37 +123,34 @@ impl<S: EventStream> EventSubscriber<S> {
                 }
             };
             let (payload, message) = message.into_parts();
-            if cancel.is_cancelled() {
+            let delivered = message.info().map_or(1, |info| info.delivered.max(1));
+            let delivery = Delivery {
+                attempt: delivered.cast_unsigned(),
+                is_final: S::MAX_DELIVER.is_some_and(|max| delivered >= max),
+            };
+
+            // A message pulled after cancellation is handed back, unless this is
+            // its final delivery: a NAK then would drop it, so it is handled like
+            // any in-flight message and the drain below waits for it.
+            let stopping = cancel.is_cancelled();
+            if stopping && !delivery.is_final {
                 if let Err(err) = message.ack_with(AckKind::Nak(None)).await {
                     tracing::warn!(target: TRACING_TARGET_STREAM, stream = S::NAME, error = %err, "Failed to return a message pulled at shutdown");
                 }
                 break;
             }
 
-            let delivered = message.info().map_or(1, |info| info.delivered.max(1));
-            let delivery = Delivery {
-                attempt: delivered.cast_unsigned(),
-                is_final: S::MAX_DELIVER.is_some_and(|max| delivered >= max),
-            };
             let handle = handle.clone();
             tasks.spawn(async move {
                 let _permit = permit;
                 // Extend the ack lease while the handler runs, so a long but
-                // healthy job is not redelivered to another instance mid-run.
-                let work = handle(payload, delivery);
-                tokio::pin!(work);
-                let mut heartbeat = tokio::time::interval(heartbeat_period::<S>());
-                heartbeat.tick().await;
-                let settle = loop {
-                    tokio::select! {
-                        settle = &mut work => break settle,
-                        _ = heartbeat.tick() => {
-                            if let Err(err) = message.ack_with(AckKind::Progress).await {
-                                tracing::warn!(target: TRACING_TARGET_STREAM, stream = S::NAME, error = %err, "Failed to extend a message's ack lease");
-                            }
-                        }
-                    }
-                };
+                // healthy job is not redelivered to another instance mid-run. The
+                // heartbeat runs on its own task, so a slow progress ack never
+                // pauses the handler.
+                let heartbeat = tokio::spawn(extend_lease::<S>(message.clone()));
+                let settle = handle(payload, delivery).await;
+                heartbeat.abort();
+
                 let ack = match settle {
                     Settle::Ack => AckKind::Ack,
                     Settle::Retry => AckKind::Nak(None),
@@ -147,6 +160,9 @@ impl<S: EventStream> EventSubscriber<S> {
                     tracing::error!(target: TRACING_TARGET_STREAM, stream = S::NAME, error = %err, ?settle, "Failed to settle a message");
                 }
             });
+            if stopping {
+                break;
+            }
         }
 
         if !tasks.is_empty() {

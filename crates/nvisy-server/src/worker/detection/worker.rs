@@ -42,6 +42,10 @@ const TRACING_TARGET: &str = "nvisy_server::worker::detection";
 /// re-analyzed.
 const DETECTION_LEASE: Duration = Duration::from_mins(30);
 
+/// Slack past a claim lease's expiry before a retry, so the redelivery lands
+/// strictly after it.
+const LEASE_MARGIN: Duration = Duration::from_secs(5);
+
 /// Background worker that runs detection off the request thread.
 ///
 /// Cheaply cloneable (every field is `Arc`-backed); a clone is handed to each
@@ -200,7 +204,7 @@ impl DetectionWorker {
                     // attempt's claim lease lapses, when a later attempt can
                     // reclaim it and drive it to a terminal state.
                     tracing::error!(target: TRACING_TARGET, error = %err, "Failed to get connection to fail detection");
-                    return Settle::RetryAfter(DETECTION_LEASE);
+                    return retry_after_lease(claim_token);
                 }
             };
             let outcome = fail_detection(
@@ -221,7 +225,7 @@ impl DetectionWorker {
             // the lease lapses (an earlier redelivery would find it still claimed
             // and ack), so a later attempt drives it to a terminal state.
             if outcome == FailOutcome::PersistFailed {
-                return Settle::RetryAfter(DETECTION_LEASE);
+                return retry_after_lease(claim_token);
             }
         }
         Settle::Ack
@@ -551,4 +555,41 @@ fn request_context(
     RequestContext::new()
         .with_context(document_context.unwrap_or_default())
         .with_codec(CodecParams::new().with_raster_mode(raster_mode))
+}
+
+/// Redelivers a job once the claim stamped at `claimed_at` has lapsed, so the
+/// redelivery's claim (which requires `claimed_at` strictly before
+/// `now - DETECTION_LEASE`) succeeds; at once if it already has.
+fn retry_after_lease(claimed_at: jiff::Timestamp) -> Settle {
+    let lapses_at = claimed_at + DETECTION_LEASE + LEASE_MARGIN;
+    let remaining = lapses_at.duration_since(jiff::Timestamp::now());
+    match Duration::try_from(remaining) {
+        Ok(delay) if !delay.is_zero() => Settle::RetryAfter(delay),
+        _ => Settle::Retry,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use nvisy_nats::stream::Settle;
+
+    use super::{DETECTION_LEASE, LEASE_MARGIN, retry_after_lease};
+
+    #[test]
+    fn retry_waits_out_a_fresh_claim() {
+        let claimed_at = jiff::Timestamp::now() - Duration::from_mins(10);
+        let Settle::RetryAfter(delay) = retry_after_lease(claimed_at) else {
+            panic!("a fresh claim delays the retry");
+        };
+        let expected = (DETECTION_LEASE + LEASE_MARGIN).saturating_sub(Duration::from_mins(10));
+        assert!(delay <= expected && delay > expected.saturating_sub(Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn retry_is_immediate_once_the_claim_lapsed() {
+        let claimed_at = jiff::Timestamp::now() - DETECTION_LEASE - Duration::from_mins(1);
+        assert_eq!(retry_after_lease(claimed_at), Settle::Retry);
+    }
 }
