@@ -44,30 +44,32 @@ reqwest = ["dep:reqwest", "dep:reqwest-middleware", "dep:reqwest-retry", "dep:re
 oauth2 = ["reqwest", "dep:oauth2", "dep:http"]
 
 [dependencies]
-# Async runtime
-async-trait = { workspace = true }
-futures = { workspace = true, features = [] }
-tokio = { workspace = true, features = ["net"] }
-
 # CLI
 clap = { workspace = true, features = ["derive"], optional = true }
 
-# HTTP client
+# Async runtime
+async-trait = { workspace = true, features = [] }
+futures = { workspace = true, features = [] }
+tokio = { workspace = true, features = ["net"] }
+
+# HTTP client & middleware
 reqwest = { workspace = true, features = [], optional = true }
 reqwest-middleware = { workspace = true, features = [], optional = true }
 reqwest-retry = { workspace = true, features = [], optional = true }
 reqwest-tracing = { workspace = true, features = [], optional = true }
-http = { workspace = true, features = [], optional = true }
 
-# Authentication
+# OAuth & OIDC
+http = { workspace = true, features = [], optional = true }
 oauth2 = { workspace = true, features = [], optional = true }
+
+# OpenAPI/Documentation
+schemars = { workspace = true, optional = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
-schemars = { workspace = true, optional = true }
 
 # Derive macros & utilities
 thiserror = { workspace = true, features = [] }
@@ -75,11 +77,16 @@ thiserror = { workspace = true, features = [] }
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
 jiff = { workspace = true, features = [], optional = true }
+
+# Domain datatypes & data structures
 url = { workspace = true, features = [] }
 
 [dev-dependencies]
-serde_json = { workspace = true, features = [] }
+# Async runtime
 tokio = { workspace = true, features = ["macros", "rt"] }
+
+# (De)serialization
+serde_json = { workspace = true, features = [] }
 
 [lints]
 workspace = true

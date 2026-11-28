@@ -34,8 +34,9 @@ clap = { workspace = true, features = ["derive", "env"], optional = true }
 
 # Async runtime
 futures = { workspace = true, features = [] }
+async-trait = { workspace = true, features = [] }
 
-# HTTP client
+# HTTP client & middleware
 reqwest = { workspace = true, features = ["json", "query", "stream", "multipart"] }
 
 # OAuth & OIDC
@@ -44,6 +45,9 @@ oauth2 = { workspace = true, features = [] }
 # OpenAPI/Documentation
 schemars = { workspace = true, features = [], optional = true }
 
+# Encoding
+percent-encoding = { workspace = true, features = [] }
+
 # Observability
 tracing = { workspace = true, features = [] }
 
@@ -51,11 +55,7 @@ tracing = { workspace = true, features = [] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = [] }
 
-# Encoding
-percent-encoding = { workspace = true, features = [] }
-
 # Derive macros & utilities
-async-trait = { workspace = true, features = [] }
 strum = { workspace = true, features = ["derive"] }
 
 # Primitive datatypes
