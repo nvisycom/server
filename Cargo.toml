@@ -47,7 +47,7 @@ debug = true
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
 # Elide crates
-elide-pipeline = { git = "https://github.com/nvisycom/elide-runtime", rev = "3e082627f91b1e98630364f9a98a162cd7e9a778", default-features = false }
+elide-pipeline = { git = "https://github.com/nvisycom/elide-runtime", rev = "6712316061b4497098ba5a7b61f7c0a7e70ca5b0", default-features = false }
 
 # Internal crates
 nvisy-core = { path = "./crates/nvisy-core", version = "0.1.0" }
@@ -101,6 +101,7 @@ tower-http = { version = "0.7", features = ["full"] }
 # OpenAPI/Documentation
 aide = { version = "0.16.0-alpha.4", features = ["axum", "macros", "scalar"] }
 schemars = { version = "1.2", features = ["uuid1", "jiff02", "semver1"] }
+indexmap = { version = "2.14", features = [] }
 
 # Authentication
 jsonwebtoken = { version = "12.0", features = ["aws_lc_rs"] }

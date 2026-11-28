@@ -87,6 +87,7 @@ tower-http = { workspace = true, features = [] }
 # OpenAPI/Documentation
 aide = { workspace = true, features = ["axum", "axum-query", "axum-extra-query", "axum-form", "axum-json", "axum-multipart", "axum-extra", "bytes", "http"] }
 schemars = { workspace = true, features = [] }
+indexmap = { workspace = true, features = [] }
 
 # Authentication
 jsonwebtoken = { workspace = true, features = [] }

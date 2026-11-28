@@ -417,7 +417,9 @@ impl WorkspaceReviewService {
 
     /// Points a review at the detection it is currently reviewing (its subject). Used
     /// on open and whenever the document is re-detected. Idempotent when the review
-    /// already points at the detection.
+    /// already points at the detection; moving an approved or partially approved
+    /// review to a different one clears its approvals and returns it to
+    /// `in_review`.
     ///
     /// # Errors
     ///

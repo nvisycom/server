@@ -10,7 +10,7 @@ use std::fmt::Display;
 
 use elide_pipeline::provider::DocumentContext;
 use nvisy_nats::stream::{BroadcastStream, BroadcastTopic};
-use nvisy_postgres::types::DetectionStatus;
+use nvisy_postgres::types::{DetectionId, DetectionStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -50,8 +50,9 @@ pub struct DetectionJob {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectionStatusEvent {
-    /// The detection whose status changed.
-    pub detection_id: Uuid,
+    /// The detection whose status changed, in the same prefixed form as the
+    /// paths.
+    pub detection_id: DetectionId,
     /// The detection's new status.
     pub status: DetectionStatus,
 }
@@ -83,7 +84,7 @@ pub async fn enqueue(infra: &Infra, job: DetectionJob) -> Result<()> {
 /// authoritative, so a dropped broadcast is recoverable).
 pub async fn broadcast_status(infra: &Infra, detection_id: Uuid, status: DetectionStatus) {
     let event = DetectionStatusEvent {
-        detection_id,
+        detection_id: DetectionId::from_uuid(detection_id),
         status,
     };
     infra

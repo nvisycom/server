@@ -25,12 +25,15 @@
 //! [`ApiRouter`]: aide::axum::ApiRouter
 
 use aide::axum::ApiRouter;
-use aide::openapi::{Contact, License, OpenApi, Tag};
+use aide::openapi::{Contact, License, OpenApi, SecurityScheme, Tag};
 use aide::scalar::Scalar;
 use aide::transform::TransformOpenApi;
 use axum::routing::{Router, get};
 use axum::{Extension, Json};
+use indexmap::IndexMap;
 use serde_json::Value;
+
+use crate::extract::{BEARER_AUTH, SESSION_COOKIE_NAME};
 
 /// `OpenAPI` configuration for aide integration.
 ///
@@ -265,6 +268,19 @@ fn api_docs(api: TransformOpenApi) -> TransformOpenApi {
             url: Some("https://www.apache.org/licenses/LICENSE-2.0".to_owned()),
             ..License::default()
         })
+        .security_scheme(
+            BEARER_AUTH,
+            SecurityScheme::Http {
+                scheme: "bearer".to_owned(),
+                bearer_format: Some("JWT".to_owned()),
+                description: Some(format!(
+                    "The session JWT issued at sign-in, sent as `Authorization: Bearer <token>`. \
+                     Browser clients may instead send the session in the `{SESSION_COOKIE_NAME}` \
+                     cookie, with the CSRF header on unsafe methods."
+                )),
+                extensions: IndexMap::default(),
+            },
+        )
         .tag(Tag {
             name: "Health".into(),
             description: Some("Service health checks".into()),

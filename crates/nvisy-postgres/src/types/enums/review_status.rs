@@ -9,23 +9,26 @@ db_enum! {
     /// Corresponds to the `REVIEW_STATUS` `PostgreSQL` enum. The state is driven by
     /// explicit reviewer decisions, not by assignment: a review opens at `Draft`;
     /// `submit` moves it to `InReview`; a reviewer can `request-changes`
-    /// (`ChangesRequested`, from which `resubmit` returns it to `InReview`) or
+    /// (`ChangesRequested`, from which `submit` returns it to `InReview`) or
     /// `approve`. An approval reaches `Approved` once the workspace's required number
     /// of distinct approvals is met, and rests at `PartiallyApproved` in between
     /// (only reachable when two or more approvals are required). Reopening an
-    /// `Approved` review returns it to `InReview`.
+    /// `Approved` review returns it to `InReview`, as does pointing a review that
+    /// has approvals at a different detection.
     pub enum ReviewStatus: Default = Draft, "crate::schema::sql_types::ReviewStatus" {
         /// Opened, edits being assembled; `submit` sends it for review.
         Draft = "draft",
         /// Submitted and awaiting a reviewer decision.
         InReview = "in_review",
-        /// A reviewer requested changes; `resubmit` returns it to `InReview`.
+        /// A reviewer requested changes; `submit` returns it to `InReview`.
         ChangesRequested = "changes_requested",
         /// Some, but not all, required approvals are in. Only reachable when the
-        /// workspace requires two or more approvals.
+        /// workspace requires two or more approvals. An approver may already have
+        /// bound the redaction the remaining approvals must endorse.
         PartiallyApproved = "partially_approved",
-        /// Signed off: the required approvals are in and the approved redaction is
-        /// the review's output.
+        /// Signed off: the required approvals are in. When an approver named a
+        /// redaction, that redaction is the review's output; otherwise the review
+        /// has none.
         Approved = "approved",
     }
 }

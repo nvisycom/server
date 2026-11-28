@@ -22,6 +22,10 @@ use super::{AuthClaims, Permission, SessionToken};
 use crate::response::{Error, ErrorKind, Result, error_responses};
 use crate::service::AuthKeys;
 
+/// The name of the bearer security scheme authenticated operations require, as
+/// declared in the spec's components.
+pub const BEARER_AUTH: &str = "BearerAuth";
+
 /// Tracing target for authentication operations.
 const TRACING_TARGET: &str = "nvisy_server::extract::auth";
 
@@ -384,7 +388,7 @@ impl OperationInput for AuthState {
     fn operation_input(_ctx: &mut GenContext, operation: &mut Operation) {
         // The Bearer token is required: the only way to satisfy the operation is
         // to present it.
-        operation.security = vec![[("BearerAuth".to_string(), vec![])].into()];
+        operation.security = vec![[(BEARER_AUTH.to_owned(), vec![])].into()];
     }
 
     fn inferred_early_responses(

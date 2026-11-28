@@ -450,12 +450,15 @@ fn point_detection_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Point a review at a detection")
         .description(
             "Points a review at the detection it is currently reviewing (idempotent). \
-             Re-detecting a document repoints the review. Requires Review.",
+             Re-detecting a document repoints the review. Moving an `approved` or \
+             `partially_approved` review to a different detection clears its approvals \
+             and approved redaction and returns it to `in_review`, since they endorsed \
+             the previous detection's output. Requires Review.",
         )
         .response::<200, Json<WorkspaceReview>>()
 }
 
-/// Submits (or resubmits) a review for review, moving it to `in_review`. Requires
+/// Submits a review for review (from `draft` or `changes_requested`), moving it to `in_review`. Requires
 /// `Review`.
 #[tracing::instrument(
     skip_all,

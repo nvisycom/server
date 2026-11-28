@@ -14,8 +14,8 @@ mod valid;
 mod workspace_context;
 
 pub use crate::extract::auth::{
-    AuthClaims, AuthState, AuthTransport, Authorized, CSRF_COOKIE_NAME, CSRF_HEADER_NAME,
-    Permission, RequiredPermission, SESSION_COOKIE_NAME, SessionToken, markers,
+    AuthClaims, AuthState, AuthTransport, Authorized, BEARER_AUTH, CSRF_COOKIE_NAME,
+    CSRF_HEADER_NAME, Permission, RequiredPermission, SESSION_COOKIE_NAME, SessionToken, markers,
 };
 pub use crate::extract::avatar_upload::AvatarUpload;
 pub use crate::extract::idempotency_key::IdempotencyKey;

@@ -104,7 +104,10 @@ pub trait WorkspaceReviewRepository {
 
     /// Points a review at a detection (its current subject), recording a
     /// `review.redetected` event when the target changes. Idempotent when the review
-    /// already points at `detection_id`. Returns the review.
+    /// already points at `detection_id`. Moving an `approved` or
+    /// `partially_approved` review to a different detection clears its approvals
+    /// and approved redaction and returns it to `in_review`, since those approvals
+    /// endorsed the previous detection's output. Returns the review.
     fn point_detection(
         &mut self,
         review_id: Uuid,
@@ -176,8 +179,10 @@ pub trait WorkspaceReviewRepository {
 
     /// Stamps `actor`'s approval on their assignee row (idempotent per reviewer) and
     /// advances the status: once the count of approved assignees reaches
-    /// `required_approvals` the review becomes `approved` (and `redaction_id` is set
-    /// when `output` is given), otherwise `partially_approved`. Records an `approved`
+    /// `required_approvals` the review becomes `approved`, otherwise
+    /// `partially_approved`. A given `output` binds `redaction_id` on either
+    /// outcome, and once bound a later approval naming a different redaction is
+    /// rejected (`rebind_rejected`). Records an `approved`
     /// event on a new approval. Locks the review first. The caller must already be an
     /// assignee (the domain layer enforces this); an un-assigned actor stamps nothing
     /// and the [`ApprovalOutcome`] reports `recorded = false` with the unchanged count.
@@ -478,11 +483,23 @@ impl WorkspaceReviewRepository for PgConnection {
                 return Ok(review);
             }
 
+            // Approvals endorse the previous detection's output, so moving to a
+            // different detection drops them (and the approved redaction) and
+            // returns the review to in_review, as a reopen does.
+            let drops_approvals = matches!(
+                review.review_status,
+                ReviewStatus::Approved | ReviewStatus::PartiallyApproved
+            );
+            if drops_approvals {
+                clear_approvals(conn, review_id).await?;
+            }
             let review = apply_update(
                 conn,
                 review_id,
                 UpdateWorkspaceReview {
                     detection_id: Some(Some(detection_id)),
+                    review_status: drops_approvals.then_some(ReviewStatus::InReview),
+                    redaction_id: drops_approvals.then_some(None),
                     ..Default::default()
                 },
             )
@@ -493,7 +510,10 @@ impl WorkspaceReviewRepository for PgConnection {
                 &review,
                 ReviewEventKind::Redetected,
                 actor,
-                Some(serde_json::json!({ "detectionId": detection_id })),
+                Some(serde_json::json!({
+                    "detectionId": detection_id,
+                    "approvalsCleared": drops_approvals,
+                })),
             )
             .await?;
             Ok(review)
@@ -1067,13 +1087,13 @@ mod tests {
     use super::count_approvals;
     use crate::PgConn;
     use crate::model::{
-        NewAccount, NewWorkspaceRedaction, NewWorkspaceReview, NewWorkspaceReviewComment,
-        UpdateWorkspaceReviewComment,
+        NewAccount, NewWorkspaceDetection, NewWorkspaceRedaction, NewWorkspaceReview,
+        NewWorkspaceReviewComment, UpdateWorkspaceReviewComment,
     };
     use crate::query::{
-        AccountRepository, TimelineCursor, TimelineSource, WorkspaceRedactionRepository,
-        WorkspaceReviewCommentRepository, WorkspaceReviewEventRepository,
-        WorkspaceReviewRepository,
+        AccountRepository, TimelineCursor, TimelineSource, WorkspaceDetectionRepository,
+        WorkspaceRedactionRepository, WorkspaceReviewCommentRepository,
+        WorkspaceReviewEventRepository, WorkspaceReviewRepository,
     };
     use crate::test_util::TestDatabase;
     use crate::types::{
@@ -1949,6 +1969,76 @@ mod tests {
             }
         }
         assert_eq!(paged, all);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn pointing_at_another_detection_drops_approvals() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let fixture = db.seed_detection_and_redaction().await;
+        let seeded = fixture.seeded;
+        let mut conn = db.client.get_connection().await?;
+
+        let review = conn
+            .create_review(NewWorkspaceReview::test(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            ))
+            .await?;
+        conn.point_detection(review.id, fixture.detection_id, seeded.account_id)
+            .await?;
+        conn.submit_review(review.id, seeded.account_id).await?;
+        conn.add_assignee(review.id, seeded.account_id, seeded.account_id)
+            .await?;
+        let approved = conn
+            .approve_review(review.id, seeded.account_id, 1, Some(fixture.redaction_id))
+            .await?;
+        assert_eq!(approved.review.review_status, ReviewStatus::Approved);
+
+        // Re-pointing at the same detection is a no-op: the approval stands.
+        let same = conn
+            .point_detection(review.id, fixture.detection_id, seeded.account_id)
+            .await?;
+        assert_eq!(same.review_status, ReviewStatus::Approved);
+        assert_eq!(same.redaction_id, Some(fixture.redaction_id));
+
+        // A different detection drops the approvals and the approved output.
+        let redetected = conn
+            .create_workspace_detection(NewWorkspaceDetection::test(
+                seeded.workspace_id,
+                seeded.account_id,
+                seeded.document_id,
+            ))
+            .await?;
+        let moved = conn
+            .point_detection(review.id, redetected.id, seeded.account_id)
+            .await?;
+        assert_eq!(moved.detection_id, Some(redetected.id));
+        assert_eq!(moved.review_status, ReviewStatus::InReview);
+        assert_eq!(moved.redaction_id, None);
+        assert_eq!(count_approvals(&mut conn, review.id).await?, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn pointing_an_unapproved_review_keeps_its_status() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let fixture = db.seed_detection_and_redaction().await;
+        let seeded = fixture.seeded;
+        let mut conn = db.client.get_connection().await?;
+
+        let review = conn
+            .create_review(NewWorkspaceReview::test(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            ))
+            .await?;
+        let moved = conn
+            .point_detection(review.id, fixture.detection_id, seeded.account_id)
+            .await?;
+        assert_eq!(moved.review_status, ReviewStatus::Draft);
         Ok(())
     }
 }
