@@ -123,6 +123,7 @@ impl_di_unit!(AccountProvisioner);
 // Per-resource domain services built over the Postgres client alone:
 impl_di_domain!(
     crate::domain::AccountService,
+    crate::domain::WorkspaceAnalyticsService,
     crate::domain::WorkspaceInviteService,
     crate::domain::WorkspaceMemberService,
     crate::domain::WorkspacePolicyService,
@@ -157,8 +158,11 @@ impl_di_new! {
     // Crypto (encrypt/decrypt config) and the endpoint policy (validate endpoints).
     crate::domain::WorkspaceProviderService =>
         |state| state.infra.postgres.clone(), state.crypto.clone(), state.endpoint_policy;
+    // Crypto, the endpoint policy, and the cloud file service (reach, refresh,
+    // and verify a connection's backing store).
     crate::domain::WorkspaceConnectionService =>
-        |state| state.infra.postgres.clone(), state.crypto.clone(), state.endpoint_policy;
+        |state| state.infra.postgres.clone(), state.crypto.clone(), state.endpoint_policy,
+        state.file_service.clone();
     // Crypto (decrypt the connection config) and the sync service (create the
     // run, spawn and cancel its transfer).
     crate::domain::WorkspaceConnectionSyncService =>

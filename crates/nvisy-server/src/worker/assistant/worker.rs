@@ -257,11 +257,7 @@ impl AssistantWorker {
             ProviderConfig::Inference(AssistantConfig::Llm(llm)) => llm,
         };
 
-        llm.connect(None).map_err(|err| {
-            ErrorKind::InternalServerError
-                .with_message("Failed to build the language model client")
-                .with_context(err.to_string())
-        })
+        Ok(llm.connect(None))
     }
 
     /// Posts the assistant's reply as a comment answering `trigger_comment_id`,

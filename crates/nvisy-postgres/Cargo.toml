@@ -39,7 +39,7 @@ cli = ["dep:clap", "nvisy-core/cli"]
 # constructors (e.g. `Handle::test`), so downstream crates can reuse the same
 # harness in their own integration tests. Off by default; pulls in the container
 # runtime and the Tokio features the fixture needs.
-test_util = ["dep:testcontainers-modules", "tokio/macros", "tokio/rt-multi-thread"]
+test_util = ["dep:testcontainers-modules", "nvisy-core/test_util", "tokio/macros", "tokio/rt-multi-thread"]
 
 [dependencies]
 # Internal crates

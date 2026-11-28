@@ -1,17 +1,15 @@
-//! Client trait and object storage providers.
+//! Object storage providers: the typed connection config and its credentials.
 
 mod azure;
 mod gcs;
 mod s3;
 
-use std::ops::Deref;
-
-pub use azure::{AzureAuth, AzureCredentials, AzureProvider};
-pub use gcs::{GcsCredentials, GcsProvider};
+pub use azure::{AzureAuth, AzureCredentials};
+pub use gcs::GcsCredentials;
 use nvisy_core::Error;
 use nvisy_core::net::EndpointPolicy;
 use object_store::prefix::PrefixStore;
-pub use s3::{S3Credentials, S3Provider};
+pub use s3::S3Credentials;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -68,9 +66,9 @@ impl StorageConfig {
     #[must_use]
     pub fn provider_id(&self) -> &'static str {
         match self {
-            Self::S3 { .. } => S3Provider::ID,
-            Self::Azure { .. } => AzureProvider::ID,
-            Self::Gcs { .. } => GcsProvider::ID,
+            Self::S3 { .. } => "s3",
+            Self::Azure { .. } => "azure",
+            Self::Gcs { .. } => "gcs",
         }
     }
 
@@ -114,28 +112,6 @@ fn with_root_path(client: ObjectStoreClient, root_path: Option<&str>) -> ObjectS
     }
 }
 
-/// Authenticated connection to an object storage backend.
-///
-/// Implementations are newtype wrappers around [`ObjectStoreClient`] that
-/// handle credential validation and client construction for a specific
-/// provider (e.g. S3, Azure, GCS).
-pub trait Client: Deref<Target = ObjectStoreClient> + Send + Sync + 'static {
-    /// Strongly-typed credentials for this provider.
-    type Credentials: Send;
-
-    /// Unique identifier (e.g. `s3`, `azure`).
-    const ID: &str;
-
-    /// Create a connected client from credentials, validating any custom
-    /// endpoint under `policy`.
-    fn connect(
-        creds: &Self::Credentials,
-        policy: EndpointPolicy,
-    ) -> impl Future<Output = Result<Self, Error>> + Send
-    where
-        Self: Sized;
-}
-
 /// Connects to an object store from a typed [`StorageConfig`], returning the
 /// shared [`ObjectStoreClient`] regardless of which provider backs it.
 ///
@@ -152,25 +128,11 @@ pub async fn connect(
     policy: EndpointPolicy,
 ) -> Result<ObjectStoreClient, Error> {
     let client = match config {
-        StorageConfig::S3 { credentials, .. } => {
-            connect_client::<S3Provider>(credentials, policy).await
-        }
-        StorageConfig::Azure { credentials, .. } => {
-            connect_client::<AzureProvider>(credentials, policy).await
-        }
-        StorageConfig::Gcs { credentials, .. } => {
-            connect_client::<GcsProvider>(credentials, policy).await
-        }
+        StorageConfig::S3 { credentials, .. } => credentials.connect(policy).await,
+        StorageConfig::Azure { credentials, .. } => credentials.connect(policy).await,
+        StorageConfig::Gcs { credentials, .. } => credentials.connect(policy).await,
     }?;
     Ok(with_root_path(client, config.root_path()))
-}
-
-/// Connects a specific provider and unwraps it to the shared client type.
-async fn connect_client<C: Client>(
-    credentials: &C::Credentials,
-    policy: EndpointPolicy,
-) -> Result<ObjectStoreClient, Error> {
-    Ok((*C::connect(credentials, policy).await?).clone())
 }
 
 #[cfg(test)]

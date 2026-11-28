@@ -1,18 +1,19 @@
 //! Test-only support for integration tests that need a real S3-compatible store.
 //!
 //! Starts an ephemeral `RustFS` container (the same S3-compatible backend the
-//! dev stack uses), connects a [`BlobStore`], and creates its bucket — so the
+//! dev stack uses), creates its bucket, and builds a [`BlobStore`], so the
 //! storage code can be exercised against a real backend without any external
 //! setup. Gated on the `test_util` feature, so it never ships in a default build.
 
-use std::sync::OnceLock;
-
 use nvisy_core::Secret;
+use nvisy_core::test_util::boot_permit;
+use object_store::aws::{AwsAuthorizer, AwsCredential};
+use object_store::client::{HttpRequest, HttpRequestBody};
+use reqwest::Method;
 use testcontainers_modules::testcontainers::core::wait::HttpWaitStrategy;
 use testcontainers_modules::testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::{ContainerAsync, GenericImage, ImageExt};
-use tokio::sync::Semaphore;
 
 use crate::{BlobStore, S3Config};
 
@@ -26,22 +27,6 @@ const RUSTFS_TAG: &str = "1.0.0-rc.5";
 /// The static credentials the container is configured with.
 const S3_ACCESS_KEY: &str = "rustfsadmin";
 const S3_SECRET_KEY: &str = "rustfsadmin";
-
-/// Caps how many storage containers may boot at once, across the whole test
-/// binary — booting all at once can overwhelm the Docker daemon and flake the
-/// readiness probes. Serializes only the boot; the containers then run in
-/// parallel. Raise with `NVISY_TEST_BOOT_CONCURRENCY`.
-fn boot_semaphore() -> &'static Semaphore {
-    static BOOT: OnceLock<Semaphore> = OnceLock::new();
-    BOOT.get_or_init(|| {
-        let permits = std::env::var("NVISY_TEST_BOOT_CONCURRENCY")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .filter(|&n| n >= 1)
-            .unwrap_or(1);
-        Semaphore::new(permits)
-    })
-}
 
 /// A running `RustFS` container paired with a connected [`BlobStore`] whose
 /// bucket ([`TEST_BUCKET`]) has been created.
@@ -59,19 +44,16 @@ pub struct TestBlobStore {
 }
 
 impl TestBlobStore {
-    /// Starts a fresh `RustFS` container, connects a [`BlobStore`], and creates
-    /// the test bucket.
+    /// Starts a fresh `RustFS` container, creates the test bucket, and builds a
+    /// [`BlobStore`] for it.
     ///
     /// # Panics
     ///
-    /// Panics if the container cannot start, the store cannot connect, or the
-    /// bucket cannot be created — a test cannot proceed without a working store.
+    /// Panics if the container cannot start, the bucket cannot be created, or the
+    /// store cannot be built: a test cannot proceed without a working store.
     pub async fn start() -> Self {
-        let (container, port) = {
-            let _permit = boot_semaphore()
-                .acquire()
-                .await
-                .expect("boot semaphore is never closed");
+        let (container, config) = {
+            let _permit = boot_permit().await;
             // Ready only once `/health/ready` serves 200 — RustFS serves requests
             // (and accepts bucket creation) only after storage has initialized.
             let ready = HttpWaitStrategy::new("/health/ready")
@@ -88,25 +70,19 @@ impl TestBlobStore {
                 .get_host_port_ipv4(9000)
                 .await
                 .expect("failed to resolve container port");
-            (container, port)
+            let config = S3Config {
+                bucket: TEST_BUCKET.to_owned(),
+                region: "us-east-1".to_owned(),
+                endpoint: Some(format!("http://127.0.0.1:{port}")),
+                force_path_style: true,
+                access_key_id: Some(Secret::new(S3_ACCESS_KEY.to_owned())),
+                secret_access_key: Some(Secret::new(S3_SECRET_KEY.to_owned())),
+            };
+            // The first request: the store is usable once its bucket exists.
+            create_bucket(&config).await;
+            (container, config)
         };
-
-        let config = S3Config {
-            bucket: TEST_BUCKET.to_owned(),
-            region: "us-east-1".to_owned(),
-            endpoint: Some(format!("http://127.0.0.1:{port}")),
-            force_path_style: true,
-            access_key_id: Some(Secret::new(S3_ACCESS_KEY.to_owned())),
-            secret_access_key: Some(Secret::new(S3_SECRET_KEY.to_owned())),
-        };
-
-        let store = BlobStore::connect(&config)
-            .await
-            .expect("failed to connect to the test blob store");
-        store
-            .create_bucket()
-            .await
-            .expect("failed to create the test bucket");
+        let store = BlobStore::connect(&config).expect("failed to build the test blob store");
 
         Self {
             _container: container,
@@ -114,6 +90,43 @@ impl TestBlobStore {
             config,
         }
     }
+}
+
+/// Creates the configured bucket with a SigV4-signed `PUT /{bucket}`.
+///
+/// Deployments provision their bucket out of band, so the store has no
+/// bucket-creation API; the harness signs the request with the store client's
+/// own signer instead.
+async fn create_bucket(config: &S3Config) {
+    let endpoint = config
+        .endpoint
+        .as_deref()
+        .expect("the test store has an endpoint");
+    let url = format!("{endpoint}/{}", config.bucket);
+    let credential = AwsCredential {
+        key_id: S3_ACCESS_KEY.to_owned(),
+        secret_key: S3_SECRET_KEY.to_owned(),
+        token: None,
+    };
+
+    let mut request = HttpRequest::new(HttpRequestBody::empty());
+    *request.method_mut() = Method::PUT;
+    *request.uri_mut() = url.parse().expect("a valid bucket URL");
+    AwsAuthorizer::new(&credential, "s3", &config.region)
+        .try_authorize(&mut request, None)
+        .expect("sign the create-bucket request");
+
+    let response = reqwest::Client::new()
+        .put(&url)
+        .headers(request.headers().clone())
+        .send()
+        .await
+        .expect("send the create-bucket request");
+    assert!(
+        response.status().is_success(),
+        "creating the test bucket failed with {}",
+        response.status(),
+    );
 }
 
 #[cfg(test)]

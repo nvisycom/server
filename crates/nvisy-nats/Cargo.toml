@@ -32,7 +32,7 @@ cli = ["dep:clap", "nvisy-core/cli"]
 
 # Test support: an ephemeral NATS (JetStream) container + connected client, for
 # this crate's tests and for downstream crates that compose a real server.
-test_util = ["dep:testcontainers-modules", "tokio/sync"]
+test_util = ["dep:testcontainers-modules", "nvisy-core/test_util"]
 
 [dependencies]
 # Internal crates

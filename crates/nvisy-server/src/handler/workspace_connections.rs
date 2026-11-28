@@ -22,10 +22,9 @@ use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::header::CACHE_CONTROL;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use nvisy_file_service::FileService;
-use nvisy_postgres::PgClient;
 
 use crate::domain;
+use crate::domain::output::ConnectionCheck;
 use crate::extract::{Authorized, Json, Path, Query, ValidateJson, markers};
 use crate::handler::request::{
     CreateWorkspaceConnection, CursorPagination, UpdateWorkspaceConnection,
@@ -35,10 +34,8 @@ use crate::handler::response::{
     WorkspaceConnection, WorkspaceConnectionVerification, WorkspaceConnectionsPage,
     WorkspacePickerToken, WorkspaceRef,
 };
-use crate::response::{ErrorKind, Result};
-use crate::service::{
-    ConnectionConfig, CryptoService, ExternalObjectStore, ServiceState, persist_refreshed_tokens,
-};
+use crate::response::Result;
+use crate::service::ServiceState;
 
 /// Tracing target for workspace connection operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspace_connections";
@@ -238,88 +235,21 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn verify_connection(
-    State(pg_client): State<PgClient>,
     State(connections): State<domain::WorkspaceConnectionService>,
-    State(crypto): State<CryptoService>,
-    State(object): State<ExternalObjectStore>,
-    State(cloud): State<FileService>,
     authz: Authorized<markers::ViewConnections>,
     Path(path_params): Path<WorkspaceConnectionPathParams>,
 ) -> Result<Json<WorkspaceConnectionVerification>> {
     tracing::debug!(target: TRACING_TARGET, "Verifying workspace connection");
 
-    let workspace = &authz.workspace;
-
-    // Load the connection through the service, then run the provider I/O below
-    // with no pooled connection held: `connect`/`verify` reach external services
-    // with no total timeout, so holding one could exhaust the pool.
-    let connection = connections
-        .find(workspace.id, path_params.connection_id)
-        .await?
-        .connection
-        .item;
-
-    let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
-
-    // Verification is capability-specific: object stores check reachability;
-    // inference providers verify their credentials.
-    let verification = match config {
-        ConnectionConfig::ObjectStore(config) => match object.connect(&config).await {
-            Ok(client) => match client.verify_reachable().await {
-                Ok(()) => {
-                    tracing::info!(target: TRACING_TARGET, "Connection verified");
-                    WorkspaceConnectionVerification::reachable()
-                }
-                Err(err) => {
-                    // Log the full error, but return only a safe kind-based reason
-                    // so backend URLs/bucket names are not exposed to the client.
-                    tracing::warn!(target: TRACING_TARGET, error = %err, "Connection unreachable");
-                    WorkspaceConnectionVerification::unreachable(err.kind().reason())
-                }
-            },
-            Err(err) => {
-                tracing::warn!(target: TRACING_TARGET, error = %err, "Connection setup failed");
-                WorkspaceConnectionVerification::unreachable(err.kind().reason())
-            }
-        },
-        ConnectionConfig::FileService(config) => match cloud.connect(&config).await {
-            Ok(connected) => {
-                // A refresh during verification produces fresh tokens; persist
-                // them so the renewed credentials are not thrown away. Acquire a
-                // connection only for this write and release it before the
-                // provider `verify` I/O below.
-                if let Some(refreshed) = connected.refreshed {
-                    let mut conn = pg_client.get_connection().await?;
-                    persist_refreshed_tokens(
-                        &mut conn,
-                        &crypto,
-                        workspace.id,
-                        connection.id,
-                        refreshed.tokens().clone(),
-                    )
-                    .await?;
-                }
-                match connected.client.verify().await {
-                    Ok(()) => {
-                        tracing::info!(target: TRACING_TARGET, "Connection verified");
-                        WorkspaceConnectionVerification::reachable()
-                    }
-                    Err(err) => {
-                        tracing::warn!(target: TRACING_TARGET, error = %err, "Connection unreachable");
-                        WorkspaceConnectionVerification::unreachable(err.kind().reason())
-                    }
-                }
-            }
-            Err(err) => {
-                tracing::warn!(target: TRACING_TARGET, error = %err, "Connection setup failed");
-                WorkspaceConnectionVerification::unreachable(
-                    "credentials rejected or provider unreachable",
-                )
-            }
-        },
-    };
-
-    Ok(Json(verification))
+    let check = connections
+        .verify(authz.workspace.id, path_params.connection_id)
+        .await?;
+    Ok(Json(match check {
+        ConnectionCheck::Reachable => WorkspaceConnectionVerification::reachable(),
+        ConnectionCheck::Unreachable { reason } => {
+            WorkspaceConnectionVerification::unreachable(reason)
+        }
+    }))
 }
 
 fn verify_connection_docs(op: TransformOperation) -> TransformOperation {
@@ -345,10 +275,7 @@ fn verify_connection_docs(op: TransformOperation) -> TransformOperation {
     )
 )]
 async fn mint_picker_token(
-    State(pg_client): State<PgClient>,
     State(connections): State<domain::WorkspaceConnectionService>,
-    State(crypto): State<CryptoService>,
-    State(cloud): State<FileService>,
     authz: Authorized<markers::RunConnectionSyncs>,
     Path(path_params): Path<WorkspaceConnectionPathParams>,
     // Optional body: a picker that names a resource per `authenticate` command
@@ -358,50 +285,13 @@ async fn mint_picker_token(
     tracing::debug!(target: TRACING_TARGET, "Minting picker token");
     let resource = request.and_then(|ValidateJson(body)| body.resource);
 
-    let workspace = &authz.workspace;
-
-    // Load the connection through the service, then run the provider token refresh
-    // below with no pooled connection held (it reaches the provider with no total
-    // timeout).
-    let connection = connections
-        .find(workspace.id, path_params.connection_id)
-        .await?
-        .connection
-        .item;
-
-    if !connection.is_active {
-        return Err(ErrorKind::BadRequest.with_message("Connection is not active"));
-    }
-
-    let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
-    let ConnectionConfig::FileService(config) = config else {
-        return Err(ErrorKind::BadRequest
-            .with_message("Picker tokens are only available for file services"));
-    };
-    if !config.provider.picker_needs_user_token() {
-        return Err(ErrorKind::BadRequest.with_message(
-            "This provider's picker uses a client-side app key, not a server token",
-        ));
-    }
-
-    // Mint the picker access token for the requested resource. The provider layer
-    // decides what the picker needs (OneDrive: a SharePoint-audience token; Drive
-    // and Box: the ordinary provider token). The refresh token never leaves the
-    // server; a rotated refresh token comes back for persistence.
-    let picker = cloud
-        .mint_picker_token(&config, resource.as_deref())
-        .await?;
-    if let Some(refreshed) = picker.refreshed {
-        let mut conn = pg_client.get_connection().await?;
-        persist_refreshed_tokens(
-            &mut conn,
-            &crypto,
-            workspace.id,
-            connection.id,
-            refreshed.tokens().clone(),
+    let picker = connections
+        .picker_token(
+            authz.workspace.id,
+            path_params.connection_id,
+            resource.as_deref(),
         )
         .await?;
-    }
 
     // The response carries a bearer credential; keep it out of any cache.
     let mut headers = HeaderMap::new();

@@ -83,10 +83,10 @@ impl<S: EventStream> EventSubscriber<S> {
             .jetstream
             .get_stream(S::NAME)
             .await
-            .map_err(|e| Error::stream_error(S::NAME, format!("Failed to get stream: {e}")))?;
+            .map_err(|e| Error::operation("stream_get", format!("{}: {e}", S::NAME)))?;
 
         let consumer = stream.create_consumer(config).await.map_err(|e| {
-            Error::consumer_error(S::CONSUMER_NAME, format!("Failed to create consumer: {e}"))
+            Error::operation("consumer_create", format!("{}: {e}", S::CONSUMER_NAME))
         })?;
 
         tracing::debug!(
@@ -96,26 +96,5 @@ impl<S: EventStream> EventSubscriber<S> {
             "Subscribed to stream"
         );
         Ok(TypedMessageStream::new(consumer))
-    }
-
-    /// Returns the stream name.
-    #[inline]
-    #[must_use]
-    pub fn stream_name(&self) -> &'static str {
-        S::NAME
-    }
-
-    /// Returns the subject.
-    #[inline]
-    #[must_use]
-    pub fn subject(&self) -> &'static str {
-        S::SUBJECT
-    }
-
-    /// Returns the consumer name.
-    #[inline]
-    #[must_use]
-    pub fn consumer_name(&self) -> &'static str {
-        S::CONSUMER_NAME
     }
 }

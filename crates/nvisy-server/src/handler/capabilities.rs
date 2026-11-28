@@ -228,7 +228,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let file_service = FileService::new(apps).unwrap();
+        let file_service = FileService::new(&apps).unwrap();
 
         let providers = FileProviders::from_service(&file_service);
 

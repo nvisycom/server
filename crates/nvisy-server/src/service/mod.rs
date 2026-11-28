@@ -34,6 +34,7 @@ pub use crate::service::auth::{
     OidcAuthorization, OidcConfig, OidcConfigured, OidcError, OidcIdentity, OidcPurpose,
     OidcService, PasswordService, RedirectKind, SignInService,
 };
+pub(crate) use crate::service::auth::{OidcStateBucket, ReauthProofBucket};
 pub use crate::service::avatar::{
     AVATAR_CONTENT_TYPE, AvatarOwner, AvatarService, MAX_AVATAR_UPLOAD_BYTES,
 };
@@ -62,7 +63,7 @@ use crate::worker::integration::ConnectionSyncWorker;
 use crate::worker::purge::{PurgeConfig, WorkspacePurgeWorker};
 use crate::worker::reaper::BlobReaper;
 use crate::worker::webhook::WebhookDeliveryWorker;
-use crate::worker::{Coordinator, WorkerSet, ensure_streams};
+use crate::worker::{Coordinator, WorkerSet, ensure_kv_buckets, ensure_streams};
 
 /// Tracing target for service-state initialization.
 const TRACING_TARGET: &str = "nvisy_server::service";
@@ -191,10 +192,11 @@ impl ServiceState {
     ) -> Result<Self> {
         let infra = Infra::from_config(args.postgres, args.nats, args.s3).await?;
 
-        // Reconcile every JetStream stream once, up front, so the publishers and
-        // subscribers built per use later are cheap handles that assume their
-        // stream already exists.
+        // Reconcile every JetStream stream and KV bucket once, up front, so the
+        // publishers, subscribers, and stores built per use later are cheap
+        // handles that assume theirs already exists.
         ensure_streams(&infra.nats).await?;
+        ensure_kv_buckets(&infra.nats).await?;
 
         let engine = EngineService::from_config(args.engine).await?;
         let oidc = OidcConfigured::from_config(&args.oidc)?;

@@ -4,10 +4,9 @@
 
 mod client;
 mod error;
-pub mod provider;
 
 pub use client::{
     AssistantClient, AssistantConfig, AuthenticatedProvider, ChatTurn, LlmConfig, Role,
-    TokenStream, UnauthenticatedProvider,
+    UnauthenticatedProvider,
 };
 pub use error::{Error, Result};

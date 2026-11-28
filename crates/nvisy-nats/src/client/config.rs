@@ -133,13 +133,6 @@ impl NatsConfig {
         let max = self.nats_max_reconnects.unwrap_or(DEFAULT_MAX_RECONNECTS);
         if max == 0 { None } else { Some(max) }
     }
-
-    /// Set the request-reply timeout.
-    #[must_use]
-    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
-        self.nats_request_timeout = Some(timeout);
-        self
-    }
 }
 
 #[cfg(test)]
@@ -168,13 +161,6 @@ mod tests {
         assert_eq!(config.nats_connect_timeout, None);
         assert_eq!(config.nats_request_timeout, None);
         assert_eq!(config.max_reconnects_option(), Some(10));
-    }
-
-    #[test]
-    fn test_with_request_timeout() {
-        let config = NatsConfig::new("nats://localhost:4222", "token")
-            .with_request_timeout(Duration::from_secs(15));
-        assert_eq!(config.nats_request_timeout, Some(Duration::from_secs(15)));
     }
 
     #[test]

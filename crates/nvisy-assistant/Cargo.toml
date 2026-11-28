@@ -27,10 +27,6 @@ schema = ["dep:schemars", "nvisy-core/schema"]
 # Internal crates
 nvisy-core = { workspace = true }
 
-# Async runtime
-futures = { workspace = true, features = [] }
-async-stream = { workspace = true, features = [] }
-
 # LLM framework
 rig = { workspace = true, features = ["reqwest"] }
 

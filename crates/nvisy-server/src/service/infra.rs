@@ -80,14 +80,13 @@ async fn connect_nats(config: NatsConfig) -> Result<NatsClient> {
 
 /// Connects to the S3-compatible blob store and verifies it is reachable.
 ///
-/// The AWS SDK builds its client lazily, so [`BlobStore::connect`] alone never
-/// touches the network. A follow-up [`ping`](BlobStore::ping) makes a bad
-/// endpoint, wrong credentials, or missing bucket fail at startup — matching the
-/// fail-fast contract of the Postgres and NATS connectors — rather than at the
-/// first upload.
+/// [`BlobStore::connect`] only builds the client and never touches the network.
+/// A follow-up [`ping`](BlobStore::ping) makes a bad endpoint, wrong
+/// credentials, or missing bucket fail at startup, matching the fail-fast
+/// contract of the Postgres and NATS connectors, rather than at the first
+/// upload.
 async fn connect_blobs(config: S3Config) -> Result<BlobStore> {
     let blobs = BlobStore::connect(&config)
-        .await
         .map_err(|e| Error::external("S3", "Failed to connect to the blob store").with_source(e))?;
 
     blobs.ping().await.map_err(|e| {

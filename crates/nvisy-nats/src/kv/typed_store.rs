@@ -1,20 +1,18 @@
 //! Type-safe NATS KV store wrapper.
 
-use std::future::Future;
 use std::marker::PhantomData;
-use std::time::{Duration, SystemTime};
 
+use async_nats::jetstream::kv::{CreateErrorKind, PurgeErrorKind};
 use async_nats::jetstream::{self, kv};
-use futures::StreamExt;
-use serde::{Deserialize, Serialize};
 
-use super::core::KvBucket;
+use super::core::{KvBucket, TokenKey};
 use crate::{Error, Result, TRACING_TARGET_KV};
 
 /// Type-safe NATS KV store wrapper.
 ///
-/// Generic only over the bucket `B`, which fixes the key type ([`KvBucket::Key`])
-/// and value type ([`KvBucket::Value`]) as well as the name, description, and TTL.
+/// Generic only over the bucket `B`, which fixes the value type
+/// ([`KvBucket::Value`]) as well as the name, description, and TTL; every entry
+/// is keyed by a [`TokenKey`].
 #[derive(Clone)]
 pub struct KvStore<B: KvBucket> {
     store: kv::Store,
@@ -22,56 +20,39 @@ pub struct KvStore<B: KvBucket> {
 }
 
 impl<B: KvBucket> KvStore<B> {
-    /// Create or get a KV bucket using the bucket configuration.
+    /// Opens the bucket, which [`ensure`](Self::ensure) created at startup.
     #[tracing::instrument(skip(jetstream), target = TRACING_TARGET_KV)]
-    pub(crate) async fn new(jetstream: &jetstream::Context) -> Result<Self> {
-        Self::with_ttl(jetstream, B::TTL.unwrap_or_default()).await
-    }
-
-    /// Create or get a KV bucket with custom TTL.
-    #[tracing::instrument(skip(jetstream), target = TRACING_TARGET_KV)]
-    pub(crate) async fn with_ttl(jetstream: &jetstream::Context, ttl: Duration) -> Result<Self> {
-        let config = kv::Config {
-            bucket: B::NAME.to_string(),
-            description: B::DESCRIPTION.to_string(),
-            max_age: ttl,
-            ..Default::default()
-        };
-
-        let store = if let Ok(store) = jetstream.get_key_value(B::NAME).await {
-            tracing::trace!(
-                target: TRACING_TARGET_KV,
-                bucket = %B::NAME,
-                "Using existing KV bucket"
-            );
-            store
-        } else {
-            tracing::debug!(
-                target: TRACING_TARGET_KV,
-                bucket = %B::NAME,
-                ttl_secs = ttl.as_secs(),
-                "Creating new KV bucket"
-            );
-            jetstream
-                .create_key_value(config)
-                .await
-                .map_err(|e| Error::operation("kv_create", e.to_string()))?
-        };
-
+    pub(crate) async fn open(jetstream: &jetstream::Context) -> Result<Self> {
+        let store = jetstream
+            .get_key_value(B::NAME)
+            .await
+            .map_err(|e| Error::operation("kv_open_bucket", format!("{}: {e}", B::NAME)))?;
         Ok(Self {
             store,
             _bucket: PhantomData,
         })
     }
 
-    /// Returns the bucket name.
-    #[inline]
-    #[must_use]
-    pub fn bucket_name(&self) -> &'static str {
-        B::NAME
+    /// Creates the bucket from its configuration if it does not exist yet.
+    #[tracing::instrument(skip(jetstream), target = TRACING_TARGET_KV)]
+    pub(crate) async fn ensure(jetstream: &jetstream::Context) -> Result<()> {
+        if jetstream.get_key_value(B::NAME).await.is_ok() {
+            return Ok(());
+        }
+        tracing::debug!(target: TRACING_TARGET_KV, bucket = %B::NAME, "Creating KV bucket");
+        jetstream
+            .create_key_value(kv::Config {
+                bucket: B::NAME.to_owned(),
+                description: B::DESCRIPTION.to_owned(),
+                max_age: B::TTL,
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| Error::operation("kv_create_bucket", format!("{}: {e}", B::NAME)))?;
+        Ok(())
     }
 
-    /// Put a value into the store.
+    /// Puts a value into the store, replacing any existing one.
     ///
     /// # Errors
     ///
@@ -79,40 +60,21 @@ impl<B: KvBucket> KvStore<B> {
     /// - `Operation` if the KV put fails (e.g. the connection is down or the
     ///   server rejects the write).
     #[tracing::instrument(skip(self, value), target = TRACING_TARGET_KV)]
-    pub async fn put(&self, key: &B::Key, value: &B::Value) -> Result<KvEntry> {
-        let key_str = key.to_string();
+    pub async fn put(&self, key: &TokenKey, value: &B::Value) -> Result<()> {
         let json = serde_json::to_vec(value)?;
-        let size = json.len();
-        let revision = self
-            .store
-            .put(&key_str, json.into())
+        self.store
+            .put(key.to_string(), json.into())
             .await
             .map_err(|e| Error::operation("kv_put", e.to_string()))?;
-
-        tracing::debug!(
-            target: TRACING_TARGET_KV,
-            key = %key_str,
-            revision = revision,
-            size_bytes = size,
-            "Put value to KV store"
-        );
-
-        Ok(KvEntry {
-            key: key_str,
-            revision,
-            size: u64::try_from(size).unwrap_or(u64::MAX),
-        })
+        Ok(())
     }
 
-    /// Atomically create a value only if the key does not already exist.
+    /// Atomically creates a value only if the key does not already exist.
     ///
     /// Returns `Ok(true)` if this call created the entry, `Ok(false)` if the key
     /// was already present. This is the put-if-absent primitive for distributed
-    /// locks / leader election: combined with a bucket TTL, exactly one caller
-    /// wins the create and the entry auto-expires if the winner dies.
-    ///
-    /// A create against an already-present key is not an error: it returns
-    /// `Ok(false)`.
+    /// locks: combined with a bucket TTL, exactly one caller wins the create and
+    /// the entry expires if the winner dies.
     ///
     /// # Errors
     ///
@@ -120,341 +82,102 @@ impl<B: KvBucket> KvStore<B> {
     /// - `Operation` if the create fails for any reason other than the key
     ///   already existing (e.g. network, ack, or publish failure).
     #[tracing::instrument(skip(self, value), target = TRACING_TARGET_KV)]
-    pub async fn create(&self, key: &B::Key, value: &B::Value) -> Result<bool> {
-        use async_nats::jetstream::kv::CreateErrorKind;
-
-        let key_str = key.to_string();
+    pub async fn create(&self, key: &TokenKey, value: &B::Value) -> Result<bool> {
         let json = serde_json::to_vec(value)?;
-        match self.store.create(&key_str, json.into()).await {
+        match self.store.create(key.to_string(), json.into()).await {
             Ok(_revision) => Ok(true),
             // A create against an existing key is the "lock already held" case,
-            // not an error. Any other failure (network, ack, publish) is a real
-            // infrastructure error and must be propagated rather than masqueraded
-            // as a lost lock.
+            // not an error. Any other failure is a real infrastructure error and
+            // must not be masqueraded as a lost lock.
             Err(err) if err.kind() == CreateErrorKind::AlreadyExists => Ok(false),
             Err(err) => Err(Error::operation("kv_create", err.to_string())),
         }
     }
 
-    /// Get a value from the store.
+    /// Reads and removes a value in one step, for single-use entries (an OAuth
+    /// state, a reauth proof): of concurrent callers, exactly one gets the value.
+    ///
+    /// The entry is purged only if its revision is still the one read, so a
+    /// caller that loses the race sees `Ok(None)` rather than a value another
+    /// caller already consumed.
     ///
     /// # Errors
     ///
-    /// - `Serialization` if a stored entry's bytes cannot be deserialized into
-    ///   `B::Value`.
-    /// - `Operation` if the KV read fails (e.g. the connection is down). A
-    ///   missing key is not an error; it returns `Ok(None)`.
+    /// - `Serialization` if the stored entry cannot be deserialized.
+    /// - `Operation` if the read or the conditional purge fails for any reason
+    ///   other than a lost race (e.g. network, ack, or publish failure).
     #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
-    pub async fn get(&self, key: &B::Key) -> Result<Option<KvValue<B::Value>>> {
-        let key_str = key.to_string();
-        match self.store.entry(&key_str).await {
-            Ok(Some(entry)) => {
-                let size = entry.value.len();
-                let deserialized = serde_json::from_slice(&entry.value)?;
-                tracing::debug!(
-                    target: TRACING_TARGET_KV,
-                    key = %key_str,
-                    size_bytes = size,
-                    revision = entry.revision,
-                    "Retrieved value from KV store"
-                );
-                Ok(Some(KvValue {
-                    key: key_str,
-                    value: deserialized,
-                    revision: entry.revision,
-                    size: u64::try_from(size).unwrap_or(u64::MAX),
-                    created: entry.created.into(),
-                }))
-            }
-            Ok(None) => {
-                tracing::debug!(
-                    target: TRACING_TARGET_KV,
-                    key = %key_str,
-                    "Key not found in KV store"
-                );
-                Ok(None)
-            }
-            Err(e) => Err(Error::operation("kv_get", e.to_string())),
-        }
-    }
-
-    /// Get a value, returning just the data.
-    ///
-    /// # Errors
-    ///
-    /// Propagates any error from [`get`](Self::get).
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
-    pub async fn get_value(&self, key: &B::Key) -> Result<Option<B::Value>> {
-        Ok(self.get(key).await?.map(|kv| kv.value))
-    }
-
-    /// Atomically consume a single-use entry: read its value and delete it in a
-    /// way that only one caller can win.
-    ///
-    /// Returns `Some(value)` to exactly one caller and `None` to everyone else,
-    /// even under concurrent calls for the same key. The delete is conditioned on
-    /// the revision the value was read at (`purge_expect_revision`), so a second
-    /// racer whose read saw the same revision fails the conditional purge and gets
-    /// `None` rather than re-consuming the entry. Use this for one-time tokens
-    /// (OAuth/OIDC state, step-up proofs) where a plain get-then-delete would leave
-    /// a replay window.
-    ///
-    /// # Errors
-    ///
-    /// - `Serialization` or `Operation` propagated from the initial
-    ///   [`get`](Self::get).
-    /// - `Operation` if the conditional purge fails for any reason other than a
-    ///   revision mismatch (e.g. network, ack, or publish failure). Losing the
-    ///   race is not an error; it returns `Ok(None)`.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
-    pub async fn take(&self, key: &B::Key) -> Result<Option<B::Value>> {
-        use async_nats::jetstream::kv::PurgeErrorKind;
-
-        let Some(entry) = self.get(key).await? else {
+    pub async fn take(&self, key: &TokenKey) -> Result<Option<B::Value>> {
+        let key = key.to_string();
+        let entry = self
+            .store
+            .entry(&key)
+            .await
+            .map_err(|e| Error::operation("kv_get", e.to_string()))?;
+        // A purged or deleted key leaves a tombstone entry, which is absent.
+        let Some(entry) = entry.filter(|entry| entry.operation == kv::Operation::Put) else {
             return Ok(None);
         };
-        let key_str = key.to_string();
+        let value = serde_json::from_slice(&entry.value)?;
+
         match self
             .store
-            .purge_expect_revision(&key_str, Some(entry.revision))
+            .purge_expect_revision(&key, Some(entry.revision))
             .await
         {
-            Ok(()) => Ok(Some(entry.value)),
-            // A concurrent caller consumed it first (the revision moved), so this
-            // caller loses the race and sees nothing to consume. Only a revision
-            // mismatch means "lost the race"; any other failure (network, ack,
-            // publish) is a real error and must propagate — masking it as `None`
-            // would silently leave a single-use token unconsumed and replayable.
+            Ok(()) => Ok(Some(value)),
+            // Only a revision mismatch means another caller consumed it first;
+            // any other failure must propagate, since masking it as `None` would
+            // leave a single-use token unconsumed and replayable.
             Err(err) if err.kind() == PurgeErrorKind::WrongLastRevision => {
-                tracing::debug!(
-                    target: TRACING_TARGET_KV,
-                    key = %key_str,
-                    error = %err,
-                    "Single-use take lost the race; entry already consumed",
-                );
+                tracing::debug!(target: TRACING_TARGET_KV, key = %key, "Single-use take lost the race");
                 Ok(None)
             }
             Err(err) => Err(Error::operation("kv_take", err.to_string())),
         }
     }
-
-    /// Delete a key from the store.
-    ///
-    /// # Errors
-    ///
-    /// - `Operation` if the purge fails (e.g. the connection is down or the
-    ///   server rejects the request). Purging an absent key is not an error.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
-    pub async fn delete(&self, key: &B::Key) -> Result<()> {
-        let key_str = key.to_string();
-        self.store
-            .purge(&key_str)
-            .await
-            .map_err(|e| Error::operation("kv_delete", e.to_string()))?;
-
-        tracing::debug!(
-            target: TRACING_TARGET_KV,
-            key = %key_str,
-            "Deleted key from KV store"
-        );
-        Ok(())
-    }
-
-    /// Check if a key exists in the store.
-    ///
-    /// # Errors
-    ///
-    /// - `Operation` if the KV read fails (e.g. the connection is down). A
-    ///   missing key is not an error; it returns `Ok(false)`.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
-    pub async fn exists(&self, key: &B::Key) -> Result<bool> {
-        let key_str = key.to_string();
-        match self.store.get(&key_str).await {
-            Ok(Some(_)) => Ok(true),
-            Ok(None) => Ok(false),
-            Err(e) => Err(Error::operation("kv_exists", e.to_string())),
-        }
-    }
-
-    /// Touches a key to reset its TTL by re-putting the same value.
-    ///
-    /// # Errors
-    ///
-    /// - `Operation` if the key does not exist (nothing to re-put), or if the
-    ///   underlying [`get`](Self::get) or [`put`](Self::put) fails.
-    /// - `Serialization` propagated from [`get`](Self::get)/[`put`](Self::put).
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
-    pub async fn touch(&self, key: &B::Key) -> Result<KvEntry> {
-        let kv_value = self
-            .get(key)
-            .await?
-            .ok_or_else(|| Error::operation("kv_touch", format!("key not found: {key}")))?;
-
-        self.put(key, &kv_value.value).await
-    }
-
-    /// Get all keys in the bucket with the expected prefix.
-    ///
-    /// # Errors
-    ///
-    /// - `Operation` if opening the key stream fails (e.g. the connection is
-    ///   down). A key that fails to read from the stream is logged and skipped; a
-    ///   key that reads but does not parse into `B::Key` is skipped silently.
-    ///   Neither is surfaced as an error.
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
-    pub async fn keys(&self) -> Result<Vec<B::Key>> {
-        let mut keys = Vec::new();
-        let mut key_stream = self
-            .store
-            .keys()
-            .await
-            .map_err(|e| Error::operation("kv_keys", e.to_string()))?;
-
-        while let Some(key_result) = key_stream.next().await {
-            match key_result {
-                Ok(key_str) => {
-                    if let Ok(key) = key_str.parse::<B::Key>() {
-                        keys.push(key);
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        target: TRACING_TARGET_KV,
-                        error = %e,
-                        "Error reading key from bucket"
-                    );
-                }
-            }
-        }
-
-        tracing::debug!(
-            target: TRACING_TARGET_KV,
-            count = keys.len(),
-            bucket = %B::NAME,
-            "Retrieved keys from bucket"
-        );
-        Ok(keys)
-    }
-
-    /// Purge all keys in the bucket.
-    ///
-    /// # Errors
-    ///
-    /// - `Operation` if listing the keys via [`keys`](Self::keys) fails, or if
-    ///   any per-key [`delete`](Self::delete) fails (deletion stops at the first
-    ///   failure).
-    #[tracing::instrument(skip(self), target = TRACING_TARGET_KV)]
-    pub async fn purge_all(&self) -> Result<()> {
-        let keys = self.keys().await?;
-        let count = keys.len();
-        for key in keys {
-            self.delete(&key).await?;
-        }
-        tracing::debug!(
-            target: TRACING_TARGET_KV,
-            count = count,
-            bucket = %B::NAME,
-            "Purged all keys from bucket"
-        );
-        Ok(())
-    }
-
-    /// Update a value only if the revision matches (optimistic concurrency).
-    ///
-    /// # Errors
-    ///
-    /// - `Serialization` if `value` cannot be serialized to JSON.
-    /// - `Operation` if the conditional update fails, including when `revision`
-    ///   no longer matches the stored revision (the concurrency check lost).
-    #[tracing::instrument(skip(self, value), target = TRACING_TARGET_KV)]
-    pub async fn update(&self, key: &B::Key, value: &B::Value, revision: u64) -> Result<KvEntry> {
-        let key_str = key.to_string();
-        let json = serde_json::to_vec(value)?;
-        let size = json.len();
-        let new_revision = self
-            .store
-            .update(&key_str, json.into(), revision)
-            .await
-            .map_err(|e| Error::operation("kv_update", e.to_string()))?;
-
-        tracing::debug!(
-            target: TRACING_TARGET_KV,
-            key = %key_str,
-            old_revision = revision,
-            new_revision = new_revision,
-            size_bytes = size,
-            "Updated value in KV store"
-        );
-
-        Ok(KvEntry {
-            key: key_str,
-            revision: new_revision,
-            size: u64::try_from(size).unwrap_or(u64::MAX),
-        })
-    }
-
-    /// Get or compute a value using the cache-aside pattern.
-    ///
-    /// # Errors
-    ///
-    /// - `Serialization` or `Operation` propagated from the [`get_value`](Self::get_value)
-    ///   read or, on a miss, the [`put`](Self::put) that stores the computed value.
-    /// - Any error returned by `compute_fn` when the key is absent.
-    #[tracing::instrument(skip(self, compute_fn), target = TRACING_TARGET_KV)]
-    pub async fn get_or_compute<F, Fut>(&self, key: &B::Key, compute_fn: F) -> Result<B::Value>
-    where
-        F: FnOnce() -> Fut + Send,
-        Fut: Future<Output = Result<B::Value>> + Send,
-        B::Value: Clone,
-    {
-        if let Some(existing) = self.get_value(key).await? {
-            return Ok(existing);
-        }
-
-        let value = compute_fn().await?;
-        self.put(key, &value).await?;
-        Ok(value)
-    }
-
-    /// Get the underlying store reference.
-    #[must_use]
-    pub fn inner(&self) -> &kv::Store {
-        &self.store
-    }
 }
 
-/// KV entry metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KvEntry {
-    pub key: String,
-    pub revision: u64,
-    pub size: u64,
-}
-
-/// KV value with metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KvValue<V> {
-    pub key: String,
-    pub value: V,
-    pub revision: u64,
-    pub size: u64,
-    pub created: SystemTime,
-}
-
-#[cfg(test)]
+#[cfg(all(test, feature = "test_util"))]
 mod tests {
-    use super::*;
+    use std::time::Duration;
 
-    #[test]
-    fn test_kv_entry_creation() {
-        let entry = KvEntry {
-            key: "test_key".to_string(),
-            revision: 1,
-            size: 100,
-        };
+    use crate::kv::TokenKey;
+    use crate::test_util::TestNats;
 
-        assert_eq!(entry.key, "test_key");
-        assert_eq!(entry.revision, 1);
-        assert_eq!(entry.size, 100);
+    crate::kv_bucket! {
+        /// A bucket for exercising the store.
+        TestBucket: u64 {
+            name: "test_bucket",
+            description: "Test bucket",
+            ttl: Duration::from_mins(1),
+        }
+    }
+
+    #[tokio::test]
+    async fn create_is_put_if_absent_and_take_is_single_use() {
+        let nats = TestNats::start().await;
+        nats.client.ensure_kv_bucket::<TestBucket>().await.unwrap();
+        let store = nats.client.kv_store::<TestBucket>().await.unwrap();
+        let key: TokenKey = "lock.1".parse().unwrap();
+
+        assert!(
+            store.create(&key, &7).await.unwrap(),
+            "the first create wins"
+        );
+        assert!(
+            !store.create(&key, &8).await.unwrap(),
+            "the key is already held"
+        );
+
+        assert_eq!(store.take(&key).await.unwrap(), Some(7));
+        assert_eq!(
+            store.take(&key).await.unwrap(),
+            None,
+            "a taken value is gone"
+        );
+
+        store.put(&key, &9).await.unwrap();
+        assert_eq!(store.take(&key).await.unwrap(), Some(9));
     }
 }

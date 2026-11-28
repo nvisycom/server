@@ -27,6 +27,8 @@ pub(crate) use set::every;
 pub use set::{Worker, WorkerSet};
 
 use crate::Result;
+use crate::handler::OAuthStateBucket;
+use crate::service::{OidcStateBucket, ReauthProofBucket};
 
 /// Reconciles every `JetStream` stream the workers use, creating each if absent and
 /// updating its config to match.
@@ -44,5 +46,22 @@ pub async fn ensure_streams(nats: &NatsClient) -> Result<()> {
     nats.ensure_stream::<detection::DetectionStream>().await?;
     nats.ensure_stream::<assistant::AssistantStream>().await?;
     nats.ensure_stream::<integration::SyncStream>().await?;
+    Ok(())
+}
+
+/// Creates every KV bucket the server uses, if absent.
+///
+/// Called once at startup beside [`ensure_streams`], so a store opened per use
+/// later is a lookup, never a create.
+///
+/// # Errors
+///
+/// A NATS error if looking up or creating any bucket fails.
+pub async fn ensure_kv_buckets(nats: &NatsClient) -> Result<()> {
+    nats.ensure_kv_bucket::<OAuthStateBucket>().await?;
+    nats.ensure_kv_bucket::<OidcStateBucket>().await?;
+    nats.ensure_kv_bucket::<ReauthProofBucket>().await?;
+    nats.ensure_kv_bucket::<integration::SchedulerLocksBucket>()
+        .await?;
     Ok(())
 }

@@ -50,7 +50,7 @@ fn get_own_account_docs(op: TransformOperation) -> TransformOperation {
 /// The requester must share at least one workspace with the target account;
 /// otherwise the account is reported as not found. Only public fields are
 /// returned — private details (email) are available solely through the
-/// caller's own `/account/` view.
+/// caller's own `/account` view.
 #[tracing::instrument(
     skip_all,
     fields(

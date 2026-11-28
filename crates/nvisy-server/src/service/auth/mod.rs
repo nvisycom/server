@@ -16,4 +16,5 @@ pub use oidc::{
     CallbackOutcome, ConsumedFlow, OidcAuthorization, OidcConfig, OidcConfigured, OidcError,
     OidcIdentity, OidcPurpose, OidcService, RedirectKind,
 };
+pub(crate) use oidc::{OidcStateBucket, ReauthProofBucket};
 pub use password::PasswordService;

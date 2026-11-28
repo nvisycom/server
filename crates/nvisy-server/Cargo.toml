@@ -60,7 +60,7 @@ elide-pipeline = { workspace = true, features = [
 ] }
 
 # Internal crates
-nvisy-core = { workspace = true, features = ["schema"] }
+nvisy-core = { workspace = true, features = ["schema", "oauth2"] }
 nvisy-nats = { workspace = true, features = [] }
 nvisy-assistant = { workspace = true, features = ["schema"] }
 nvisy-object-store = { workspace = true, features = ["schema"] }
@@ -84,6 +84,9 @@ axum-extra = { workspace = true, features = ["typed-header", "attachment", "quer
 tower = { workspace = true, features = [] }
 tower-http = { workspace = true, features = [] }
 
+# HTTP client
+reqwest = { workspace = true, features = [] }
+
 # OpenAPI/Documentation
 aide = { workspace = true, features = ["axum", "axum-query", "axum-extra-query", "axum-form", "axum-json", "axum-multipart", "axum-extra", "bytes", "http"] }
 schemars = { workspace = true, features = [] }
@@ -94,7 +97,7 @@ jsonwebtoken = { workspace = true, features = [] }
 argon2 = { workspace = true, features = [] }
 zxcvbn = { workspace = true, features = [] }
 sha2 = { workspace = true, features = [] }
-openidconnect = { workspace = true, features = ["reqwest", "rustls-tls"] }
+openidconnect = { workspace = true, features = [] }
 
 # Encryption & Cryptography
 chacha20poly1305 = { workspace = true, features = [] }

@@ -15,6 +15,7 @@
 use elide_pipeline::entity::EditSet;
 use elide_pipeline::governance::policy::Policy;
 use elide_pipeline::provider::DocumentContext;
+use elide_pipeline::{ArtifactSet, Audit};
 use nvisy_postgres::model::{
     NewWorkspaceDetection, NewWorkspaceDetectionJob, WorkspaceDetection as WorkspaceDetectionModel,
 };
@@ -285,6 +286,57 @@ impl WorkspaceDetectionService {
         conn.find_workspace_detection_by_id(workspace_id, detection_id)
             .await?
             .ok_or_else(|| Error::not_found(Resource::Detection))
+    }
+
+    /// Loads a detection's audit: the analyzed document with every finding.
+    ///
+    /// The audit's blob row is resolved on a connection released before the
+    /// object-store load, so no pooled connection is held across it.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the detection does not exist in the workspace.
+    /// - `Conflict` if the detection has no audit yet.
+    /// - A database, storage, or decoding error if loading it fails.
+    pub async fn audit(&self, workspace_id: Uuid, detection_id: Uuid) -> Result<Audit> {
+        let detection = self.find(workspace_id, detection_id).await?;
+        let blob = {
+            let mut conn = self.postgres.get_connection().await?;
+            self.reader
+                .resolve_audit_blob(&mut conn, &detection)
+                .await?
+        };
+        self.reader
+            .load_audit(&self.engine, workspace_id, &blob)
+            .await
+    }
+
+    /// Loads a detection's enrichment intermediates (an image's OCR layout, an
+    /// audio transcript, tokenized text).
+    ///
+    /// The intermediates' blob row is resolved on a connection released before
+    /// the object-store load, so no pooled connection is held across it.
+    ///
+    /// # Errors
+    ///
+    /// - `NotFound` if the detection does not exist in the workspace, or its
+    ///   analysis ran no enricher.
+    /// - A database, storage, or decoding error if loading them fails.
+    pub async fn intermediates(
+        &self,
+        workspace_id: Uuid,
+        detection_id: Uuid,
+    ) -> Result<ArtifactSet> {
+        let detection = self.find(workspace_id, detection_id).await?;
+        let blob = {
+            let mut conn = self.postgres.get_connection().await?;
+            self.reader
+                .resolve_intermediates_blob(&mut conn, &detection)
+                .await?
+        };
+        self.reader
+            .load_intermediates(&self.engine, workspace_id, &blob)
+            .await
     }
 
     /// Persists a detection's accumulated reviewer edits (`edit_set`) under an

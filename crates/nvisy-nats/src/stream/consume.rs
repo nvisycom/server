@@ -114,8 +114,8 @@ impl<S: EventStream> EventSubscriber<S> {
             // The pull is not raced against cancellation: dropping it mid-flight
             // could strand a message the server already sent to its inbox until
             // the ack lease ran out. It ends within `PULL_TIMEOUT`.
-            let message = match stream.next(PULL_TIMEOUT).await {
-                Ok(Some(message)) => message,
+            let (payload, message) = match stream.next(PULL_TIMEOUT).await {
+                Ok(Some(pulled)) => pulled,
                 Ok(None) => continue,
                 Err(err) => {
                     tracing::error!(target: TRACING_TARGET_STREAM, stream = S::NAME, error = %err, "Failed to pull a message");
@@ -123,7 +123,6 @@ impl<S: EventStream> EventSubscriber<S> {
                     continue;
                 }
             };
-            let (payload, message) = message.into_parts();
             let delivered = message.info().map_or(1, |info| info.delivered.max(1));
             let delivery = Delivery {
                 attempt: delivered.cast_unsigned(),

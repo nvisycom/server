@@ -1,9 +1,10 @@
 //! The S3-compatible blob store.
 
-use aws_sdk_s3::Client;
-use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
+use futures::TryStreamExt;
+use nvisy_core::{Error as CoreError, ErrorKind};
+use nvisy_object_store::client::ObjectStoreClient;
 use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio_util::io::{ReaderStream, StreamReader};
 
 use crate::error::{Error, Result};
 use crate::key::ObjectKey;
@@ -11,15 +12,8 @@ use crate::key::ObjectKey;
 /// Tracing target for blob-store operations.
 const TRACING_TARGET: &str = "nvisy_s3::store";
 
-/// Size of each multipart-upload part. S3 requires every part except the last to
-/// be at least 5 MiB; 8 MiB keeps part counts low for large objects while staying
-/// comfortably above the floor.
-const PART_SIZE: usize = 8 * 1024 * 1024;
-
-/// S3 accepts at most 10,000 parts per multipart upload. With [`PART_SIZE`] parts
-/// that caps a single object at ~78 GiB; an upload that would exceed the limit is
-/// rejected (and aborted) rather than submitting a part S3 refuses.
-const MAX_PARTS: i32 = 10_000;
+/// Size of each read from an upload's reader.
+const READ_CHUNK_SIZE: usize = 64 * 1024;
 
 /// A handle to a stored object's content and size.
 ///
@@ -48,20 +42,19 @@ impl GetObject {
 ///
 /// One S3 bucket holds every logical [`Bucket`]; each object is addressed by
 /// `"{bucket.prefix()}/{key}"`, and the bucket is derived from the key's
-/// [`ObjectKey::BUCKET`]. Cloneable and cheap to pass around — it wraps an
-/// `Arc`-backed SDK client.
+/// [`ObjectKey::BUCKET`]. Cloneable and cheap to pass around: it wraps an
+/// `Arc`-backed [`ObjectStoreClient`].
 ///
 /// [`Bucket`]: crate::Bucket
 #[derive(Clone)]
 pub struct BlobStore {
-    client: Client,
-    bucket: String,
+    client: ObjectStoreClient,
 }
 
 impl BlobStore {
-    /// Wraps an already-built S3 client for `bucket`.
-    pub(crate) fn new(client: Client, bucket: String) -> Self {
-        Self { client, bucket }
+    /// Wraps a client already scoped to the configured bucket.
+    pub(crate) fn new(client: ObjectStoreClient) -> Self {
+        Self { client }
     }
 
     /// The full S3 object key for `key`, namespaced under its store's prefix.
@@ -72,16 +65,14 @@ impl BlobStore {
     /// Streams `reader` into `key`'s store, returning the number of bytes written.
     ///
     /// The target store is [`K::BUCKET`], so a key can only be written to its own
-    /// store. Uploads as a single S3 object when the content fits one part, and as
-    /// a multipart upload otherwise, so an object of unknown length streams without
-    /// being buffered whole in memory. A failure after the multipart upload begins
-    /// aborts it so no partial upload lingers.
+    /// store. Small content is written with a single put and larger content as a
+    /// multipart upload, so an object of unknown length streams without being
+    /// buffered whole in memory; a failed upload is aborted so nothing partial
+    /// lingers.
     ///
     /// # Errors
     ///
-    /// - `Body` if reading from `reader` fails.
-    /// - `Operation` if the store rejects the upload (a single-part put, or any
-    ///   part of a multipart upload).
+    /// `Operation` if reading from `reader` fails or the store rejects the upload.
     ///
     /// [`K::BUCKET`]: ObjectKey::BUCKET
     pub async fn put<K, R>(&self, key: &K, reader: R) -> Result<u64>
@@ -92,198 +83,38 @@ impl BlobStore {
         let object_key = Self::object_key(key);
         tracing::debug!(target: TRACING_TARGET, key = %object_key, "Uploading object");
 
-        let mut reader = reader;
-        let first = read_part(&mut reader).await?;
-
-        // Small object: one PutObject, no multipart bookkeeping.
-        if first.len() < PART_SIZE {
-            let size = u64::try_from(first.len()).unwrap_or(u64::MAX);
-            self.client
-                .put_object()
-                .bucket(&self.bucket)
-                .key(&object_key)
-                .body(ByteStream::from(first))
-                .send()
-                .await
-                .map_err(|err| Error::operation("put", err.into_service_error()))?;
-            tracing::debug!(target: TRACING_TARGET, key = %object_key, size, "Object uploaded");
-            return Ok(size);
-        }
-
-        // Box the multipart future so it is heap-allocated rather than inlined
-        // into `put`'s own future. With a deeply-nested reader type the combined
-        // future is otherwise large enough to overflow a worker thread's stack
-        // just being constructed, even for the small-object path that never runs
-        // this branch.
-        Box::pin(self.put_multipart(&object_key, first, reader)).await
-    }
-
-    /// Streams the remainder of `reader` after `first` as a multipart upload.
-    async fn put_multipart<R>(&self, object_key: &str, first: Vec<u8>, mut reader: R) -> Result<u64>
-    where
-        R: AsyncRead + Unpin + Send,
-    {
-        let created = self
-            .client
-            .create_multipart_upload()
-            .bucket(&self.bucket)
-            .key(object_key)
-            .send()
+        let body = ReaderStream::with_capacity(reader, READ_CHUNK_SIZE)
+            .map_err(|err| CoreError::runtime("failed to read the upload body").with_source(err));
+        // Box the upload future so it is heap-allocated rather than inlined into
+        // `put`'s own future: with a deeply nested reader type the combined future
+        // is otherwise large enough to overflow a worker thread's stack.
+        let size = Box::pin(self.client.put_stream(&object_key, None, body))
             .await
-            .map_err(|err| Error::operation("put", err.into_service_error()))?;
-        let upload_id = created.upload_id().ok_or_else(|| {
-            Error::operation_msg("put", "S3 create_multipart_upload returned no upload id")
-        })?;
+            .map_err(|err| Error::operation("put", err))?;
 
-        // Upload every part; on any failure, abort so no partial upload lingers.
-        let result = self
-            .upload_parts(object_key, upload_id, first, &mut reader)
-            .await;
-        let (parts, size) = match result {
-            Ok(uploaded) => uploaded,
-            Err(err) => {
-                self.abort_multipart(object_key, upload_id).await;
-                return Err(err);
-            }
-        };
-
-        // Parts uploaded; completing them can still fail. Abort on that too, so a
-        // failure never leaves the uploaded parts billing until S3 lifecycle reaps
-        // them.
-        let completed = self
-            .client
-            .complete_multipart_upload()
-            .bucket(&self.bucket)
-            .key(object_key)
-            .upload_id(upload_id)
-            .multipart_upload(
-                CompletedMultipartUpload::builder()
-                    .set_parts(Some(parts))
-                    .build(),
-            )
-            .send()
-            .await;
-        if let Err(err) = completed {
-            self.abort_multipart(object_key, upload_id).await;
-            return Err(Error::operation("put", err.into_service_error()));
-        }
-
-        tracing::debug!(target: TRACING_TARGET, key = %object_key, size, "Object uploaded (multipart)");
+        tracing::debug!(target: TRACING_TARGET, key = %object_key, size, "Object uploaded");
         Ok(size)
-    }
-
-    /// Uploads `first` and every subsequent part read from `reader`, returning the
-    /// completed parts and the total byte count.
-    async fn upload_parts<R>(
-        &self,
-        object_key: &str,
-        upload_id: &str,
-        first: Vec<u8>,
-        reader: &mut R,
-    ) -> Result<(Vec<CompletedPart>, u64)>
-    where
-        R: AsyncRead + Unpin + Send,
-    {
-        let mut parts = Vec::new();
-        let mut total: u64 = 0;
-        let mut part = first;
-        let mut part_number = 1;
-
-        loop {
-            if part_number > MAX_PARTS {
-                return Err(Error::operation_msg(
-                    "put",
-                    format!("object exceeds the maximum of {MAX_PARTS} upload parts"),
-                ));
-            }
-
-            total += u64::try_from(part.len()).unwrap_or(u64::MAX);
-            let uploaded = self
-                .client
-                .upload_part()
-                .bucket(&self.bucket)
-                .key(object_key)
-                .upload_id(upload_id)
-                .part_number(part_number)
-                .body(ByteStream::from(part))
-                .send()
-                .await
-                .map_err(|err| Error::operation("put", err.into_service_error()))?;
-            parts.push(
-                CompletedPart::builder()
-                    .part_number(part_number)
-                    .set_e_tag(uploaded.e_tag().map(str::to_owned))
-                    .build(),
-            );
-
-            // The next part; an empty read means the stream is exhausted.
-            let next = read_part(reader).await?;
-            if next.is_empty() {
-                break;
-            }
-            part = next;
-            part_number += 1;
-        }
-
-        Ok((parts, total))
-    }
-
-    /// Aborts a multipart upload, best-effort — a failure only leaves an
-    /// incomplete upload for S3's own lifecycle rules to reap, so it is logged
-    /// rather than propagated over the original error.
-    async fn abort_multipart(&self, object_key: &str, upload_id: &str) {
-        if let Err(err) = self
-            .client
-            .abort_multipart_upload()
-            .bucket(&self.bucket)
-            .key(object_key)
-            .upload_id(upload_id)
-            .send()
-            .await
-        {
-            tracing::warn!(
-                target: TRACING_TARGET,
-                key = %object_key,
-                error = %err.into_service_error(),
-                "Failed to abort a multipart upload; left for S3 lifecycle cleanup",
-            );
-        }
     }
 
     /// Fetches an object as a stream, or `None` if it does not exist.
     ///
     /// # Errors
     ///
-    /// `Operation` if the fetch fails for any reason other than a missing object
-    /// (a missing object is reported as `Ok(None)`).
+    /// `Operation` if the fetch fails for any reason other than a missing object.
     pub async fn get<K: ObjectKey>(&self, key: &K) -> Result<Option<GetObject>> {
         let object_key = Self::object_key(key);
         tracing::debug!(target: TRACING_TARGET, key = %object_key, "Fetching object");
 
-        let output = match self
-            .client
-            .get_object()
-            .bucket(&self.bucket)
-            .key(&object_key)
-            .send()
-            .await
-        {
-            Ok(output) => output,
-            Err(err) => {
-                let service = err.into_service_error();
-                if service.is_no_such_key() {
-                    return Ok(None);
-                }
-                return Err(Error::operation("get", service));
-            }
-        };
-
-        let size = u64::try_from(output.content_length().unwrap_or_default().max(0)).unwrap_or(0);
-        let reader = output.body.into_async_read();
-        Ok(Some(GetObject {
-            reader: Box::new(reader),
-            size,
-        }))
+        match self.client.get_stream(&object_key).await {
+            Ok(object) => Ok(Some(GetObject {
+                reader: Box::new(StreamReader::new(
+                    object.body.map_err(std::io::Error::other),
+                )),
+                size: object.size,
+            })),
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(Error::operation("get", err)),
+        }
     }
 
     /// Fetches an object's whole content, or `None` if it does not exist.
@@ -301,7 +132,10 @@ impl BlobStore {
             .into_reader()
             .read_to_end(&mut bytes)
             .await
-            .map_err(|err| Error::operation("read", err))?;
+            .map_err(|err| {
+                let source = CoreError::runtime("failed to read the object body").with_source(err);
+                Error::operation("read", source)
+            })?;
         Ok(Some(bytes))
     }
 
@@ -315,19 +149,16 @@ impl BlobStore {
         tracing::debug!(target: TRACING_TARGET, key = %object_key, "Deleting object");
 
         self.client
-            .delete_object()
-            .bucket(&self.bucket)
-            .key(&object_key)
-            .send()
+            .delete(&object_key)
             .await
-            .map_err(|err| Error::operation("delete", err.into_service_error()))?;
-        Ok(())
+            .map_err(|err| Error::operation("delete", err))
     }
 
-    /// Probes the store's liveness by heading the configured bucket.
+    /// Probes the store's liveness with a bounded top-level listing of the
+    /// configured bucket.
     ///
     /// Succeeds when the endpoint is reachable and the bucket exists and is
-    /// accessible with the current credentials — the same preconditions every
+    /// listable with the current credentials, the same preconditions every
     /// object operation needs, so it doubles as a readiness check.
     ///
     /// # Errors
@@ -336,82 +167,8 @@ impl BlobStore {
     /// or the bucket is missing or inaccessible.
     pub async fn ping(&self) -> Result<()> {
         self.client
-            .head_bucket()
-            .bucket(&self.bucket)
-            .send()
+            .verify_reachable()
             .await
-            .map_err(|err| Error::operation("head_bucket", err.into_service_error()))?;
-        Ok(())
+            .map_err(|err| Error::operation("ping", err))
     }
-
-    /// Creates the configured bucket, for test setup against an empty store.
-    ///
-    /// Deployments provision their bucket out of band, so this is test-only:
-    /// gated on the `test_util` feature and never part of the normal API.
-    ///
-    /// # Errors
-    ///
-    /// `Operation` if the bucket cannot be created (already exists, or the store
-    /// rejects the request).
-    #[cfg(feature = "test_util")]
-    pub async fn create_bucket(&self) -> Result<()> {
-        self.client
-            .create_bucket()
-            .bucket(&self.bucket)
-            .send()
-            .await
-            .map_err(|err| Error::operation("create_bucket", err.into_service_error()))?;
-        Ok(())
-    }
-
-    /// Whether an object exists, via a HEAD request.
-    ///
-    /// # Errors
-    ///
-    /// `Operation` if the HEAD request fails for any reason other than the object
-    /// being absent (a missing object is reported as `Ok(false)`).
-    pub async fn exists<K: ObjectKey>(&self, key: &K) -> Result<bool> {
-        let object_key = Self::object_key(key);
-        match self
-            .client
-            .head_object()
-            .bucket(&self.bucket)
-            .key(&object_key)
-            .send()
-            .await
-        {
-            Ok(_) => Ok(true),
-            Err(err) => {
-                let service = err.into_service_error();
-                if service.is_not_found() {
-                    Ok(false)
-                } else {
-                    Err(Error::operation("head", service))
-                }
-            }
-        }
-    }
-}
-
-/// Reads up to [`PART_SIZE`] bytes from `reader`, returning fewer only at EOF.
-///
-/// An empty return means the stream is exhausted. Reading the whole part up front
-/// is what lets a small object take the single-`PutObject` path and lets each
-/// multipart part meet S3's minimum size.
-async fn read_part<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Vec<u8>> {
-    let mut buffer = Vec::with_capacity(PART_SIZE);
-    // Heap-allocate the scratch chunk: as a stack array it would be embedded in
-    // this future (and transitively in `put`'s), enlarging it needlessly.
-    let mut chunk = vec![0u8; 64 * 1024];
-    while buffer.len() < PART_SIZE {
-        let read = reader
-            .read(&mut chunk)
-            .await
-            .map_err(|err| Error::Body(err.to_string()))?;
-        if read == 0 {
-            break;
-        }
-        buffer.extend_from_slice(&chunk[..read]);
-    }
-    Ok(buffer)
 }

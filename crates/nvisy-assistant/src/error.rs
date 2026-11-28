@@ -3,15 +3,10 @@
 /// A result whose error is the crate [`Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// An error building or validating an LLM provider client.
+/// An error verifying an LLM provider or running a completion against it.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// The client could not be constructed from the config (e.g. an invalid
-    /// base URL).
-    #[error("failed to build the assistant client: {0}")]
-    Build(String),
-
     /// The provider rejected the credentials or was unreachable.
     #[error("provider verification failed: {0}")]
     Verify(String),

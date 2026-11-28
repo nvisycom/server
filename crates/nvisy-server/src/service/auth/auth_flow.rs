@@ -17,7 +17,7 @@ use nvisy_postgres::model::{NewAccount, NewAccountIdentity};
 use nvisy_postgres::query::{
     AccountApiTokenRepository, AccountIdentityRepository, AccountRepository,
 };
-use nvisy_postgres::types::IdentityProvider;
+use nvisy_postgres::types::{ApiTokenType, IdentityProvider};
 use nvisy_postgres::{AsyncConnection, Error as PgError, PgClient};
 
 use crate::extract::SecurityContext;
@@ -200,6 +200,46 @@ impl SignInService {
             .await?;
 
         Ok(jwt)
+    }
+
+    /// Mints a long-lived desktop (`app`) session token for the account behind
+    /// a browser session, to hand to the desktop app.
+    ///
+    /// Only a `web` session may mint one: the desktop login completes in the
+    /// browser first, and refusing `app`/`api` tokens stops a leaked `app` token
+    /// from renewing itself indefinitely. The account must still be allowed to
+    /// sign in.
+    ///
+    /// # Errors
+    ///
+    /// - `Unauthorized` if the session no longer exists.
+    /// - `Forbidden` if the session is not a browser session, or the account may
+    ///   not sign in.
+    /// - A database or signing error if minting fails.
+    pub async fn issue_desktop_token(
+        &self,
+        account_id: uuid::Uuid,
+        session_id: uuid::Uuid,
+        security: SecurityContext,
+    ) -> Result<String> {
+        let mut conn = self.postgres.get_connection().await?;
+
+        let session = conn
+            .find_account_api_token_by_id(session_id)
+            .await?
+            .ok_or_else(|| ErrorKind::Unauthorized.with_message("Session not found"))?;
+        if session.session_type != ApiTokenType::Web {
+            return Err(ErrorKind::Forbidden
+                .with_message("Desktop tokens can only be minted from a browser session"));
+        }
+
+        let account = AccountProvisioner
+            .load_active(&mut conn, account_id)
+            .await?;
+        AccountProvisioner::ensure_can_sign_in(&account)?;
+        self.issuer
+            .issue_app_token(&mut conn, &account, security)
+            .await
     }
 
     /// Revokes the session token `token_id` (logout), returning whether a live

@@ -143,7 +143,6 @@ impl Cli {
     fn enabled_features() -> Vec<&'static str> {
         [
             cfg!(feature = "tls").then_some("tls"),
-            cfg!(feature = "otel").then_some("otel"),
             cfg!(feature = "dotenv").then_some("dotenv"),
         ]
         .into_iter()

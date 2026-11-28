@@ -4,9 +4,8 @@
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
-use nvisy_postgres::PgClient;
-use nvisy_postgres::query::WorkspaceAnalyticsRepository;
 
+use crate::domain::WorkspaceAnalyticsService;
 use crate::extract::{Authorized, Json, Query, markers};
 use crate::handler::ServiceState;
 use crate::handler::request::DateWindow;
@@ -19,18 +18,13 @@ const TRACING_TARGET: &str = "nvisy_server::handler::analytics";
 /// Returns aggregate analytics for a workspace.
 #[tracing::instrument(skip_all)]
 async fn get_analytics(
-    State(pg_client): State<PgClient>,
+    State(analytics): State<WorkspaceAnalyticsService>,
     authz: Authorized<markers::ViewAnalytics>,
 ) -> Result<Json<WorkspaceAnalytics>> {
     tracing::debug!(target: TRACING_TARGET, "Computing workspace analytics");
 
-    let mut conn = pg_client.get_connection().await?;
-
-    let snapshot = conn.snapshot(authz.workspace.id).await?;
-
-    let analytics = WorkspaceAnalytics::from_snapshot(snapshot);
-
-    Ok(Json(analytics))
+    let snapshot = analytics.snapshot(authz.workspace.id).await?;
+    Ok(Json(WorkspaceAnalytics::from_snapshot(snapshot)))
 }
 
 fn get_analytics_docs(op: TransformOperation) -> TransformOperation {
@@ -44,7 +38,7 @@ fn get_analytics_docs(op: TransformOperation) -> TransformOperation {
 /// Returns a workspace's daily detection activity over a date window.
 #[tracing::instrument(skip_all)]
 async fn get_detection_timeseries(
-    State(pg_client): State<PgClient>,
+    State(analytics): State<WorkspaceAnalyticsService>,
     authz: Authorized<markers::ViewAnalytics>,
     Query(window): Query<DateWindow>,
 ) -> Result<Json<WorkspaceDetectionTimeSeries>> {
@@ -52,9 +46,7 @@ async fn get_detection_timeseries(
 
     let window = window.resolve()?;
 
-    let mut conn = pg_client.get_connection().await?;
-
-    let points = conn
+    let points = analytics
         .detections_by_day(
             authz.workspace.id,
             window.from_timestamp()?,

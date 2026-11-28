@@ -11,8 +11,6 @@ use async_stream::stream;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::sse::Event;
-use nvisy_postgres::PgClient;
-use nvisy_postgres::query::AccountNotificationRepository;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -23,7 +21,7 @@ use crate::handler::response::{
     AccountMarkedReadStatus, AccountNotification, AccountNotificationsPage, AccountUnreadStatus,
 };
 use crate::response::{ErrorResponse, Result, SseResponse, Watch, sse_event, watch};
-use crate::service::{NotificationEmitter, ServiceState, UnreadCountEvent};
+use crate::service::{ServiceState, UnreadCountEvent};
 
 /// Tracing target for notification operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::account_notifications";
@@ -113,8 +111,7 @@ const UNREAD_POLL_INTERVAL: Duration = Duration::from_secs(30);
 /// `Authorization` header.
 #[tracing::instrument(skip_all)]
 async fn stream_unread_status(
-    State(pg_client): State<PgClient>,
-    State(notification_emitter): State<NotificationEmitter>,
+    State(notifications): State<AccountNotificationService>,
     State(shutdown): State<CancellationToken>,
     auth_state: AuthState,
 ) -> Result<SseResponse<UnreadCountEvent>> {
@@ -125,11 +122,9 @@ async fn stream_unread_status(
     // Subscribe BEFORE reading the current count: core-NATS broadcasts are not
     // replayed, so a change published between the read and the subscription going
     // live would otherwise be missed until the next change.
-    let mut updates = notification_emitter.subscribe_unread(account_id).await?;
+    let mut updates = notifications.subscribe_unread(account_id).await?;
 
-    let mut conn = pg_client.get_connection().await?;
-    let current = conn.count_unread_account_notifications(account_id).await?;
-    drop(conn);
+    let current = notifications.unread_count(account_id).await?;
 
     let stream = stream! {
         // Emit the current count first so a client that connects between changes
@@ -141,7 +136,7 @@ async fn stream_unread_status(
             match watched {
                 Watch::Live(event) => yield unread_event(event),
                 Watch::Reread | Watch::Closed => {
-                    if let Some(unread_count) = reread_unread_count(&pg_client, account_id).await {
+                    if let Some(unread_count) = reread_unread_count(&notifications, account_id).await {
                         yield unread_event(UnreadCountEvent { unread_count });
                     }
                     if closed {
@@ -157,9 +152,11 @@ async fn stream_unread_status(
 
 /// Re-reads an account's unread count from the database, returning `None` if the
 /// count can no longer be read (a transient error — the next poll retries).
-async fn reread_unread_count(pg_client: &PgClient, account_id: Uuid) -> Option<i64> {
-    let mut conn = pg_client.get_connection().await.ok()?;
-    match conn.count_unread_account_notifications(account_id).await {
+async fn reread_unread_count(
+    notifications: &AccountNotificationService,
+    account_id: Uuid,
+) -> Option<i64> {
+    match notifications.unread_count(account_id).await {
         Ok(count) => Some(count),
         Err(err) => {
             tracing::debug!(target: TRACING_TARGET, error = %err, %account_id, "Failed to re-read unread count");

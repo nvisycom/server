@@ -1,7 +1,7 @@
 //! The dependency-injected entry point and the provider-neutral client surface.
 //!
-//! [`FileService`] holds the shared HTTP client and the configured OAuth
-//! apps, and turns a stored [`FileServiceConfig`] into a connected provider
+//! [`FileService`] holds the shared HTTP client and an OAuth client per
+//! configured provider, and turns a stored [`FileServiceConfig`] into a connected provider
 //! client, refreshing the OAuth token when expired. [`FileServiceClient`] is the
 //! provider-neutral surface the sync engine drives: verify the connection,
 //! stream a file's bytes, and upload a stream. Files to import are chosen through
@@ -11,9 +11,14 @@
 //! Token *persistence* is the caller's responsibility: a refresh returns the
 //! updated config via [`ConnectedFileService::refreshed`] for the caller to store.
 
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
+use jiff::Timestamp;
+use nvisy_core::http::OAuthHttpClient;
 use nvisy_core::{ByteStream, Error, ErrorKind, FileUpload, Result, Secret};
+use strum::IntoEnumIterator;
 
 use super::apps::OAuthApps;
 use super::connected::ConnectedFileService;
@@ -37,34 +42,48 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// Connects cloud file-service configs to their provider backends, refreshing
 /// OAuth tokens as needed.
 ///
-/// Cloneable and cheap to pass around; it holds the shared HTTP client and the
-/// OAuth app credentials, and builds a fresh provider client per request.
+/// Cloneable and cheap to pass around: it holds the shared HTTP client and one
+/// [`OAuthClient`] per configured provider, built once, and builds a fresh
+/// provider client per request.
 #[derive(Clone)]
 #[must_use = "service does nothing unless you use it"]
 pub struct FileService {
     http: reqwest::Client,
-    apps: OAuthApps,
+    oauth: Arc<HashMap<FileServiceProvider, OAuthClient>>,
 }
 
 impl FileService {
-    /// Creates a new [`FileService`] with the given OAuth app credentials.
+    /// Creates a new [`FileService`] for the given OAuth app credentials.
     ///
     /// Builds an HTTP client with finite connect and read timeouts so a stalled
     /// provider cannot pin a caller for its whole timeout window; no total
     /// request timeout is set, since transfers are streamed and can run long.
+    /// Then builds each configured provider's [`OAuthClient`] over it.
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTP client cannot be built. Falling back to a
-    /// default client would silently drop the connect and read timeouts and let
-    /// a stalled provider pin a caller indefinitely.
-    pub fn new(apps: OAuthApps) -> Result<Self> {
+    /// - A `Connection` error if the HTTP client cannot be built. Falling back
+    ///   to a default client would silently drop the connect and read timeouts.
+    /// - An `Invalid` error if a configured app's redirect URI is not a valid
+    ///   URL.
+    pub fn new(apps: &OAuthApps) -> Result<Self> {
         let http = reqwest::Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
             .read_timeout(READ_TIMEOUT)
             .build()
             .map_err(|err| Error::connection("failed to build HTTP client").with_source(err))?;
-        Ok(Self { http, apps })
+        let oauth_http = OAuthHttpClient::new(http.clone());
+        let oauth = FileServiceProvider::iter()
+            .filter_map(|provider| {
+                let app = apps.for_provider(provider)?;
+                let client = OAuthClient::new(provider.oauth_provider(), app, oauth_http.clone());
+                Some(client.map(|client| (provider, client)))
+            })
+            .collect::<Result<HashMap<_, _>>>()?;
+        Ok(Self {
+            http,
+            oauth: Arc::new(oauth),
+        })
     }
 
     /// Whether the host has configured an OAuth app for `provider`, and so
@@ -72,29 +91,20 @@ impl FileService {
     /// attempting a flow that would fail.
     #[must_use]
     pub fn is_configured(&self, provider: FileServiceProvider) -> bool {
-        self.apps.for_provider(provider).is_some()
+        self.oauth.contains_key(&provider)
     }
 
-    /// An [`OAuthClient`] for `provider`, resolving its configured app, or an
-    /// error if the host has not configured one. This is the handle for the
-    /// authorize URL and the code/token exchanges.
+    /// The [`OAuthClient`] for `provider`: the handle for the authorize URL and
+    /// the code and token exchanges.
     ///
     /// # Errors
     ///
     /// Returns an `Invalid` error if the host has not configured an OAuth app
     /// for `provider`.
-    pub fn oauth_client(&self, provider: FileServiceProvider) -> Result<OAuthClient> {
-        let app = self.apps.for_provider(provider).ok_or_else(|| {
-            Error::new(
-                ErrorKind::Invalid,
-                "this cloud file provider is not configured",
-            )
-        })?;
-        Ok(OAuthClient::new(
-            provider.oauth_provider(),
-            app.clone(),
-            self.http.clone(),
-        ))
+    pub fn oauth_client(&self, provider: FileServiceProvider) -> Result<&OAuthClient> {
+        self.oauth
+            .get(&provider)
+            .ok_or_else(|| Error::invalid("this cloud file provider is not configured"))
     }
 
     /// Ensures `config` has a usable access token, refreshing it if expired.
@@ -107,7 +117,7 @@ impl FileService {
     /// Returns [`ErrorKind::Unauthenticated`] if the token is expired and there is
     /// no refresh token, or the refresh is rejected.
     pub async fn ensure_fresh(&self, config: &FileServiceConfig) -> Result<FreshToken> {
-        let now = jiff::Timestamp::now().as_second();
+        let now = Timestamp::now().as_second();
         let tokens = config.tokens();
         if !tokens.is_expired(now, REFRESH_SKEW_SECS) {
             return Ok(FreshToken {

@@ -6,12 +6,10 @@ use std::sync::Arc;
 use hmac::{Hmac, KeyInit, Mac};
 use jiff::Timestamp;
 use nvisy_core::health::{ComponentHealth, HealthCheck};
+use nvisy_core::http::{ExponentialBackoff, middleware_client};
 use nvisy_core::net::check_outbound;
 use reqwest::Client;
-use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
-use reqwest_retry::RetryTransientMiddleware;
-use reqwest_retry::policies::ExponentialBackoff;
-use reqwest_tracing::TracingMiddleware;
+use reqwest_middleware::ClientWithMiddleware;
 use sha2::Sha256;
 
 use super::{ReqwestConfig, TRACING_TARGET};
@@ -86,10 +84,7 @@ impl ReqwestClient {
             .retry_bounds(config.min_retry_interval, config.max_retry_interval)
             .build_with_max_retries(config.max_retries);
 
-        let http = ClientBuilder::new(base_client)
-            .with(TracingMiddleware::default())
-            .with(RetryTransientMiddleware::new_with_policy(retry_policy))
-            .build();
+        let http = middleware_client(base_client, retry_policy);
 
         tracing::info!(
             target: TRACING_TARGET,

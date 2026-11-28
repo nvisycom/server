@@ -29,9 +29,6 @@ default = []
 # TLS support: enables HTTPS with rustls for secure connections
 tls = ["axum-server"]
 
-# OpenTelemetry support: enables environment-based log filtering
-otel = ["tracing-subscriber/env-filter"]
-
 # Dotenv support: loads environment variables from .env files
 # This allows configuration via .env files in addition to CLI args
 dotenv = ["dep:dotenvy"]
@@ -59,9 +56,6 @@ axum-server = { workspace = true, features = ["tls-rustls"], optional = true }
 # Observability
 tracing = { workspace = true, features = [] }
 tracing-subscriber = { workspace = true, features = ["fmt", "ansi", "json", "env-filter"] }
-
-# (De)serialization
-serde = { workspace = true, features = ["derive"] }
 
 # Derive macros & utilities
 anyhow = { workspace = true, features = ["backtrace"] }

@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use jiff::{Span, Timestamp};
-use nvisy_nats::kv::{SchedulerLockKey, SchedulerLocksBucket};
+use nvisy_nats::kv::TokenKey;
 use nvisy_nats::stream::{ConnectionSyncStream, Delivery, EventPublisher, Settle};
 use nvisy_postgres::model::{
     NewWorkspaceConnectionSync, WorkspaceConnection, WorkspaceConnectionSync,
@@ -50,6 +50,18 @@ const STALE_RUN_AGE_HOURS: i64 = 6;
 
 /// Fixed KV key for the per-tick scheduler leader-election lock.
 const SCHEDULER_LOCK_KEY: &str = "connection-sync-scheduler";
+
+nvisy_nats::kv_bucket! {
+    /// Short-lived scheduler leader-election locks, one key per tick period. The
+    /// value is a nonce; only the key's presence matters. The TTL is comfortably
+    /// above the tick interval, so a period's lock outlives its period despite
+    /// clock skew, and a crashed holder never blocks later ticks.
+    pub(crate) SchedulerLocksBucket: u64 {
+        name: "scheduler_locks",
+        description: "Short-lived scheduler leader-election locks",
+        ttl: Duration::from_mins(5),
+    }
+}
 
 /// Base backoff before a failed scheduled sync is redelivered. Each attempt
 /// waits this multiplied by the attempt number (linear backoff); the stream's
@@ -145,7 +157,7 @@ impl ConnectionSyncWorker {
         // instance's tick phase. The bucket TTL reclaims old period keys. Segments
         // are joined with `.`, which NATS KV keys allow (`[-/_=.a-zA-Z0-9]`).
         let period = now.as_second() / i64::try_from(TICK_INTERVAL.as_secs()).unwrap_or(i64::MAX);
-        let lock_key: SchedulerLockKey = format!("{SCHEDULER_LOCK_KEY}.{period}").parse()?;
+        let lock_key: TokenKey = format!("{SCHEDULER_LOCK_KEY}.{period}").parse()?;
         let locks = self.infra.nats.kv_store::<SchedulerLocksBucket>().await?;
         let acquired = locks.create(&lock_key, &1).await?;
         if !acquired {

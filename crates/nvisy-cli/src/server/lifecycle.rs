@@ -30,7 +30,6 @@ where
     let start_time = Instant::now();
 
     log_security_warnings(server_config);
-    log_config_details(server_config);
 
     let result = serve_fn().await;
 
@@ -47,19 +46,7 @@ fn log_security_warnings(config: &ServerConfig) {
     }
 }
 
-/// Logs configuration details.
-fn log_config_details(config: &ServerConfig) {
-    tracing::debug!(
-        target: TRACING_TARGET_STARTUP,
-        host = %config.host,
-        port = config.port,
-        shutdown_timeout = ?config.shutdown_timeout,
-        tls = config.is_tls_enabled(),
-        "Server configuration"
-    );
-}
-
-/// Handles the server result and logs appropriate messages.
+/// Logs a clean shutdown, or a recovery suggestion for a failure.
 fn handle_result(result: io::Result<()>, start_time: Instant) -> io::Result<()> {
     let uptime = start_time.elapsed();
 
@@ -72,15 +59,8 @@ fn handle_result(result: io::Result<()>, start_time: Instant) -> io::Result<()> 
             );
             Ok(())
         }
+        // The error itself is reported once, by `main`; this adds only the hint.
         Err(err) => {
-            tracing::error!(
-                target: TRACING_TARGET_SHUTDOWN,
-                error = %err,
-                kind = ?err.kind(),
-                uptime_secs = uptime.as_secs(),
-                "Fatal error"
-            );
-
             if let Some(suggestion) = error_suggestion(&err) {
                 tracing::info!(
                     target: TRACING_TARGET_SHUTDOWN,
@@ -120,14 +100,14 @@ mod tests {
 
     #[tokio::test]
     async fn serve_with_shutdown_success() {
-        let config = ServerConfig::default();
+        let config = ServerConfig::test();
         let result = serve_with_shutdown(&config, || async { Ok(()) }).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn serve_with_shutdown_handles_error() {
-        let config = ServerConfig::default();
+        let config = ServerConfig::test();
         let result =
             serve_with_shutdown(&config, || async { Err(io::Error::other("test error")) }).await;
 

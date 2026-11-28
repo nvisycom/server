@@ -27,7 +27,7 @@ cli = ["dep:clap"]
 
 [dependencies]
 # Internal crates
-nvisy-core = { workspace = true, features = ["reqwest"] }
+nvisy-core = { workspace = true, features = ["oauth2"] }
 
 # CLI
 clap = { workspace = true, features = ["derive", "env"], optional = true }
@@ -35,13 +35,11 @@ clap = { workspace = true, features = ["derive", "env"], optional = true }
 # Async runtime
 futures = { workspace = true, features = [] }
 
-# HTTP client & middleware
+# HTTP client
 reqwest = { workspace = true, features = ["json", "query", "stream", "multipart"] }
-reqwest-middleware = { workspace = true, features = [] }
-reqwest-retry = { workspace = true, features = [] }
-reqwest-tracing = { workspace = true, features = [] }
+
+# OAuth & OIDC
 oauth2 = { workspace = true, features = [] }
-http = { workspace = true, features = [] }
 
 # OpenAPI/Documentation
 schemars = { workspace = true, features = [], optional = true }
@@ -57,7 +55,6 @@ serde_json = { workspace = true, features = [] }
 percent-encoding = { workspace = true, features = [] }
 
 # Derive macros & utilities
-thiserror = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
 strum = { workspace = true, features = ["derive"] }
 

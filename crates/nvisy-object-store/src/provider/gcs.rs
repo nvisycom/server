@@ -1,6 +1,5 @@
 //! Google Cloud Storage provider using [`object_store::gcp::GoogleCloudStorageBuilder`].
 
-use derive_more::Deref;
 use nvisy_core::net::EndpointPolicy;
 use nvisy_core::{Error, Secret};
 use object_store::ClientOptions;
@@ -9,7 +8,6 @@ use object_store::gcp::GoogleCloudStorageBuilder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::Client;
 use crate::client::ObjectStoreClient;
 
 /// Typed credentials for Google Cloud Storage.
@@ -32,21 +30,14 @@ pub struct GcsCredentials {
     pub endpoint: Option<String>,
 }
 
-/// Google Cloud Storage-backed object storage client.
-#[derive(Deref)]
-pub struct GcsProvider(ObjectStoreClient);
-
-impl Client for GcsProvider {
-    type Credentials = GcsCredentials;
-
-    const ID: &str = "gcs";
-
-    async fn connect(creds: &Self::Credentials, policy: EndpointPolicy) -> Result<Self, Error> {
+impl GcsCredentials {
+    /// Connects to the store, validating any custom endpoint under `policy`.
+    pub(super) async fn connect(&self, policy: EndpointPolicy) -> Result<ObjectStoreClient, Error> {
         let mut builder = GoogleCloudStorageBuilder::new()
-            .with_bucket_name(&creds.bucket)
-            .with_service_account_key(creds.service_account_key.expose());
+            .with_bucket_name(&self.bucket)
+            .with_service_account_key(self.service_account_key.expose());
 
-        if let Some(endpoint) = &creds.endpoint {
+        if let Some(endpoint) = &self.endpoint {
             // Validate the custom endpoint: only http(s), and plaintext http only
             // for a local emulator (e.g. a fake-gcs server).
             let allow_http = super::endpoint_allow_http(policy, endpoint).await?;
@@ -63,8 +54,8 @@ impl Client for GcsProvider {
 
         let store = builder
             .build()
-            .map_err(|e| Error::invalid(format!("{}: {e}", Self::ID)))?;
+            .map_err(|e| Error::invalid(format!("{}: {e}", "gcs")))?;
 
-        Ok(Self(ObjectStoreClient::new(store)))
+        Ok(ObjectStoreClient::new(store))
     }
 }

@@ -3,7 +3,7 @@
 //!
 //! An account authenticates through one or more identities — a local password
 //! and/or linked OIDC providers — and this module manages them uniformly under
-//! the singular `/account/` self-resource:
+//! the singular `/account` self-resource:
 //!
 //! - `GET    /account/identities` — list the account's sign-in methods.
 //! - `PUT    /account/identities/password` — set or change the password.
@@ -178,8 +178,8 @@ fn unlink_provider_docs(op: TransformOperation) -> TransformOperation {
 
 /// Returns the authenticated account-identity routes.
 ///
-/// Mounted under the singular `/account/` self-resource (matching `/account/`
-/// for the profile), not the plural `/accounts/{accountId}/` collection that
+/// Mounted under the singular `/account` self-resource (matching `/account`
+/// for the profile), not the plural `/accounts/{accountId}` collection that
 /// addresses other accounts — the identity is always the authenticated caller's.
 pub fn routes() -> ApiRouter<ServiceState> {
     ApiRouter::new()

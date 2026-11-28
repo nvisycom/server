@@ -12,12 +12,10 @@
 
 use nvisy_core::{ByteStream, FileUpload, Result, Secret};
 
-use super::{ProviderRequest, encode_path_segment, response_stream};
+use super::session::Session;
+use super::{FileServiceProvider, encode_path_segment, response_stream};
 use crate::client::FileServiceClient;
 use crate::oauth::OAuthProvider;
-
-/// Provider identifier stored in the connection's `provider` column.
-pub const PROVIDER_ID: &str = "box";
 
 /// Box OAuth authorize endpoint.
 const AUTH_URL: &str = "https://account.box.com/api/oauth2/authorize";
@@ -44,8 +42,7 @@ pub fn oauth_provider() -> OAuthProvider {
 
 /// A connected Box client holding a valid access token.
 pub struct BoxClient {
-    http: reqwest::Client,
-    access_token: Secret<String>,
+    session: Session,
     /// The folder id that new exports are created in; `None` is the account root
     /// (`"0"`).
     root_folder_id: Option<String>,
@@ -59,8 +56,7 @@ impl BoxClient {
         root_folder_id: Option<String>,
     ) -> Self {
         Self {
-            http,
-            access_token,
+            session: Session::new(http, access_token, FileServiceProvider::Box),
             root_folder_id,
         }
     }
@@ -69,10 +65,8 @@ impl BoxClient {
 #[async_trait::async_trait]
 impl FileServiceClient for BoxClient {
     async fn verify(&self) -> Result<()> {
-        self.http
-            .get(format!("{API_BASE}/users/me"))
-            .bearer_auth(self.access_token.expose())
-            .send_checked(PROVIDER_ID)
+        self.session
+            .send(self.session.get(format!("{API_BASE}/users/me")))
             .await?;
         Ok(())
     }
@@ -83,10 +77,8 @@ impl FileServiceClient for BoxClient {
         // cannot alter the request URL.
         let id = encode_path_segment(id);
         let response = self
-            .http
-            .get(format!("{API_BASE}/files/{id}/content"))
-            .bearer_auth(self.access_token.expose())
-            .send_checked(PROVIDER_ID)
+            .session
+            .send(self.session.get(format!("{API_BASE}/files/{id}/content")))
             .await?;
         Ok(response_stream(response))
     }
@@ -109,11 +101,12 @@ impl FileServiceClient for BoxClient {
             .text("attributes", attributes)
             .part("file", content_part);
 
-        self.http
-            .post(format!("{UPLOAD_BASE}/files/content"))
-            .bearer_auth(self.access_token.expose())
-            .multipart(form)
-            .send_checked(PROVIDER_ID)
+        self.session
+            .send(
+                self.session
+                    .post(format!("{UPLOAD_BASE}/files/content"))
+                    .multipart(form),
+            )
             .await?;
         Ok(())
     }

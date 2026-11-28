@@ -45,8 +45,9 @@ pub struct S3Config {
     )]
     pub force_path_style: bool,
 
-    /// Access key id. When unset (alongside `secret_access_key`), the SDK's
-    /// default credential chain is used (environment, profile, IAM role, …).
+    /// Access key id. When unset (alongside `secret_access_key`), credentials
+    /// come from the environment chain (`AWS_*` variables, web identity, ECS
+    /// container credentials, instance metadata); `~/.aws` profiles are not read.
     #[cfg_attr(feature = "cli", arg(long, env = "S3_ACCESS_KEY_ID"))]
     pub access_key_id: Option<Secret<String>>,
 
