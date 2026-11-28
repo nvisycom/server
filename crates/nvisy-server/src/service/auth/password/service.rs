@@ -26,6 +26,21 @@ impl PasswordService {
         }
     }
 
+    /// The account values a password is checked against for strength (username,
+    /// display name, and the email's local part and domain), so a password cannot
+    /// simply echo the account's own identifiers.
+    #[must_use]
+    pub fn user_inputs<'a>(
+        username: &'a str,
+        display_name: Option<&'a str>,
+        email_address: &'a str,
+    ) -> Vec<&'a str> {
+        let mut inputs = vec![username];
+        inputs.extend(display_name);
+        inputs.extend(email_address.split('@'));
+        inputs
+    }
+
     /// Validates strength, then hashes the password with Argon2id — the single
     /// entry point for accepting a new password, so it can't be hashed without
     /// first passing the strength check.

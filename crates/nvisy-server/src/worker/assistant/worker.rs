@@ -62,7 +62,7 @@ pub struct AssistantWorker {
 }
 
 impl Worker for AssistantWorker {
-    type Error = Error<'static>;
+    type Error = Error;
 
     const NAME: &'static str = "assistant";
 
@@ -379,7 +379,7 @@ fn turn_for(comment: &WorkspaceReviewComment) -> ChatTurn {
 /// terminal condition (drop the job).
 enum ReplyError {
     /// A transient failure (no connection, failed load or persist) — redeliver.
-    Transient(Error<'static>),
+    Transient(Error),
     /// A terminal condition — retrying would not help, so drop the job. Carries a
     /// short reason (borrowed for the fixed cases, owned for a formatted one).
     Terminal(std::borrow::Cow<'static, str>),
@@ -388,7 +388,7 @@ enum ReplyError {
 impl ReplyError {
     /// Wraps a transient underlying error (any error convertible into the server
     /// error, e.g. a `nvisy_postgres::Error` from a repository call).
-    fn transient(err: impl Into<Error<'static>>) -> Self {
+    fn transient(err: impl Into<Error>) -> Self {
         ReplyError::Transient(err.into())
     }
 

@@ -23,28 +23,22 @@ use crate::service::ServiceState;
 use crate::service::event::EventOrigin;
 
 /// Tracing target for workspace member operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::members";
+const TRACING_TARGET: &str = "nvisy_server::handler::workspace_members";
 
 /// Lists all members of a workspace.
 ///
 /// Returns a paginated list of workspace members with their roles and status.
 /// Requires `ViewMembers` permission. Returns an empty list for private workspaces.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn list_members(
     State(members): State<domain::WorkspaceMemberService>,
     authz: Authorized<markers::ViewMembers>,
     Query(query): Query<ListWorkspaceMembers>,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<WorkspaceMembersPage>)> {
+) -> Result<Json<WorkspaceMembersPage>> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace members");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
     let page = members
         .list(
             workspace.id,
@@ -58,52 +52,37 @@ async fn list_members(
         WorkspaceMember::from_model(&member, account)
     });
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok(Json(response))
 }
 
 fn list_members_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List members")
         .description("Returns a paginated list of workspace members with their roles and status.")
         .response::<200, Json<WorkspaceMembersPage>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Gets detailed information about a specific workspace member.
 ///
 /// Returns comprehensive information about a workspace member, including their role,
 /// permissions, and activity status. Requires `ViewMembers` permission.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn get_member(
     State(members): State<domain::WorkspaceMemberService>,
     authz: Authorized<markers::ViewMembers>,
     Path(path_params): Path<WorkspaceMemberPathParams>,
-) -> Result<(StatusCode, Json<WorkspaceMember>)> {
+) -> Result<Json<WorkspaceMember>> {
     tracing::debug!(target: TRACING_TARGET, "Retrieving workspace member details");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
     let (member, account) = members.find(workspace.id, path_params.account_id).await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceMember::from_model(&member, account)),
-    ))
+    Ok(Json(WorkspaceMember::from_model(&member, account)))
 }
 
 fn get_member_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get member")
         .description("Returns detailed information about a specific workspace member.")
         .response::<200, Json<WorkspaceMember>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Removes a member from a workspace.
@@ -111,34 +90,19 @@ fn get_member_docs(op: TransformOperation) -> TransformOperation {
 /// Permanently removes a member from the workspace. This action cannot be undone.
 /// The member will lose all access to the workspace and its resources.
 /// Requires `RemoveMembers` permission. Cannot remove an owner.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn delete_member(
     State(members): State<domain::WorkspaceMemberService>,
     authz: Authorized<markers::RemoveMembers>,
     Path(path_params): Path<WorkspaceMemberPathParams>,
-    security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Removing workspace member");
 
-    let workspace = authz.workspace;
     members
-        .remove(
-            EventOrigin {
-                workspace_id: workspace.id,
-                account_id: authz.account_id,
-                security: &security,
-            },
-            path_params.account_id,
-        )
+        .remove(authz.origin(), path_params.account_id)
         .await?;
 
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn delete_member_docs(op: TransformOperation) -> TransformOperation {
@@ -146,11 +110,7 @@ fn delete_member_docs(op: TransformOperation) -> TransformOperation {
         .description(
             "Permanently removes a member from the workspace. Cannot remove owners or yourself.",
         )
-        .response::<200, ()>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
+        .response::<204, ()>()
 }
 
 /// Updates a workspace member's role.
@@ -161,8 +121,6 @@ fn delete_member_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         new_role = ?request.role,
     )
 )]
@@ -170,28 +128,15 @@ async fn update_member(
     State(members): State<domain::WorkspaceMemberService>,
     authz: Authorized<markers::ManageRoles>,
     Path(path_params): Path<WorkspaceMemberPathParams>,
-    security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWorkspaceMember>,
-) -> Result<(StatusCode, Json<WorkspaceMember>)> {
+) -> Result<Json<WorkspaceMember>> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace member role");
 
-    let workspace = authz.workspace;
     let (member, account) = members
-        .update(
-            EventOrigin {
-                workspace_id: workspace.id,
-                account_id: authz.account_id,
-                security: &security,
-            },
-            path_params.account_id,
-            request.into_model(),
-        )
+        .update(authz.origin(), path_params.account_id, request.into_model())
         .await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceMember::from_model(&member, account)),
-    ))
+    Ok(Json(WorkspaceMember::from_model(&member, account)))
 }
 
 fn update_member_docs(op: TransformOperation) -> TransformOperation {
@@ -200,10 +145,6 @@ fn update_member_docs(op: TransformOperation) -> TransformOperation {
             "Updates a workspace member's role. Cannot update your own role or demote owners.",
         )
         .response::<200, Json<WorkspaceMember>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Leaves a workspace.
@@ -211,13 +152,7 @@ fn update_member_docs(op: TransformOperation) -> TransformOperation {
 /// Allows a member to voluntarily leave a workspace. This action cannot be undone.
 /// The member will lose all access to the workspace and its resources.
 /// The last owner cannot leave - they must transfer ownership first.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn leave_workspace(
     State(members): State<domain::WorkspaceMemberService>,
     auth_state: AuthState,
@@ -234,16 +169,13 @@ async fn leave_workspace(
         })
         .await?;
 
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn leave_workspace_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Leave workspace")
         .description("Allows a member to voluntarily leave a workspace.")
-        .response::<200, ()>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
+        .response::<204, ()>()
         .response::<409, Json<ErrorResponse>>()
 }
 

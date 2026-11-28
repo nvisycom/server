@@ -12,6 +12,7 @@ mod health;
 mod infra;
 mod integration;
 mod queue;
+mod upload;
 mod user_agent;
 
 use std::sync::Arc;
@@ -52,6 +53,7 @@ pub use crate::service::integration::{
     persist_refreshed_tokens,
 };
 pub use crate::service::queue::{AssistantQueue, DetectionQueue};
+pub use crate::service::upload::{DocumentStager, StagedDocument, UploadTarget};
 pub use crate::service::user_agent::UserAgentParser;
 use crate::worker::assistant::{AssistantJobRelay, AssistantOutboxDrainer, AssistantWorker};
 use crate::worker::detection::{DetectionJobRelay, DetectionOutboxDrainer, DetectionWorker};

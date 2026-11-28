@@ -2,7 +2,6 @@
 //!
 //! API-specific wrappers over the nvisy-postgres pagination types.
 
-use garde::Validate;
 use nvisy_postgres::types;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -11,18 +10,17 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_LIMIT: u32 = 20;
 /// Maximum pagination limit.
 const MAX_LIMIT: u32 = 100;
+
 /// Cursor-based pagination query parameters.
 ///
 /// This is the preferred pagination method for API endpoints. It provides:
 /// - Consistent performance regardless of page depth
 /// - Stable results even when items are added/removed
 /// - Efficient "load more" / infinite scroll patterns
-#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-#[garde(allow_unvalidated)]
 pub struct CursorPagination {
     /// The maximum number of records to return (1-100, default: 20).
-    #[garde(range(min = 1, max = 100))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
 

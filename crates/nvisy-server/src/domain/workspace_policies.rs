@@ -5,18 +5,17 @@
 //! split, and derived-policy immutability — in one place, factored out of the handler
 //! so they can be reasoned about (and tested) independently of the HTTP flow.
 
-use elide_pipeline::governance::policy::Policy;
 use nvisy_postgres::model::{NewWorkspacePolicy, WorkspacePolicy, WorkspacePolicyVersion};
 use nvisy_postgres::query::{
-    PolicyWithVersion, WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
+    DerivedPolicy, PolicyWithVersion, WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
 };
 use nvisy_postgres::types::{CursorPage, CursorPagination, PolicyKind, TimeCursor, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, model};
 use uuid::Uuid;
 
 use crate::domain::input::{CreatePolicyInput, DerivedPolicyInput, UpdatePolicyInput};
-use crate::domain::output::ResolvedPolicy;
-use crate::response::{Error, ErrorKind, Result};
+use crate::domain::json::{encode, parse_policy_definition};
+use crate::response::{Error, ErrorKind, Resource, Result};
 use crate::service::event;
 use crate::service::event::EventEmitter;
 
@@ -63,7 +62,7 @@ impl WorkspacePolicyService {
         let description = input
             .description
             .or_else(|| definition.description.clone().map(Into::into));
-        let body = definition_to_json(&definition)?;
+        let body = encode(&definition, "policy definition")?;
 
         let new_policy = NewWorkspacePolicy {
             workspace_id: origin.workspace_id,
@@ -80,9 +79,9 @@ impl WorkspacePolicyService {
                 let created = conn.create_workspace_policy(new_policy, body, None).await?;
                 conn.emit_event(
                     origin,
-                    event::WorkspaceEvent::PolicyCreated(event::PolicyCreated {
+                    event::PolicyCreated {
                         policy_id: created.policy.id,
-                    }),
+                    },
                 )
                 .await?;
                 Ok::<_, Error>(created)
@@ -169,11 +168,9 @@ impl WorkspacePolicyService {
         // the client cannot set or clear. Carry the current version's origin forward.
         let new_definition = match input.definition {
             Some(draft) => {
-                let template = serde_json::from_value::<Policy>(current.definition)
-                    .map_err(|err| malformed_definition(&err))?
-                    .template;
+                let template = parse_policy_definition(current.id, current.definition)?.template;
                 let definition = draft.into_definition(template);
-                Some(definition_to_json(&definition)?)
+                Some(encode(&definition, "policy definition")?)
             }
             None => None,
         };
@@ -199,11 +196,8 @@ impl WorkspacePolicyService {
                 )
                 .await?;
             }
-            conn.emit_event(
-                origin,
-                event::WorkspaceEvent::PolicyUpdated(event::PolicyUpdated { policy_id }),
-            )
-            .await?;
+            conn.emit_event(origin, event::PolicyUpdated { policy_id })
+                .await?;
             Ok::<(), Error>(())
         })
         .await?;
@@ -267,11 +261,8 @@ impl WorkspacePolicyService {
                 },
             )
             .await?;
-            conn.emit_event(
-                origin,
-                event::WorkspaceEvent::PolicyUpdated(event::PolicyUpdated { policy_id }),
-            )
-            .await?;
+            conn.emit_event(origin, event::PolicyUpdated { policy_id })
+                .await?;
             Ok::<(), Error>(())
         })
         .await?;
@@ -293,11 +284,8 @@ impl WorkspacePolicyService {
 
         conn.transaction(async |conn| {
             conn.delete_workspace_policy(policy_id).await?;
-            conn.emit_event(
-                origin,
-                event::WorkspaceEvent::PolicyDeleted(event::PolicyDeleted { policy_id }),
-            )
-            .await?;
+            conn.emit_event(origin, event::PolicyDeleted { policy_id })
+                .await?;
             Ok::<(), Error>(())
         })
         .await?;
@@ -305,22 +293,6 @@ impl WorkspacePolicyService {
         tracing::info!(target: TRACING_TARGET, "Policy deleted");
         Ok(())
     }
-}
-
-/// Serializes a policy definition to the plaintext JSONB stored on its version.
-fn definition_to_json(definition: &Policy) -> Result<serde_json::Value> {
-    serde_json::to_value(definition).map_err(|err| {
-        ErrorKind::InternalServerError
-            .with_message("Failed to serialize the policy definition")
-            .with_context(err.to_string())
-    })
-}
-
-/// Maps a failed deserialization of a stored definition to a server error.
-fn malformed_definition(err: &serde_json::Error) -> Error<'static> {
-    ErrorKind::InternalServerError
-        .with_message("Stored policy definition is malformed")
-        .with_context(err.to_string())
 }
 
 /// Finds a policy within a workspace by id, with its creator, or a `NotFound`.
@@ -331,7 +303,7 @@ async fn find_policy(
 ) -> Result<WithAccountRef<WorkspacePolicy>> {
     conn.find_policy_in_workspace_with_creator(workspace_id, policy_id)
         .await?
-        .ok_or_else(|| Error::not_found("policy"))
+        .ok_or_else(|| Error::not_found(Resource::Policy))
 }
 
 /// Loads a policy's current version (the one whose definition the engine
@@ -343,10 +315,10 @@ async fn current_version(
 ) -> Result<WorkspacePolicyVersion> {
     let version_id = policy
         .current_version_id
-        .ok_or_else(|| Error::not_found("policy_version"))?;
+        .ok_or_else(|| Error::not_found(Resource::PolicyVersion))?;
     conn.find_policy_version(workspace_id, version_id)
         .await?
-        .ok_or_else(|| Error::not_found("policy_version"))
+        .ok_or_else(|| Error::not_found(Resource::PolicyVersion))
 }
 
 /// The stored name for a derived policy, e.g. `1f0a3c8b9d2e4a5b6c7d8e9f`.
@@ -394,12 +366,12 @@ pub(crate) async fn resolve_derived_policy(
     conn: &mut PgConn,
     origin: event::EventOrigin<'_>,
     input: DerivedPolicyInput,
-) -> Result<ResolvedPolicy> {
+) -> Result<DerivedPolicy> {
     let content_hash = input.content_hash();
     let display_name = derived_display_name(&content_hash);
 
     let definition = input.into_definition(&display_name);
-    let definition_json = definition_to_json(&definition)?;
+    let definition_json = encode(&definition, "policy definition")?;
 
     let new_policy = NewWorkspacePolicy {
         workspace_id: origin.workspace_id,
@@ -419,9 +391,9 @@ pub(crate) async fn resolve_derived_policy(
             if resolved.created {
                 conn.emit_event(
                     origin,
-                    event::WorkspaceEvent::PolicyCreated(event::PolicyCreated {
+                    event::PolicyCreated {
                         policy_id: resolved.policy.policy.id,
-                    }),
+                    },
                 )
                 .await?;
             }
@@ -433,11 +405,7 @@ pub(crate) async fn resolve_derived_policy(
         tracing::info!(target: TRACING_TARGET, policy_id = %resolved.policy.policy.id, "Derived policy created");
     }
 
-    Ok(ResolvedPolicy {
-        policy: resolved.policy.policy,
-        version: resolved.policy.version,
-        created: resolved.created,
-    })
+    Ok(resolved)
 }
 
 #[cfg(test)]
@@ -479,7 +447,7 @@ mod tests {
         db: &TestDatabase,
         origin: event::EventOrigin<'_>,
         labels: &[&str],
-    ) -> anyhow::Result<ResolvedPolicy> {
+    ) -> anyhow::Result<DerivedPolicy> {
         let mut conn = db.client.get_connection().await?;
         Ok(resolve_derived_policy(&mut conn, origin, derived_request(labels)).await?)
     }
@@ -517,13 +485,13 @@ mod tests {
 
         let first = derive(&db, origin(), &["person_name"]).await?;
         assert!(first.created);
-        assert_eq!(first.policy.kind, PolicyKind::Derived);
+        assert_eq!(first.policy.policy.kind, PolicyKind::Derived);
 
         // The same labels reuse the row rather than minting a second one.
         let second = derive(&db, origin(), &["person_name"]).await?;
         assert!(!second.created);
-        assert_eq!(second.policy.id, first.policy.id);
-        assert_eq!(second.version.id, first.version.id);
+        assert_eq!(second.policy.policy.id, first.policy.policy.id);
+        assert_eq!(second.policy.version.id, first.policy.version.id);
         Ok(())
     }
 
@@ -540,7 +508,7 @@ mod tests {
         };
 
         let derived = derive(&db, origin(), &["person_name"]).await?;
-        let policy_id = derived.policy.id;
+        let policy_id = derived.policy.policy.id;
 
         // A label-only edit is rejected: a derived policy is immutable.
         let label_edit = UpdatePolicyInput {
@@ -625,9 +593,9 @@ mod tests {
         };
 
         let derived = derive(&db, origin(), &["person_name"]).await?;
-        let policy_id = derived.policy.id;
-        assert_eq!(derived.policy.kind, PolicyKind::Derived);
-        assert!(derived.policy.content_hash.is_some());
+        let policy_id = derived.policy.policy.id;
+        assert_eq!(derived.policy.policy.kind, PolicyKind::Derived);
+        assert!(derived.policy.policy.content_hash.is_some());
 
         // Promotion flips the kind to authored, clears the dedup hash, and applies
         // the required title, keeping the id and current version.
@@ -672,8 +640,8 @@ mod tests {
 
         // A derived policy for a label set carries a neutral hash name.
         let derived = derive(&db, origin(), &["person_name"]).await?;
-        let first_id = derived.policy.id;
-        let hash_name = derived.policy.display_name.clone();
+        let first_id = derived.policy.policy.id;
+        let hash_name = derived.policy.policy.display_name.clone();
 
         // Promotion requires a title, which replaces the hash name and frees the slot.
         let (promoted, _) = service
@@ -687,13 +655,17 @@ mod tests {
         // row reclaiming the vacated hash name), not a unique-index deadlock.
         let recreated = derive(&db, origin(), &["person_name"]).await?;
         assert!(recreated.created, "a fresh derived policy is minted");
-        assert_ne!(recreated.policy.id, first_id);
-        assert_eq!(recreated.policy.kind, PolicyKind::Derived);
-        assert_eq!(recreated.policy.display_name, hash_name);
+        assert_ne!(recreated.policy.policy.id, first_id);
+        assert_eq!(recreated.policy.policy.kind, PolicyKind::Derived);
+        assert_eq!(recreated.policy.policy.display_name, hash_name);
 
         // That recreated policy promotes too, with its own distinct required title.
         let (second_promoted, _) = service
-            .promote(origin(), recreated.policy.id, "Court filing".to_owned())
+            .promote(
+                origin(),
+                recreated.policy.policy.id,
+                "Court filing".to_owned(),
+            )
             .await?;
         assert_eq!(second_promoted.item.kind, PolicyKind::Authored);
         assert_eq!(second_promoted.item.display_name, "Court filing");

@@ -7,7 +7,11 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{NewWorkspaceRedaction, WorkspaceRedaction};
-use crate::types::{CursorPage, CursorPagination, RedactionFilter, TimeCursor, keyset, total};
+use crate::schema::accounts;
+use crate::types::{
+    AccountRefRow, CursorPage, CursorPagination, RedactionFilter, TimeCursor, WithAccountRef,
+    keyset, total,
+};
 use crate::{PgConnection, Result, schema};
 
 /// Redacted output metadata for one detection, used by the artifacts endpoint.
@@ -64,7 +68,7 @@ pub trait WorkspaceRedactionRepository {
         &mut self,
         detection_id: Uuid,
         pagination: CursorPagination<TimeCursor>,
-    ) -> impl Future<Output = Result<CursorPage<WorkspaceRedaction>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceRedaction>>>> + Send;
 
     /// Lists a workspace's redactions with cursor pagination, newest first,
     /// narrowed by an optional detection and document.
@@ -76,7 +80,7 @@ pub trait WorkspaceRedactionRepository {
         workspace_id: Uuid,
         pagination: CursorPagination<TimeCursor>,
         filter: &RedactionFilter,
-    ) -> impl Future<Output = Result<CursorPage<WorkspaceRedaction>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<WithAccountRef<WorkspaceRedaction>>>> + Send;
 }
 
 impl WorkspaceRedactionRepository for PgConnection {
@@ -180,35 +184,29 @@ impl WorkspaceRedactionRepository for PgConnection {
         &mut self,
         detection_id: Uuid,
         pagination: CursorPagination<TimeCursor>,
-    ) -> Result<CursorPage<WorkspaceRedaction>> {
+    ) -> Result<CursorPage<WithAccountRef<WorkspaceRedaction>>> {
         use schema::workspace_redactions::{self, dsl};
 
-        let base_query = workspace_redactions::table
-            .filter(dsl::detection_id.eq(detection_id))
-            .filter(dsl::deleted_at.is_null());
-
-        let total = total!(pagination, self, base_query.count());
-
-        let scoped = workspace_redactions::table
-            .filter(dsl::detection_id.eq(detection_id))
-            .filter(dsl::deleted_at.is_null())
-            .into_boxed();
+        let scoped = || {
+            workspace_redactions::table
+                .filter(dsl::detection_id.eq(detection_id))
+                .filter(dsl::deleted_at.is_null())
+                .into_boxed()
+        };
+        let total = total!(pagination, self, scoped().count());
+        let query = scoped().inner_join(accounts::table.on(accounts::id.eq(dsl::account_id)));
 
         let after = pagination.after_pair();
-        let items: Vec<WorkspaceRedaction> = keyset!(
-            scoped,
-            dsl::created_at,
-            dsl::id,
-            pagination.direction,
-            after
-        )
-        .select(WorkspaceRedaction::as_select())
-        .limit(pagination.fetch_limit())
-        .load(self)
-        .await?;
+        let rows: Vec<(WorkspaceRedaction, AccountRefRow)> =
+            keyset!(query, dsl::created_at, dsl::id, pagination.direction, after)
+                .select((WorkspaceRedaction::as_select(), AccountRefRow::as_select()))
+                .limit(pagination.fetch_limit())
+                .load(self)
+                .await?;
 
+        let items = rows.into_iter().map(WithAccountRef::from).collect();
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
-            TimeCursor::new(row.created_at, row.id)
+            TimeCursor::new(row.item.created_at, row.item.id)
         }))
     }
 
@@ -217,13 +215,12 @@ impl WorkspaceRedactionRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination<TimeCursor>,
         filter: &RedactionFilter,
-    ) -> Result<CursorPage<WorkspaceRedaction>> {
+    ) -> Result<CursorPage<WithAccountRef<WorkspaceRedaction>>> {
         use schema::workspace_detections::dsl as detections;
         use schema::workspace_redactions::dsl as redactions;
         use schema::{workspace_detections, workspace_redactions};
 
-        // One scoped builder for both the count and the page, so a future filter
-        // cannot be added to one and forgotten on the other. Redactions carry no
+        // One scoped builder for both the count and the page. Redactions carry no
         // workspace column, so scope (and the document filter) run through the
         // detection: `redactions ⋈ detections` on `workspace_id`, and on the
         // detection's `input_document_id` when a document is given.
@@ -242,24 +239,26 @@ impl WorkspaceRedactionRepository for PgConnection {
             }
             query
         };
-
         let total = total!(pagination, self, scoped().count());
+        let query =
+            scoped().inner_join(accounts::table.on(accounts::id.eq(redactions::account_id)));
 
         let after = pagination.after_pair();
-        let items: Vec<WorkspaceRedaction> = keyset!(
-            scoped(),
+        let rows: Vec<(WorkspaceRedaction, AccountRefRow)> = keyset!(
+            query,
             redactions::created_at,
             redactions::id,
             pagination.direction,
             after
         )
-        .select(WorkspaceRedaction::as_select())
+        .select((WorkspaceRedaction::as_select(), AccountRefRow::as_select()))
         .limit(pagination.fetch_limit())
         .load(self)
         .await?;
 
+        let items = rows.into_iter().map(WithAccountRef::from).collect();
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
-            TimeCursor::new(row.created_at, row.id)
+            TimeCursor::new(row.item.created_at, row.item.id)
         }))
     }
 }
@@ -387,7 +386,7 @@ mod tests {
             .await?;
         // Both belong to the detection, newest first.
         assert_eq!(
-            page.items.iter().map(|r| r.id).collect::<Vec<_>>(),
+            page.items.iter().map(|r| r.item.id).collect::<Vec<_>>(),
             vec![second.id, first.id]
         );
 
@@ -451,7 +450,7 @@ mod tests {
                 &RedactionFilter::default(),
             )
             .await?;
-        let mut ids = all.items.iter().map(|r| r.id).collect::<Vec<_>>();
+        let mut ids = all.items.iter().map(|r| r.item.id).collect::<Vec<_>>();
         ids.sort();
         let mut want = vec![redaction_a.id, redaction_b.id];
         want.sort();
@@ -469,7 +468,7 @@ mod tests {
             )
             .await?;
         assert_eq!(
-            by_doc.items.iter().map(|r| r.id).collect::<Vec<_>>(),
+            by_doc.items.iter().map(|r| r.item.id).collect::<Vec<_>>(),
             vec![redaction_a.id],
             "the document filter scopes through the detection"
         );
@@ -486,7 +485,11 @@ mod tests {
             )
             .await?;
         assert_eq!(
-            by_detection.items.iter().map(|r| r.id).collect::<Vec<_>>(),
+            by_detection
+                .items
+                .iter()
+                .map(|r| r.item.id)
+                .collect::<Vec<_>>(),
             vec![redaction_b.id]
         );
 

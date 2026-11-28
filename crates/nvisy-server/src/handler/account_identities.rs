@@ -35,10 +35,10 @@ use crate::response::{ErrorKind, ErrorResponse, Result};
 use crate::service::{OidcService, ServiceState};
 
 /// Tracing target for identity operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::identities";
+const TRACING_TARGET: &str = "nvisy_server::handler::account_identities";
 
 /// Lists the authenticated account's sign-in methods.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+#[tracing::instrument(skip_all)]
 async fn list_identities(
     State(identities): State<AccountIdentityService>,
     auth_state: AuthState,
@@ -57,7 +57,6 @@ fn list_identities_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List sign-in methods")
         .description("Returns the authenticated account's identities: its password and any linked providers.")
         .response::<200, Json<AccountIdentities>>()
-        .response::<401, Json<ErrorResponse>>()
 }
 
 /// Sets or changes the authenticated account's password.
@@ -67,7 +66,7 @@ fn list_identities_docs(op: TransformOperation) -> TransformOperation {
 /// requires a step-up re-authentication proof — consumed single-use against
 /// NATS-KV here — because a merely-live session must not mint a durable new
 /// credential. The service owns strength-checking, hashing, and the write.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+#[tracing::instrument(skip_all)]
 async fn set_password(
     State(identities): State<AccountIdentityService>,
     State(oidc): State<OidcService>,
@@ -112,12 +111,10 @@ fn set_password_docs(op: TransformOperation) -> TransformOperation {
              step-up re-authentication proof.",
         )
         .response_with::<204, (), _>(|res| res.description("Password set."))
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
 }
 
 /// Removes the authenticated account's password identity.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+#[tracing::instrument(skip_all)]
 async fn delete_password(
     State(identities): State<AccountIdentityService>,
     auth_state: AuthState,
@@ -136,13 +133,17 @@ fn delete_password_docs(op: TransformOperation) -> TransformOperation {
              providers. Refused if the password is the account's only sign-in method.",
         )
         .response_with::<204, (), _>(|res| res.description("Password removed."))
-        .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
 }
 
 /// Unlinks a provider from the authenticated account.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id, provider = ?path_params.provider))]
+#[tracing::instrument(
+    skip_all,
+    fields(
+        provider = ?path_params.provider,
+    )
+)]
 async fn unlink_provider(
     State(identities): State<AccountIdentityService>,
     auth_state: AuthState,
@@ -171,8 +172,6 @@ fn unlink_provider_docs(op: TransformOperation) -> TransformOperation {
              account's only sign-in method.",
         )
         .response_with::<204, (), _>(|res| res.description("Provider unlinked."))
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
 }

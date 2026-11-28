@@ -59,13 +59,17 @@ pub trait EventEmitter {
     fn emit_event(
         &mut self,
         origin: EventOrigin<'_>,
-        event: WorkspaceEvent,
+        event: impl Into<WorkspaceEvent> + Send,
     ) -> impl Future<Output = Result<()>> + Send;
 }
 
 impl EventEmitter for PgConn {
-    async fn emit_event(&mut self, origin: EventOrigin<'_>, event: WorkspaceEvent) -> Result<()> {
-        let row = event_outbox_row(origin, &event)?;
+    async fn emit_event(
+        &mut self,
+        origin: EventOrigin<'_>,
+        event: impl Into<WorkspaceEvent> + Send,
+    ) -> Result<()> {
+        let row = event_outbox_row(origin, &event.into())?;
         self.insert_outbox(row).await?;
         Ok(())
     }

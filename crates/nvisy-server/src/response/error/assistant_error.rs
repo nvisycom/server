@@ -7,7 +7,7 @@
 
 use super::http_error::{Error as HttpError, ErrorKind};
 
-impl From<nvisy_assistant::Error> for HttpError<'_> {
+impl From<nvisy_assistant::Error> for HttpError {
     fn from(error: nvisy_assistant::Error) -> Self {
         ErrorKind::InternalServerError
             .with_message("Language model request failed")

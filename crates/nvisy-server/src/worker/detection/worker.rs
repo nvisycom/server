@@ -28,7 +28,7 @@ use uuid::Uuid;
 use super::job::{DetectionJob, DetectionStream, broadcast_status};
 use super::support::{FailDetection, FailOutcome, fail_detection, resolve_policies_by_ids};
 use crate::extract::SecurityContext;
-use crate::response::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Resource, Result};
 use crate::service::{ArtifactReader, ArtifactWriter, EngineService, Infra, StagedBlob, event};
 use crate::worker::Worker;
 
@@ -67,7 +67,7 @@ pub struct DetectionWorker {
 const DEFAULT_DETECTION_CONCURRENCY: usize = 4;
 
 impl Worker for DetectionWorker {
-    type Error = Error<'static>;
+    type Error = Error;
 
     const NAME: &'static str = "detection";
 
@@ -281,11 +281,11 @@ impl DetectionWorker {
             let workspace = conn
                 .find_workspace_by_id(job.workspace_id)
                 .await?
-                .ok_or_else(|| ErrorKind::NotFound.with_message("Workspace not found"))?;
+                .ok_or_else(|| Error::not_found(Resource::Workspace))?;
             let document = conn
                 .find_document_in_workspace(job.workspace_id, detection.input_document_id)
                 .await?
-                .ok_or_else(|| ErrorKind::NotFound.with_message("Input document not found"))?;
+                .ok_or_else(|| Error::not_found(Resource::Document))?;
             let blob = conn
                 .find_blob_by_id(document.blob_id.ok_or_else(|| {
                     ErrorKind::NotFound.with_message("Input document content not found")

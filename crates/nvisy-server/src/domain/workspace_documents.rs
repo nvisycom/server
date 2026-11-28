@@ -11,17 +11,21 @@
 
 use std::collections::BTreeSet;
 
-use nvisy_postgres::model::WorkspaceDocument as DocumentModel;
-use nvisy_postgres::query::{DocumentWithBlob, WorkspaceDocumentRepository};
+use nvisy_postgres::model::{
+    UpdateWorkspaceDocument as UpdateDocumentModel, WorkspaceDocument as DocumentModel,
+};
+use nvisy_postgres::query::{
+    DocumentWithBlob, WorkspaceBlobRepository, WorkspaceDocumentRepository,
+};
 use nvisy_postgres::types::{CursorPage, CursorPagination, TimeCursor, WithAccountRef};
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
-use crate::domain::input::{ListDocumentsInput, UpdateDocumentInput};
+use crate::domain::input::ListDocumentsInput;
 use crate::domain::output::BulkDeleteOutcome;
-use crate::response::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Resource, Result};
 use crate::service::event::EventEmitter;
-use crate::service::{EngineService, event};
+use crate::service::{DocumentStager, EngineService, StagedDocument, event};
 
 /// Tracing target for document domain operations.
 const TRACING_TARGET: &str = "nvisy_server::domain::document";
@@ -37,13 +41,100 @@ const TRACING_TARGET: &str = "nvisy_server::domain::document";
 pub struct WorkspaceDocumentService {
     postgres: PgClient,
     engine: EngineService,
+    stager: DocumentStager,
 }
 
 impl WorkspaceDocumentService {
     /// Creates a [`WorkspaceDocumentService`] over its clients.
     #[must_use]
-    pub fn new(postgres: PgClient, engine: EngineService) -> Self {
-        Self { postgres, engine }
+    pub fn new(postgres: PgClient, engine: EngineService, stager: DocumentStager) -> Self {
+        Self {
+            postgres,
+            engine,
+            stager,
+        }
+    }
+
+    /// Records a batch of staged uploads: every document, its blob, and its event
+    /// in one transaction. The batch is atomic: on any failure no row is written
+    /// and every staged object is reclaimed. After the commit, an object staged
+    /// for content that deduplicated onto an existing blob is reclaimed too.
+    ///
+    /// # Errors
+    ///
+    /// - `BadRequest` if the batch is empty.
+    /// - A database error if a connection or the transaction fails.
+    pub async fn commit_uploads(
+        &self,
+        origin: event::EventOrigin<'_>,
+        staged: Vec<StagedDocument>,
+    ) -> Result<Vec<DocumentWithBlob>> {
+        if staged.is_empty() {
+            return Err(ErrorKind::BadRequest.with_message("No documents provided"));
+        }
+
+        // Acquisition and commit share the cleanup path: any failure after
+        // staging must reclaim the objects, including an exhausted pool.
+        let created = match self.insert_uploads(origin, &staged).await {
+            Ok(created) => created,
+            Err(err) => {
+                self.stager.discard(&staged).await;
+                return Err(err);
+            }
+        };
+
+        for (staged_document, entry) in staged.iter().zip(&created) {
+            if entry.blob.storage_path != staged_document.blob.storage_path {
+                self.stager.discard_object(&staged_document.key).await;
+            }
+        }
+
+        tracing::info!(
+            target: TRACING_TARGET,
+            document_count = created.len(),
+            "Documents uploaded",
+        );
+        Ok(created)
+    }
+
+    /// Inserts the staged batch's rows and events in one transaction.
+    async fn insert_uploads(
+        &self,
+        origin: event::EventOrigin<'_>,
+        staged: &[StagedDocument],
+    ) -> Result<Vec<DocumentWithBlob>> {
+        let mut conn = self.postgres.get_connection().await?;
+        conn.transaction(async |conn| {
+            let mut created = Vec::with_capacity(staged.len());
+            for staged_document in staged {
+                let document = conn
+                    .create_workspace_document(
+                        staged_document.document.clone(),
+                        staged_document.blob.clone(),
+                    )
+                    .await?;
+                // The blob the document was pointed at (shared or freshly created),
+                // for the response's content-addressed fields.
+                let blob_id = document.blob_id.ok_or_else(|| {
+                    ErrorKind::InternalServerError.with_message("Staged blob not found")
+                })?;
+                let blob = conn.find_blob_by_id(blob_id).await?.ok_or_else(|| {
+                    ErrorKind::InternalServerError.with_message("Staged blob not found")
+                })?;
+                conn.emit_event(
+                    origin,
+                    event::DocumentCreated {
+                        document_id: document.id,
+                        document_name: document.display_name.clone(),
+                        document_size_bytes: blob.file_size_bytes,
+                    },
+                )
+                .await?;
+                created.push(DocumentWithBlob { document, blob });
+            }
+            Ok::<_, Error>(created)
+        })
+        .await
     }
 
     /// Lists a workspace's documents with cursor pagination, each with its backing
@@ -100,22 +191,21 @@ impl WorkspaceDocumentService {
         &self,
         origin: event::EventOrigin<'_>,
         document_id: Uuid,
-        input: UpdateDocumentInput,
+        document_updates: UpdateDocumentModel,
     ) -> Result<WithAccountRef<DocumentWithBlob>> {
         let mut conn = self.postgres.get_connection().await?;
         find_document(&mut conn, origin.workspace_id, document_id).await?;
 
-        let document_updates = input.into_model();
         conn.transaction(async |conn| {
             let updated = conn
                 .update_workspace_document(document_id, document_updates)
                 .await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::DocumentUpdated(event::DocumentUpdated {
+                event::DocumentUpdated {
                     document_id,
                     document_name: updated.display_name.clone(),
-                }),
+                },
             )
             .await?;
             Ok::<(), Error>(())
@@ -142,10 +232,10 @@ impl WorkspaceDocumentService {
             conn.delete_workspace_document(document.id).await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::DocumentDeleted(event::DocumentDeleted {
+                event::DocumentDeleted {
                     document_id,
                     document_name: document.display_name.clone(),
-                }),
+                },
             )
             .await?;
             Ok::<(), Error>(())
@@ -183,10 +273,10 @@ impl WorkspaceDocumentService {
                 for document in &documents {
                     conn.emit_event(
                         origin,
-                        event::WorkspaceEvent::DocumentDeleted(event::DocumentDeleted {
+                        event::DocumentDeleted {
                             document_id: document.id,
                             document_name: document.display_name.clone(),
-                        }),
+                        },
                     )
                     .await?;
                 }
@@ -219,7 +309,7 @@ async fn find_document(
 ) -> Result<DocumentModel> {
     conn.find_document_in_workspace(workspace_id, document_id)
         .await?
-        .ok_or_else(|| Error::not_found("document"))
+        .ok_or_else(|| Error::not_found(Resource::Document))
 }
 
 /// Finds a document within a workspace, with its backing blob and uploader's
@@ -231,5 +321,5 @@ async fn find_document_with_creator(
 ) -> Result<WithAccountRef<DocumentWithBlob>> {
     conn.find_document_in_workspace_with_creator(workspace_id, document_id)
         .await?
-        .ok_or_else(|| Error::not_found("document"))
+        .ok_or_else(|| Error::not_found(Resource::Document))
 }

@@ -7,14 +7,12 @@
 mod auth_state;
 mod authorized;
 mod jwt_claims;
-mod optional_auth;
 mod permission;
 mod session_token;
 
 pub use self::auth_state::AuthState;
 pub use self::authorized::{Authorized, RequiredPermission, markers};
 pub use self::jwt_claims::AuthClaims;
-pub use self::optional_auth::OptionalAuth;
 pub use self::permission::Permission;
 pub use self::session_token::{AuthTransport, SessionToken};
 

@@ -11,15 +11,16 @@ use aide::openapi::{Operation, Response};
 use axum::RequestPartsExt;
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
-use nvisy_postgres::PgClient;
 use nvisy_postgres::model::Workspace;
 use nvisy_postgres::query::WorkspaceRepository;
+use nvisy_postgres::{PgClient, PgConn};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tracing::Span;
 use uuid::Uuid;
 
 use crate::extract::Path;
-use crate::response::{Error, ErrorKind};
+use crate::response::{Error, Resource, error_responses};
 
 /// The workspace addressed by the `{workspaceId}` path segment.
 ///
@@ -47,26 +48,35 @@ where
     PgClient: FromRef<S>,
     S: Sync,
 {
-    type Rejection = Error<'static>;
+    type Rejection = Error;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let Path(IdParam { workspace_id }) = parts.extract::<Path<IdParam>>().await?;
-
-        let pg_client = PgClient::from_ref(state);
-        let mut conn = pg_client.get_connection().await.map_err(|error| {
-            tracing::error!(error = %error, "Failed to acquire database connection");
-            ErrorKind::InternalServerError
-                .with_message("Database connection unavailable")
-                .with_context(error.to_string())
-        })?;
-
-        let workspace = conn
-            .find_workspace_by_id(workspace_id)
-            .await?
-            .ok_or_else(|| ErrorKind::NotFound.with_message("Workspace not found"))?;
-
-        Ok(WorkspaceContext(workspace))
+        let workspace_id = workspace_path_id(parts).await?;
+        let mut conn = PgClient::from_ref(state).get_connection().await?;
+        Ok(WorkspaceContext(
+            find_workspace(&mut conn, workspace_id).await?,
+        ))
     }
+}
+
+/// Reads the `{workspaceId}` path segment.
+pub(crate) async fn workspace_path_id(parts: &mut Parts) -> Result<Uuid, Error> {
+    let Path(IdParam { workspace_id }) = parts.extract::<Path<IdParam>>().await?;
+    Ok(workspace_id)
+}
+
+/// Loads the addressed workspace, a 404 if it does not exist, and records its
+/// id on the request span so every log line of the request carries it.
+pub(crate) async fn find_workspace(
+    conn: &mut PgConn,
+    workspace_id: Uuid,
+) -> Result<Workspace, Error> {
+    let workspace = conn
+        .find_workspace_by_id(workspace_id)
+        .await?
+        .ok_or_else(|| Error::not_found(Resource::Workspace))?;
+    Span::current().record("workspace_id", tracing::field::display(workspace.id));
+    Ok(workspace)
 }
 
 impl OperationInput for WorkspaceContext {
@@ -78,6 +88,6 @@ impl OperationInput for WorkspaceContext {
         ctx: &mut GenContext,
         operation: &mut Operation,
     ) -> Vec<(Option<aide::openapi::StatusCode>, Response)> {
-        Path::<IdParam>::inferred_early_responses(ctx, operation)
+        error_responses(ctx, operation, &[400, 404])
     }
 }

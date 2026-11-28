@@ -22,7 +22,6 @@ use nvisy_postgres::{AsyncConnection, Error as PgError, PgClient};
 
 use crate::extract::SecurityContext;
 use crate::handler::request::{Login, Signup};
-use crate::handler::utility::build_password_user_inputs;
 use crate::response::{ErrorKind, Result};
 use crate::service::{AccountProvisioner, AuthIssuer, PasswordService};
 
@@ -141,7 +140,7 @@ impl SignInService {
         // Strength-check and hash before touching the database; bind the check to
         // the account's own fields so a password derived from the username/email is
         // rejected.
-        let user_inputs = build_password_user_inputs(
+        let user_inputs = PasswordService::user_inputs(
             request.username.as_str(),
             request.display_name.as_deref(),
             &request.email_address,

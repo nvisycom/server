@@ -229,7 +229,7 @@ impl ArtifactWriter {
 
 /// Serializes an audit or artifact set for staging.
 fn to_json(value: &impl Serialize) -> Result<Vec<u8>> {
-    serde_json::to_vec(value).map_err(|err| -> Error<'static> {
+    serde_json::to_vec(value).map_err(|err| -> Error {
         ErrorKind::InternalServerError
             .with_message("Failed to serialize analysis")
             .with_context(err.to_string())

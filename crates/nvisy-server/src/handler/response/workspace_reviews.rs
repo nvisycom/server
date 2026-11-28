@@ -6,7 +6,7 @@ use nvisy_postgres::model::{
     WorkspaceReview as ReviewModel, WorkspaceReviewComment as CommentModel,
     WorkspaceReviewEvent as ReviewEventModel,
 };
-use nvisy_postgres::query::{TimelineCursor, TimelineSource};
+use nvisy_postgres::query::TimelineEntry;
 use nvisy_postgres::types::{DetectionId, RedactionId, ReviewEventKind, ReviewStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -156,31 +156,17 @@ pub enum WorkspaceReviewEntry {
     Event(WorkspaceReviewEvent),
 }
 
-impl WorkspaceReviewEntry {
-    /// The entry's position in the merged timeline: `(created_at, source, id)`.
-    /// Comments sort after events at the same instant; `id` breaks a tie within one
-    /// stream. This is the total order the timeline is paginated by.
-    #[must_use]
-    pub fn cursor(&self) -> TimelineCursor {
-        match self {
-            WorkspaceReviewEntry::Comment(c) => TimelineCursor {
-                created_at: c.created_at,
-                source: TimelineSource::Comment,
-                id: c.id,
-            },
-            WorkspaceReviewEntry::Event(e) => TimelineCursor {
-                created_at: e.created_at,
-                source: TimelineSource::Event,
-                id: e.id,
-            },
+impl From<TimelineEntry> for WorkspaceReviewEntry {
+    fn from(entry: TimelineEntry) -> Self {
+        match entry {
+            TimelineEntry::Comment(row) => {
+                Self::Comment(WorkspaceComment::from_model(row.item, row.account.into()))
+            }
+            TimelineEntry::Event(row) => Self::Event(WorkspaceReviewEvent::from_model(
+                row.item,
+                row.account.map(Into::into),
+            )),
         }
-    }
-
-    /// The sort tuple for merging the two streams, derived from [`Self::cursor`].
-    #[must_use]
-    pub fn sort_key(&self) -> (Timestamp, TimelineSource, uuid::Uuid) {
-        let c = self.cursor();
-        (c.created_at, c.source, c.id)
     }
 }
 

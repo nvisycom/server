@@ -14,7 +14,7 @@ use aide::axum::routing::get_with;
 use aide::transform::TransformOperation;
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue};
 use elide_pipeline::export::{ExportCsv, ExportJson};
 use elide_pipeline::{ArtifactSet, Audit};
 use nvisy_postgres::PgClient;
@@ -36,8 +36,6 @@ const TRACING_TARGET: &str = "nvisy_server::handler::detection_audits";
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         detection_id = %path_params.detection_id,
     )
 )]
@@ -48,10 +46,10 @@ async fn get_detection_analysis(
     State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadAudit>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
-) -> Result<(StatusCode, Json<Audit>)> {
+) -> Result<Json<Audit>> {
     tracing::debug!(target: TRACING_TARGET, "Getting detection analysis");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
 
     // Resolve the detection through the service, then resolve its audit file row on
     // a scoped connection released before the object-store load below so the pooled
@@ -68,7 +66,7 @@ async fn get_detection_analysis(
 
     tracing::debug!(target: TRACING_TARGET, "Detection analysis retrieved");
 
-    Ok((StatusCode::OK, Json(analyzed)))
+    Ok(Json(analyzed))
 }
 
 fn get_detection_analysis_docs(op: TransformOperation) -> TransformOperation {
@@ -77,9 +75,6 @@ fn get_detection_analysis_docs(op: TransformOperation) -> TransformOperation {
             "Returns the detection's detected findings (the analyzed document) for review.",
         )
         .response::<200, Json<Audit>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
 }
 
@@ -94,8 +89,6 @@ fn get_detection_analysis_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         detection_id = %path_params.detection_id,
     )
 )]
@@ -106,10 +99,10 @@ async fn get_detection_intermediates(
     State(engine): State<EngineService>,
     authz: Authorized<markers::DownloadOriginalDocuments>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
-) -> Result<(StatusCode, Json<ArtifactSet>)> {
+) -> Result<Json<ArtifactSet>> {
     tracing::debug!(target: TRACING_TARGET, "Getting detection intermediates");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
 
     // Resolve the detection through the service, then resolve its intermediates
     // file row on a scoped connection released before the object-store load so the
@@ -130,7 +123,7 @@ async fn get_detection_intermediates(
 
     tracing::debug!(target: TRACING_TARGET, "Detection intermediates retrieved");
 
-    Ok((StatusCode::OK, Json(intermediates)))
+    Ok(Json(intermediates))
 }
 
 fn get_detection_intermediates_docs(op: TransformOperation) -> TransformOperation {
@@ -157,8 +150,6 @@ fn get_detection_intermediates_docs(op: TransformOperation) -> TransformOperatio
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         detection_id = %path_params.detection_id,
         format = ?query.format,
     )
@@ -171,10 +162,10 @@ async fn download_detection_audit(
     authz: Authorized<markers::DownloadAudit>,
     Path(path_params): Path<WorkspaceDetectionPathParams>,
     Query(query): Query<ExportQuery>,
-) -> Result<(StatusCode, HeaderMap, Body)> {
+) -> Result<(HeaderMap, Body)> {
     tracing::debug!(target: TRACING_TARGET, "Downloading detection audit");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
 
     // Resolve the detection through the service, then resolve its audit file row on
     // a scoped connection released before the object-store load below so the pooled
@@ -219,7 +210,7 @@ async fn download_detection_audit(
     );
 
     tracing::debug!(target: TRACING_TARGET, "Detection audit exported");
-    Ok((StatusCode::OK, headers, Body::from(body)))
+    Ok((headers, Body::from(body)))
 }
 
 fn download_detection_audit_docs(op: TransformOperation) -> TransformOperation {
@@ -232,9 +223,6 @@ fn download_detection_audit_docs(op: TransformOperation) -> TransformOperation {
             "The detection's exported audit.",
             &["application/zip", "application/json"],
         )
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
 }
 
@@ -250,7 +238,7 @@ fn build_audit_csv_zip(audit: &Audit) -> Result<Vec<u8>> {
 
 /// Maps an audit-archive build failure — CSV serialization, zip, or IO — to an
 /// internal error.
-fn archive_error(error: impl std::fmt::Display) -> Error<'static> {
+fn archive_error(error: impl std::fmt::Display) -> Error {
     ErrorKind::InternalServerError
         .with_message("Failed to build audit archive")
         .with_context(error.to_string())

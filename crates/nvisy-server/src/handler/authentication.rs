@@ -40,7 +40,6 @@ fn login_docs(op: TransformOperation) -> TransformOperation {
              token created via the tokens endpoint, not this one.)",
         )
         .response::<204, ()>()
-        .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
 }
 
@@ -65,7 +64,6 @@ fn signup_docs(op: TransformOperation) -> TransformOperation {
              and a CSRF cookie, returning no body.",
         )
         .response::<204, ()>()
-        .response::<400, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
 }
 
@@ -73,7 +71,6 @@ fn signup_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
         token_id = %auth_state.token_id,
     )
 )]
@@ -93,14 +90,13 @@ async fn logout(
     // client simply has no cookies to clear and ignores them; a cookie client is
     // logged out on the client side too.
     let cleared = ClearedSession::new(cookie).into_jar();
-    Ok((StatusCode::OK, cleared).into_response())
+    Ok((StatusCode::NO_CONTENT, cleared).into_response())
 }
 
 fn logout_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Logout")
         .description("Invalidates the current session and clears session cookies.")
-        .response_with::<200, (), _>(|res| res.description("Logged out."))
-        .response::<401, Json<ErrorResponse>>()
+        .response_with::<204, (), _>(|res| res.description("Logged out."))
 }
 
 /// Public authentication routes: login and signup, which a caller with no

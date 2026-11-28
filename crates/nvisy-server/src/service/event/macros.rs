@@ -9,7 +9,8 @@
 ///
 /// 1. the `WorkspaceEvent` enum, `#[serde(tag = "type", content = "data")]`, one
 ///    newtype variant per entry carrying its serde `rename`;
-/// 2. an inherent impl forwarding `tag`, `resource_id`, `activity`, `webhook`,
+/// 2. a `From` impl per variant, so an emitter takes the event struct itself,
+///    and an inherent impl forwarding `tag`, `resource_id`, `activity`, `webhook`,
 ///    and `notification` to the wrapped struct's [`EventKind`];
 /// 3. a test asserting each variant's serde rename equals the wrapped struct's
 ///    [`EventKind::TAG`], so the tag lives once (in the table) and the two can
@@ -37,6 +38,14 @@ macro_rules! workspace_events {
                 $variant($variant),
             )+
         }
+
+        $(
+            impl From<$variant> for WorkspaceEvent {
+                fn from(event: $variant) -> Self {
+                    Self::$variant(event)
+                }
+            }
+        )+
 
         impl WorkspaceEvent {
             /// The event's stable wire tag (its `type` in the outbox envelope).

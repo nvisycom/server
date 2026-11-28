@@ -9,6 +9,7 @@
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::time::Duration;
 
 use aide::OperationOutput;
 use aide::generate::GenContext;
@@ -17,6 +18,8 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response as AxumResponse};
 use futures::{Stream, StreamExt};
 use schemars::JsonSchema;
+use serde::Serialize;
+use tokio_util::sync::CancellationToken;
 
 /// The erased event stream an [`SseResponse`] serves.
 ///
@@ -103,5 +106,44 @@ where
             Some(response) => Vec::from([(Some(StatusCode::Code(200)), response)]),
             None => Vec::new(),
         }
+    }
+}
+
+/// Builds a named SSE event carrying `data` as JSON.
+pub fn sse_event<T: Serialize>(name: &'static str, data: &T) -> Event {
+    Event::default()
+        .event(name)
+        .json_data(data)
+        .unwrap_or_else(|_| Event::default().event(name))
+}
+
+/// What a watched status stream should do next.
+pub enum Watch<E> {
+    /// A live update arrived; forward it.
+    Live(E),
+    /// No update within the poll interval: re-read the authoritative state, which
+    /// recovers a dropped best-effort broadcast (core NATS is at-most-once).
+    Reread,
+    /// The subscription ended: re-read once so the client is not left stale,
+    /// then stop.
+    Closed,
+}
+
+/// Waits for the next step of a status stream: a live update from `updates`,
+/// or a re-read when none arrives within `interval` or the subscription ends.
+/// `None` once `shutdown` fires, so a long-lived stream never holds up a
+/// graceful shutdown.
+pub async fn watch<E>(
+    updates: &mut (impl Stream<Item = E> + Unpin),
+    interval: Duration,
+    shutdown: &CancellationToken,
+) -> Option<Watch<E>> {
+    tokio::select! {
+        () = shutdown.cancelled() => None,
+        next = tokio::time::timeout(interval, updates.next()) => Some(match next {
+            Ok(Some(event)) => Watch::Live(event),
+            Ok(None) => Watch::Closed,
+            Err(_) => Watch::Reread,
+        }),
     }
 }

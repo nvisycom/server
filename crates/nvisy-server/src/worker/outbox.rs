@@ -231,7 +231,7 @@ impl<H: OutboxHandler> OutboxDrainer<H> {
 }
 
 impl<H: OutboxHandler> Worker for OutboxDrainer<H> {
-    type Error = Error<'static>;
+    type Error = Error;
 
     const NAME: &'static str = H::NAME;
 

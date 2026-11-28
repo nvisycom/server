@@ -64,14 +64,16 @@ pub use workspace_detections::{
 pub use workspace_documents::{DocumentWithBlob, ImportedDocumentRef, WorkspaceDocumentRepository};
 pub use workspace_invites::{InviteCursor, WorkspaceInviteRepository};
 pub use workspace_members::{WorkspaceMemberCursor, WorkspaceMemberRepository};
-pub use workspace_policies::{PolicyWithVersion, WorkspacePolicyRepository};
+pub use workspace_policies::{DerivedPolicy, PolicyWithVersion, WorkspacePolicyRepository};
 pub use workspace_policy_versions::WorkspacePolicyVersionRepository;
 pub use workspace_providers::WorkspaceProviderRepository;
 pub use workspace_redactions::{DetectionRedactedOutput, WorkspaceRedactionRepository};
 pub use workspace_review_comments::WorkspaceReviewCommentRepository;
-pub use workspace_review_events::{TimelineCursor, TimelineSource, WorkspaceReviewEventRepository};
+pub use workspace_review_events::{
+    TimelineCursor, TimelineEntry, TimelineSource, WorkspaceReviewEventRepository,
+};
 pub use workspace_reviews::{
-    ApprovalOutcome, AssignmentOutcome, WithReviewers, WorkspaceReviewRepository,
+    ApprovalOutcome, AssignmentOutcome, ReviewDetails, StatusOutcome, WorkspaceReviewRepository,
 };
 pub use workspace_webhooks::WorkspaceWebhookRepository;
 pub use workspaces::WorkspaceRepository;

@@ -5,13 +5,15 @@
 //! each pair their write with an event in one transaction.
 
 use nvisy_postgres::model::{Workspace, WorkspaceMember};
-use nvisy_postgres::query::{WorkspaceMemberRepository, WorkspaceRepository};
-use nvisy_postgres::types::{AccountRefRow, CursorPage, CursorPagination, TimeCursor};
-use nvisy_postgres::{AsyncConnection, PgClient, model};
+use nvisy_postgres::query::{AccountRepository, WorkspaceMemberRepository, WorkspaceRepository};
+use nvisy_postgres::types::{
+    AccountRefRow, CursorPage, CursorPagination, TimeCursor, WithAccountRef,
+};
+use nvisy_postgres::{AsyncConnection, PgClient, PgConnection, model};
 use uuid::Uuid;
 
 use crate::domain::output::WorkspaceWithMembership;
-use crate::response::{Error, Result};
+use crate::response::{Error, ErrorKind, Result};
 use crate::service::event;
 use crate::service::event::EventEmitter;
 
@@ -65,9 +67,9 @@ impl WorkspaceService {
                         account_id: creator_id,
                         security: origin.security,
                     },
-                    event::WorkspaceEvent::WorkspaceCreated(event::WorkspaceCreated {
+                    event::WorkspaceCreated {
                         workspace_id: workspace.id,
-                    }),
+                    },
                 )
                 .await?;
                 Ok::<_, Error>((workspace, membership))
@@ -98,8 +100,18 @@ impl WorkspaceService {
             .await?)
     }
 
+    /// Loads the account that created `workspace`.
+    ///
+    /// # Errors
+    ///
+    /// - A database error if a connection or the query fails.
+    pub async fn creator(&self, workspace: &Workspace) -> Result<AccountRefRow> {
+        let mut conn = self.postgres.get_connection().await?;
+        find_creator(&mut conn, workspace.created_by).await
+    }
+
     /// Updates a workspace's configuration, recording the event atomically, and
-    /// returns the updated workspace.
+    /// returns the updated workspace with its creator.
     ///
     /// # Errors
     ///
@@ -108,21 +120,20 @@ impl WorkspaceService {
         &self,
         origin: event::EventOrigin<'_>,
         updates: model::UpdateWorkspace,
-    ) -> Result<Workspace> {
+    ) -> Result<WithAccountRef<Workspace>> {
         let mut conn = self.postgres.get_connection().await?;
         let workspace_id = origin.workspace_id;
 
         let workspace = conn
             .transaction(async |conn| {
                 let workspace = conn.update_workspace(workspace_id, updates).await?;
-                conn.emit_event(
-                    origin,
-                    event::WorkspaceEvent::WorkspaceUpdated(event::WorkspaceUpdated {
-                        workspace_id: workspace.id,
-                    }),
-                )
-                .await?;
-                Ok::<_, Error>(workspace)
+                conn.emit_event(origin, event::WorkspaceUpdated { workspace_id })
+                    .await?;
+                let creator = find_creator(conn, workspace.created_by).await?;
+                Ok::<_, Error>(WithAccountRef {
+                    item: workspace,
+                    account: creator,
+                })
             })
             .await?;
 
@@ -141,11 +152,8 @@ impl WorkspaceService {
 
         conn.transaction(async |conn| {
             conn.delete_workspace(workspace_id).await?;
-            conn.emit_event(
-                origin,
-                event::WorkspaceEvent::WorkspaceDeleted(event::WorkspaceDeleted { workspace_id }),
-            )
-            .await?;
+            conn.emit_event(origin, event::WorkspaceDeleted { workspace_id })
+                .await?;
             Ok::<(), Error>(())
         })
         .await?;
@@ -153,6 +161,13 @@ impl WorkspaceService {
         tracing::info!(target: TRACING_TARGET, "Workspace deleted");
         Ok(())
     }
+}
+
+/// Loads the public reference of a workspace's creator.
+async fn find_creator(conn: &mut PgConnection, account_id: Uuid) -> Result<AccountRefRow> {
+    conn.find_account_ref(account_id).await?.ok_or_else(|| {
+        ErrorKind::InternalServerError.with_message("The workspace's creator account is missing")
+    })
 }
 
 #[cfg(test)]
@@ -213,7 +228,7 @@ mod tests {
             ..Default::default()
         };
         let updated_workspace = service.update(origin, updates).await?;
-        assert_eq!(updated_workspace.display_name, "Renamed");
+        assert_eq!(updated_workspace.item.display_name, "Renamed");
         Ok(())
     }
 

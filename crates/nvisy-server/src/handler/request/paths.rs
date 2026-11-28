@@ -106,3 +106,18 @@ pub struct AccountNotificationPathParams {
     /// Unique identifier of the notification.
     pub notification_id: Uuid,
 }
+
+/// Path parameters for a public avatar route: the owner id and the avatar's
+/// version.
+///
+/// Each version is a distinct stored object, so an unknown version simply does
+/// not resolve — the version needs no separate validation.
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AvatarPathParams {
+    /// Opaque id of the avatar's owner.
+    pub id: Uuid,
+    /// Version segment identifying the exact stored object.
+    pub version: String,
+}

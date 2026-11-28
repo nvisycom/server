@@ -18,3 +18,11 @@ pub struct AccountDesktopToken {
     /// The desktop deep-link the token should be delivered on, echoed back.
     pub redirect_uri: String,
 }
+
+/// The response to starting an OAuth or OIDC flow: where to send the user.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorizeRedirect {
+    /// The provider authorize URL the client should redirect the user to.
+    pub authorize_url: String,
+}

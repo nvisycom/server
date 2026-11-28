@@ -4,7 +4,6 @@
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
-use axum::http::StatusCode;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::WorkspaceAnalyticsRepository;
 
@@ -12,23 +11,17 @@ use crate::extract::{Authorized, Json, Query, markers};
 use crate::handler::ServiceState;
 use crate::handler::request::DateWindow;
 use crate::handler::response::{WorkspaceAnalytics, WorkspaceDetectionTimeSeries};
-use crate::response::{ErrorResponse, Result};
+use crate::response::Result;
 
 /// Tracing target for workspace analytics operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::analytics";
 
 /// Returns aggregate analytics for a workspace.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn get_analytics(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewAnalytics>,
-) -> Result<(StatusCode, Json<WorkspaceAnalytics>)> {
+) -> Result<Json<WorkspaceAnalytics>> {
     tracing::debug!(target: TRACING_TARGET, "Computing workspace analytics");
 
     let mut conn = pg_client.get_connection().await?;
@@ -37,7 +30,7 @@ async fn get_analytics(
 
     let analytics = WorkspaceAnalytics::from_snapshot(snapshot);
 
-    Ok((StatusCode::OK, Json(analytics)))
+    Ok(Json(analytics))
 }
 
 fn get_analytics_docs(op: TransformOperation) -> TransformOperation {
@@ -46,24 +39,15 @@ fn get_analytics_docs(op: TransformOperation) -> TransformOperation {
             "Returns aggregate analytics for a workspace: stored-file totals with a per-kind breakdown, and detection health (status mix, error rate, and durations). Breakdowns list every kind/status, zero-filled, in a stable order.",
         )
         .response::<200, Json<WorkspaceAnalytics>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Returns a workspace's daily detection activity over a date window.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn get_detection_timeseries(
     State(pg_client): State<PgClient>,
     authz: Authorized<markers::ViewAnalytics>,
     Query(window): Query<DateWindow>,
-) -> Result<(StatusCode, Json<WorkspaceDetectionTimeSeries>)> {
+) -> Result<Json<WorkspaceDetectionTimeSeries>> {
     tracing::debug!(target: TRACING_TARGET, "Computing detection time series");
 
     let window = window.resolve()?;
@@ -79,7 +63,7 @@ async fn get_detection_timeseries(
         .await?;
     let series = WorkspaceDetectionTimeSeries::from_window(window.from, window.to, points);
 
-    Ok((StatusCode::OK, Json(series)))
+    Ok(Json(series))
 }
 
 fn get_detection_timeseries_docs(op: TransformOperation) -> TransformOperation {
@@ -88,10 +72,6 @@ fn get_detection_timeseries_docs(op: TransformOperation) -> TransformOperation {
             "Returns a workspace's daily detection activity over a date window: detections per day, plus each day's error rate and durations. Every day in the window is present (quiet days report detections: 0), so the series plots as a continuous line or a contribution-style calendar. The window is `from`/`to` (inclusive, YYYY-MM-DD); it defaults to the last 30 days and is capped at 366 days.",
         )
         .response::<200, Json<WorkspaceDetectionTimeSeries>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Builds the analytics routes.

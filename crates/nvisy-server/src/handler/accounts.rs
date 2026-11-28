@@ -26,24 +26,23 @@ use crate::service::{AvatarOwner, AvatarService, MAX_AVATAR_UPLOAD_BYTES, Servic
 const TRACING_TARGET: &str = "nvisy_server::handler::accounts";
 
 /// Retrieves the authenticated account.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+#[tracing::instrument(skip_all)]
 async fn get_own_account(
     State(accounts): State<AccountService>,
     auth_state: AuthState,
-) -> Result<(StatusCode, Json<Account>)> {
+) -> Result<Json<Account>> {
     tracing::debug!(target: TRACING_TARGET, "Reading account");
 
     let account = accounts.find(auth_state.account_id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Account read");
-    Ok((StatusCode::OK, Json(Account::from_model(account))))
+    Ok(Json(Account::from_model(account)))
 }
 
 fn get_own_account_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get own account")
         .description("Returns the authenticated user's account details.")
         .response::<200, Json<Account>>()
-        .response::<401, Json<ErrorResponse>>()
 }
 
 /// Retrieves the public profile of an account by its id.
@@ -52,12 +51,17 @@ fn get_own_account_docs(op: TransformOperation) -> TransformOperation {
 /// otherwise the account is reported as not found. Only public fields are
 /// returned — private details (email) are available solely through the
 /// caller's own `/account/` view.
-#[tracing::instrument(skip_all, fields(requester_id = %auth_state.account_id))]
+#[tracing::instrument(
+    skip_all,
+    fields(
+        requester_id = %auth_state.account_id,
+    )
+)]
 async fn get_account(
     State(accounts): State<AccountService>,
     auth_state: AuthState,
     Path(path_params): Path<AccountPathParams>,
-) -> Result<(StatusCode, Json<PublicAccount>)> {
+) -> Result<Json<PublicAccount>> {
     tracing::debug!(target: TRACING_TARGET, "Reading account by id");
 
     let account = accounts
@@ -65,7 +69,7 @@ async fn get_account(
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Account read by id");
-    Ok((StatusCode::OK, Json(PublicAccount::from_model(account))))
+    Ok(Json(PublicAccount::from_model(account)))
 }
 
 fn get_account_docs(op: TransformOperation) -> TransformOperation {
@@ -75,18 +79,17 @@ fn get_account_docs(op: TransformOperation) -> TransformOperation {
              The requester must share at least one workspace with the target account.",
         )
         .response::<200, Json<PublicAccount>>()
-        .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
 
 /// Updates the authenticated account.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+#[tracing::instrument(skip_all)]
 async fn update_own_account(
     State(accounts): State<AccountService>,
     auth_state: AuthState,
     ValidateJson(request): ValidateJson<UpdateAccount>,
-) -> Result<(StatusCode, Json<Account>)> {
+) -> Result<Json<Account>> {
     tracing::debug!(target: TRACING_TARGET, "Updating account");
 
     let account = accounts
@@ -94,20 +97,18 @@ async fn update_own_account(
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Account updated");
-    Ok((StatusCode::OK, Json(Account::from_model(account))))
+    Ok(Json(Account::from_model(account)))
 }
 
 fn update_own_account_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update account")
         .description("Updates the authenticated user's account details.")
         .response::<200, Json<Account>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
 }
 
 /// Deletes the authenticated account.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+#[tracing::instrument(skip_all)]
 async fn delete_own_account(
     State(accounts): State<AccountService>,
     auth_state: AuthState,
@@ -117,14 +118,13 @@ async fn delete_own_account(
     accounts.delete(auth_state.account_id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Account deleted");
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn delete_own_account_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete account")
         .description("Deletes the authenticated user's account.")
-        .response_with::<200, (), _>(|res| res.description("Account deleted."))
-        .response::<401, Json<ErrorResponse>>()
+        .response_with::<204, (), _>(|res| res.description("Account deleted."))
         .response::<404, Json<ErrorResponse>>()
 }
 
@@ -134,14 +134,14 @@ fn delete_own_account_docs(op: TransformOperation) -> TransformOperation {
 /// to its serve path. Only the account itself may set its avatar, so the
 /// `{accountId}` in the path must be the caller's own. Requires a multipart body
 /// with an image field.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+#[tracing::instrument(skip_all)]
 async fn upload_account_avatar(
     State(accounts): State<AccountService>,
     State(avatar): State<AvatarService>,
     auth_state: AuthState,
     Path(path_params): Path<AccountPathParams>,
     AvatarUpload(bytes): AvatarUpload,
-) -> Result<(StatusCode, Json<Account>)> {
+) -> Result<Json<Account>> {
     tracing::debug!(target: TRACING_TARGET, "Uploading account avatar");
 
     let account = accounts.find(auth_state.account_id).await?;
@@ -151,7 +151,7 @@ async fn upload_account_avatar(
     let updated = accounts.find(account.id).await?;
 
     tracing::info!(target: TRACING_TARGET, "Account avatar set");
-    Ok((StatusCode::OK, Json(Account::from_model(updated))))
+    Ok(Json(Account::from_model(updated)))
 }
 
 fn upload_account_avatar_docs(op: TransformOperation) -> TransformOperation {
@@ -160,14 +160,12 @@ fn upload_account_avatar_docs(op: TransformOperation) -> TransformOperation {
             "Uploads and normalizes the account's avatar. Only the account itself may set it.",
         )
         .response::<200, Json<Account>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
 
 /// Removes the authenticated account's avatar. Only the account itself may.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+#[tracing::instrument(skip_all)]
 async fn delete_account_avatar(
     State(accounts): State<AccountService>,
     State(avatar): State<AvatarService>,
@@ -188,7 +186,6 @@ fn delete_account_avatar_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete account avatar")
         .description("Removes the account's avatar. Only the account itself may delete it.")
         .response::<204, ()>()
-        .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }

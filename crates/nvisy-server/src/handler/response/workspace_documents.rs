@@ -2,12 +2,12 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::{Blob, WorkspaceDocument as DocumentModel};
-use nvisy_postgres::types::{DocumentKind, Handle};
+use nvisy_postgres::types::DocumentKind;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{AccountRef, Page};
+use super::{AccountRef, Page, WorkspaceRef};
 
 /// Represents a document in responses.
 #[must_use]
@@ -16,10 +16,9 @@ use super::{AccountRef, Page};
 pub struct WorkspaceDocument {
     /// Unique document identifier.
     pub id: Uuid,
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
-    /// URL-safe workspace handle. Display-only.
-    pub workspace_handle: Handle,
+    /// The workspace it belongs to.
+    #[serde(flatten)]
+    pub workspace: WorkspaceRef,
     /// Display name.
     pub display_name: String,
     /// Original filename when uploaded.
@@ -47,14 +46,12 @@ impl WorkspaceDocument {
     pub fn from_model(
         document: DocumentModel,
         blob: &Blob,
-        workspace_id: Uuid,
-        workspace_handle: Handle,
+        workspace: WorkspaceRef,
         uploaded_by: AccountRef,
     ) -> Self {
         Self {
             id: document.id,
-            workspace_id,
-            workspace_handle,
+            workspace,
             display_name: document.display_name,
             original_filename: document.original_filename,
             extension: document.file_extension.clone(),
@@ -85,19 +82,12 @@ impl WorkspaceDocumentDetails {
     pub fn from_model(
         mut document: DocumentModel,
         blob: &Blob,
-        workspace_id: Uuid,
-        workspace_handle: Handle,
+        workspace: WorkspaceRef,
         uploaded_by: AccountRef,
     ) -> Self {
         let metadata = std::mem::take(&mut document.metadata);
         Self {
-            document: WorkspaceDocument::from_model(
-                document,
-                blob,
-                workspace_id,
-                workspace_handle,
-                uploaded_by,
-            ),
+            document: WorkspaceDocument::from_model(document, blob, workspace, uploaded_by),
             metadata,
         }
     }
@@ -157,8 +147,10 @@ mod tests {
         let details = WorkspaceDocumentDetails::from_model(
             found.item.document,
             &found.item.blob,
-            seeded.workspace_id,
-            "test-workspace".parse().unwrap(),
+            WorkspaceRef {
+                workspace_id: seeded.workspace_id,
+                workspace_handle: "test-workspace".parse().unwrap(),
+            },
             found.account.into(),
         );
         let json = serde_json::to_value(details).unwrap();

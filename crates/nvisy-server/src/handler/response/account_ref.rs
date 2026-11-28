@@ -1,5 +1,6 @@
 //! Shared account reference for response types.
 
+use nvisy_postgres::model::Account;
 use nvisy_postgres::types::{AccountRefRow, Handle};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,17 @@ impl AccountRef {
             display_name,
             avatar_url,
         }
+    }
+}
+
+impl From<Account> for AccountRef {
+    fn from(account: Account) -> Self {
+        Self::new(
+            account.id,
+            account.username,
+            account.display_name,
+            account.avatar_url,
+        )
     }
 }
 

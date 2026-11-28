@@ -39,7 +39,7 @@ pub trait WorkspaceConnectionSyncRepository {
         &mut self,
         workspace_id: Uuid,
         sync_id: Uuid,
-    ) -> impl Future<Output = Result<Option<WorkspaceConnectionSync>>> + Send;
+    ) -> impl Future<Output = Result<Option<WithAccountRef<WorkspaceConnectionSync>>>> + Send;
 
     /// Returns the most recent successful sync completion time for each of the
     /// given connections.
@@ -161,20 +161,26 @@ impl WorkspaceConnectionSyncRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         sync_id: Uuid,
-    ) -> Result<Option<WorkspaceConnectionSync>> {
+    ) -> Result<Option<WithAccountRef<WorkspaceConnectionSync>>> {
+        use schema::accounts;
         use schema::workspace_connection_syncs::dsl as runs;
         use schema::workspace_connections::dsl as connections;
 
-        Ok(runs::workspace_connection_syncs
+        let row = runs::workspace_connection_syncs
             .inner_join(
                 connections::workspace_connections.on(connections::id.eq(runs::connection_id)),
             )
+            .inner_join(accounts::table.on(accounts::id.eq(runs::account_id)))
             .filter(runs::id.eq(sync_id))
             .filter(connections::workspace_id.eq(workspace_id))
-            .select(WorkspaceConnectionSync::as_select())
-            .first(self)
+            .select((
+                WorkspaceConnectionSync::as_select(),
+                AccountRefRow::as_select(),
+            ))
+            .first::<(WorkspaceConnectionSync, AccountRefRow)>(self)
             .await
-            .optional()?)
+            .optional()?;
+        Ok(row.map(WithAccountRef::from))
     }
 
     async fn last_successful_sync_at(

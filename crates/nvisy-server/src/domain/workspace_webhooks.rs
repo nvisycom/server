@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::domain::input::{CreateWebhookInput, UpdateWebhookInput};
 use crate::domain::output::CreatedWebhook;
-use crate::response::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Resource, Result};
 use crate::service::event::EventEmitter;
 use crate::service::{CryptoService, event};
 
@@ -83,10 +83,10 @@ impl WorkspaceWebhookService {
                 let webhook = conn.create_workspace_webhook(new_webhook).await?;
                 conn.emit_event(
                     origin,
-                    event::WorkspaceEvent::WebhookCreated(event::WebhookCreated {
+                    event::WebhookCreated {
                         webhook_id: webhook.id,
                         webhook_name: webhook.display_name.clone(),
-                    }),
+                    },
                 )
                 .await?;
                 Ok::<_, Error>(webhook)
@@ -164,10 +164,10 @@ impl WorkspaceWebhookService {
                 .await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::WebhookUpdated(event::WebhookUpdated {
+                event::WebhookUpdated {
                     webhook_id: existing.id,
                     webhook_name,
-                }),
+                },
             )
             .await?;
             Ok::<(), Error>(())
@@ -194,10 +194,10 @@ impl WorkspaceWebhookService {
             conn.delete_workspace_webhook(existing.id).await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::WebhookDeleted(event::WebhookDeleted {
+                event::WebhookDeleted {
                     webhook_id: existing.id,
                     webhook_name: existing.display_name.clone(),
-                }),
+                },
             )
             .await?;
             Ok::<(), Error>(())
@@ -308,5 +308,5 @@ async fn find_webhook(
 ) -> Result<WithAccountRef<WorkspaceWebhook>> {
     conn.find_webhook_in_workspace_with_creator(workspace_id, webhook_id)
         .await?
-        .ok_or_else(|| Error::not_found("webhook"))
+        .ok_or_else(|| Error::not_found(Resource::Webhook))
 }

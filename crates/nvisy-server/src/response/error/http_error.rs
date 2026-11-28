@@ -15,22 +15,72 @@ use strum::EnumIter;
 
 use super::ErrorResponse;
 
+/// Tracing target for request errors.
+const TRACING_TARGET: &str = "nvisy_server::response::error";
+
+/// A resource a request addressed, named in its not-found message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
+pub enum Resource {
+    /// An account.
+    Account,
+    /// An account API token.
+    #[strum(to_string = "API token")]
+    ApiToken,
+    /// An account or workspace avatar version.
+    Avatar,
+    /// A workspace connection.
+    Connection,
+    /// A connection sync run.
+    #[strum(to_string = "Connection sync")]
+    ConnectionSync,
+    /// A detection.
+    Detection,
+    /// A document.
+    Document,
+    /// A workspace invitation.
+    #[strum(to_string = "Invitation")]
+    Invite,
+    /// A workspace membership.
+    #[strum(to_string = "Workspace member")]
+    Member,
+    /// A notification.
+    Notification,
+    /// A policy.
+    Policy,
+    /// A policy version.
+    #[strum(to_string = "Policy version")]
+    PolicyVersion,
+    /// A provider.
+    Provider,
+    /// A redaction.
+    Redaction,
+    /// A review.
+    Review,
+    /// A review comment.
+    #[strum(to_string = "Review comment")]
+    ReviewComment,
+    /// A webhook.
+    Webhook,
+    /// A workspace.
+    Workspace,
+}
+
 /// The error type for HTTP handlers in the server.
 ///
 /// This error type provides a comprehensive way to handle HTTP errors with proper
 /// status codes, messages, and optional context information.
 #[derive(Clone)]
 #[must_use = "errors do nothing unless serialized"]
-pub struct Error<'a> {
+pub struct Error {
     /// The error category, which determines the HTTP status and default message.
     pub kind: ErrorKind,
     /// Debugging context appended to the response, if any.
-    pub context: Option<Cow<'a, str>>,
+    pub context: Option<Cow<'static, str>>,
     /// A custom user-facing message overriding the kind's default, if any.
-    pub message: Option<Cow<'a, str>>,
+    pub message: Option<Cow<'static, str>>,
 }
 
-impl Error<'static> {
+impl Error {
     /// Creates a new [`Error`] with the specified kind.
     #[inline]
     pub fn new(kind: ErrorKind) -> Self {
@@ -42,7 +92,7 @@ impl Error<'static> {
     }
 
     /// Creates a [`NotFound`](ErrorKind::NotFound) error for the given resource.
-    pub fn not_found(resource: &'static str) -> Self {
+    pub fn not_found(resource: Resource) -> Self {
         Self::new(ErrorKind::NotFound).with_message(format!("{resource} not found"))
     }
 
@@ -54,13 +104,13 @@ impl Error<'static> {
     }
 }
 
-impl<'a> Error<'a> {
+impl Error {
     /// Attaches context information to the error.
     ///
     /// Context provides additional information about what went wrong,
     /// which will be included in the error response for debugging.
     #[inline]
-    pub fn with_context(self, context: impl Into<Cow<'a, str>>) -> Self {
+    pub fn with_context(self, context: impl Into<Cow<'static, str>>) -> Self {
         Self {
             context: Some(context.into()),
             ..self
@@ -69,7 +119,7 @@ impl<'a> Error<'a> {
 
     /// Sets a custom user-friendly message for the error.
     #[inline]
-    pub fn with_message(self, message: impl Into<Cow<'a, str>>) -> Self {
+    pub fn with_message(self, message: impl Into<Cow<'static, str>>) -> Self {
         Self {
             message: Some(message.into()),
             ..self
@@ -84,18 +134,9 @@ impl<'a> Error<'a> {
     pub fn kind(&self) -> ErrorKind {
         self.kind
     }
-
-    /// Converts this error into a static version by cloning all borrowed data.
-    pub fn into_owned(self) -> Error<'static> {
-        Error {
-            kind: self.kind,
-            context: self.context.map(|c| Cow::Owned(c.into_owned())),
-            message: self.message.map(|m| Cow::Owned(m.into_owned())),
-        }
-    }
 }
 
-impl Default for Error<'static> {
+impl Default for Error {
     #[inline]
     fn default() -> Self {
         Self {
@@ -106,7 +147,7 @@ impl Default for Error<'static> {
     }
 }
 
-impl fmt::Debug for Error<'_> {
+impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let response = self.kind.response();
 
@@ -129,7 +170,7 @@ impl fmt::Debug for Error<'_> {
     }
 }
 
-impl fmt::Display for Error<'_> {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let response = self.kind.response();
         let message = self.message.as_deref().unwrap_or("Unknown error");
@@ -144,10 +185,33 @@ impl fmt::Display for Error<'_> {
     }
 }
 
-impl std::error::Error for Error<'_> {}
+impl std::error::Error for Error {}
 
-impl IntoResponse for Error<'_> {
+impl IntoResponse for Error {
+    /// The one place a request error is logged: at `error` for a server fault,
+    /// at `debug` for a client error (expected, and the client is told).
     fn into_response(self) -> Response {
+        let status = self.kind.status_code();
+        if status.is_server_error() {
+            tracing::error!(
+                target: TRACING_TARGET,
+                %status,
+                kind = ?self.kind,
+                message = self.message.as_deref(),
+                context = self.context.as_deref(),
+                "Request failed",
+            );
+        } else {
+            tracing::debug!(
+                target: TRACING_TARGET,
+                %status,
+                kind = ?self.kind,
+                message = self.message.as_deref(),
+                context = self.context.as_deref(),
+                "Request rejected",
+            );
+        }
+
         // The kind supplies the defaults (name, status, and fallback message);
         // this error's own fields override the message and add the per-occurrence
         // context.
@@ -162,7 +226,7 @@ impl IntoResponse for Error<'_> {
     }
 }
 
-impl From<ErrorKind> for Error<'static> {
+impl From<ErrorKind> for Error {
     #[inline]
     fn from(kind: ErrorKind) -> Self {
         Self::new(kind)
@@ -175,7 +239,7 @@ impl From<ErrorKind> for Error<'static> {
 /// for operations that can fail with an HTTP error.
 ///
 /// [`Result`]: std::result::Result
-pub type Result<T, E = Error<'static>> = std::result::Result<T, E>;
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Comprehensive enumeration of all possible HTTP error kinds.
 ///
@@ -219,7 +283,7 @@ pub enum ErrorKind {
 impl ErrorKind {
     /// Converts this error kind into a full [`Error`].
     #[inline]
-    pub fn into_error(self) -> Error<'static> {
+    pub fn into_error(self) -> Error {
         Error::new(self)
     }
 
@@ -227,7 +291,7 @@ impl ErrorKind {
     ///
     /// This is a convenience method for creating contextual errors.
     #[inline]
-    pub fn with_context<'a>(self, context: impl Into<Cow<'a, str>>) -> Error<'a> {
+    pub fn with_context(self, context: impl Into<Cow<'static, str>>) -> Error {
         Error::new(self).with_context(context)
     }
 
@@ -235,7 +299,7 @@ impl ErrorKind {
     ///
     /// This is a convenience method for creating errors with custom messages.
     #[inline]
-    pub fn with_message<'a>(self, message: impl Into<Cow<'a, str>>) -> Error<'a> {
+    pub fn with_message(self, message: impl Into<Cow<'static, str>>) -> Error {
         Error::new(self).with_message(message)
     }
 
@@ -327,11 +391,11 @@ impl fmt::Display for ErrorKind {
 impl IntoResponse for ErrorKind {
     #[inline]
     fn into_response(self) -> Response {
-        self.response().into_response()
+        Error::new(self).into_response()
     }
 }
 
-impl OperationOutput for Error<'_> {
+impl OperationOutput for Error {
     type Inner = ErrorResponse<'static>;
 
     fn operation_response(
@@ -349,6 +413,35 @@ impl OperationOutput for Error<'_> {
         // Error responses should be explicitly documented via TransformOperation.
         Vec::new()
     }
+}
+
+/// The `OpenAPI` responses an extractor rejects with, one per status `code`, each
+/// documented with the [`ErrorResponse`] body every error carries. Returned
+/// from an extractor's `inferred_early_responses`, so a handler's docs list
+/// only what its body adds.
+pub fn error_responses(
+    ctx: &mut GenContext,
+    operation: &mut Operation,
+    codes: &[u16],
+) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
+    let Some(response) = Error::operation_response(ctx, operation) else {
+        return Vec::new();
+    };
+    codes
+        .iter()
+        .map(|&code| {
+            let description = StatusCode::from_u16(code)
+                .ok()
+                .and_then(|status| status.canonical_reason())
+                .unwrap_or("Error")
+                .to_owned();
+            let response = aide::openapi::Response {
+                description,
+                ..response.clone()
+            };
+            (Some(aide::openapi::StatusCode::Code(code)), response)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -422,17 +515,6 @@ mod tests {
     fn std_error_trait() {
         let error = Error::new(ErrorKind::BadRequest);
         let _: &dyn std::error::Error = &error;
-    }
-
-    #[test]
-    fn error_into_static() {
-        let error = ErrorKind::NotFound
-            .with_message("Test message".to_string())
-            .with_context("Test context".to_string());
-
-        let static_error = error.into_owned();
-        assert_eq!(static_error.message.as_deref(), Some("Test message"));
-        assert_eq!(static_error.context.as_deref(), Some("Test context"));
     }
 
     #[test]

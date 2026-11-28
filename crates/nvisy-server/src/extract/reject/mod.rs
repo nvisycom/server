@@ -5,15 +5,13 @@
 //! designed to be drop-in replacements for their standard Axum counterparts while
 //! providing additional features like detailed error context and automatic validation.
 
-mod form_with_rej;
 mod json_with_rej;
-mod mutlipart_with_rej;
+mod multipart_with_rej;
 mod path_with_rej;
 mod query_with_rej;
 
-pub use self::form_with_rej::Form;
 pub use self::json_with_rej::Json;
-pub use self::mutlipart_with_rej::Multipart;
+pub use self::multipart_with_rej::Multipart;
 pub use self::path_with_rej::Path;
 pub use self::query_with_rej::Query;
 

@@ -25,15 +25,13 @@ impl CreateInviteInput {
 
     /// Builds the database model, storing the normalized invitee email.
     pub fn to_model(&self, workspace_id: Uuid, created_by: Uuid) -> NewWorkspaceInvite {
-        NewWorkspaceInvite {
+        new_invite(
             workspace_id,
-            invitee_email: Some(self.normalized_email()),
-            invited_role: Some(self.invited_role),
-            expires_at: self.expires_at.map(Into::into),
             created_by,
-            updated_by: created_by,
-            ..Default::default()
-        }
+            Some(self.normalized_email()),
+            self.invited_role,
+            self.expires_at,
+        )
     }
 }
 
@@ -47,16 +45,33 @@ pub struct GenerateInviteCodeInput {
 
 impl GenerateInviteCodeInput {
     /// Builds the database model for an open (email-unbound) invite code.
-    pub fn into_model(self, workspace_id: Uuid, created_by: Uuid) -> NewWorkspaceInvite {
-        NewWorkspaceInvite {
+    pub fn to_model(&self, workspace_id: Uuid, created_by: Uuid) -> NewWorkspaceInvite {
+        new_invite(
             workspace_id,
-            invitee_email: None,
-            invited_role: Some(self.invited_role),
-            expires_at: self.expires_at.map(Into::into),
             created_by,
-            updated_by: created_by,
-            ..Default::default()
-        }
+            None,
+            self.invited_role,
+            self.expires_at,
+        )
+    }
+}
+
+/// An invite row: bound to `invitee_email`, or an open code when `None`.
+fn new_invite(
+    workspace_id: Uuid,
+    created_by: Uuid,
+    invitee_email: Option<String>,
+    invited_role: WorkspaceRole,
+    expires_at: Option<Timestamp>,
+) -> NewWorkspaceInvite {
+    NewWorkspaceInvite {
+        workspace_id,
+        invitee_email,
+        invited_role: Some(invited_role),
+        expires_at: expires_at.map(Into::into),
+        created_by,
+        updated_by: created_by,
+        ..Default::default()
     }
 }
 

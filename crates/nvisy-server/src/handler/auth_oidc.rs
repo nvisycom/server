@@ -38,17 +38,17 @@ use aide::axum::ApiRouter;
 use aide::axum::routing::{get_with, post_with};
 use aide::transform::TransformOperation;
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::AccountApiTokenRepository;
 use nvisy_postgres::types::ApiTokenType;
-use serde::{Deserialize, Serialize};
 
 use crate::extract::{AuthState, Json, Path, Query, SecurityContext, ValidateJson};
-use crate::handler::request::{DesktopTokenRequest, IdentityPathParams, OidcCallbackQuery};
-use crate::handler::response::AccountDesktopToken;
+use crate::handler::request::{
+    DesktopTokenRequest, IdentityPathParams, OidcCallbackQuery, OidcStartQuery,
+};
+use crate::handler::response::{AccountDesktopToken, AuthorizeRedirect};
 use crate::response::{CookieConfig, ErrorKind, ErrorResponse, RedirectResult, Result, WebSession};
 use crate::service::{
     AccountProvisioner, AuthIssuer, CallbackOutcome, OidcPurpose, OidcService, RedirectKind,
@@ -58,21 +58,18 @@ use crate::service::{
 /// Tracing target for OIDC sign-in operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::auth_oidc";
 
-/// The response to a successful sign-in start: where to send the user.
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct OidcStartResponse {
-    /// The provider authorize URL the client should redirect the user to.
-    pub authorize_url: String,
-}
-
 /// Begins an OIDC sign-in and returns the provider authorize URL.
-#[tracing::instrument(skip_all, fields(provider = ?path_params.provider))]
+#[tracing::instrument(
+    skip_all,
+    fields(
+        provider = ?path_params.provider,
+    )
+)]
 async fn start_sign_in(
     State(oidc): State<OidcService>,
     Path(path_params): Path<IdentityPathParams>,
     Query(query): Query<OidcStartQuery>,
-) -> Result<(StatusCode, Json<OidcStartResponse>)> {
+) -> Result<Json<AuthorizeRedirect>> {
     tracing::debug!(target: TRACING_TARGET, "Starting OIDC sign-in");
     let authorize_url = oidc
         .begin_flow(
@@ -81,7 +78,7 @@ async fn start_sign_in(
             OidcPurpose::SignIn,
         )
         .await?;
-    Ok((StatusCode::OK, Json(OidcStartResponse { authorize_url })))
+    Ok(Json(AuthorizeRedirect { authorize_url }))
 }
 
 fn start_sign_in_docs(op: TransformOperation) -> TransformOperation {
@@ -91,7 +88,7 @@ fn start_sign_in_docs(op: TransformOperation) -> TransformOperation {
              authorize URL to redirect the user to. On consent, the provider redirects to the \
              callback, which signs the user in.",
         )
-        .response::<200, Json<OidcStartResponse>>()
+        .response::<200, Json<AuthorizeRedirect>>()
         .response::<404, Json<ErrorResponse>>()
         .response::<503, Json<ErrorResponse>>()
 }
@@ -104,13 +101,18 @@ fn start_sign_in_docs(op: TransformOperation) -> TransformOperation {
 /// (`POST /account/identities/{provider}`), not `/auth`, so linking and
 /// unlinking a provider sit symmetrically on the same resource. The OIDC redirect
 /// machinery lives here beside the shared callback.
-#[tracing::instrument(skip_all, fields(provider = ?path_params.provider, account_id = %auth_state.account_id))]
+#[tracing::instrument(
+    skip_all,
+    fields(
+        provider = ?path_params.provider,
+    )
+)]
 pub(crate) async fn start_link(
     State(oidc): State<OidcService>,
     auth_state: AuthState,
     Path(path_params): Path<IdentityPathParams>,
     Query(query): Query<OidcStartQuery>,
-) -> Result<(StatusCode, Json<OidcStartResponse>)> {
+) -> Result<Json<AuthorizeRedirect>> {
     tracing::debug!(target: TRACING_TARGET, "Starting OIDC account link");
 
     // Linking a provider adds a credential, so it requires a fresh step-up proof
@@ -132,7 +134,7 @@ pub(crate) async fn start_link(
             },
         )
         .await?;
-    Ok((StatusCode::OK, Json(OidcStartResponse { authorize_url })))
+    Ok(Json(AuthorizeRedirect { authorize_url }))
 }
 
 pub(crate) fn start_link_docs(op: TransformOperation) -> TransformOperation {
@@ -143,7 +145,7 @@ pub(crate) fn start_link_docs(op: TransformOperation) -> TransformOperation {
              (`reauthProof`, from the reauth endpoint). On consent, the callback attaches the \
              verified provider identity to the caller's account.",
         )
-        .response::<200, Json<OidcStartResponse>>()
+        .response::<200, Json<AuthorizeRedirect>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
         .response::<503, Json<ErrorResponse>>()
@@ -153,13 +155,18 @@ pub(crate) fn start_link_docs(op: TransformOperation) -> TransformOperation {
 /// provider identity already linked to their account, so a credential-adding
 /// action (setting a first password, linking a new provider) can require more
 /// than a merely-live session. The callback mints a single-use proof.
-#[tracing::instrument(skip_all, fields(provider = ?path_params.provider, account_id = %auth_state.account_id))]
+#[tracing::instrument(
+    skip_all,
+    fields(
+        provider = ?path_params.provider,
+    )
+)]
 async fn start_reauth(
     State(oidc): State<OidcService>,
     auth_state: AuthState,
     Path(path_params): Path<IdentityPathParams>,
     Query(query): Query<OidcStartQuery>,
-) -> Result<(StatusCode, Json<OidcStartResponse>)> {
+) -> Result<Json<AuthorizeRedirect>> {
     tracing::debug!(target: TRACING_TARGET, "Starting OIDC step-up re-authentication");
     let authorize_url = oidc
         .begin_flow(
@@ -170,7 +177,7 @@ async fn start_reauth(
             },
         )
         .await?;
-    Ok((StatusCode::OK, Json(OidcStartResponse { authorize_url })))
+    Ok(Json(AuthorizeRedirect { authorize_url }))
 }
 
 fn start_reauth_docs(op: TransformOperation) -> TransformOperation {
@@ -181,8 +188,7 @@ fn start_reauth_docs(op: TransformOperation) -> TransformOperation {
              callback mints a short-lived, single-use proof required to add a credential \
              (set a first password, or link a new provider).",
         )
-        .response::<200, Json<OidcStartResponse>>()
-        .response::<401, Json<ErrorResponse>>()
+        .response::<200, Json<AuthorizeRedirect>>()
         .response::<404, Json<ErrorResponse>>()
         .response::<503, Json<ErrorResponse>>()
 }
@@ -196,7 +202,7 @@ fn start_reauth_docs(op: TransformOperation) -> TransformOperation {
 /// token and returns it for the frontend to hand back to the app via the
 /// deep-link. Authenticated by the just-established session, so a caller can only
 /// mint a token for their own account. No cookie is set on the response.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+#[tracing::instrument(skip_all)]
 async fn mint_desktop_token(
     State(pg_client): State<PgClient>,
     State(oidc): State<OidcService>,
@@ -205,7 +211,7 @@ async fn mint_desktop_token(
     auth_state: AuthState,
     security: SecurityContext,
     ValidateJson(request): ValidateJson<DesktopTokenRequest>,
-) -> Result<(StatusCode, Json<AccountDesktopToken>)> {
+) -> Result<Json<AccountDesktopToken>> {
     tracing::debug!(target: TRACING_TARGET, "Minting desktop app token");
 
     // The target must be an allow-listed desktop scheme. Refuse a web origin (or
@@ -241,13 +247,10 @@ async fn mint_desktop_token(
         .issue_app_token(&mut conn, &account, security)
         .await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(AccountDesktopToken {
-            api_token,
-            redirect_uri: request.redirect_uri,
-        }),
-    ))
+    Ok(Json(AccountDesktopToken {
+        api_token,
+        redirect_uri: request.redirect_uri,
+    }))
 }
 
 fn mint_desktop_token_docs(op: TransformOperation) -> TransformOperation {
@@ -259,21 +262,6 @@ fn mint_desktop_token_docs(op: TransformOperation) -> TransformOperation {
              must be a configured desktop scheme.",
         )
         .response::<200, Json<AccountDesktopToken>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-}
-
-/// Optional query parameters for starting a sign-in, link, or reauth.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct OidcStartQuery {
-    /// Frontend URL to return to once done. Carried through the flow and used to
-    /// build the callback's redirect.
-    redirect_uri: Option<String>,
-    /// A step-up re-authentication proof. Required to start a *link* (adding a
-    /// provider is a credential-adding action, so a live session alone is not
-    /// enough); ignored for sign-in and reauth.
-    reauth_proof: Option<String>,
 }
 
 /// Completes an OIDC flow: the provider redirects here with the code and state.

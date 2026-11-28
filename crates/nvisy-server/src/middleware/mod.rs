@@ -56,7 +56,6 @@ mod observability;
 mod recovery;
 mod security;
 mod specification;
-mod sunset;
 
 pub use args::{MiddlewareArgs, RouterMiddlewareExt};
 pub use auth::{csrf_protect, require_authentication, slide_session};
@@ -68,4 +67,3 @@ pub use security::{
     UploadConfig,
 };
 pub use specification::{OpenApiConfig, RouterOpenApiExt, collapse_null_types};
-pub use sunset::{SunsetConfig, sunset_headers};

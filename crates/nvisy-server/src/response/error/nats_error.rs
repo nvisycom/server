@@ -10,13 +10,13 @@ use super::http_error::{Error as HttpError, ErrorKind};
 /// A key the server generated itself (a CSRF state, a proof token, a lock name)
 /// failed KV key validation: a server fault, not a bad request. Untrusted keys
 /// are parsed at the call site and mapped to a client error there.
-impl From<InvalidKvKey> for HttpError<'_> {
+impl From<InvalidKvKey> for HttpError {
     fn from(_: InvalidKvKey) -> Self {
         ErrorKind::InternalServerError.with_message("Generated key is not a valid KV key")
     }
 }
 
-impl From<nvisy_nats::Error> for HttpError<'_> {
+impl From<nvisy_nats::Error> for HttpError {
     fn from(nats_error: nvisy_nats::Error) -> Self {
         match nats_error {
             // Connection and network errors -> Service Unavailable (transient,

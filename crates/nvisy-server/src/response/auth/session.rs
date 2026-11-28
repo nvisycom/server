@@ -68,47 +68,24 @@ fn cookie_max_age() -> time::Duration {
     time::Duration::seconds(session::MAX_AGE_SECS)
 }
 
-/// Builds the `HttpOnly` session cookie carrying `jwt`.
-///
-/// `HttpOnly` keeps page script from reading the token; `Secure` (per config)
-/// restricts it to HTTPS; `SameSite=Lax` lets it ride the provider's top-level
-/// redirect back to the app (needed for the OIDC callback) while still not being
-/// sent on cross-site background requests.
-fn session_cookie(secure: bool, jwt: String) -> Cookie<'static> {
-    Cookie::build((SESSION_COOKIE_NAME, jwt))
-        .http_only(true)
-        .secure(secure)
-        .same_site(SameSite::Lax)
-        .path("/")
-        .max_age(cookie_max_age())
-        .build()
-}
-
-/// Builds the readable CSRF-token cookie for the double-submit check.
-///
-/// Deliberately **not** `HttpOnly`: the SPA reads it and echoes it in the CSRF
-/// header on state-changing requests. It is not a secret credential on its own —
-/// it is only meaningful paired with the `HttpOnly` session cookie an attacker
-/// cannot read or set cross-site.
-fn csrf_cookie(secure: bool, token: String) -> Cookie<'static> {
-    Cookie::build((CSRF_COOKIE_NAME, token))
-        .http_only(false)
-        .secure(secure)
-        .same_site(SameSite::Lax)
-        .path("/")
-        .max_age(cookie_max_age())
-        .build()
-}
-
-/// Builds a cookie that clears `name`: empty value, immediate expiry, attributes
-/// matching the originals so the browser overwrites them.
-fn clearing_cookie(secure: bool, name: &'static str, http_only: bool) -> Cookie<'static> {
-    Cookie::build((name, ""))
+/// Builds a session-scoped cookie: `SameSite=Lax`, the whole site, `Secure` per
+/// deployment. The session cookie is `HttpOnly`; the CSRF cookie deliberately is
+/// not — the SPA reads it and echoes it in the CSRF header, and it is only
+/// meaningful paired with the `HttpOnly` session cookie an attacker cannot read
+/// or set cross-site. A zero `max_age` clears the cookie.
+fn cookie(
+    name: &'static str,
+    value: String,
+    http_only: bool,
+    secure: bool,
+    max_age: time::Duration,
+) -> Cookie<'static> {
+    Cookie::build((name, value))
         .http_only(http_only)
         .secure(secure)
         .same_site(SameSite::Lax)
         .path("/")
-        .max_age(time::Duration::ZERO)
+        .max_age(max_age)
         .build()
 }
 
@@ -147,8 +124,20 @@ impl WebSession {
     /// response — used by the OIDC callback, which sets them on a redirect.
     pub fn into_jar(self) -> CookieJar {
         CookieJar::new()
-            .add(session_cookie(self.config.secure, self.jwt))
-            .add(csrf_cookie(self.config.secure, generate_csrf_token()))
+            .add(cookie(
+                SESSION_COOKIE_NAME,
+                self.jwt,
+                true,
+                self.config.secure,
+                cookie_max_age(),
+            ))
+            .add(cookie(
+                CSRF_COOKIE_NAME,
+                generate_csrf_token(),
+                false,
+                self.config.secure,
+                cookie_max_age(),
+            ))
     }
 }
 
@@ -201,11 +190,19 @@ impl ClearedSession {
     /// The clearing session and CSRF cookies as a jar.
     pub fn into_jar(self) -> CookieJar {
         CookieJar::new()
-            .add(clearing_cookie(
-                self.config.secure,
+            .add(cookie(
                 SESSION_COOKIE_NAME,
+                String::new(),
                 true,
+                self.config.secure,
+                time::Duration::ZERO,
             ))
-            .add(clearing_cookie(self.config.secure, CSRF_COOKIE_NAME, false))
+            .add(cookie(
+                CSRF_COOKIE_NAME,
+                String::new(),
+                false,
+                self.config.secure,
+                time::Duration::ZERO,
+            ))
     }
 }

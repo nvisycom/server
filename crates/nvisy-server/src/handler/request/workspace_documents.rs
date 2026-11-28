@@ -6,12 +6,13 @@ use std::collections::BTreeSet;
 use derive_more::{AsRef, Into};
 use elide_pipeline::FormatRegistry;
 use garde::Validate;
+use nvisy_postgres::model;
 use nvisy_postgres::types::DocumentKind;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::input::{ListDocumentsInput, UpdateDocumentInput};
+use crate::domain::input::ListDocumentsInput;
 use crate::handler::utility::DocumentHash;
 use crate::service::format_modality;
 
@@ -28,11 +29,12 @@ pub struct UpdateWorkspaceDocument {
     pub metadata: Option<serde_json::Value>,
 }
 
-impl From<UpdateWorkspaceDocument> for UpdateDocumentInput {
+impl From<UpdateWorkspaceDocument> for model::UpdateWorkspaceDocument {
     fn from(request: UpdateWorkspaceDocument) -> Self {
-        UpdateDocumentInput {
+        Self {
             display_name: request.display_name,
             metadata: request.metadata,
+            ..Default::default()
         }
     }
 }

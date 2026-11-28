@@ -4,25 +4,22 @@
 //! authentication verification by validating JWT tokens against current database state.
 //! Unlike basic JWT validation, this extractor ensures accounts are in good standing.
 
-use std::hash::Hash;
-
 use aide::OperationInput;
 use aide::generate::GenContext;
 use aide::openapi::Operation;
-use axum::extract::{FromRef, FromRequestParts, OptionalFromRequestParts};
+use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
 use derive_more::Deref;
 use nvisy_postgres::model::{Account, WorkspaceMember};
 use nvisy_postgres::query::{
     AccountApiTokenRepository, AccountRepository, WorkspaceMemberRepository,
 };
-use nvisy_postgres::types::session;
+use nvisy_postgres::types::{AccountRefRow, session};
 use nvisy_postgres::{PgClient, PgConn};
-use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{AuthClaims, Permission, SessionToken};
-use crate::response::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Result, error_responses};
 use crate::service::AuthKeys;
 
 /// Tracing target for authentication operations.
@@ -64,17 +61,39 @@ const TRACING_TARGET: &str = "nvisy_server::extract::auth";
 ///
 /// [`AuthState`] is [`Send`] + [`Sync`] and can be safely shared across threads.
 /// All contained data is immutable after creation.
-#[derive(Debug, Clone, Deref, Hash, PartialEq, Eq)]
-pub struct AuthState<T = ()>(AuthClaims<T>);
+#[derive(Debug, Clone, Deref)]
+pub struct AuthState {
+    /// The verified token claims.
+    #[deref]
+    claims: AuthClaims,
+    /// The caller's public account reference, from the row the verification
+    /// already loads.
+    account: AccountRefRow,
+}
 
-impl<T> AuthState<T> {
-    /// Wraps claims that have already been verified against the database. Private
-    /// on purpose: the only way to obtain an `AuthState` is by going through
-    /// [`from_unverified_header`](Self::from_unverified_header) (or the extractor),
-    /// so the type is a proof of verification that cannot be forged from raw claims.
-    #[inline]
-    const fn from_verified_claims(auth_claims: AuthClaims<T>) -> Self {
-        Self(auth_claims)
+impl AuthState {
+    /// Wraps claims that have already been verified against the database, with
+    /// the account the check loaded. Private on purpose: the only way to obtain an
+    /// `AuthState` is through [`from_unverified_header`](Self::from_unverified_header)
+    /// (or the extractor), so the type is a proof of verification that cannot be
+    /// forged from raw claims.
+    fn from_verified(claims: AuthClaims, account: Account) -> Self {
+        Self {
+            claims,
+            account: AccountRefRow {
+                id: account.id,
+                username: account.username,
+                display_name: account.display_name,
+                avatar_url: account.avatar_url,
+            },
+        }
+    }
+
+    /// The caller's public account reference, for responses that name them (as
+    /// a creator, author, or requester) without another lookup.
+    #[must_use]
+    pub fn account(&self) -> &AccountRefRow {
+        &self.account
     }
 
     /// Authorizes the caller for `permission` in `workspace_id`, returning their
@@ -94,14 +113,14 @@ impl<T> AuthState<T> {
         permission: Permission,
     ) -> Result<WorkspaceMember> {
         let member = conn
-            .find_workspace_member(workspace_id, self.0.account_id)
+            .find_workspace_member(workspace_id, self.claims.account_id)
             .await
             .map_err(Error::from)?;
 
         let Some(member) = member else {
             tracing::warn!(
                 target: TRACING_TARGET,
-                account_id = %self.0.account_id,
+                account_id = %self.claims.account_id,
                 workspace_id = %workspace_id,
                 "access denied: not a workspace member"
             );
@@ -111,7 +130,7 @@ impl<T> AuthState<T> {
         if permission.is_permitted_by_role(member.member_role) {
             tracing::debug!(
                 target: TRACING_TARGET,
-                account_id = %self.0.account_id,
+                account_id = %self.claims.account_id,
                 workspace_id = %workspace_id,
                 permission = ?permission,
                 role = ?member.member_role,
@@ -121,7 +140,7 @@ impl<T> AuthState<T> {
         } else {
             tracing::warn!(
                 target: TRACING_TARGET,
-                account_id = %self.0.account_id,
+                account_id = %self.claims.account_id,
                 workspace_id = %workspace_id,
                 permission = ?permission,
                 role = ?member.member_role,
@@ -132,10 +151,7 @@ impl<T> AuthState<T> {
     }
 }
 
-impl<T> AuthState<T>
-where
-    T: Clone + for<'de> Deserialize<'de>,
-{
+impl AuthState {
     /// Creates a new [`AuthState`] from an unverified JWT token with full database validation.
     ///
     /// This method is the primary entry point for secure authentication verification.
@@ -171,7 +187,7 @@ where
     /// This method performs optimized database queries and should be called
     /// only once per request (caching handles subsequent uses).
     pub async fn from_unverified_header(
-        session_token: SessionToken<T>,
+        session_token: SessionToken,
         pg_client: PgClient,
     ) -> Result<Self> {
         let auth_claims = session_token.into_auth_claims();
@@ -195,7 +211,7 @@ where
         })?;
 
         // Step 1: Verify account exists and is in good standing
-        Self::verify_account_status(&mut conn, &auth_claims).await?;
+        let account = Self::verify_account_status(&mut conn, &auth_claims).await?;
 
         // Step 2: Ensure the token itself has not been revoked. The JWT's own
         // expiry bounds its lifetime, but revocation must take effect
@@ -209,7 +225,7 @@ where
             "authentication verification completed successfully"
         );
 
-        Ok(Self::from_verified_claims(auth_claims))
+        Ok(Self::from_verified(auth_claims, account))
     }
 
     /// Verifies that the account exists and is in good standing.
@@ -241,10 +257,7 @@ where
     ///
     /// * [`ErrorKind::Unauthorized`]: Account not found or suspended
     /// * [`ErrorKind::InternalServerError`]: Database query failures
-    async fn verify_account_status(
-        conn: &mut PgConn,
-        auth_claims: &AuthClaims<T>,
-    ) -> Result<Account> {
+    async fn verify_account_status(conn: &mut PgConn, auth_claims: &AuthClaims) -> Result<Account> {
         let account = conn
             .find_account_by_id(auth_claims.account_id)
             .await
@@ -295,7 +308,7 @@ where
     /// # Errors
     ///
     /// Returns [`ErrorKind::Unauthorized`] if the token has been revoked.
-    async fn verify_token_active(conn: &mut PgConn, auth_claims: &AuthClaims<T>) -> Result<()> {
+    async fn verify_token_active(conn: &mut PgConn, auth_claims: &AuthClaims) -> Result<()> {
         // This check is the SOLE authority for session validity: revocation, idle
         // expiry, and absolute-age expiry all go through `is_active`. It MUST fail
         // closed — a database error maps to an error (request rejected), never to
@@ -339,14 +352,13 @@ where
     }
 }
 
-impl<T, S> FromRequestParts<S> for AuthState<T>
+impl<S> FromRequestParts<S> for AuthState
 where
-    T: Clone + for<'de> Deserialize<'de> + Send + Sync + 'static,
     S: Sync + Send + 'static,
     PgClient: FromRef<S>,
     AuthKeys: FromRef<S>,
 {
-    type Rejection = Error<'static>;
+    type Rejection = Error;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         // Check for cached auth state to avoid repeated database queries
@@ -359,56 +371,26 @@ where
         let pg_database = PgClient::from_ref(state);
         let auth_state = Self::from_unverified_header(session_token, pg_database).await?;
 
-        // Cache the verified state for subsequent extractors in the same request
+        // Cache the verified state for subsequent extractors in the same request,
+        // and tag the request span so every later log line carries the caller.
         parts.extensions.insert(auth_state.clone());
+        tracing::Span::current()
+            .record("account_id", tracing::field::display(auth_state.account_id));
         Ok(auth_state)
     }
 }
 
-impl<T, S> OptionalFromRequestParts<S> for AuthState<T>
-where
-    T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static,
-    S: Sync + Send + 'static,
-    PgClient: FromRef<S>,
-    AuthKeys: FromRef<S>,
-{
-    type Rejection = Error<'static>;
-
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &S,
-    ) -> Result<Option<Self>, Self::Rejection> {
-        use crate::response::ErrorKind;
-
-        match <Self as FromRequestParts<S>>::from_request_parts(parts, state).await {
-            Ok(auth_state) => Ok(Some(auth_state)),
-            // Only a genuinely absent-or-invalid credential degrades to "not
-            // authenticated" (`None`). An infrastructure error (e.g. the database
-            // validity check failing) or a forbidden account must PROPAGATE, not
-            // silently become anonymous — mapping those to `None` would fail open,
-            // contradicting the fail-closed authority of the `is_active` check.
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    ErrorKind::MissingAuthToken
-                        | ErrorKind::MalformedAuthToken
-                        | ErrorKind::Unauthorized
-                ) =>
-            {
-                Ok(None)
-            }
-            Err(error) => Err(error),
-        }
-    }
-}
-
-impl<T> OperationInput for AuthState<T>
-where
-    T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static,
-{
+impl OperationInput for AuthState {
     fn operation_input(_ctx: &mut GenContext, operation: &mut Operation) {
         // The Bearer token is required: the only way to satisfy the operation is
         // to present it.
         operation.security = vec![[("BearerAuth".to_string(), vec![])].into()];
+    }
+
+    fn inferred_early_responses(
+        ctx: &mut GenContext,
+        operation: &mut Operation,
+    ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
+        error_responses(ctx, operation, &[401])
     }
 }

@@ -16,7 +16,7 @@ use crate::schema::{
 };
 use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Json,
-    TimeCursor, keyset, total,
+    TimeCursor, WithAccountRef, keyset, total,
 };
 use crate::{Error, PgConnection, Result, schema};
 
@@ -177,6 +177,13 @@ pub trait WorkspaceDetectionRepository {
         workspace_id: Uuid,
         detection_id: Uuid,
     ) -> impl Future<Output = Result<Option<WorkspaceDetection>>> + Send;
+
+    /// Finds a detection within a workspace, with the account that triggered it.
+    fn find_detection_with_trigger(
+        &mut self,
+        workspace_id: Uuid,
+        detection_id: Uuid,
+    ) -> impl Future<Output = Result<Option<WithAccountRef<WorkspaceDetection>>>> + Send;
 
     /// Finds a detection by its `(workspace, idempotency key)` pair, for detect
     /// replay.
@@ -396,6 +403,26 @@ impl WorkspaceDetectionRepository for PgConnection {
             .await
             .optional()
             .map_err(Error::from)
+    }
+
+    async fn find_detection_with_trigger(
+        &mut self,
+        workspace_id: Uuid,
+        detection_id: Uuid,
+    ) -> Result<Option<WithAccountRef<WorkspaceDetection>>> {
+        use schema::workspace_detections::dsl as detections;
+        use schema::{accounts, workspace_detections};
+
+        let row = workspace_detections::table
+            .inner_join(accounts::table.on(accounts::id.eq(detections::account_id)))
+            .filter(detections::id.eq(detection_id))
+            .filter(detections::workspace_id.eq(workspace_id))
+            .filter(detections::deleted_at.is_null())
+            .select((WorkspaceDetection::as_select(), AccountRefRow::as_select()))
+            .first::<(WorkspaceDetection, AccountRefRow)>(self)
+            .await
+            .optional()?;
+        Ok(row.map(WithAccountRef::from))
     }
 
     async fn find_detection_by_idempotency_key(

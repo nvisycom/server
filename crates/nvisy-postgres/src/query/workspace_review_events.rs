@@ -12,8 +12,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::model::{NewWorkspaceReviewEvent, WorkspaceReview, WorkspaceReviewEvent};
-use crate::types::{AccountRefRow, ReviewEventKind, WithAccountRef};
+use crate::model::{
+    NewWorkspaceReviewEvent, WorkspaceReview, WorkspaceReviewComment, WorkspaceReviewEvent,
+};
+use crate::query::WorkspaceReviewCommentRepository;
+use crate::types::{AccountRefRow, CursorPage, CursorPagination, ReviewEventKind, WithAccountRef};
 use crate::{PgConnection, Result, schema};
 
 /// Which of the two timeline streams an entry came from. Its order is the
@@ -83,8 +86,52 @@ pub(crate) enum StreamBound {
     FromInstant { created_at: Timestamp },
 }
 
+/// One entry in a review's timeline: a comment or a lifecycle event, each with
+/// its author or actor.
+#[derive(Debug, Clone)]
+pub enum TimelineEntry {
+    /// A comment, with its author.
+    Comment(WithAccountRef<WorkspaceReviewComment>),
+    /// A lifecycle event, with its actor (absent when the account was removed).
+    Event(WithAccountRef<WorkspaceReviewEvent, Option<AccountRefRow>>),
+}
+
+impl TimelineEntry {
+    /// The entry's position in the merged timeline: `(created_at, source, id)`.
+    /// Events sort before comments at the same instant; `id` breaks a tie within
+    /// one stream. This is the total order the timeline is paginated by.
+    #[must_use]
+    pub fn cursor(&self) -> TimelineCursor {
+        match self {
+            Self::Comment(c) => TimelineCursor {
+                created_at: c.item.created_at.into(),
+                source: TimelineSource::Comment,
+                id: c.item.id,
+            },
+            Self::Event(e) => TimelineCursor {
+                created_at: e.item.created_at.into(),
+                source: TimelineSource::Event,
+                id: e.item.id,
+            },
+        }
+    }
+}
+
 /// Read operations on a review's timeline events.
 pub trait WorkspaceReviewEventRepository {
+    /// Lists a review's timeline — its comments and lifecycle events interleaved,
+    /// oldest first — one page after the pagination's cursor.
+    ///
+    /// Each stream contributes a bounded window (`limit + 1` rows from its own
+    /// keyset bound). The windows are merged in timeline order and cut to the
+    /// first `limit + 1`, of which the page keeps `limit`; the extra row signals a
+    /// further page.
+    fn list_review_timeline(
+        &mut self,
+        review_id: Uuid,
+        pagination: &CursorPagination<TimelineCursor>,
+    ) -> impl Future<Output = Result<CursorPage<TimelineEntry>>> + Send;
+
     /// Lists up to `limit` of a review's timeline events at or after a cursor
     /// position, oldest first, each with its actor's account reference. Backs the
     /// merged, paginated timeline; the caller interleaves these with the comments.
@@ -99,6 +146,41 @@ pub trait WorkspaceReviewEventRepository {
 }
 
 impl WorkspaceReviewEventRepository for PgConnection {
+    async fn list_review_timeline(
+        &mut self,
+        review_id: Uuid,
+        pagination: &CursorPagination<TimelineCursor>,
+    ) -> Result<CursorPage<TimelineEntry>> {
+        let after = pagination.after_key();
+        let fetch = pagination.fetch_limit();
+        let comments = self
+            .list_review_comments_after(review_id, after, fetch)
+            .await?;
+        let events = self
+            .list_review_events_after(review_id, after, fetch)
+            .await?;
+
+        let mut entries: Vec<TimelineEntry> = comments
+            .into_iter()
+            .map(TimelineEntry::Comment)
+            .chain(events.into_iter().map(TimelineEntry::Event))
+            .collect();
+        entries.sort_by_key(|entry| {
+            let cursor = entry.cursor();
+            (cursor.created_at, cursor.source, cursor.id)
+        });
+        // Each window holds up to `limit + 1` rows, so the merge can hold twice
+        // that. Keep the first `limit + 1` in timeline order, so the page ends at
+        // the true `limit`-th entry and the next cursor skips nothing.
+        entries.truncate(usize::try_from(fetch).unwrap_or(usize::MAX));
+        Ok(CursorPage::new(
+            entries,
+            None,
+            pagination.limit,
+            TimelineEntry::cursor,
+        ))
+    }
+
     async fn list_review_events_after(
         &mut self,
         review_id: Uuid,

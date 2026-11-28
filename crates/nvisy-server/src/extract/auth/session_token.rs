@@ -17,7 +17,6 @@ use axum_extra::headers::Authorization;
 use axum_extra::headers::authorization::Bearer;
 use axum_extra::typed_header::TypedHeaderRejectionReason;
 use jsonwebtoken::errors::{Error as JwtError, ErrorKind as JwtErrorKind};
-use serde::Deserialize;
 
 use super::AuthClaims;
 use crate::extract::auth::SESSION_COOKIE_NAME;
@@ -60,13 +59,13 @@ pub enum AuthTransport {
 /// [`AuthState`]: crate::extract::AuthState
 #[must_use]
 #[derive(Debug, Clone)]
-pub struct SessionToken<T = ()> {
-    auth_claims: AuthClaims<T>,
+pub struct SessionToken {
+    auth_claims: AuthClaims,
     /// The transport the token arrived on.
     transport: AuthTransport,
 }
 
-impl<T> SessionToken<T> {
+impl SessionToken {
     /// The transport this token arrived on.
     #[inline]
     #[must_use]
@@ -76,15 +75,13 @@ impl<T> SessionToken<T> {
 
     /// Consumes this token and returns the verified JWT claims.
     #[inline]
-    pub fn into_auth_claims(self) -> AuthClaims<T> {
+    #[must_use]
+    pub fn into_auth_claims(self) -> AuthClaims {
         self.auth_claims
     }
 }
 
-impl<T> SessionToken<T>
-where
-    T: Clone + for<'de> Deserialize<'de>,
-{
+impl SessionToken {
     /// Validates a raw JWT `token` carried by `transport` (signature, claims,
     /// expiry) and records the transport.
     ///
@@ -100,13 +97,12 @@ where
     }
 }
 
-impl<T, S> FromRequestParts<S> for SessionToken<T>
+impl<S> FromRequestParts<S> for SessionToken
 where
-    T: Clone + for<'de> Deserialize<'de> + Send + Sync + 'static,
     S: Sync + Send,
     AuthKeys: FromRef<S>,
 {
-    type Rejection = Error<'static>;
+    type Rejection = Error;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         // Return the cached token if a prior extractor already verified it.
@@ -153,7 +149,7 @@ where
     }
 }
 
-impl From<JwtError> for Error<'static> {
+impl From<JwtError> for Error {
     fn from(error: JwtError) -> Self {
         match error.kind() {
             JwtErrorKind::ExpiredSignature => ErrorKind::Unauthorized

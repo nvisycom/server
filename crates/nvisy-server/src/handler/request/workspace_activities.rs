@@ -49,46 +49,35 @@ pub struct WorkspaceActivityExportOptions {
 }
 
 impl WorkspaceActivityFilterQuery {
-    /// Builds the repository filter for the paginated feed, folding in the actor
-    /// resolved by the handler and the optional date window.
-    ///
-    /// `actor` is the account id to constrain to;
-    /// `None` means no actor constraint. The window narrows the feed only where its
-    /// bounds are given.
+    /// Builds the repository filter for the paginated feed. The window narrows
+    /// the feed only where its bounds are given.
     ///
     /// # Errors
     ///
     /// A 400 if the window's optional bounds are invalid (see
     /// [`DateWindow::resolve_optional_bounds`]).
-    pub fn to_filter(&self, actor_id: Option<Uuid>, window: &DateWindow) -> Result<ActivityFilter> {
+    pub fn into_filter(self, window: &DateWindow) -> Result<ActivityFilter> {
         let (from, to) = window.resolve_optional_bounds()?;
         Ok(ActivityFilter {
-            types: self.types.clone().unwrap_or_default(),
-            actor: actor_id,
+            types: self.types.unwrap_or_default(),
+            actor: self.actor,
             from,
             to,
         })
     }
 
-    /// Builds the repository filter for the export, folding in the actor resolved
-    /// by the handler and the resolved, bounded date window.
-    ///
-    /// `actor` is the account id to constrain to;
-    /// `None` means no actor constraint. Unlike the feed, the export's window is
-    /// always applied (defaulted and capped) so the result stays bounded.
+    /// Builds the repository filter for the export. Unlike the feed, the
+    /// export's window is always applied (defaulted and capped) so the result
+    /// stays bounded.
     ///
     /// # Errors
     ///
     /// A 400 if either resolved window bound cannot be represented as a timestamp
     /// (see [`ResolvedWindow::from_timestamp`] and [`ResolvedWindow::to_timestamp`]).
-    pub fn to_export_filter(
-        &self,
-        actor_id: Option<Uuid>,
-        window: &ResolvedWindow,
-    ) -> Result<ActivityFilter> {
+    pub fn into_export_filter(self, window: &ResolvedWindow) -> Result<ActivityFilter> {
         Ok(ActivityFilter {
-            types: self.types.clone().unwrap_or_default(),
-            actor: actor_id,
+            types: self.types.unwrap_or_default(),
+            actor: self.actor,
             from: Some(window.from_timestamp()?),
             to: Some(window.to_timestamp()?),
         })
@@ -184,7 +173,7 @@ mod tests {
         let filter = WorkspaceActivityFilterQuery::default();
         let window: DateWindow = extract("from=2026-02-01&to=2026-01-01").await;
         assert!(
-            filter.to_filter(None, &window).is_err(),
+            filter.into_filter(&window).is_err(),
             "an inverted window should be rejected"
         );
     }

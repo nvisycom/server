@@ -9,7 +9,7 @@
 use super::http_error::{Error as HttpError, ErrorKind};
 use crate::service::OidcError;
 
-impl From<OidcError> for HttpError<'_> {
+impl From<OidcError> for HttpError {
     fn from(error: OidcError) -> Self {
         let message = error.to_string();
         match error {

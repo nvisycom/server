@@ -10,7 +10,7 @@ use nvisy_postgres::types::{CursorPage, CursorPagination, MemberFilter, MemberSo
 use nvisy_postgres::{AsyncConnection, PgClient, model};
 use uuid::Uuid;
 
-use crate::response::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Resource, Result};
 use crate::service::event;
 use crate::service::event::EventEmitter;
 
@@ -68,7 +68,7 @@ impl WorkspaceMemberService {
         let mut conn = self.postgres.get_connection().await?;
         conn.find_workspace_member_with_account(workspace_id, member_account_id)
             .await?
-            .ok_or_else(|| ErrorKind::NotFound.with_message("Workspace member not found"))
+            .ok_or_else(|| Error::not_found(Resource::Member))
     }
 
     /// Removes a member from a workspace, recording the event atomically.
@@ -100,7 +100,7 @@ impl WorkspaceMemberService {
             .find_workspace_member(workspace_id, member_account_id)
             .await?
         else {
-            return Err(ErrorKind::NotFound.into_error());
+            return Err(Error::not_found(Resource::Member));
         };
 
         if member_to_remove.member_role.is_owner() {
@@ -114,9 +114,9 @@ impl WorkspaceMemberService {
                 .await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::MemberDeleted(event::MemberDeleted {
+                event::MemberDeleted {
                     member_id: member_account_id,
-                }),
+                },
             )
             .await?;
             Ok::<(), Error>(())
@@ -160,7 +160,7 @@ impl WorkspaceMemberService {
             .find_workspace_member(workspace_id, member_account_id)
             .await?
         else {
-            return Err(ErrorKind::NotFound.into_error());
+            return Err(Error::not_found(Resource::Member));
         };
 
         // An owner cannot be demoted (only they can leave): reject a role change
@@ -178,9 +178,9 @@ impl WorkspaceMemberService {
                 .await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::MemberUpdated(event::MemberUpdated {
+                event::MemberUpdated {
                     member_id: member_account_id,
-                }),
+                },
             )
             .await?;
             Ok::<(), Error>(())
@@ -189,7 +189,7 @@ impl WorkspaceMemberService {
 
         conn.find_workspace_member_with_account(workspace_id, member_account_id)
             .await?
-            .ok_or_else(|| ErrorKind::NotFound.into_error())
+            .ok_or_else(|| Error::not_found(Resource::Member))
     }
 
     /// Returns the acting account's membership in the workspace, or a `NotFound`.
@@ -209,7 +209,7 @@ impl WorkspaceMemberService {
         let mut conn = self.postgres.get_connection().await?;
         conn.find_workspace_member(workspace_id, account_id)
             .await?
-            .ok_or_else(|| ErrorKind::NotFound.with_message("Workspace membership not found"))
+            .ok_or_else(|| Error::not_found(Resource::Member))
     }
 
     /// Updates the acting account's notification preferences on its membership,
@@ -232,7 +232,7 @@ impl WorkspaceMemberService {
             .await?
             .is_none()
         {
-            return Err(ErrorKind::NotFound.with_message("Workspace membership not found"));
+            return Err(Error::not_found(Resource::Member));
         }
 
         Ok(conn
@@ -279,9 +279,9 @@ impl WorkspaceMemberService {
                 .await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::MemberDeleted(event::MemberDeleted {
+                event::MemberDeleted {
                     member_id: account_id,
-                }),
+                },
             )
             .await?;
             Ok::<(), Error>(())

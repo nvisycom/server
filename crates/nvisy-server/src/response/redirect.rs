@@ -1,9 +1,10 @@
 //! Redirects that return the browser to the configured frontend at the end of a
 //! browser-driven flow (OIDC sign-in/link/reauth, cloud-file OAuth).
 //!
-//! Each flow validates its redirect target when it starts, so the `base` here is
-//! always an allow-listed URL; when none is configured, a minimal self-describing
-//! fallback is rendered instead of redirecting.
+//! An OIDC flow checks its redirect target against the allow-list when it
+//! starts. The cloud-file OAuth target is the deployment's configured frontend
+//! URL, checked to be absolute at startup. When no target is configured, a
+//! minimal self-describing fallback is rendered instead of redirecting.
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
@@ -124,13 +125,17 @@ pub(crate) fn connection_result_redirect(
     status: &str,
     workspace_handle: Option<&str>,
 ) -> Response {
-    if let Some(base) = base {
+    let target = base.and_then(|base| {
         let base = match workspace_handle {
             Some(handle) => base.replace("{workspaceHandle}", handle),
             None => base.to_owned(),
         };
-        let separator = if base.contains('?') { '&' } else { '?' };
-        Redirect::to(&format!("{base}{separator}connection={status}")).into_response()
+        let mut url = url::Url::parse(&base).ok()?;
+        url.query_pairs_mut().append_pair("connection", status);
+        Some(url)
+    });
+    if let Some(url) = target {
+        Redirect::to(url.as_str()).into_response()
     } else {
         let body = format!("Cloud file connection {status}. You can close this window.");
         (StatusCode::OK, body).into_response()

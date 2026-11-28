@@ -4,12 +4,12 @@ use elide_pipeline::entity::EditSet;
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceDetection as DetectionModel;
 use nvisy_postgres::query::DetectionDocuments;
-use nvisy_postgres::types::{DetectionId, DetectionMetadata, DetectionStatus, Handle};
+use nvisy_postgres::types::{DetectionId, DetectionMetadata, DetectionStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{AccountRef, Page};
+use super::{AccountRef, Page, WorkspaceRef};
 
 /// Response type for a detection.
 ///
@@ -21,10 +21,9 @@ use super::{AccountRef, Page};
 pub struct WorkspaceDetection {
     /// Opaque identifier of the detection.
     pub id: DetectionId,
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
-    /// URL-safe workspace handle. Display-only.
-    pub workspace_handle: Handle,
+    /// The workspace it belongs to.
+    #[serde(flatten)]
+    pub workspace: WorkspaceRef,
     /// Source document this detection analyzes.
     pub input_document_id: Uuid,
     /// Display name of the source document, for showing the detection without a
@@ -64,10 +63,9 @@ pub struct WorkspaceDetection {
 pub struct WorkspaceDetectionSummary {
     /// Detection identifier.
     pub id: DetectionId,
-    /// Owning workspace.
-    pub workspace_id: Uuid,
-    /// Workspace handle for display.
-    pub workspace_handle: Handle,
+    /// The workspace it belongs to.
+    #[serde(flatten)]
+    pub workspace: WorkspaceRef,
     /// Input document identifier.
     pub input_document_id: Uuid,
     /// Input display name, omitted if the document was deleted.
@@ -93,15 +91,10 @@ pub struct WorkspaceDetectionSummary {
 
 impl WorkspaceDetectionSummary {
     /// Builds a compact response from a list query's projection.
-    pub fn from_row(
-        row: nvisy_postgres::query::DetectionListRow,
-        workspace_id: Uuid,
-        workspace_handle: Handle,
-    ) -> Self {
+    pub fn from_row(row: nvisy_postgres::query::DetectionListRow, workspace: WorkspaceRef) -> Self {
         Self {
             id: DetectionId::from_uuid(row.detection.id),
-            workspace_id,
-            workspace_handle,
+            workspace,
             input_document_id: row.detection.input_document_id,
             input_document_name: row.input_document_name,
             triggered_by: row.account.into(),
@@ -124,8 +117,7 @@ impl WorkspaceDetection {
     /// name.
     pub fn from_model(
         detection: &DetectionModel,
-        workspace_id: Uuid,
-        workspace_handle: Handle,
+        workspace: WorkspaceRef,
         triggered_by: AccountRef,
         files: DetectionDocuments,
     ) -> Self {
@@ -142,8 +134,7 @@ impl WorkspaceDetection {
 
         Self {
             id: DetectionId::from_uuid(detection.id),
-            workspace_id,
-            workspace_handle,
+            workspace,
             input_document_id: detection.input_document_id,
             input_document_name: files.input,
             triggered_by,

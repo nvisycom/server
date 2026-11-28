@@ -2,12 +2,12 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceActivity as WorkspaceActivityModel;
-use nvisy_postgres::types::{ActivityPayload, Handle};
+use nvisy_postgres::types::ActivityPayload;
 use schemars::JsonSchema;
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::{AccountRef, Page};
+use super::{AccountRef, Page, WorkspaceRef};
 
 /// Response type for a workspace activity.
 ///
@@ -18,10 +18,9 @@ use super::{AccountRef, Page};
 pub struct WorkspaceActivity {
     /// Unique activity identifier.
     pub id: Uuid,
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
-    /// URL-safe workspace handle. Display-only.
-    pub workspace_handle: Handle,
+    /// The workspace it belongs to.
+    #[serde(flatten)]
+    pub workspace: WorkspaceRef,
     /// Account that performed the activity.
     pub performed_by: AccountRef,
     /// The activity type and its typed params, absent when the stored params do
@@ -39,14 +38,12 @@ impl WorkspaceActivity {
     #[must_use]
     pub fn from_model(
         activity: &WorkspaceActivityModel,
-        workspace_id: Uuid,
-        workspace_handle: Handle,
+        workspace: WorkspaceRef,
         performed_by: AccountRef,
     ) -> Self {
         Self {
             id: activity.id,
-            workspace_id,
-            workspace_handle,
+            workspace,
             performed_by,
             payload: activity.params.optional(),
             created_at: activity.created_at.into(),

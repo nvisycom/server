@@ -28,7 +28,7 @@ pub struct WorkspacePurgeWorker {
 }
 
 impl Worker for WorkspacePurgeWorker {
-    type Error = Error<'static>;
+    type Error = Error;
 
     const NAME: &'static str = "workspace_purge";
 

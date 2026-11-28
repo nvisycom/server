@@ -112,3 +112,16 @@ pub struct OidcCallbackQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
+
+/// Optional query parameters for starting a sign-in, link, or reauth.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OidcStartQuery {
+    /// Frontend URL to return to once done. Carried through the flow and used to
+    /// build the callback's redirect.
+    pub redirect_uri: Option<String>,
+    /// A step-up re-authentication proof. Required to start a *link* (adding a
+    /// provider is a credential-adding action, so a live session alone is not
+    /// enough); ignored for sign-in and reauth.
+    pub reauth_proof: Option<String>,
+}

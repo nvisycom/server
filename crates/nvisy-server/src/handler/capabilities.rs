@@ -17,15 +17,14 @@ use axum::extract::State;
 use elide_pipeline::entity::LabelCatalog;
 use nvisy_core::net::EndpointPolicy;
 use nvisy_file_service::FileService;
-use nvisy_file_service::provider::FileServiceProvider;
 use nvisy_postgres::types::IdentityProvider;
-use schemars::JsonSchema;
-use serde::Serialize;
 
 use crate::extract::{AuthState, Json};
-use crate::handler::response::RecognizerCatalog;
-use crate::response::ErrorResponse;
-use crate::service::{DocumentModality, EngineService, OidcService, ServiceState, format_modality};
+use crate::handler::response::{
+    AuthCapabilities, ConnectorCapabilities, FileProviders, FormatCapabilities,
+    InferenceCapabilities, RecognizerCatalog, SupportedFormat,
+};
+use crate::service::{EngineService, OidcService, ServiceState, format_modality};
 
 /// Lists the deployment's supported labels (the built-in taxonomy).
 async fn list_labels(_: AuthState) -> Json<LabelCatalog> {
@@ -39,7 +38,6 @@ fn list_labels_docs(op: TransformOperation) -> TransformOperation {
              (PII, PHI, PCI, ...) that policies can target.",
         )
         .response::<200, Json<LabelCatalog>>()
-        .response::<401, Json<ErrorResponse>>()
 }
 
 /// Lists the recognizers the engine has registered, grouped into NER and LLM.
@@ -62,93 +60,6 @@ fn list_recognizers_docs(op: TransformOperation) -> TransformOperation {
              credentials are never exposed.",
         )
         .response::<200, Json<RecognizerCatalog>>()
-        .response::<401, Json<ErrorResponse>>()
-}
-
-/// Per-provider availability for the OAuth file services. Each field is `true`
-/// only when that provider's OAuth app is configured on the server.
-#[derive(Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-// reason: one serialized availability flag per provider; a struct-per-bool would
-// not read better and would change the wire shape.
-#[allow(clippy::struct_excessive_bools)]
-pub struct FileProviders {
-    /// Whether Google Drive can be connected.
-    pub google_drive: bool,
-    /// Whether Dropbox can be connected.
-    pub dropbox: bool,
-    /// Whether `OneDrive` can be connected.
-    pub one_drive: bool,
-    /// Whether Box can be connected. (`box` is a Rust keyword, hence the field
-    /// name; the wire name is `box`.)
-    #[serde(rename = "box")]
-    pub box_provider: bool,
-}
-
-impl FileProviders {
-    /// Builds the availability report from the deployment's file service.
-    fn from_service(file_service: &FileService) -> Self {
-        // Matched exhaustively so adding a `FileServiceProvider` variant fails to compile
-        // until it is represented here.
-        let is = |provider| file_service.is_configured(provider);
-        Self {
-            google_drive: is(FileServiceProvider::GoogleDrive),
-            dropbox: is(FileServiceProvider::Dropbox),
-            one_drive: is(FileServiceProvider::OneDrive),
-            box_provider: is(FileServiceProvider::Box),
-        }
-    }
-}
-
-/// What inference providers this deployment can connect to.
-///
-/// Inference providers carry their own credentials, so creating one is always
-/// available. A local-only backend such as Ollama is different: it is reached at
-/// a loopback URL, which only a self-hosted deployment's endpoint policy admits —
-/// a cloud deployment rejects a loopback endpoint at connection time — so
-/// `ollama` reports whether this deployment can use it at all.
-#[derive(Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct InferenceCapabilities {
-    /// Whether inference providers can be created. Currently always `true` — they
-    /// carry their own credentials, so nothing gates them server-side.
-    pub available: bool,
-    /// Whether a local Ollama backend can be used, for both the `@assistant`
-    /// reviewer and LLM-driven detection. `true` only on a self-hosted
-    /// (`permissive`) deployment, whose endpoint policy admits a loopback URL;
-    /// a cloud (`strict`) deployment reports `false`.
-    pub ollama: bool,
-}
-
-impl InferenceCapabilities {
-    /// Builds the inference availability report from the deployment's endpoint
-    /// policy. Ollama lives at a loopback URL, which only a self-hosted
-    /// (permissive) deployment's endpoint policy admits.
-    fn from_policy(endpoint_policy: EndpointPolicy) -> Self {
-        Self {
-            available: true,
-            ollama: matches!(endpoint_policy, EndpointPolicy::Permissive),
-        }
-    }
-}
-
-/// Which connector families and providers this deployment can create.
-///
-/// Lets a client render the connect UI without probing: a file-service provider
-/// is only offered when the host has configured its OAuth app, whereas
-/// object-store and inference connections carry their own credentials and are
-/// always available.
-#[derive(Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ConnectorCapabilities {
-    /// Availability of each OAuth file-service provider.
-    pub file_services: FileProviders,
-    /// Whether object-store connections can be created. Currently always `true` —
-    /// they carry their own credentials, so nothing gates them server-side — but
-    /// clients should read the field rather than assume it.
-    pub object_stores: bool,
-    /// Which inference providers this deployment can connect to.
-    pub inference: InferenceCapabilities,
 }
 
 /// Reports which connectors this deployment can create.
@@ -175,32 +86,6 @@ fn list_connectors_docs(op: TransformOperation) -> TransformOperation {
              without probing.",
         )
         .response::<200, Json<ConnectorCapabilities>>()
-        .response::<401, Json<ErrorResponse>>()
-}
-
-/// One file format the engine can process.
-#[derive(Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SupportedFormat {
-    /// The engine's format id (e.g. `elide.document.pdf`).
-    pub id: String,
-    /// The modality the format decodes to.
-    pub modality: DocumentModality,
-    /// The file extensions that resolve to this format, lowercased with no dot.
-    pub extensions: Vec<String>,
-    /// The MIME content types that resolve to this format.
-    pub content_types: Vec<String>,
-}
-
-/// The file formats this deployment can process.
-///
-/// Uploads and imports of any other format are rejected, so a client builds its
-/// file picker's accept list from this rather than a list of its own.
-#[derive(Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FormatCapabilities {
-    /// The supported formats, in the engine's registration order.
-    pub formats: Vec<SupportedFormat>,
 }
 
 /// Reports the file formats the engine can process.
@@ -247,22 +132,6 @@ fn list_formats_docs(op: TransformOperation) -> TransformOperation {
              rejected, so build a file picker's accept list from this.",
         )
         .response::<200, Json<FormatCapabilities>>()
-        .response::<401, Json<ErrorResponse>>()
-}
-
-/// The sign-in methods this deployment offers.
-///
-/// Lets a client render the login screen without probing: one ordered list of
-/// the identity providers a person can sign in with — `password`, plus exactly
-/// the OIDC providers (`google`, `microsoft`, ...) whose apps are configured on
-/// the server. This is pre-authentication reference data, so the endpoint is
-/// unauthenticated.
-#[derive(Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthCapabilities {
-    /// The available sign-in methods, in the order a client should present them:
-    /// `password` first, then each configured OIDC provider.
-    pub methods: Vec<IdentityProvider>,
 }
 
 /// Reports the deployment's available sign-in methods.
@@ -325,6 +194,7 @@ mod tests {
     use nvisy_file_service::oauth::OAuthApp;
 
     use super::*;
+    use crate::service::DocumentModality;
 
     #[test]
     fn builtin_labels_are_non_empty() {

@@ -11,7 +11,7 @@ use axum::extract::{FromRequest, Multipart as AxumMultipart, Request};
 use derive_more::{Deref, DerefMut, From};
 
 use super::sanitize_error_message;
-use crate::response::{Error, ErrorKind};
+use crate::response::{Error, ErrorKind, error_responses};
 
 /// Enhanced Multipart extractor with improved error handling.
 ///
@@ -29,7 +29,7 @@ impl<S> FromRequest<S> for Multipart
 where
     S: Send + Sync,
 {
-    type Rejection = Error<'static>;
+    type Rejection = Error;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         AxumMultipart::from_request(req, state)
@@ -39,7 +39,7 @@ where
     }
 }
 
-impl From<MultipartRejection> for Error<'static> {
+impl From<MultipartRejection> for Error {
     fn from(rejection: MultipartRejection) -> Self {
         match rejection {
             MultipartRejection::InvalidBoundary(_) => ErrorKind::BadRequest
@@ -61,5 +61,12 @@ impl From<MultipartRejection> for Error<'static> {
 impl OperationInput for Multipart {
     fn operation_input(ctx: &mut GenContext, operation: &mut Operation) {
         AxumMultipart::operation_input(ctx, operation);
+    }
+
+    fn inferred_early_responses(
+        ctx: &mut GenContext,
+        operation: &mut Operation,
+    ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
+        error_responses(ctx, operation, &[400, 413])
     }
 }

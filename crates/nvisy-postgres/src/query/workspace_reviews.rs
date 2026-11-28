@@ -28,13 +28,15 @@ use crate::types::{
     AccountRefRow, CursorPage, CursorPagination, DocumentReviewFilter, ReviewEventKind,
     ReviewStatus, TimeCursor, WithAccountRef, keyset, total,
 };
-use crate::{AsyncConnection, PgConnection, Result, schema};
+use crate::{AsyncConnection, Error, PgConnection, Result, schema};
 
-/// A review paired with its assignees' account references (empty when unassigned).
+/// A review with the people on it: its author and its assigned reviewers.
 #[derive(Debug, Clone)]
-pub struct WithReviewers<T> {
+pub struct ReviewDetails {
     /// The review.
-    pub item: T,
+    pub item: WorkspaceReview,
+    /// The review's author.
+    pub author: AccountRefRow,
     /// The assigned reviewers' account references (empty when unassigned).
     pub assignees: Vec<AccountRefRow>,
 }
@@ -76,7 +78,7 @@ pub trait WorkspaceReviewRepository {
         &mut self,
         workspace_id: Uuid,
         document_id: Uuid,
-    ) -> impl Future<Output = Result<Vec<WithReviewers<WorkspaceReview>>>> + Send;
+    ) -> impl Future<Output = Result<Vec<ReviewDetails>>> + Send;
 
     /// Lists a workspace's reviews (the review queue) with cursor pagination, each
     /// paired with its assignees' account references.
@@ -85,7 +87,7 @@ pub trait WorkspaceReviewRepository {
         workspace_id: Uuid,
         pagination: CursorPagination<TimeCursor>,
         filter: &DocumentReviewFilter,
-    ) -> impl Future<Output = Result<CursorPage<WithReviewers<WorkspaceReview>>>> + Send;
+    ) -> impl Future<Output = Result<CursorPage<ReviewDetails>>> + Send;
 
     /// Sets a review's title, recording a `review.renamed` timeline event carrying
     /// the new name, in one transaction.
@@ -145,6 +147,12 @@ pub trait WorkspaceReviewRepository {
         review_id: Uuid,
     ) -> impl Future<Output = Result<Vec<AccountRefRow>>> + Send;
 
+    /// Loads the people on a review: its author and its assignees.
+    fn review_details(
+        &mut self,
+        review: WorkspaceReview,
+    ) -> impl Future<Output = Result<ReviewDetails>> + Send;
+
     /// Submits (or resubmits) a review for review, moving it from `draft` or
     /// `changes_requested` to `in_review` and recording a `submitted` event. Locks
     /// the review first and re-checks the status under the lock: a review in any other
@@ -164,7 +172,7 @@ pub trait WorkspaceReviewRepository {
         &mut self,
         review_id: Uuid,
         actor: Uuid,
-    ) -> impl Future<Output = Result<WorkspaceReview>> + Send;
+    ) -> impl Future<Output = Result<StatusOutcome>> + Send;
 
     /// Stamps `actor`'s approval on their assignee row (idempotent per reviewer) and
     /// advances the status: once the count of approved assignees reaches
@@ -315,7 +323,7 @@ impl WorkspaceReviewRepository for PgConnection {
         &mut self,
         workspace_id: Uuid,
         document_id: Uuid,
-    ) -> Result<Vec<WithReviewers<WorkspaceReview>>> {
+    ) -> Result<Vec<ReviewDetails>> {
         use schema::workspace_reviews::{self, dsl};
 
         let reviews: Vec<WorkspaceReview> = workspace_reviews::table
@@ -327,7 +335,7 @@ impl WorkspaceReviewRepository for PgConnection {
             .load(self)
             .await?;
 
-        attach_assignees(self, reviews).await
+        attach_people(self, reviews).await
     }
 
     async fn cursor_list_reviews(
@@ -335,7 +343,7 @@ impl WorkspaceReviewRepository for PgConnection {
         workspace_id: Uuid,
         pagination: CursorPagination<TimeCursor>,
         filter: &DocumentReviewFilter,
-    ) -> Result<CursorPage<WithReviewers<WorkspaceReview>>> {
+    ) -> Result<CursorPage<ReviewDetails>> {
         use schema::workspace_reviews::{self, dsl};
 
         // The assignee filter is a membership test against the link table, so it
@@ -380,11 +388,18 @@ impl WorkspaceReviewRepository for PgConnection {
         .load(self)
         .await?;
 
-        let items = attach_assignees(self, reviews).await?;
+        let items = attach_people(self, reviews).await?;
 
         Ok(CursorPage::new(items, total, pagination.limit, |row| {
             TimeCursor::new(row.item.created_at, row.item.id)
         }))
+    }
+
+    async fn review_details(&mut self, review: WorkspaceReview) -> Result<ReviewDetails> {
+        let mut details = attach_people(self, vec![review]).await?;
+        details
+            .pop()
+            .ok_or_else(|| Error::unexpected("review details for one review came back empty"))
     }
 
     async fn rename_review(
@@ -668,7 +683,7 @@ impl WorkspaceReviewRepository for PgConnection {
         .await
     }
 
-    async fn request_changes(&mut self, review_id: Uuid, actor: Uuid) -> Result<WorkspaceReview> {
+    async fn request_changes(&mut self, review_id: Uuid, actor: Uuid) -> Result<StatusOutcome> {
         self.transaction(async |conn| {
             let review = lock_review(conn, review_id).await?;
 
@@ -681,7 +696,10 @@ impl WorkspaceReviewRepository for PgConnection {
                 review.review_status,
                 ReviewStatus::InReview | ReviewStatus::PartiallyApproved
             ) {
-                return Ok(review);
+                return Ok(StatusOutcome {
+                    review,
+                    changed: false,
+                });
             }
 
             // A pushback invalidates the approvals accumulated against the prior
@@ -706,7 +724,10 @@ impl WorkspaceReviewRepository for PgConnection {
                 None,
             )
             .await?;
-            Ok(review)
+            Ok(StatusOutcome {
+                review,
+                changed: true,
+            })
         })
         .await
     }
@@ -987,18 +1008,29 @@ async fn clear_approvals(conn: &mut PgConnection, review_id: Uuid) -> Result<()>
     Ok(())
 }
 
-/// Pairs each review with its assignees' account references in one grouped query
-/// (no N+1): all assignees for the given reviews are loaded together and grouped
-/// by review, preserving the input order.
-async fn attach_assignees(
+/// Pairs each review with its author and its assignees, in one grouped query
+/// each (no N+1), preserving the input order. A review whose author no longer
+/// resolves is a broken invariant (the author is a live account).
+async fn attach_people(
     conn: &mut PgConnection,
     reviews: Vec<WorkspaceReview>,
-) -> Result<Vec<WithReviewers<WorkspaceReview>>> {
+) -> Result<Vec<ReviewDetails>> {
     use std::collections::HashMap;
 
     use schema::{accounts, workspace_review_assignees as wra, workspace_review_assignees};
 
     let review_ids: Vec<Uuid> = reviews.iter().map(|r| r.id).collect();
+    let author_ids: Vec<Uuid> = reviews.iter().map(|r| r.author_account_id).collect();
+
+    let authors: HashMap<Uuid, AccountRefRow> = accounts::table
+        .filter(accounts::id.eq_any(&author_ids))
+        .select(AccountRefRow::as_select())
+        .load::<AccountRefRow>(conn)
+        .await?
+        .into_iter()
+        .map(|account| (account.id, account))
+        .collect();
+
     let rows: Vec<(Uuid, AccountRefRow)> = workspace_review_assignees::table
         .inner_join(accounts::table.on(wra::account_id.eq(accounts::id)))
         .filter(wra::review_id.eq_any(&review_ids))
@@ -1006,24 +1038,34 @@ async fn attach_assignees(
         .select((wra::review_id, AccountRefRow::as_select()))
         .load(conn)
         .await?;
-
     let mut by_review: HashMap<Uuid, Vec<AccountRefRow>> = HashMap::new();
     for (review_id, account) in rows {
         by_review.entry(review_id).or_default().push(account);
     }
 
-    Ok(reviews
+    reviews
         .into_iter()
         .map(|item| {
+            let author = authors
+                .get(&item.author_account_id)
+                .cloned()
+                .ok_or_else(|| {
+                    Error::unexpected(format!("review {} has no author account", item.id))
+                })?;
             let assignees = by_review.remove(&item.id).unwrap_or_default();
-            WithReviewers { item, assignees }
+            Ok(ReviewDetails {
+                item,
+                author,
+                assignees,
+            })
         })
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::count_approvals;
+    use crate::PgConn;
     use crate::model::{
         NewAccount, NewWorkspaceRedaction, NewWorkspaceReview, NewWorkspaceReviewComment,
         UpdateWorkspaceReviewComment,
@@ -1035,7 +1077,7 @@ mod tests {
     };
     use crate::test_util::TestDatabase;
     use crate::types::{
-        CursorPagination, Direction, DocumentReviewFilter, ReviewEventKind, ReviewStatus,
+        Cursor, CursorPagination, Direction, DocumentReviewFilter, ReviewEventKind, ReviewStatus,
     };
 
     #[tokio::test]
@@ -1434,7 +1476,11 @@ mod tests {
 
         // request-changes: in_review -> changes_requested.
         let pushed_back = conn.request_changes(review.id, seeded.account_id).await?;
-        assert_eq!(pushed_back.review_status, ReviewStatus::ChangesRequested);
+        assert!(pushed_back.changed);
+        assert_eq!(
+            pushed_back.review.review_status,
+            ReviewStatus::ChangesRequested
+        );
 
         // resubmit (submit from changes_requested): -> in_review.
         let resubmitted = conn.submit_review(review.id, seeded.account_id).await?;
@@ -1533,9 +1579,12 @@ mod tests {
         // Requesting changes while partially approved clears the accumulated approval
         // (and its bound output), so quorum must be met afresh.
         let pushed_back = conn.request_changes(review.id, seeded.account_id).await?;
-        assert_eq!(pushed_back.review_status, ReviewStatus::ChangesRequested);
         assert_eq!(
-            pushed_back.redaction_id, None,
+            pushed_back.review.review_status,
+            ReviewStatus::ChangesRequested
+        );
+        assert_eq!(
+            pushed_back.review.redaction_id, None,
             "the invalidated approval's output is cleared"
         );
         conn.submit_review(review.id, seeded.account_id).await?;
@@ -1773,55 +1822,38 @@ mod tests {
         Ok(())
     }
 
-    /// A merged-timeline page: one entry with its sort key, mirroring how the
-    /// handler interleaves the two streams. `(created_at, source, id)`.
+    /// A timeline entry's sort key: `(created_at, source, id)`.
     type Entry = (jiff::Timestamp, TimelineSource, uuid::Uuid);
 
-    /// Fetches one page of the merged timeline (comments + events) after `cursor`,
-    /// mirroring the handler: pull `limit + 1` from each stream, merge by
-    /// `(created_at, source, id)`, keep `limit`, and return the next cursor.
+    /// Fetches one page of the merged timeline after `cursor`, returning each
+    /// entry's sort key and the next cursor.
     async fn timeline_page(
-        conn: &mut crate::PgConn,
+        conn: &mut PgConn,
         review_id: uuid::Uuid,
         after: Option<&TimelineCursor>,
         limit: i64,
     ) -> anyhow::Result<(Vec<Entry>, Option<TimelineCursor>)> {
-        let fetch = limit + 1;
-        let comments = conn
-            .list_review_comments_after(review_id, after, fetch)
-            .await?;
-        let events = conn
-            .list_review_events_after(review_id, after, fetch)
-            .await?;
-
-        let mut merged: Vec<Entry> = Vec::new();
-        merged.extend(
-            comments
-                .iter()
-                .map(|c| (c.item.created_at.into(), TimelineSource::Comment, c.item.id)),
-        );
-        merged.extend(events.iter().map(|row| {
-            (
-                row.item.created_at.into(),
-                TimelineSource::Event,
-                row.item.id,
-            )
-        }));
-        merged.sort();
-
-        let next = if i64::try_from(merged.len()).unwrap_or(i64::MAX) > limit {
-            merged.truncate(usize::try_from(limit).unwrap_or(0));
-            merged
-                .last()
-                .map(|&(created_at, source, id)| TimelineCursor {
-                    created_at,
-                    source,
-                    id,
-                })
-        } else {
-            None
+        let pagination = CursorPagination {
+            limit,
+            after: after.cloned().map(Cursor::new),
+            include_count: false,
+            direction: Direction::Ascending,
         };
-        Ok((merged, next))
+        let page = conn.list_review_timeline(review_id, &pagination).await?;
+        let entries = page
+            .items
+            .iter()
+            .map(|entry| {
+                let cursor = entry.cursor();
+                (cursor.created_at, cursor.source, cursor.id)
+            })
+            .collect();
+        let next = page
+            .next_cursor
+            .as_deref()
+            .and_then(Cursor::<TimelineCursor>::decode)
+            .map(|cursor| cursor.key);
+        Ok((entries, next))
     }
 
     #[tokio::test]
@@ -1865,6 +1897,51 @@ mod tests {
         let mut cursor: Option<TimelineCursor> = None;
         loop {
             let (page, next) = timeline_page(&mut conn, review.id, cursor.as_ref(), 2).await?;
+            paged.extend(page);
+            match next {
+                Some(c) => cursor = Some(c),
+                None => break,
+            }
+        }
+        assert_eq!(paged, all);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn timeline_pages_never_exceed_limit_or_skip_entries() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let seeded = db.seed_document().await;
+        let mut conn = db.client.get_connection().await?;
+
+        // Comments all precede most events, so both streams fill their windows on
+        // the first page: opening (1 event), four comments, then three renames.
+        let review = conn
+            .create_review(NewWorkspaceReview::test(
+                seeded.workspace_id,
+                seeded.document_id,
+                seeded.account_id,
+            ))
+            .await?;
+        for _ in 0..4 {
+            conn.create_comment(NewWorkspaceReviewComment::test(
+                review.id,
+                seeded.account_id,
+            ))
+            .await?;
+        }
+        for name in ["First", "Second", "Third"] {
+            conn.rename_review(review.id, name.to_owned(), seeded.account_id)
+                .await?;
+        }
+
+        let (all, _) = timeline_page(&mut conn, review.id, None, 50).await?;
+        assert_eq!(all.len(), 8);
+
+        let mut paged: Vec<Entry> = Vec::new();
+        let mut cursor: Option<TimelineCursor> = None;
+        loop {
+            let (page, next) = timeline_page(&mut conn, review.id, cursor.as_ref(), 2).await?;
+            assert!(page.len() <= 2, "a page holds at most `limit` entries");
             paged.extend(page);
             match next {
                 Some(c) => cursor = Some(c),

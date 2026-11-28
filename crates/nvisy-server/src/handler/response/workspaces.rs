@@ -9,6 +9,27 @@ use uuid::Uuid;
 
 use super::{AccountRef, Page};
 
+/// The workspace a resource belongs to: its id (the identity a client
+/// addresses it by) and its handle (display-only). Flattened into each
+/// resource response, so the wire shape is `workspaceId` + `workspaceHandle`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRef {
+    /// Unique identifier of the workspace.
+    pub workspace_id: Uuid,
+    /// URL-safe workspace handle. Display-only.
+    pub workspace_handle: Handle,
+}
+
+impl From<&model::Workspace> for WorkspaceRef {
+    fn from(workspace: &model::Workspace) -> Self {
+        Self {
+            workspace_id: workspace.id,
+            workspace_handle: workspace.handle.clone(),
+        }
+    }
+}
+
 /// Workspace response.
 #[must_use]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

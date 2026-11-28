@@ -7,7 +7,7 @@ use nvisy_object_store::{Error as ObjectError, ErrorKind as ObjectErrorKind};
 
 use super::http_error::{Error as HttpError, ErrorKind};
 
-impl From<ObjectError> for HttpError<'_> {
+impl From<ObjectError> for HttpError {
     fn from(error: ObjectError) -> Self {
         let message = error.to_string();
         match error.kind() {

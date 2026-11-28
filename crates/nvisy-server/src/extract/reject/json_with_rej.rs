@@ -16,7 +16,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use super::sanitize_error_message;
-use crate::response::{Error, ErrorKind};
+use crate::response::{Error, ErrorKind, error_responses};
 
 /// Enhanced JSON extractor with improved error handling.
 ///
@@ -41,7 +41,7 @@ use crate::response::{Error, ErrorKind};
 /// [`Json`]: AxumJson
 #[must_use]
 #[derive(Debug, Clone, Copy, Default, Deref, DerefMut, From, FromRequest)]
-#[from_request(via(AxumJson), rejection(Error<'static>))]
+#[from_request(via(AxumJson), rejection(Error))]
 pub struct Json<T>(pub T);
 
 impl<T, S> OptionalFromRequest<S> for Json<T>
@@ -49,7 +49,7 @@ where
     T: DeserializeOwned + 'static,
     S: Send + Sync,
 {
-    type Rejection = Error<'static>;
+    type Rejection = Error;
 
     async fn from_request(req: Request, state: &S) -> Result<Option<Self>, Self::Rejection> {
         // A zero-length body is absent, whatever the headers say: a client that
@@ -86,7 +86,7 @@ where
     }
 }
 
-impl From<JsonRejection> for Error<'static> {
+impl From<JsonRejection> for Error {
     fn from(rejection: JsonRejection) -> Self {
         match rejection {
             JsonRejection::JsonDataError(err) => {
@@ -145,7 +145,7 @@ where
         ctx: &mut GenContext,
         operation: &mut Operation,
     ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
-        axum::Json::<T>::inferred_early_responses(ctx, operation)
+        error_responses(ctx, operation, &[400, 413, 415])
     }
 }
 
@@ -187,7 +187,7 @@ mod tests {
             .unwrap()
     }
 
-    async fn optional(body: &'static str) -> Result<Option<Json<Payload>>, Error<'static>> {
+    async fn optional(body: &'static str) -> Result<Option<Json<Payload>>, Error> {
         <Json<Payload> as OptionalFromRequest<()>>::from_request(json_request(body), &()).await
     }
 

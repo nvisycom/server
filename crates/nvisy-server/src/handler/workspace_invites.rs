@@ -21,14 +21,14 @@ use crate::handler::request::{
 };
 use crate::handler::response::{
     InvitePreview, WorkspaceInvite, WorkspaceInviteCode, WorkspaceInviteSent, WorkspaceInvitesPage,
-    WorkspaceMember,
+    WorkspaceMember, WorkspaceRef,
 };
 use crate::response::{ErrorResponse, Result};
 use crate::service::ServiceState;
 use crate::service::event::EventOrigin;
 
 /// Tracing target for workspace invite operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::invites";
+const TRACING_TARGET: &str = "nvisy_server::handler::workspace_invites";
 
 /// Creates a new workspace invitation.
 ///
@@ -39,31 +39,18 @@ const TRACING_TARGET: &str = "nvisy_server::handler::invites";
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         invited_role = ?request.invited_role,
     )
 )]
 async fn send_invite(
     State(invites): State<domain::WorkspaceInviteService>,
     authz: Authorized<markers::InviteMembers>,
-    security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateWorkspaceInvite>,
-) -> Result<(StatusCode, Json<WorkspaceInviteSent>)> {
+) -> Result<Json<WorkspaceInviteSent>> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace invitation");
 
-    let workspace = authz.workspace;
     let input = request.into();
-    let outcome = invites
-        .create(
-            EventOrigin {
-                workspace_id: workspace.id,
-                account_id: authz.account_id,
-                security: &security,
-            },
-            &input,
-        )
-        .await?;
+    let outcome = invites.create(authz.origin(), &input).await?;
 
     match outcome {
         domain::output::InviteOutcome::Created(_) => {
@@ -74,7 +61,7 @@ async fn send_invite(
         }
     }
 
-    Ok((StatusCode::OK, Json(WorkspaceInviteSent::new())))
+    Ok(Json(WorkspaceInviteSent::new()))
 }
 
 fn send_invite_docs(op: TransformOperation) -> TransformOperation {
@@ -85,9 +72,6 @@ fn send_invite_docs(op: TransformOperation) -> TransformOperation {
              account, so it cannot be used to determine whether an account exists.",
         )
         .response::<200, Json<WorkspaceInviteSent>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
 }
 
@@ -95,22 +79,16 @@ fn send_invite_docs(op: TransformOperation) -> TransformOperation {
 ///
 /// Returns a paginated list of workspace invitations with their current status.
 /// Requires `ViewMembers` permission.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn list_invites(
     State(invites): State<domain::WorkspaceInviteService>,
     authz: Authorized<markers::ViewMembers>,
     Query(query): Query<ListWorkspaceInvites>,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<WorkspaceInvitesPage>)> {
+) -> Result<Json<WorkspaceInvitesPage>> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace invitations");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
     let page = invites
         .list(
             workspace.id,
@@ -120,20 +98,16 @@ async fn list_invites(
         )
         .await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceInvitesPage::from_cursor_page(page, |invite| {
-            WorkspaceInvite::from_model(invite, workspace.id, workspace.handle.clone())
-        })),
-    ))
+    Ok(Json(WorkspaceInvitesPage::from_cursor_page(
+        page,
+        |invite| WorkspaceInvite::from_model(invite, WorkspaceRef::from(workspace)),
+    )))
 }
 
 fn list_invites_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List invitations")
         .description("Returns a paginated list of workspace invitations with their current status.")
         .response::<200, Json<WorkspaceInvitesPage>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Cancels a workspace invitation.
@@ -143,41 +117,27 @@ fn list_invites_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         invite_id = %path_params.invite_id,
     )
 )]
 async fn cancel_invite(
     State(invites): State<domain::WorkspaceInviteService>,
     authz: Authorized<markers::InviteMembers>,
-    security: SecurityContext,
     Path(path_params): Path<WorkspaceInvitePathParams>,
 ) -> Result<StatusCode> {
     tracing::info!(target: TRACING_TARGET, "Cancelling workspace invitation");
 
-    let workspace = authz.workspace;
     invites
-        .cancel(
-            EventOrigin {
-                workspace_id: workspace.id,
-                account_id: authz.account_id,
-                security: &security,
-            },
-            path_params.invite_id,
-        )
+        .cancel(authz.origin(), path_params.invite_id)
         .await?;
 
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn cancel_invite_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Cancel invitation")
         .description("Permanently cancels a pending invitation. The invitee will no longer be able to accept it.")
-        .response::<200, ()>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
+        .response::<204, ()>()
 }
 
 /// Responds to a workspace invitation.
@@ -188,8 +148,6 @@ fn cancel_invite_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
         invite_id = %path_params.invite_id,
         accept = request.accept_invite,
     )
@@ -200,7 +158,7 @@ async fn reply_to_invite(
     WorkspaceContext(workspace): WorkspaceContext,
     security: SecurityContext,
     Path(path_params): Path<WorkspaceInvitePathParams>,
-    Json(request): Json<ReplyWorkspaceInvite>,
+    ValidateJson(request): ValidateJson<ReplyWorkspaceInvite>,
 ) -> Result<(StatusCode, Json<Option<WorkspaceMember>>)> {
     tracing::info!(target: TRACING_TARGET, "Responding to workspace invitation");
 
@@ -228,9 +186,6 @@ fn reply_to_invite_docs(op: TransformOperation) -> TransformOperation {
         )
         .response::<200, Json<Option<WorkspaceMember>>>()
         .response::<201, Json<WorkspaceMember>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
 }
 
@@ -242,8 +197,6 @@ fn reply_to_invite_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         invited_role = ?request.invited_role,
     )
 )]
@@ -254,7 +207,7 @@ async fn generate_invite_code(
 ) -> Result<(StatusCode, Json<WorkspaceInviteCode>)> {
     tracing::info!(target: TRACING_TARGET, "Generating invite code");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
     let invite = invites
         .generate_code(workspace.id, authz.account_id, request.into())
         .await?;
@@ -263,8 +216,7 @@ async fn generate_invite_code(
         StatusCode::CREATED,
         Json(WorkspaceInviteCode::from_invite(
             invite,
-            workspace.id,
-            workspace.handle,
+            WorkspaceRef::from(workspace),
         )),
     ))
 }
@@ -279,9 +231,6 @@ fn generate_invite_code_docs(op: TransformOperation) -> TransformOperation {
              correlate the code to its listing row and tell an active code from a consumed one.",
         )
         .response::<201, Json<WorkspaceInviteCode>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Previews a workspace invitation before joining.
@@ -293,25 +242,21 @@ fn generate_invite_code_docs(op: TransformOperation) -> TransformOperation {
 async fn preview_invite_code(
     State(invites): State<domain::WorkspaceInviteService>,
     Path(path_params): Path<InviteCodePathParams>,
-) -> Result<(StatusCode, Json<InvitePreview>)> {
+) -> Result<Json<InvitePreview>> {
     tracing::debug!(target: TRACING_TARGET, "Previewing invite code");
 
     let preview = invites.preview_code(&path_params.invite_code).await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(InvitePreview::from_models(
-            preview.workspace,
-            &preview.invite,
-        )),
-    ))
+    Ok(Json(InvitePreview::from_models(
+        preview.workspace,
+        &preview.invite,
+    )))
 }
 
 fn preview_invite_code_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Preview invite")
         .description("Returns workspace information for an invite code, allowing users to preview the workspace before joining. Requires authentication but not workspace membership.")
         .response::<200, Json<InvitePreview>>()
-        .response::<400, Json<ErrorResponse>>()
         .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
@@ -321,7 +266,7 @@ fn preview_invite_code_docs(op: TransformOperation) -> TransformOperation {
 /// Allows a user to accept or decline a workspace invite code. If accepted (the
 /// default), the user is added as a member with the role specified when the code
 /// was generated. If declined, no action is taken.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+#[tracing::instrument(skip_all)]
 async fn reply_to_invite_code(
     State(invites): State<domain::WorkspaceInviteService>,
     auth_state: AuthState,
@@ -352,8 +297,6 @@ fn reply_to_invite_code_docs(op: TransformOperation) -> TransformOperation {
         .description("Accepts or declines a workspace invite code. If accepted (the default when no body is provided), the user becomes a member with the role specified in the code. If declined, no action is taken.")
         .response::<200, Json<Option<WorkspaceMember>>>()
         .response::<201, Json<WorkspaceMember>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
 }

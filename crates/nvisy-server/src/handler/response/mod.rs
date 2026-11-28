@@ -69,17 +69,13 @@ pub struct Page<T> {
     pub next_cursor: Option<String>,
 }
 
-impl<T> Page<T> {
-    /// Creates an empty page with no items.
-    #[must_use]
-    pub fn empty() -> Self {
-        Self {
-            items: Vec::new(),
-            total: Some(0),
-            next_cursor: None,
-        }
+impl<T> From<CursorPage<T>> for Page<T> {
+    fn from(page: CursorPage<T>) -> Self {
+        Self::new(page.items, page.total, page.next_cursor)
     }
+}
 
+impl<T> Page<T> {
     /// Creates a new page from items and pagination metadata.
     #[must_use]
     pub fn new(items: Vec<T>, total: Option<i64>, next_cursor: Option<String>) -> Self {
@@ -90,24 +86,6 @@ impl<T> Page<T> {
         }
     }
 
-    /// Returns true if there are more items to fetch.
-    #[must_use]
-    pub fn has_more(&self) -> bool {
-        self.next_cursor.is_some()
-    }
-
-    /// Maps items from one type to another.
-    pub fn map<U, F>(self, f: F) -> Page<U>
-    where
-        F: FnMut(T) -> U,
-    {
-        Page {
-            items: self.items.into_iter().map(f).collect(),
-            total: self.total,
-            next_cursor: self.next_cursor,
-        }
-    }
-
     /// Creates a page from a cursor page, mapping items using the provided function.
     pub fn from_cursor_page<M, F>(page: CursorPage<M>, f: F) -> Self
     where
@@ -115,41 +93,6 @@ impl<T> Page<T> {
     {
         Self {
             items: page.items.into_iter().map(f).collect(),
-            total: page.total,
-            next_cursor: page.next_cursor,
-        }
-    }
-
-    /// Creates a page from a cursor page, mapping items with a fallible function.
-    ///
-    /// Returns the first error encountered while mapping (e.g. a decryption
-    /// failure), otherwise the fully mapped page.
-    ///
-    /// # Errors
-    ///
-    /// Propagates the first error returned by `f`, stopping the mapping.
-    pub fn try_from_cursor_page<M, F, E>(page: CursorPage<M>, f: F) -> Result<Self, E>
-    where
-        F: FnMut(M) -> Result<T, E>,
-    {
-        Ok(Self {
-            items: page.items.into_iter().map(f).collect::<Result<_, _>>()?,
-            total: page.total,
-            next_cursor: page.next_cursor,
-        })
-    }
-
-    /// Creates a page from a cursor page, mapping items and dropping any that map
-    /// to `None` (e.g. a stored row whose shape no longer decodes).
-    ///
-    /// The cursor and total reflect the source page; only the rendered items are
-    /// filtered, so pagination still advances past a skipped row.
-    pub fn filter_from_cursor_page<M, F>(page: CursorPage<M>, f: F) -> Self
-    where
-        F: FnMut(M) -> Option<T>,
-    {
-        Self {
-            items: page.items.into_iter().filter_map(f).collect(),
             total: page.total,
             next_cursor: page.next_cursor,
         }
