@@ -1,8 +1,9 @@
 //! Avatar service: stores, serves, and removes account and workspace avatars.
 //!
 //! Uploads are normalized to WebP (decoded, bounded, resized, re-encoded) and
-//! stored unencrypted in the blob store, keyed by `(owner, content hash)`
-//! so each version is its own object and the serve URL can be cached immutably.
+//! stored unencrypted in the blob store, keyed by `(owner, version)` where each
+//! upload draws a fresh random version, so every upload is its own object and
+//! the serve URL can be cached immutably.
 //! Because the stored bytes are always WebP, the serve `Content-Type` is
 //! constant and no per-object mime is persisted; re-encoding also strips
 //! EXIF/metadata.
@@ -12,10 +13,8 @@ use std::io::Cursor;
 use bytes::Bytes;
 use image::{ImageFormat, ImageReader};
 use nvisy_postgres::PgConn;
-use nvisy_postgres::model::{UpdateAccount, UpdateWorkspace};
 use nvisy_postgres::query::{AccountRepository, WorkspaceRepository};
 use nvisy_s3::{AccountAvatarKey, BlobStore, WorkspaceAvatarKey};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::response::{ErrorKind, Result};
@@ -48,11 +47,11 @@ pub enum AvatarOwner {
 }
 
 impl AvatarOwner {
-    /// The serve URL of a version, `/avatars/{kind}/{id}/{version}/`.
+    /// The serve URL of a version, `/avatars/{kind}/{id}/{version}`.
     fn url(self, version: &str) -> String {
         match self {
-            Self::Account(id) => format!("/avatars/accounts/{id}/{version}/"),
-            Self::Workspace(id) => format!("/avatars/workspaces/{id}/{version}/"),
+            Self::Account(id) => format!("/avatars/accounts/{id}/{version}"),
+            Self::Workspace(id) => format!("/avatars/workspaces/{id}/{version}"),
         }
     }
 
@@ -110,31 +109,15 @@ impl AvatarOwner {
         Ok(avatar_version(url.as_deref()))
     }
 
-    /// Points the owner's `avatar_url` at `url`, or clears it.
-    async fn set_url(self, conn: &mut PgConn, url: Option<String>) -> Result<()> {
-        match self {
-            Self::Account(id) => {
-                conn.update_account(
-                    id,
-                    UpdateAccount {
-                        avatar_url: Some(url),
-                        ..Default::default()
-                    },
-                )
-                .await?;
-            }
-            Self::Workspace(id) => {
-                conn.update_workspace(
-                    id,
-                    UpdateWorkspace {
-                        avatar_url: Some(url),
-                        ..Default::default()
-                    },
-                )
-                .await?;
-            }
-        }
-        Ok(())
+    /// Points the owner's `avatar_url` at `url` (or clears it), returning the
+    /// version it named before. The read and the write are one locked step, so
+    /// each concurrent replacement sees exactly the version it replaced.
+    async fn replace_url(self, conn: &mut PgConn, url: Option<String>) -> Result<Option<String>> {
+        let previous = match self {
+            Self::Account(id) => conn.replace_account_avatar(id, url).await?,
+            Self::Workspace(id) => conn.replace_workspace_avatar(id, url).await?,
+        };
+        Ok(avatar_version(previous.as_deref()))
     }
 }
 
@@ -151,15 +134,18 @@ impl AvatarService {
         Self { infra }
     }
 
-    /// Normalizes and stores an avatar as a new content-versioned object, points
-    /// the owner's `avatar_url` at it, and deletes the previous version.
+    /// Normalizes and stores an avatar as a new object, points the owner's
+    /// `avatar_url` at it, and deletes the version it replaced.
     ///
-    /// The stored object is keyed by `(owner, content hash)` and the URL embeds
-    /// the same hash, so a versioned URL maps to immutable bytes. The new object
-    /// is written and the URL updated before the previous version is deleted, so
-    /// a reader never sees a missing avatar. If the URL update fails, the new
-    /// object is removed again; removing the previous version is best-effort, so
-    /// a failure (or a crash before it) can leave that object orphaned (see #192).
+    /// Each upload draws a fresh random version, and the URL embeds it, so a
+    /// versioned URL maps to immutable bytes and no two uploads share an object:
+    /// an object is only ever deleted by the upload that replaced it, or by this
+    /// upload when its own URL update did not land, so concurrent uploads and
+    /// deletes never remove an object a URL still names. The new object is
+    /// written and the URL updated before the previous version is deleted, so a
+    /// reader never sees a missing avatar. Deleting an unreferenced object is
+    /// best effort, so a failure (or a crash before it) can leave it orphaned
+    /// (see #192).
     ///
     /// # Errors
     ///
@@ -171,15 +157,16 @@ impl AvatarService {
     /// - A database error if reading or updating the owner fails.
     pub async fn set(&self, owner: AvatarOwner, upload: Bytes) -> Result<()> {
         let webp = process_avatar(upload).await?;
-        let version = content_version(&webp);
+        let version = new_version();
         owner.put(&self.infra.blobs, &version, webp).await?;
 
         let previous = match self.point_at(owner, &version).await {
             Ok(previous) => previous,
             Err(err) => {
-                // The object just written is unreferenced unless the URL names
-                // it. Remove it only when the URL is known not to: if the lookup
-                // fails too, the update may have landed, so the object is kept.
+                // The object just written is unreferenced unless this update
+                // landed, as no other upload can point the URL at its version.
+                // Remove it only when the URL is known not to name it: if the
+                // lookup fails too, the update may have landed, so it is kept.
                 match self.current_version(owner).await {
                     Ok(current) if current.as_deref() != Some(version.as_str()) => {
                         self.discard(owner, &version).await;
@@ -193,9 +180,7 @@ impl AvatarService {
             }
         };
 
-        if let Some(previous) = previous
-            && previous != version
-        {
+        if let Some(previous) = previous {
             self.discard(owner, &previous).await;
         }
         Ok(())
@@ -205,9 +190,7 @@ impl AvatarService {
     /// named before.
     async fn point_at(&self, owner: AvatarOwner, version: &str) -> Result<Option<String>> {
         let mut conn = self.infra.postgres.get_connection().await?;
-        let previous = owner.current_version(&mut conn).await?;
-        owner.set_url(&mut conn, Some(owner.url(version))).await?;
-        Ok(previous)
+        owner.replace_url(&mut conn, Some(owner.url(version))).await
     }
 
     /// The version the owner's `avatar_url` currently names.
@@ -243,8 +226,7 @@ impl AvatarService {
     /// - A database error if reading or updating the owner fails.
     pub async fn delete(&self, owner: AvatarOwner) -> Result<()> {
         let mut conn = self.infra.postgres.get_connection().await?;
-        let current = owner.current_version(&mut conn).await?;
-        owner.set_url(&mut conn, None).await?;
+        let current = owner.replace_url(&mut conn, None).await?;
         drop(conn);
 
         if let Some(version) = current {
@@ -254,26 +236,19 @@ impl AvatarService {
     }
 }
 
-/// Returns a short content hash of the stored bytes, used as the avatar's
-/// version segment.
+/// Draws a fresh avatar version: 8 random bytes, hex-encoded.
 ///
-/// The hash changes only when the image does, so an identical re-upload keeps
-/// the same object key and URL (cache stays warm) while a new image produces a
-/// new one (cache is busted), letting the serve route mark the response
-/// immutable.
-fn content_version(webp: &[u8]) -> String {
-    let digest = Sha256::digest(webp);
-    hex::encode(&digest[..8])
+/// Every upload gets its own version, so a new upload always busts the cache
+/// and its object belongs to it alone, letting the serve route mark the
+/// response immutable.
+fn new_version() -> String {
+    hex::encode(rand::random::<[u8; 8]>())
 }
 
 /// Extracts the version segment from a stored avatar URL of the form
-/// `/avatars/{kind}/{id}/{version}/`, if present.
+/// `/avatars/{kind}/{id}/{version}`, if present.
 fn avatar_version(avatar_url: Option<&str>) -> Option<String> {
-    avatar_url?
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .map(str::to_owned)
+    avatar_url?.rsplit('/').next().map(str::to_owned)
 }
 
 /// Rejects payloads that are too large, do not decode as an image, or exceed the

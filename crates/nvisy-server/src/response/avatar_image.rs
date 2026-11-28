@@ -12,7 +12,7 @@ use crate::service::AVATAR_CONTENT_TYPE;
 /// A stored avatar image, served with the WebP content type and an immutable
 /// cache header.
 ///
-/// The serve URL carries a content hash, so a given URL always maps to the same
+/// The serve URL carries the upload's version, so a given URL always maps to the same
 /// bytes and may be cached indefinitely; a new upload changes the URL rather than
 /// the contents at a URL. The bytes come straight from the blob store, so this
 /// holds a `Vec<u8>` (which becomes the response body without a copy).

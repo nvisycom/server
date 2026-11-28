@@ -81,6 +81,17 @@ pub trait AccountRepository {
         updates: UpdateAccount,
     ) -> impl Future<Output = Result<Account>> + Send;
 
+    /// Points a live account's `avatar_url` at `url` (or clears it with `None`),
+    /// returning the URL it named before. The row is locked while it is read, so
+    /// concurrent replacements each return the URL they replaced.
+    ///
+    /// Errors with not-found if the account does not exist or is soft-deleted.
+    fn replace_account_avatar(
+        &mut self,
+        account_id: Uuid,
+        url: Option<String>,
+    ) -> impl Future<Output = Result<Option<String>>> + Send;
+
     /// Soft deletes an account by setting the deletion timestamp.
     ///
     /// Marks an account as deleted without permanently removing it,
@@ -232,6 +243,34 @@ impl AccountRepository for PgConnection {
             .map_err(Error::from)
     }
 
+    async fn replace_account_avatar(
+        &mut self,
+        account_id: Uuid,
+        url: Option<String>,
+    ) -> Result<Option<String>> {
+        use crate::AsyncConnection;
+
+        // Lock the live row while reading the old URL, so concurrent replacements
+        // serialize and each returns exactly the URL it replaced.
+        self.transaction(async |conn| {
+            use schema::accounts::dsl;
+
+            let previous: Option<String> = dsl::accounts
+                .filter(dsl::id.eq(account_id))
+                .filter(dsl::deleted_at.is_null())
+                .for_update()
+                .select(dsl::avatar_url)
+                .first(conn)
+                .await?;
+            diesel::update(dsl::accounts.filter(dsl::id.eq(account_id)))
+                .set(dsl::avatar_url.eq(url))
+                .execute(conn)
+                .await?;
+            Ok::<_, Error>(previous)
+        })
+        .await
+    }
+
     async fn delete_account(&mut self, account_id: Uuid) -> Result<Option<Account>> {
         use diesel::dsl::now;
 
@@ -338,6 +377,33 @@ mod tests {
     use crate::query::AccountRepository;
     use crate::test_util::TestDatabase;
     use crate::types::Handle;
+
+    #[tokio::test]
+    async fn replacing_an_avatar_returns_the_url_it_replaced() -> anyhow::Result<()> {
+        let db = TestDatabase::start().await;
+        let mut conn = db.client.get_connection().await?;
+        let account = conn.create_account(NewAccount::test()).await?;
+
+        let first = Some("/avatars/accounts/a/1/".to_owned());
+        let second = Some("/avatars/accounts/a/2/".to_owned());
+        assert_eq!(
+            conn.replace_account_avatar(account.id, first.clone())
+                .await?,
+            None
+        );
+        assert_eq!(
+            conn.replace_account_avatar(account.id, second.clone())
+                .await?,
+            first
+        );
+        assert_eq!(conn.replace_account_avatar(account.id, None).await?, second);
+
+        // A deleted account has no live row to replace on.
+        conn.delete_account(account.id).await?;
+        let deleted = conn.replace_account_avatar(account.id, first).await;
+        assert!(deleted.is_err_and(|err| err.is_not_found()));
+        Ok(())
+    }
 
     #[tokio::test]
     async fn create_normalizes_email_and_lookup_is_case_insensitive() -> anyhow::Result<()> {

@@ -5,7 +5,7 @@ use std::io::Cursor;
 use bytes::Bytes;
 use elide_pipeline::{ArtifactSet, Audit};
 use nvisy_postgres::model::{NewBlob, WorkspaceDocument};
-use nvisy_postgres::types::{RetentionOverride, RetentionScope, RetentionSettings};
+use nvisy_postgres::types::{Retention, RetentionOverride, RetentionScope, RetentionSettings};
 use nvisy_s3::{AuditKey, DocumentKey, IntermediateKey, ObjectKey};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -82,14 +82,12 @@ impl ArtifactWriter {
         audit: &Audit,
     ) -> Result<StagedBlob> {
         let plaintext = to_json(audit)?;
-        let expires_at = workspace_settings
-            .resolve(RetentionScope::AuditLogs, retention_override)
-            .expires_at(jiff::Timestamp::now());
+        let retention = workspace_settings.resolve(RetentionScope::AuditLogs, retention_override);
         self.stage_encrypted(
             AuditKey::generate(workspace_id),
             workspace_id,
             &plaintext,
-            expires_at,
+            retention,
             Some(audit.digest().as_bytes().to_vec()),
         )
         .await
@@ -111,14 +109,13 @@ impl ArtifactWriter {
         artifacts: &ArtifactSet,
     ) -> Result<StagedBlob> {
         let plaintext = to_json(artifacts)?;
-        let expires_at = workspace_settings
-            .resolve(RetentionScope::Intermediates, retention_override)
-            .expires_at(jiff::Timestamp::now());
+        let retention =
+            workspace_settings.resolve(RetentionScope::Intermediates, retention_override);
         self.stage_encrypted(
             IntermediateKey::generate(workspace_id),
             workspace_id,
             &plaintext,
-            expires_at,
+            retention,
             Some(artifacts.digest().as_bytes().to_vec()),
         )
         .await
@@ -141,15 +138,14 @@ impl ArtifactWriter {
         bytes: Bytes,
     ) -> Result<(StagedBlob, String)> {
         let workspace_id = source_document.workspace_id;
-        let expires_at = workspace_settings
-            .resolve(RetentionScope::RedactedDocuments, retention_override)
-            .expires_at(jiff::Timestamp::now());
+        let retention =
+            workspace_settings.resolve(RetentionScope::RedactedDocuments, retention_override);
         let staged = self
             .stage_encrypted(
                 DocumentKey::generate(workspace_id),
                 workspace_id,
                 &bytes,
-                expires_at,
+                retention,
                 None,
             )
             .await?;
@@ -199,7 +195,7 @@ impl ArtifactWriter {
         key: K,
         workspace_id: Uuid,
         plaintext: &[u8],
-        expires_at: jiff::Timestamp,
+        retention: Retention,
         audit_digest: Option<Vec<u8>>,
     ) -> Result<StagedBlob> {
         let content_hash = Sha256::digest(plaintext).to_vec();
@@ -213,6 +209,9 @@ impl ArtifactWriter {
                     .with_context(err.to_string())
             })?;
         self.infra.blobs.put(&key, Cursor::new(ciphertext)).await?;
+        // The retention window starts once the bytes exist, so upload time does
+        // not count against it.
+        let expires_at = retention.expires_at(jiff::Timestamp::now());
 
         Ok(StagedBlob {
             blob: NewBlob {

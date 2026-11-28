@@ -1,6 +1,5 @@
 //! Blob object reclamation for the reaper's GC path.
 
-use nvisy_postgres::PgConn;
 use nvisy_postgres::query::{ReclaimableBlob, WorkspaceBlobRepository};
 
 use crate::response::Result;
@@ -25,8 +24,10 @@ pub(super) enum PurgeOutcome {
 /// GC-side counterpart to the [`ArtifactWriter`]/[`ArtifactReader`] request-path
 /// services.
 ///
-/// It holds only the shared [`Infra`] clients (all `Arc`-backed) and takes the
-/// per-sweep database connection as a method argument. Unlike that pair it needs
+/// It holds only the shared [`Infra`] clients (all `Arc`-backed) and checks out
+/// a pooled connection for each database step alone, so no connection is held
+/// across an object delete and a session lost mid-sweep costs only the step it
+/// broke. Unlike that pair it needs
 /// no crypto — object deletion is content-agnostic — so the reaper depends on the
 /// object store alone, not the workspace keys.
 ///
@@ -58,18 +59,16 @@ impl BlobReclaimer {
     /// - A database error if the claim query fails. Once the blob is claimed, the
     ///   object reclaim is folded into the returned [`PurgeOutcome`] (a failed
     ///   delete yields `Pending`, not an error).
-    pub(super) async fn purge_blob(
-        &self,
-        conn: &mut PgConn,
-        blob: &ReclaimableBlob,
-    ) -> Result<PurgeOutcome> {
+    pub(super) async fn purge_blob(&self, blob: &ReclaimableBlob) -> Result<PurgeOutcome> {
         // Claim first, in its own committed step: once purged_at is set the blob no
         // longer deduplicates, so deleting its object next cannot strand a live
         // reference even if this process crashes before the delete.
+        let mut conn = self.infra.postgres.get_connection().await?;
         if conn.claim_blob_for_purge(blob.id).await?.is_none() {
             return Ok(PurgeOutcome::Pending);
         }
-        Ok(self.reclaim_claimed_object(conn, blob).await)
+        drop(conn);
+        Ok(self.reclaim_claimed_object(blob).await)
     }
 
     /// Reclaims the object of a blob already claimed for purge (`purged_at` set),
@@ -77,11 +76,7 @@ impl BlobReclaimer {
     ///
     /// A failed delete leaves `reclaimed_at` NULL so the blob is retried; the blob
     /// is already out of the dedup set, so its bytes are never reused meanwhile.
-    pub(super) async fn reclaim_claimed_object(
-        &self,
-        conn: &mut PgConn,
-        blob: &ReclaimableBlob,
-    ) -> PurgeOutcome {
+    pub(super) async fn reclaim_claimed_object(&self, blob: &ReclaimableBlob) -> PurgeOutcome {
         if let Err(err) =
             delete_object(&self.infra.blobs, &blob.storage_bucket, &blob.storage_path).await
         {
@@ -94,7 +89,7 @@ impl BlobReclaimer {
             return PurgeOutcome::Pending;
         }
 
-        if let Err(err) = conn.mark_blob_reclaimed(blob.id).await {
+        if let Err(err) = self.mark_reclaimed(blob).await {
             tracing::error!(
                 target: TRACING_TARGET,
                 blob_id = %blob.id,
@@ -104,5 +99,12 @@ impl BlobReclaimer {
             return PurgeOutcome::Pending;
         }
         PurgeOutcome::Purged
+    }
+
+    /// Stamps `reclaimed_at` on a blob whose object is gone.
+    async fn mark_reclaimed(&self, blob: &ReclaimableBlob) -> Result<()> {
+        let mut conn = self.infra.postgres.get_connection().await?;
+        conn.mark_blob_reclaimed(blob.id).await?;
+        Ok(())
     }
 }

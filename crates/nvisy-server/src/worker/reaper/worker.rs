@@ -119,13 +119,10 @@ impl BlobReaper {
 
             let fetched = i64::try_from(batch.len()).unwrap_or(i64::MAX);
             let mut reclaimed = 0i64;
-            let mut conn = self.infra.postgres.get_connection().await?;
             for blob in batch {
                 let outcome = match sweep {
-                    Sweep::Purge => self.blob.purge_blob(&mut conn, &blob).await,
-                    Sweep::Reconcile => {
-                        Ok(self.blob.reclaim_claimed_object(&mut conn, &blob).await)
-                    }
+                    Sweep::Purge => self.blob.purge_blob(&blob).await,
+                    Sweep::Reconcile => Ok(self.blob.reclaim_claimed_object(&blob).await),
                 };
                 match outcome {
                     // Only a confirmed reclaim is progress. A pending one leaves the

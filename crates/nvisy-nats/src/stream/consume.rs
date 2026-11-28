@@ -9,6 +9,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::AbortOnDropHandle;
 
 use super::core::EventStream;
 use super::typed_sub::EventSubscriber;
@@ -24,7 +25,7 @@ const PULL_ERROR_BACKOFF: Duration = Duration::from_secs(1);
 const DEFAULT_ACK_WAIT: Duration = Duration::from_secs(30);
 
 /// Extends a message's ack lease every third of the lease, so two missed beats
-/// still leave it alive, until the task is aborted. Each progress ack is bounded
+/// still leave it alive, until its task is aborted. Each progress ack is bounded
 /// by the period, so a stalled send skips a beat rather than piling up.
 async fn extend_lease<S: EventStream>(message: Message) {
     let period = S::ACK_WAIT.unwrap_or(DEFAULT_ACK_WAIT) / 3;
@@ -145,11 +146,14 @@ impl<S: EventStream> EventSubscriber<S> {
                 let _permit = permit;
                 // Extend the ack lease while the handler runs, so a long but
                 // healthy job is not redelivered to another instance mid-run. The
-                // heartbeat runs on its own task, so a slow progress ack never
-                // pauses the handler.
-                let heartbeat = tokio::spawn(extend_lease::<S>(message.clone()));
+                // heartbeat runs on its own task, so neither a slow progress ack
+                // nor a blocking stretch in the handler stalls the other. The
+                // handle aborts it on drop, so a handler that panics or is
+                // aborted stops renewing the lease and the message is redelivered.
+                let heartbeat =
+                    AbortOnDropHandle::new(tokio::spawn(extend_lease::<S>(message.clone())));
                 let settle = handle(payload, delivery).await;
-                heartbeat.abort();
+                drop(heartbeat);
 
                 let ack = match settle {
                     Settle::Ack => AckKind::Ack,

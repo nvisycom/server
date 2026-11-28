@@ -39,6 +39,17 @@ pub trait WorkspaceRepository {
         changes: UpdateWorkspace,
     ) -> impl Future<Output = Result<Workspace>> + Send;
 
+    /// Points a live workspace's `avatar_url` at `url` (or clears it with `None`),
+    /// returning the URL it named before. The row is locked while it is read, so
+    /// concurrent replacements each return the URL they replaced.
+    ///
+    /// Errors with not-found if the workspace does not exist or is soft-deleted.
+    fn replace_workspace_avatar(
+        &mut self,
+        workspace_id: Uuid,
+        url: Option<String>,
+    ) -> impl Future<Output = Result<Option<String>>> + Send;
+
     /// Soft deletes a workspace by setting the deletion timestamp.
     fn delete_workspace(&mut self, workspace_id: Uuid) -> impl Future<Output = Result<()>> + Send;
 
@@ -122,6 +133,34 @@ impl WorkspaceRepository for PgConnection {
             .returning(Workspace::as_returning())
             .get_result(self)
             .await?)
+    }
+
+    async fn replace_workspace_avatar(
+        &mut self,
+        workspace_id: Uuid,
+        url: Option<String>,
+    ) -> Result<Option<String>> {
+        use crate::AsyncConnection;
+
+        // Lock the live row while reading the old URL, so concurrent replacements
+        // serialize and each returns exactly the URL it replaced.
+        self.transaction(async |conn| {
+            use schema::workspaces::dsl;
+
+            let previous: Option<String> = dsl::workspaces
+                .filter(dsl::id.eq(workspace_id))
+                .filter(dsl::deleted_at.is_null())
+                .for_update()
+                .select(dsl::avatar_url)
+                .first(conn)
+                .await?;
+            diesel::update(dsl::workspaces.filter(dsl::id.eq(workspace_id)))
+                .set(dsl::avatar_url.eq(url))
+                .execute(conn)
+                .await?;
+            Ok::<_, Error>(previous)
+        })
+        .await
     }
 
     async fn delete_workspace(&mut self, workspace_id: Uuid) -> Result<()> {

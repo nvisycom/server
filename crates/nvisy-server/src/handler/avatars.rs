@@ -2,9 +2,8 @@
 //!
 //! Avatars are served from a dedicated, unauthenticated route family keyed by
 //! the owner's opaque id, so they load directly in an `<img>` tag and reveal no
-//! username or slug. Each URL carries a content-hash `version` segment used only
-//! for cache-busting; the route serves the owner's current avatar regardless of
-//! its value and marks the response immutable. Uploads and deletes live with the
+//! username or slug. Each URL carries the `version` segment an upload drew, so a
+//! URL maps to one stored object and the response is marked immutable. Uploads and deletes live with the
 //! authenticated account and workspace handlers.
 
 use aide::axum::ApiRouter;
@@ -23,7 +22,7 @@ use crate::service::{AvatarOwner, AvatarService, ServiceState};
 const TRACING_TARGET: &str = "nvisy_server::handler::avatars";
 
 /// Path parameters for a public avatar route: the owner id and the avatar's
-/// content-hash version.
+/// version.
 ///
 /// Each version is a distinct stored object, so an unknown version simply does
 /// not resolve — the version needs no separate validation.
@@ -33,7 +32,7 @@ const TRACING_TARGET: &str = "nvisy_server::handler::avatars";
 struct AvatarPathParams {
     /// Opaque id of the avatar's owner.
     id: Uuid,
-    /// Content-hash version segment identifying the exact stored object.
+    /// Version segment identifying the exact stored object.
     version: String,
 }
 
