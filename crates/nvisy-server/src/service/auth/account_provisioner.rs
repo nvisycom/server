@@ -13,7 +13,7 @@ use nvisy_postgres::types::{HANDLE_MAX_LENGTH, Handle, IdentityProvider};
 use nvisy_postgres::{AsyncConnection, Error as PgError, PgConn};
 use uuid::Uuid;
 
-use crate::response::{ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Resource, Result};
 use crate::service::OidcIdentity;
 
 /// Tracing target for account provisioning.
@@ -258,7 +258,7 @@ impl AccountProvisioner {
     pub async fn load_active(&self, conn: &mut PgConn, account_id: Uuid) -> Result<Account> {
         conn.find_account_by_id(account_id)
             .await?
-            .ok_or_else(|| ErrorKind::NotFound.with_message("Account not found"))
+            .ok_or_else(|| Error::not_found(Resource::Account))
     }
 }
 

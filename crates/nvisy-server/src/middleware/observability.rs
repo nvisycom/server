@@ -25,13 +25,16 @@ const TRACING_TARGET: &str = "nvisy_server::middleware::observability";
 /// Builds the per-request tracing span carrying the method and path.
 ///
 /// Every event logged while handling the request inherits these fields, so
-/// error responses (4xx/5xx) are always attributable to a route.
+/// error responses (4xx/5xx) are always attributable to a route. The auth
+/// extractors fill in `account_id` and `workspace_id` once resolved.
 fn request_span(request: &Request) -> tracing::Span {
     tracing::info_span!(
         target: TRACING_TARGET,
         "request",
         method = %request.method(),
         path = %request.uri().path(),
+        account_id = tracing::field::Empty,
+        workspace_id = tracing::field::Empty,
     )
 }
 

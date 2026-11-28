@@ -30,7 +30,7 @@ impl<S> FromRequestParts<S> for IdempotencyKey
 where
     S: Sync,
 {
-    type Rejection = Error<'static>;
+    type Rejection = Error;
 
     // reason: `FromRequestParts::from_request_parts` is an `async fn` in the trait; this
     // extractor reads a header with no await, but the sibling extractors all keep the

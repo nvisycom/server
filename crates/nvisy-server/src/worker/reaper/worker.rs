@@ -27,7 +27,7 @@ pub struct BlobReaper {
 }
 
 impl Worker for BlobReaper {
-    type Error = Error<'static>;
+    type Error = Error;
 
     const NAME: &'static str = "blob_reaper";
 

@@ -38,7 +38,7 @@ where
     T: DeserializeOwned + Validate<Context = ()> + 'static,
     S: Send + Sync,
 {
-    type Rejection = Error<'static>;
+    type Rejection = Error;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         let Json(data) = <Json<T> as FromRequest<S>>::from_request(req, state).await?;
@@ -52,7 +52,7 @@ where
     T: DeserializeOwned + Validate<Context = ()> + 'static,
     S: Send + Sync,
 {
-    type Rejection = Error<'static>;
+    type Rejection = Error;
 
     /// Extracts and validates a body only when one is present. A genuinely absent
     /// body yields `None`; a present-but-broken body (malformed JSON, wrong
@@ -70,16 +70,12 @@ where
     }
 }
 
-impl From<Report> for Error<'static> {
+impl From<Report> for Error {
     fn from(report: Report) -> Self {
         let messages: Vec<String> = report
             .iter()
             .map(|(path, error)| describe_error(path, error))
             .collect();
-
-        // The report holds only paths and messages, never the submitted value,
-        // so logging it in full cannot leak request contents.
-        tracing::warn!(errors = %report, "Request validation failed");
 
         let user_message = match messages.as_slice() {
             [] => "Validation failed".to_string(),

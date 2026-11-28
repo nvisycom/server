@@ -18,6 +18,6 @@ mod sse;
 pub use auth::{ClearedSession, CookieConfig, WebSession};
 pub use avatar_image::AvatarImage;
 pub use download::attachment_headers;
-pub use error::{Error, ErrorKind, ErrorResponse, Result};
+pub use error::{Error, ErrorKind, ErrorResponse, Resource, Result, error_responses};
 pub(crate) use redirect::{RedirectResult, connection_result_redirect};
-pub use sse::SseResponse;
+pub use sse::{SseResponse, Watch, sse_event, watch};

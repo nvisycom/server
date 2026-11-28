@@ -11,9 +11,7 @@
 //! [`find`]: WorkspaceConnectionService::find
 
 use nvisy_core::net::EndpointPolicy;
-use nvisy_postgres::model::{
-    NewWorkspaceConnection, NewWorkspaceConnectionSchedule, WorkspaceConnectionSchedule,
-};
+use nvisy_postgres::model::{NewWorkspaceConnection, WorkspaceConnectionSchedule};
 use nvisy_postgres::query::{
     WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
     WorkspaceConnectionSyncRepository,
@@ -22,11 +20,12 @@ use nvisy_postgres::types::{ConnectionId, CursorPage, CursorPagination, TimeCurs
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, model};
 use uuid::Uuid;
 
-use crate::domain::input::{CreateConnectionInput, SyncScheduleInput, UpdateConnectionInput};
+use crate::domain::config::replace_config;
+use crate::domain::input::{CreateConnectionInput, UpdateConnectionInput};
 use crate::domain::output::FoundConnection;
-use crate::response::{Error, ErrorKind, Result};
+use crate::response::{Error, Resource, Result};
 use crate::service::event::EventEmitter;
-use crate::service::{ConnectionConfig, CryptoService, StandardCronSchedule, event};
+use crate::service::{CryptoService, event};
 
 /// Tracing target for connection domain operations.
 const TRACING_TARGET: &str = "nvisy_server::domain::connection";
@@ -82,11 +81,7 @@ impl WorkspaceConnectionService {
             .await?;
 
         if let Some(sync) = &input.sync {
-            if !input.config.supports_schedule() {
-                return Err(ErrorKind::BadRequest
-                    .with_message("This provider does not support scheduled sync"));
-            }
-            validate_sync_input(sync)?;
+            sync.validate(input.config.supports_schedule())?;
         }
 
         let provider = input.config.provider_id().to_owned();
@@ -112,20 +107,15 @@ impl WorkspaceConnectionService {
             .transaction(async |conn| {
                 let connection = conn.create_workspace_connection(new_connection).await?;
                 if let Some(sync) = sync {
-                    conn.create_connection_schedule(NewWorkspaceConnectionSchedule {
-                        connection_id: connection.id,
-                        sync_mode: Some(sync.sync_mode),
-                        schedule_cron: sync.schedule_cron,
-                        deletion_policy: Some(sync.deletion_policy),
-                    })
-                    .await?;
+                    conn.create_connection_schedule(sync.into_model(connection.id))
+                        .await?;
                 }
                 conn.emit_event(
                     origin,
-                    event::WorkspaceEvent::ConnectionCreated(event::ConnectionCreated {
+                    event::ConnectionCreated {
                         connection_id: connection.id,
                         connection_name: connection.display_name.clone(),
-                    }),
+                    },
                 )
                 .await?;
                 Ok::<_, Error>(connection)
@@ -243,11 +233,7 @@ impl WorkspaceConnectionService {
             .item;
 
         if let Some(sync) = &input.sync {
-            if !existing.connection_type.supports_schedule() {
-                return Err(ErrorKind::BadRequest
-                    .with_message("This provider does not support scheduled sync"));
-            }
-            validate_sync_input(sync)?;
+            sync.validate(existing.connection_type.supports_schedule())?;
         }
 
         let connection_row_id = existing.id;
@@ -256,38 +242,21 @@ impl WorkspaceConnectionService {
             .clone()
             .unwrap_or_else(|| existing.display_name.clone());
         let workspace_id = origin.workspace_id;
-        let crypto = self.crypto.clone();
-        conn.transaction(async move |conn| {
+        conn.transaction(async |conn| {
             let Some(current) = conn
                 .find_workspace_connection_by_id_for_update(connection_row_id)
                 .await?
             else {
-                return Err(ErrorKind::NotFound.with_message("WorkspaceConnection not found"));
+                return Err(Error::not_found(Resource::Connection));
             };
 
-            let (provider, encrypted_data) = match input.config {
-                Some(mut config) => {
-                    let stored: ConnectionConfig =
-                        crypto.decrypt_json(workspace_id, &current.encrypted_data)?;
-                    if config.provider_id() != stored.provider_id() {
-                        return Err(ErrorKind::BadRequest.with_message(
-                            "A connection's provider cannot be changed; delete and recreate instead",
-                        ));
-                    }
-                    if let (
-                        ConnectionConfig::FileService(new),
-                        ConnectionConfig::FileService(existing),
-                    ) = (&mut config, &stored)
-                    {
-                        new.set_tokens(existing.tokens().clone());
-                    }
-                    (
-                        Some(config.provider_id().to_owned()),
-                        Some(crypto.encrypt_json(workspace_id, &config)?),
-                    )
-                }
-                None => (None, None),
-            };
+            let (provider, encrypted_data) = input
+                .config
+                .map(|config| {
+                    replace_config(&self.crypto, workspace_id, &current.encrypted_data, config)
+                })
+                .transpose()?
+                .unzip();
 
             let update_data = model::UpdateWorkspaceConnection {
                 display_name: input.display_name,
@@ -299,20 +268,15 @@ impl WorkspaceConnectionService {
             conn.update_workspace_connection(connection_row_id, update_data)
                 .await?;
             if let Some(sync) = input.sync {
-                conn.upsert_connection_schedule(NewWorkspaceConnectionSchedule {
-                    connection_id: connection_row_id,
-                    sync_mode: Some(sync.sync_mode),
-                    schedule_cron: sync.schedule_cron,
-                    deletion_policy: Some(sync.deletion_policy),
-                })
-                .await?;
+                conn.upsert_connection_schedule(sync.into_model(connection_row_id))
+                    .await?;
             }
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::ConnectionUpdated(event::ConnectionUpdated {
+                event::ConnectionUpdated {
                     connection_id: connection_row_id,
                     connection_name,
-                }),
+                },
             )
             .await?;
             Ok::<(), Error>(())
@@ -344,10 +308,10 @@ impl WorkspaceConnectionService {
             conn.delete_workspace_connection(existing.id).await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::ConnectionDeleted(event::ConnectionDeleted {
+                event::ConnectionDeleted {
                     connection_id: existing.id,
                     connection_name: existing.display_name.clone(),
-                }),
+                },
             )
             .await?;
             Ok::<(), Error>(())
@@ -357,18 +321,6 @@ impl WorkspaceConnectionService {
         tracing::info!(target: TRACING_TARGET, "Connection deleted");
         Ok(())
     }
-}
-
-/// Validates a sync-schedule input: the cron expression, when present, must be
-/// valid. Either direction may be scheduled — an import pulls the listing, an
-/// export pushes redacted outputs.
-fn validate_sync_input(sync: &SyncScheduleInput) -> Result<()> {
-    if let Some(cron) = &sync.schedule_cron
-        && !StandardCronSchedule.is_valid(cron)
-    {
-        return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
-    }
-    Ok(())
 }
 
 /// Finds a connection within a workspace by id, with its creator, schedule, and
@@ -381,7 +333,7 @@ async fn find_connection(
     let found = conn
         .find_connection_in_workspace_with_creator(workspace_id, connection_id.as_uuid())
         .await?
-        .ok_or_else(|| Error::not_found("connection"))?;
+        .ok_or_else(|| Error::not_found(Resource::Connection))?;
     let schedule = conn.find_connection_schedule(found.item.id).await?;
     let last_synced_at = conn
         .last_successful_sync_at(&[found.item.id])

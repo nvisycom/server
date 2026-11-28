@@ -15,7 +15,6 @@ use nvisy_postgres::types::session::SlidingWindow;
 
 use super::TRACING_TARGET;
 use crate::extract::AuthState;
-use crate::response::Result;
 
 /// Requires a valid session to proceed with the request.
 ///
@@ -34,18 +33,15 @@ pub async fn require_authentication(_: AuthState, request: Request, next: Next) 
 /// extends it. It must be layered *inside* CSRF protection, so a request that will
 /// be rejected for a missing CSRF token never reaches the session-extending write.
 ///
-/// # Errors
-///
-/// Never returns `Err`: the sliding write is best-effort, so a failure to acquire
-/// a connection or to slide is logged and swallowed, and the downstream response
-/// is always returned. The `Result` return type only mirrors the middleware
-/// signature.
+/// The sliding write is best-effort, so a failure to acquire a connection or to
+/// slide is logged and swallowed, and the downstream response is always
+/// returned.
 pub async fn slide_session(
     auth_state: AuthState,
     State(pg_database): State<PgClient>,
     request: Request,
     next: Next,
-) -> Result<Response> {
+) -> Response {
     // Slide the session's idle bound forward on use, throttled so it writes at
     // most once per throttle interval rather than on every request. Only `web`
     // sessions actually slide (the query no-ops for programmatic tokens). This is
@@ -86,5 +82,5 @@ pub async fn slide_session(
         }
     }
 
-    Ok(next.run(request).await)
+    next.run(request).await
 }

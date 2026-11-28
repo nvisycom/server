@@ -31,10 +31,11 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::extract::SecurityContext;
 use crate::response::{Error, ErrorKind, Result};
 use crate::service::{
     ConnectionConfig, ConnectionSyncService, CryptoService, Infra, StandardCronSchedule,
-    TransferKind, TransferRequest,
+    TransferKind, TransferRequest, event,
 };
 use crate::worker::{Worker, every};
 
@@ -80,7 +81,7 @@ pub struct ConnectionSyncWorker {
 }
 
 impl Worker for ConnectionSyncWorker {
-    type Error = Error<'static>;
+    type Error = Error;
 
     const NAME: &'static str = "connection_sync";
 
@@ -378,10 +379,16 @@ impl ConnectionSyncWorker {
             attempt: Some(attempt),
             metadata: None,
         };
-        // Create the run and record its start event atomically.
+        // Create the run and record its start event atomically. A background run
+        // has no request, so its origin carries no client IP or user agent.
+        let origin = event::EventOrigin {
+            workspace_id: connection.workspace_id,
+            account_id,
+            security: &SecurityContext::default(),
+        };
         let run = self
             .sync
-            .create_run(&mut conn, new_run, &connection)
+            .create_run(&mut conn, origin, new_run, &connection)
             .await?;
         Ok(Some(TransferRequest {
             run_id: run.id,

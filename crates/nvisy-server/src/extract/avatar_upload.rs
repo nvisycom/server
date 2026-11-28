@@ -7,7 +7,7 @@ use axum::extract::{FromRequest, Request};
 use bytes::Bytes;
 
 use crate::extract::Multipart;
-use crate::response::{Error, ErrorKind};
+use crate::response::{Error, ErrorKind, error_responses};
 
 /// The raw bytes of an uploaded avatar image, read from the first file field of a
 /// multipart request.
@@ -21,7 +21,7 @@ impl<S> FromRequest<S> for AvatarUpload
 where
     S: Send + Sync,
 {
-    type Rejection = Error<'static>;
+    type Rejection = Error;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         let Multipart(mut multipart) = Multipart::from_request(req, state).await?;
@@ -49,5 +49,12 @@ where
 impl OperationInput for AvatarUpload {
     fn operation_input(ctx: &mut GenContext, operation: &mut Operation) {
         Multipart::operation_input(ctx, operation);
+    }
+
+    fn inferred_early_responses(
+        ctx: &mut GenContext,
+        operation: &mut Operation,
+    ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
+        error_responses(ctx, operation, &[400, 413])
     }
 }

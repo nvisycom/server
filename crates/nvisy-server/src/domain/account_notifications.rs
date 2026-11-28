@@ -12,7 +12,7 @@ use nvisy_postgres::query::AccountNotificationRepository;
 use nvisy_postgres::types::{CursorPage, CursorPagination, TimeCursor};
 use uuid::Uuid;
 
-use crate::response::{Error, Result};
+use crate::response::{Error, Resource, Result};
 use crate::service::NotificationEmitter;
 
 /// Tracing target for account notification domain operations.
@@ -102,7 +102,7 @@ impl AccountNotificationService {
             .mark_account_notification_as_read(account_id, notification_id)
             .await?;
         if !marked {
-            return Err(Error::not_found("notification"));
+            return Err(Error::not_found(Resource::Notification));
         }
 
         // Push the decremented unread count so a watching badge updates live.

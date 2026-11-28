@@ -3,12 +3,12 @@
 use elide_pipeline::governance::policy::Policy;
 use jiff::Timestamp;
 use nvisy_postgres::model::{WorkspacePolicy as WorkspacePolicyModel, WorkspacePolicyVersion};
-use nvisy_postgres::types::{Handle, PolicyKind};
+use nvisy_postgres::types::PolicyKind;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{AccountRef, Page};
+use super::{AccountRef, Page, WorkspaceRef};
 use crate::response::{ErrorKind, Result};
 
 /// Response type for a workspace policy.
@@ -17,10 +17,9 @@ use crate::response::{ErrorKind, Result};
 pub struct WorkspacePolicy {
     /// Unique identifier of the policy.
     pub id: Uuid,
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
-    /// URL-safe workspace handle. Display-only.
-    pub workspace_handle: Handle,
+    /// The workspace it belongs to.
+    #[serde(flatten)]
+    pub workspace: WorkspaceRef,
     /// Account that created this policy.
     pub created_by: AccountRef,
     /// Human-readable policy display name.
@@ -52,10 +51,9 @@ pub struct WorkspacePolicy {
 pub struct WorkspacePolicySummary {
     /// Unique identifier of the policy.
     pub id: Uuid,
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
-    /// URL-safe workspace handle. Display-only.
-    pub workspace_handle: Handle,
+    /// The workspace it belongs to.
+    #[serde(flatten)]
+    pub workspace: WorkspaceRef,
     /// Account that created this policy.
     pub created_by: AccountRef,
     /// Human-readable policy display name.
@@ -79,14 +77,12 @@ impl WorkspacePolicySummary {
     #[must_use]
     pub fn from_model(
         policy: WorkspacePolicyModel,
-        workspace_id: Uuid,
-        workspace_handle: Handle,
+        workspace: WorkspaceRef,
         created_by: AccountRef,
     ) -> Self {
         Self {
             id: policy.id,
-            workspace_id,
-            workspace_handle,
+            workspace,
             created_by,
             display_name: policy.display_name,
             description: policy.description,
@@ -111,8 +107,7 @@ impl WorkspacePolicy {
     pub fn from_model(
         policy: WorkspacePolicyModel,
         version: WorkspacePolicyVersion,
-        workspace_id: Uuid,
-        workspace_handle: Handle,
+        workspace: WorkspaceRef,
         created_by: AccountRef,
     ) -> Result<Self> {
         let definition = serde_json::from_value::<Policy>(version.definition).map_err(|err| {
@@ -123,8 +118,7 @@ impl WorkspacePolicy {
 
         Ok(Self {
             id: policy.id,
-            workspace_id,
-            workspace_handle,
+            workspace,
             created_by,
             display_name: policy.display_name,
             description: policy.description,

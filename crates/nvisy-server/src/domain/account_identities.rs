@@ -22,8 +22,7 @@ use nvisy_postgres::types::IdentityProvider;
 use nvisy_postgres::{AsyncConnection, PgClient};
 use uuid::Uuid;
 
-use crate::handler::utility::build_password_user_inputs;
-use crate::response::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Resource, Result};
 use crate::service::PasswordService;
 
 /// Tracing target for account identity domain operations.
@@ -108,7 +107,7 @@ impl AccountIdentityService {
         let account = conn
             .find_account_by_id(account_id)
             .await?
-            .ok_or_else(|| Error::not_found("account"))?;
+            .ok_or_else(|| Error::not_found(Resource::Account))?;
 
         let secret = conn
             .find_account_identity(account_id, IdentityProvider::Password)
@@ -154,7 +153,7 @@ impl AccountIdentityService {
         let account = conn
             .find_account_by_id(account_id)
             .await?
-            .ok_or_else(|| Error::not_found("account"))?;
+            .ok_or_else(|| Error::not_found(Resource::Account))?;
 
         let existing = conn
             .find_account_identity(account_id, IdentityProvider::Password)
@@ -183,7 +182,7 @@ impl AccountIdentityService {
     ) -> Result<()> {
         // Bind the strength check to the account's own fields so a password derived
         // from the username/email is rejected.
-        let user_inputs = build_password_user_inputs(
+        let user_inputs = PasswordService::user_inputs(
             account.username.as_str(),
             account.display_name.as_deref(),
             &account.email_address,

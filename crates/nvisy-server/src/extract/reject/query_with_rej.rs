@@ -13,7 +13,7 @@ use derive_more::{Deref, DerefMut, From};
 use schemars::JsonSchema;
 
 use super::sanitize_error_message;
-use crate::response::{Error, ErrorKind};
+use crate::response::{Error, ErrorKind, error_responses};
 
 /// Enhanced query parameter extractor with improved error handling.
 ///
@@ -35,22 +35,16 @@ use crate::response::{Error, ErrorKind};
 /// [`Query`]: AxumQuery
 #[must_use]
 #[derive(Debug, Clone, Copy, Default, Deref, DerefMut, From, FromRequestParts)]
-#[from_request(via(AxumQuery), rejection(Error<'static>))]
+#[from_request(via(AxumQuery), rejection(Error))]
 pub struct Query<T>(pub T);
 
 /// Maps a query rejection into a structured bad-request [`Error`].
 ///
 /// The deserializer message is sanitized before it becomes context so that
 /// submitted query values are not echoed back or logged.
-impl From<QueryRejection> for Error<'static> {
+impl From<QueryRejection> for Error {
     fn from(rejection: QueryRejection) -> Self {
         let context = sanitize_error_message(&rejection.to_string());
-
-        tracing::debug!(
-            target: "nvisy::extract::query",
-            error = %context,
-            "Query parameter parsing failed"
-        );
 
         ErrorKind::BadRequest
             .with_message("Invalid query parameters")
@@ -70,6 +64,6 @@ where
         ctx: &mut GenContext,
         operation: &mut Operation,
     ) -> Vec<(Option<aide::openapi::StatusCode>, Response)> {
-        <AxumQuery<T> as OperationInput>::inferred_early_responses(ctx, operation)
+        error_responses(ctx, operation, &[400])
     }
 }

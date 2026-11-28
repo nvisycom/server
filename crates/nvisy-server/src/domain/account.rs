@@ -15,7 +15,7 @@ use nvisy_postgres::model::{Account, UpdateAccount};
 use nvisy_postgres::query::{AccountRepository, WorkspaceMemberRepository};
 use uuid::Uuid;
 
-use crate::response::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Resource, Result};
 
 /// Tracing target for account domain operations.
 const TRACING_TARGET: &str = "nvisy_server::domain::account";
@@ -49,7 +49,7 @@ impl AccountService {
         let mut conn = self.postgres.get_connection().await?;
         conn.find_account_by_id(account_id)
             .await?
-            .ok_or_else(|| Error::not_found("account"))
+            .ok_or_else(|| Error::not_found(Resource::Account))
     }
 
     /// Finds another account's profile by its id, visible only to a requester
@@ -70,14 +70,14 @@ impl AccountService {
         let account = conn
             .find_account_by_id(account_id)
             .await?
-            .ok_or_else(|| Error::not_found("account"))?;
+            .ok_or_else(|| Error::not_found(Resource::Account))?;
 
         let shares_workspace = conn
             .accounts_share_workspace(requester_id, account.id)
             .await?;
         if !shares_workspace {
             tracing::warn!(target: TRACING_TARGET, "Account not accessible: no shared workspace");
-            return Err(Error::not_found("account"));
+            return Err(Error::not_found(Resource::Account));
         }
 
         Ok(account)
@@ -126,7 +126,7 @@ impl AccountService {
         let mut conn = self.postgres.get_connection().await?;
         conn.delete_account(account_id)
             .await?
-            .ok_or_else(|| Error::not_found("account"))?;
+            .ok_or_else(|| Error::not_found(Resource::Account))?;
         tracing::info!(target: TRACING_TARGET, "Account deleted");
         Ok(())
     }

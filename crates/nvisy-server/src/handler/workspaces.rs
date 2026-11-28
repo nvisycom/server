@@ -8,7 +8,6 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
 use uuid::Uuid;
 
 use crate::domain;
@@ -20,7 +19,6 @@ use crate::handler::request::{
     CreateWorkspace, CursorPagination, UpdateWorkspace, UpdateWorkspaceNotificationSettings,
 };
 use crate::handler::response::{Page, Workspace, WorkspaceNotificationSettings, WorkspacesPage};
-use crate::handler::utility::resolve_account_ref;
 use crate::middleware::UploadConfig;
 use crate::response::{ErrorResponse, Result};
 use crate::service::event::EventOrigin;
@@ -33,9 +31,8 @@ const TRACING_TARGET: &str = "nvisy_server::handler::workspaces";
 ///
 /// The creator is automatically added as an owner of the workspace,
 /// granting full management permissions.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+#[tracing::instrument(skip_all)]
 async fn create_workspace(
-    State(pg_client): State<PgClient>,
     State(workspaces): State<domain::WorkspaceService>,
     State(upload): State<UploadConfig>,
     auth_state: AuthState,
@@ -58,9 +55,8 @@ async fn create_workspace(
         )
         .await?;
 
-    // The creator is the authenticated caller; resolve their identity directly.
-    let mut conn = pg_client.get_connection().await?;
-    let creator = resolve_account_ref(&mut conn, creator_id).await?;
+    // The creator is the authenticated caller.
+    let creator = auth_state.account().clone().into();
     let response = Workspace::from_model_with_membership(
         created.workspace,
         &created.membership,
@@ -75,21 +71,19 @@ fn create_workspace_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Create workspace")
         .description("Creates a new workspace. The creator is automatically added as an owner.")
         .response::<201, Json<Workspace>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
 }
 
 /// Lists all workspaces the authenticated user is a member of.
 ///
 /// Returns workspaces with membership details including the user's role
 /// in each workspace.
-#[tracing::instrument(skip_all, fields(account_id = %auth_state.account_id))]
+#[tracing::instrument(skip_all)]
 async fn list_workspaces(
     State(workspaces): State<domain::WorkspaceService>,
     State(upload): State<UploadConfig>,
     auth_state: AuthState,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<WorkspacesPage>)> {
+) -> Result<Json<WorkspacesPage>> {
     let page = workspaces
         .list(auth_state.account_id, pagination.into_cursor())
         .await?;
@@ -110,94 +104,61 @@ async fn list_workspaces(
         "Workspaces listed",
     );
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok(Json(response))
 }
 
 fn list_workspaces_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List workspaces")
         .description("Returns all workspaces the authenticated user is a member of.")
         .response::<200, Json<WorkspacesPage>>()
-        .response::<401, Json<ErrorResponse>>()
 }
 
 /// Retrieves details for a specific workspace.
 ///
 /// Requires `ViewWorkspace` permission for the requested workspace.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn read_workspace(
-    State(pg_client): State<PgClient>,
+    State(workspaces): State<domain::WorkspaceService>,
     State(upload): State<UploadConfig>,
     authz: Authorized<markers::ViewWorkspace>,
-) -> Result<(StatusCode, Json<Workspace>)> {
-    let workspace = authz.workspace;
-    let member = authz.member;
-
-    let mut conn = pg_client.get_connection().await?;
-    let creator = resolve_account_ref(&mut conn, workspace.created_by).await?;
-
+) -> Result<Json<Workspace>> {
+    let creator = workspaces.creator(&authz.workspace).await?;
     let hard = upload.max_file_bytes();
-    let response = Workspace::from_model_with_membership(workspace, &member, creator, hard);
-    Ok((StatusCode::OK, Json(response)))
+    Ok(Json(Workspace::from_model_with_membership(
+        authz.workspace,
+        &authz.member,
+        creator.into(),
+        hard,
+    )))
 }
 
 fn read_workspace_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get workspace")
         .description("Returns details for a specific workspace.")
         .response::<200, Json<Workspace>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Updates an existing workspace's configuration.
 ///
 /// Requires `UpdateWorkspace` permission. Only provided fields are updated.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn update_workspace(
-    State(pg_client): State<PgClient>,
     State(workspaces): State<domain::WorkspaceService>,
     State(upload): State<UploadConfig>,
     authz: Authorized<markers::UpdateWorkspace>,
-    security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWorkspace>,
-) -> Result<(StatusCode, Json<Workspace>)> {
+) -> Result<Json<Workspace>> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace");
-
-    let account_id = authz.account_id;
-    let workspace = authz.workspace;
-    let member = authz.member;
-
     let update_data = request.into_model()?;
-    let updated = workspaces
-        .update(
-            EventOrigin {
-                workspace_id: workspace.id,
-                account_id,
-                security: &security,
-            },
-            update_data,
-        )
-        .await?;
-
-    let mut conn = pg_client.get_connection().await?;
-    let creator = resolve_account_ref(&mut conn, updated.created_by).await?;
+    let updated = workspaces.update(authz.origin(), update_data).await?;
 
     let hard = upload.max_file_bytes();
-    let response = Workspace::from_model_with_membership(updated, &member, creator, hard);
-
-    Ok((StatusCode::OK, Json(response)))
+    Ok(Json(Workspace::from_model_with_membership(
+        updated.item,
+        &authz.member,
+        updated.account.into(),
+        hard,
+    )))
 }
 
 fn update_workspace_docs(op: TransformOperation) -> TransformOperation {
@@ -206,105 +167,63 @@ fn update_workspace_docs(op: TransformOperation) -> TransformOperation {
             "Updates an existing workspace's configuration. Only provided fields are updated.",
         )
         .response::<200, Json<Workspace>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Soft-deletes a workspace.
 ///
 /// Requires `DeleteWorkspace` permission. The workspace is marked as deleted
 /// but data is retained for potential recovery.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn delete_workspace(
     State(workspaces): State<domain::WorkspaceService>,
     authz: Authorized<markers::DeleteWorkspace>,
-    security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace");
 
-    let account_id = authz.account_id;
-    let workspace = authz.workspace;
+    workspaces.delete(authz.origin()).await?;
 
-    workspaces
-        .delete(EventOrigin {
-            workspace_id: workspace.id,
-            account_id,
-            security: &security,
-        })
-        .await?;
-
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn delete_workspace_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete workspace")
         .description("Soft-deletes a workspace. Data is retained for potential recovery.")
-        .response::<200, ()>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
+        .response::<204, ()>()
 }
 
 /// Retrieves the notification settings for the authenticated user in a workspace.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn get_notification_settings(
     State(members): State<domain::WorkspaceMemberService>,
     auth_state: AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
-) -> Result<(StatusCode, Json<WorkspaceNotificationSettings>)> {
+) -> Result<Json<WorkspaceNotificationSettings>> {
     let member = members
         .notification_settings(workspace.id, auth_state.account_id)
         .await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceNotificationSettings::from_member(&member)),
-    ))
+    Ok(Json(WorkspaceNotificationSettings::from_member(&member)))
 }
 
 fn get_notification_settings_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get notification settings")
         .description("Returns the notification settings for the authenticated user in a workspace.")
         .response::<200, Json<WorkspaceNotificationSettings>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Updates the notification settings for the authenticated user in a workspace.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %auth_state.account_id,
-        workspace_id = %workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn update_notification_settings(
     State(members): State<domain::WorkspaceMemberService>,
     auth_state: AuthState,
     WorkspaceContext(workspace): WorkspaceContext,
     ValidateJson(request): ValidateJson<UpdateWorkspaceNotificationSettings>,
-) -> Result<(StatusCode, Json<WorkspaceNotificationSettings>)> {
+) -> Result<Json<WorkspaceNotificationSettings>> {
     let member = members
         .update_notification_settings(workspace.id, auth_state.account_id, request.into_model())
         .await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceNotificationSettings::from_member(&member)),
-    ))
+    Ok(Json(WorkspaceNotificationSettings::from_member(&member)))
 }
 
 fn update_notification_settings_docs(op: TransformOperation) -> TransformOperation {
@@ -316,14 +235,11 @@ fn update_notification_settings_docs(op: TransformOperation) -> TransformOperati
         .response::<404, Json<ErrorResponse>>()
 }
 
-/// Returns a [`Router`] with all workspace-related routes.
-///
-/// [`Router`]: axum::routing::Router
 /// Uploads (or replaces) a workspace's avatar (logo).
 ///
 /// The image is normalized to WebP and stored; the workspace's `avatar_url` is
 /// set to its serve path. Requires `UpdateWorkspace`.
-#[tracing::instrument(skip_all, fields(account_id = %authz.account_id, workspace_id = %authz.workspace.id))]
+#[tracing::instrument(skip_all)]
 async fn upload_workspace_avatar(
     State(avatar): State<AvatarService>,
     authz: Authorized<markers::UpdateWorkspace>,
@@ -334,34 +250,30 @@ async fn upload_workspace_avatar(
     // Authorization is enforced by the `Authorized` extractor. The avatar
     // service processes the image, writes the object, and acquires its own
     // connection for the URL update.
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
     avatar
         .set(AvatarOwner::Workspace(workspace.id), bytes)
         .await?;
 
     tracing::info!(target: TRACING_TARGET, "Workspace avatar set");
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn upload_workspace_avatar_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Upload workspace avatar")
         .description("Uploads and normalizes the workspace's avatar. Requires UpdateWorkspace.")
-        .response::<200, ()>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
+        .response::<204, ()>()
 }
 
 /// Removes a workspace's avatar. Requires `UpdateWorkspace`.
-#[tracing::instrument(skip_all, fields(account_id = %authz.account_id, workspace_id = %authz.workspace.id))]
+#[tracing::instrument(skip_all)]
 async fn delete_workspace_avatar(
     State(avatar): State<AvatarService>,
     authz: Authorized<markers::UpdateWorkspace>,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace avatar");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
     avatar.delete(AvatarOwner::Workspace(workspace.id)).await?;
     tracing::info!(target: TRACING_TARGET, "Workspace avatar deleted");
     Ok(StatusCode::NO_CONTENT)
@@ -371,11 +283,11 @@ fn delete_workspace_avatar_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete workspace avatar")
         .description("Removes the workspace's avatar. Requires UpdateWorkspace.")
         .response::<204, ()>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
+/// Returns a [`Router`] with all workspace-related routes.
+///
+/// [`Router`]: axum::routing::Router
 pub fn routes() -> ApiRouter<ServiceState> {
     use aide::axum::routing::{get_with, post_with, put_with};
 

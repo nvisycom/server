@@ -14,7 +14,7 @@ use derive_more::{Deref, DerefMut, From};
 use schemars::JsonSchema;
 
 use super::sanitize_error_message;
-use crate::response::{Error, ErrorKind};
+use crate::response::{Error, ErrorKind, error_responses};
 
 /// Enhanced path parameter extractor with improved error handling.
 ///
@@ -35,19 +35,14 @@ use crate::response::{Error, ErrorKind};
 /// [`Path`]: AxumPath
 #[must_use]
 #[derive(Debug, Clone, Copy, Default, Deref, DerefMut, From, FromRequestParts)]
-#[from_request(via(AxumPath), rejection(Error<'static>))]
+#[from_request(via(AxumPath), rejection(Error))]
 pub struct Path<T>(pub T);
 
-impl From<PathRejection> for Error<'static> {
+impl From<PathRejection> for Error {
     fn from(rejection: PathRejection) -> Self {
         match rejection {
             PathRejection::FailedToDeserializePathParams(err) => {
                 let error_message = sanitize_error_message(&err.to_string());
-
-                tracing::warn!(
-                    error = %error_message,
-                    "Path parameter deserialization failed"
-                );
 
                 ErrorKind::BadRequest
                     .with_message("Invalid path parameter format")
@@ -58,11 +53,6 @@ impl From<PathRejection> for Error<'static> {
             PathRejection::MissingPathParams(err) => {
                 let error_message = sanitize_error_message(&err.to_string());
 
-                tracing::warn!(
-                    error = %error_message,
-                    "Missing path parameter"
-                );
-
                 ErrorKind::MissingPathParam
                     .with_message("Required path parameter missing")
                     .with_context(format!(
@@ -70,8 +60,6 @@ impl From<PathRejection> for Error<'static> {
                     ))
             }
             _ => {
-                tracing::error!("Unexpected path rejection error");
-
                 ErrorKind::InternalServerError
                     .with_message("Path processing failed")
                     .with_context("Unexpected error occurred during path parameter processing. This may indicate a routing configuration issue.")
@@ -92,6 +80,6 @@ where
         ctx: &mut GenContext,
         operation: &mut Operation,
     ) -> Vec<(Option<aide::openapi::StatusCode>, Response)> {
-        AxumPath::<T>::inferred_early_responses(ctx, operation)
+        error_responses(ctx, operation, &[400])
     }
 }

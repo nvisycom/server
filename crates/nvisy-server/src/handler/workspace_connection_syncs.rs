@@ -15,115 +15,52 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::model::{
-    NewWorkspaceConnectionSync, WorkspaceConnection as WorkspaceConnectionModel,
-};
-use nvisy_postgres::query::{
-    WorkspaceConnectionRepository, WorkspaceConnectionScheduleRepository,
-    WorkspaceConnectionSyncRepository,
-};
-use nvisy_postgres::types::{
-    ConnectionId, SyncDeletionPolicy, SyncMode, SyncStatus, SyncTriggerType,
-};
-use nvisy_postgres::{PgClient, PgConn};
-use uuid::Uuid;
+use nvisy_postgres::model::WorkspaceConnectionSync as WorkspaceConnectionSyncModel;
+use nvisy_postgres::types::WithAccountRef;
 
+use crate::domain::{self, SyncRequest};
 use crate::extract::{Authorized, Json, Path, Query, ValidateJson, markers};
 use crate::handler::request::{
     CursorPagination, ExportWorkspaceFiles, ImportWorkspaceFiles, WorkspaceConnectionPathParams,
     WorkspaceConnectionSyncPathParams, WorkspaceSyncsQuery,
 };
 use crate::handler::response::{Page, WorkspaceConnectionSync, WorkspaceConnectionSyncsPage};
-use crate::handler::utility::resolve_account_ref;
-use crate::response::{Error, ErrorKind, ErrorResponse, Result};
-use crate::service::{
-    ConnectionConfig, ConnectionSyncService, CryptoService, ServiceState, TransferKind,
-    TransferRequest,
-};
+use crate::response::{ErrorResponse, Result};
+use crate::service::ServiceState;
 use crate::worker::integration::SourceEntry;
 
 /// Tracing target for connection sync operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::connection_syncs";
+const TRACING_TARGET: &str = "nvisy_server::handler::workspace_connection_syncs";
 
 /// Triggers a sync between the connection and the workspace file store.
 ///
-/// Decrypts the stored connection config, opens a `Manual` sync run, and
+/// Decrypts the stored connection config, opens an on-demand sync run, and
 /// performs the import or export in the background. Returns `202 Accepted` with
 /// the created sync immediately; poll the sync detail endpoint for completion.
 /// Requires `RunConnectionSyncs` permission.
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
 async fn sync_connection(
-    State(pg_client): State<PgClient>,
-    State(crypto): State<CryptoService>,
-    State(connection_sync): State<ConnectionSyncService>,
+    State(syncs): State<domain::WorkspaceConnectionSyncService>,
     authz: Authorized<markers::RunConnectionSyncs>,
     Path(path_params): Path<WorkspaceConnectionPathParams>,
 ) -> Result<(StatusCode, Json<WorkspaceConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Triggering connection sync");
-
-    let account_id = authz.account_id;
-    let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
-
-    if !connection.is_active {
-        return Err(ErrorKind::BadRequest.with_message("Connection is not active"));
-    }
-
-    // Reject a new sync while one is already running for this connection.
-    if let Some(latest) = conn
-        .find_latest_workspace_connection_sync(connection.id)
-        .await?
-        && latest.status.is_in_progress()
-    {
-        return Err(ErrorKind::Conflict.with_message("A sync is already in progress"));
-    }
-
-    let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
-    // This endpoint runs a whole-listing sync, which is the object-store model. A
-    // file service transfers on demand (picker import, per-file export) and has no
-    // whole-listing sync, so it is rejected here — schedulability is exactly the
-    // "can be run as a whole-listing/scheduled sync" capability.
-    if !config.supports_schedule() {
-        return Err(ErrorKind::BadRequest.with_message(
-            "This connection has no whole-listing sync; file services import via the \
-             picker and export per file",
-        ));
-    }
-
-    // The direction and deletion policy come from the connection's schedule when
-    // it has one; an object store created without a `sync` block has no schedule
-    // row, so a manual run falls back to the defaults (import, ignore deletions).
-    let schedule = conn.find_connection_schedule(connection.id).await?;
-    let sync_mode = schedule.as_ref().map_or(SyncMode::Import, |s| s.sync_mode);
-    let deletion_policy = schedule
-        .as_ref()
-        .map_or(SyncDeletionPolicy::Ignore, |s| s.deletion_policy);
-
-    // A manual trigger runs the connection's configured direction: import pulls
-    // the whole listing; export pushes every redacted output not yet exported.
-    let kind = match sync_mode {
-        SyncMode::Import => TransferKind::ImportAll { deletion_policy },
-        SyncMode::Export => TransferKind::ExportRedacted,
-    };
-    let sync = open_run_and_transfer(
-        &mut conn,
-        &connection_sync,
-        account_id,
-        connection,
-        config,
-        kind,
-    )
-    .await?;
-    Ok((StatusCode::ACCEPTED, Json(sync)))
+    let request = SyncRequest::Configured;
+    let run = syncs
+        .start(authz.origin(), path_params.connection_id.as_uuid(), request)
+        .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(WorkspaceConnectionSync::from_model(
+            run,
+            authz.account.clone().into(),
+        )),
+    ))
 }
 
 fn sync_connection_docs(op: TransformOperation) -> TransformOperation {
@@ -134,10 +71,6 @@ fn sync_connection_docs(op: TransformOperation) -> TransformOperation {
              import and per-file export instead. Returns the created sync; poll it for completion.",
         )
         .response::<202, Json<WorkspaceConnectionSync>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Imports a caller-selected set of files from a file-service connection.
@@ -152,47 +85,16 @@ fn sync_connection_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
 async fn import_files(
-    State(pg_client): State<PgClient>,
-    State(crypto): State<CryptoService>,
-    State(connection_sync): State<ConnectionSyncService>,
+    State(syncs): State<domain::WorkspaceConnectionSyncService>,
     authz: Authorized<markers::RunConnectionSyncs>,
     Path(path_params): Path<WorkspaceConnectionPathParams>,
     ValidateJson(request): ValidateJson<ImportWorkspaceFiles>,
 ) -> Result<(StatusCode, Json<WorkspaceConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Importing selected files from connection");
-
-    let account_id = authz.account_id;
-    let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
-
-    if !connection.is_active {
-        return Err(ErrorKind::BadRequest.with_message("Connection is not active"));
-    }
-
-    // Reject a new sync while one is already running for this connection.
-    if let Some(latest) = conn
-        .find_latest_workspace_connection_sync(connection.id)
-        .await?
-        && latest.status.is_in_progress()
-    {
-        return Err(ErrorKind::Conflict.with_message("A sync is already in progress"));
-    }
-
-    let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
-    if !config.is_file_service() {
-        return Err(
-            ErrorKind::BadRequest.with_message("Picker import is only available for file services")
-        );
-    }
-
     let entries = request
         .files
         .into_iter()
@@ -201,17 +103,17 @@ async fn import_files(
             name: file.name,
         })
         .collect();
-    let kind = TransferKind::ImportSelected { entries };
-    let sync = open_run_and_transfer(
-        &mut conn,
-        &connection_sync,
-        account_id,
-        connection,
-        config,
-        kind,
-    )
-    .await?;
-    Ok((StatusCode::ACCEPTED, Json(sync)))
+    let request = SyncRequest::ImportSelected(entries);
+    let run = syncs
+        .start(authz.origin(), path_params.connection_id.as_uuid(), request)
+        .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(WorkspaceConnectionSync::from_model(
+            run,
+            authz.account.clone().into(),
+        )),
+    ))
 }
 
 fn import_files_docs(op: TransformOperation) -> TransformOperation {
@@ -221,10 +123,6 @@ fn import_files_docs(op: TransformOperation) -> TransformOperation {
              Already-imported files are skipped. Returns the created sync; poll it for completion.",
         )
         .response::<202, Json<WorkspaceConnectionSync>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
 }
 
@@ -239,56 +137,27 @@ fn import_files_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
 async fn export_files(
-    State(pg_client): State<PgClient>,
-    State(crypto): State<CryptoService>,
-    State(connection_sync): State<ConnectionSyncService>,
+    State(syncs): State<domain::WorkspaceConnectionSyncService>,
     authz: Authorized<markers::RunConnectionSyncs>,
     Path(path_params): Path<WorkspaceConnectionPathParams>,
     ValidateJson(request): ValidateJson<ExportWorkspaceFiles>,
 ) -> Result<(StatusCode, Json<WorkspaceConnectionSync>)> {
     tracing::debug!(target: TRACING_TARGET, "Exporting selected files to connection");
-
-    let account_id = authz.account_id;
-    let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
-
-    if !connection.is_active {
-        return Err(ErrorKind::BadRequest.with_message("Connection is not active"));
-    }
-
-    // Reject a new sync while one is already running for this connection.
-    if let Some(latest) = conn
-        .find_latest_workspace_connection_sync(connection.id)
-        .await?
-        && latest.status.is_in_progress()
-    {
-        return Err(ErrorKind::Conflict.with_message("A sync is already in progress"));
-    }
-
-    let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
-
-    // The files are resolved (and missing ids skipped) inside the transfer.
-    let kind = TransferKind::ExportSelected {
-        file_ids: request.file_ids,
-    };
-    let sync = open_run_and_transfer(
-        &mut conn,
-        &connection_sync,
-        account_id,
-        connection,
-        config,
-        kind,
-    )
-    .await?;
-    Ok((StatusCode::ACCEPTED, Json(sync)))
+    let request = SyncRequest::ExportSelected(request.file_ids);
+    let run = syncs
+        .start(authz.origin(), path_params.connection_id.as_uuid(), request)
+        .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(WorkspaceConnectionSync::from_model(
+            run,
+            authz.account.clone().into(),
+        )),
+    ))
 }
 
 fn export_files_docs(op: TransformOperation) -> TransformOperation {
@@ -298,96 +167,38 @@ fn export_files_docs(op: TransformOperation) -> TransformOperation {
              file. Returns the created sync; poll it for completion.",
         )
         .response::<202, Json<WorkspaceConnectionSync>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
-}
-
-/// Opens a `Manual` sync run for `connection` and drives `kind` in the
-/// background, returning the created sync. Shared by every trigger endpoint: the
-/// transfer runs in an inner task so a panic is recorded as a failed sync rather
-/// than leaving the run stuck in `Running`.
-async fn open_run_and_transfer(
-    conn: &mut PgConn,
-    connection_sync: &ConnectionSyncService,
-    account_id: Uuid,
-    connection: WorkspaceConnectionModel,
-    config: ConnectionConfig,
-    kind: TransferKind,
-) -> Result<WorkspaceConnectionSync> {
-    let new_run = NewWorkspaceConnectionSync {
-        connection_id: connection.id,
-        account_id,
-        trigger_type: Some(SyncTriggerType::OnDemand),
-        status: Some(SyncStatus::Running),
-        records_synced: Some(0),
-        attempt: Some(1),
-        metadata: None,
-    };
-    let run = connection_sync
-        .create_run(conn, new_run, &connection)
-        .await?;
-
-    let connection_sync = connection_sync.clone();
-    let run_id = run.id;
-    tokio::spawn(async move {
-        connection_sync
-            .run_transfer(TransferRequest {
-                run_id,
-                connection,
-                config,
-                account_id,
-                kind,
-            })
-            .await;
-    });
-
-    let trigger = resolve_account_ref(conn, run.account_id).await?;
-    Ok(WorkspaceConnectionSync::from_model(run, trigger))
 }
 
 /// Lists sync runs for a connection, most recent first.
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
 async fn list_connection_syncs(
-    State(pg_client): State<PgClient>,
+    State(syncs): State<domain::WorkspaceConnectionSyncService>,
     authz: Authorized<markers::ViewConnections>,
     Path(path_params): Path<WorkspaceConnectionPathParams>,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<WorkspaceConnectionSyncsPage>)> {
+) -> Result<Json<WorkspaceConnectionSyncsPage>> {
     tracing::debug!(target: TRACING_TARGET, "Listing connection syncs");
 
-    let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
-
-    let page = conn
-        .cursor_list_workspace_connection_syncs(connection.id, pagination.into_cursor(), None)
+    let page = syncs
+        .list_for_connection(
+            authz.workspace.id,
+            path_params.connection_id.as_uuid(),
+            pagination.into_cursor(),
+        )
         .await?;
-
-    let page = Page::from_cursor_page(page, |wc| {
-        WorkspaceConnectionSync::from_model(wc.item, wc.account.into())
-    });
-
-    Ok((StatusCode::OK, Json(page)))
+    Ok(Json(Page::from_cursor_page(page, sync_response)))
 }
 
 fn list_connection_syncs_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List connection syncs")
         .description("Returns the connection's sync history, most recent first.")
         .response::<200, Json<WorkspaceConnectionSyncsPage>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Lists sync runs across every connection in the workspace, most recent first.
@@ -395,38 +206,24 @@ fn list_connection_syncs_docs(op: TransformOperation) -> TransformOperation {
 /// Optional `status` and repeatable `provider` query filters narrow the result
 /// (a sync matches if its connection uses any of the given providers). Requires
 /// `ViewConnections` permission.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn list_workspace_syncs(
-    State(pg_client): State<PgClient>,
+    State(syncs): State<domain::WorkspaceConnectionSyncService>,
     authz: Authorized<markers::ViewConnections>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<WorkspaceSyncsQuery>,
-) -> Result<(StatusCode, Json<WorkspaceConnectionSyncsPage>)> {
+) -> Result<Json<WorkspaceConnectionSyncsPage>> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace syncs");
 
-    let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let page = conn
-        .cursor_list_workspace_connection_syncs_all(
-            workspace.id,
+    let page = syncs
+        .list(
+            authz.workspace.id,
             pagination.into_cursor(),
             query.status,
             &query.provider,
         )
         .await?;
-
-    let page = Page::from_cursor_page(page, |(wc, _connection_id)| {
-        WorkspaceConnectionSync::from_model(wc.item, wc.account.into())
-    });
-
-    Ok((StatusCode::OK, Json(page)))
+    Ok(Json(Page::from_cursor_page(page, sync_response)))
 }
 
 fn list_workspace_syncs_docs(op: TransformOperation) -> TransformOperation {
@@ -436,55 +233,37 @@ fn list_workspace_syncs_docs(op: TransformOperation) -> TransformOperation {
              with optional status and provider filters.",
         )
         .response::<200, Json<WorkspaceConnectionSyncsPage>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Retrieves a single sync run for a connection.
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
         sync_id = %path_params.sync_id,
     )
 )]
 async fn read_connection_sync(
-    State(pg_client): State<PgClient>,
+    State(syncs): State<domain::WorkspaceConnectionSyncService>,
     authz: Authorized<markers::ViewConnections>,
     Path(path_params): Path<WorkspaceConnectionSyncPathParams>,
-) -> Result<(StatusCode, Json<WorkspaceConnectionSync>)> {
+) -> Result<Json<WorkspaceConnectionSync>> {
     tracing::debug!(target: TRACING_TARGET, "Reading connection sync");
 
-    let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    // Confirm the connection is in this workspace before exposing its run.
-    let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
-
-    let run = conn
-        .find_connection_sync_in_workspace(workspace.id, path_params.sync_id)
-        .await?
-        .filter(|run| run.connection_id == connection.id)
-        .ok_or_else(|| Error::not_found("connection_sync"))?;
-
-    let trigger = resolve_account_ref(&mut conn, run.account_id).await?;
-
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceConnectionSync::from_model(run, trigger)),
-    ))
+    let run = syncs
+        .find(
+            authz.workspace.id,
+            path_params.connection_id.as_uuid(),
+            path_params.sync_id,
+        )
+        .await?;
+    Ok(Json(sync_response(run)))
 }
 
 fn read_connection_sync_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get connection sync")
         .description("Returns a single sync run for the connection.")
         .response::<200, Json<WorkspaceConnectionSync>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Cancels an in-progress sync run.
@@ -497,71 +276,37 @@ fn read_connection_sync_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
         sync_id = %path_params.sync_id,
     )
 )]
 async fn cancel_connection_sync(
-    State(pg_client): State<PgClient>,
-    State(connection_sync): State<ConnectionSyncService>,
+    State(syncs): State<domain::WorkspaceConnectionSyncService>,
     authz: Authorized<markers::RunConnectionSyncs>,
     Path(path_params): Path<WorkspaceConnectionSyncPathParams>,
-) -> Result<(StatusCode, Json<WorkspaceConnectionSync>)> {
+) -> Result<Json<WorkspaceConnectionSync>> {
     tracing::debug!(target: TRACING_TARGET, "Cancelling connection sync");
 
-    let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
-    let connection = find_connection(&mut conn, workspace.id, path_params.connection_id).await?;
-
-    // Resolve the run within the workspace + connection before mutating it.
-    let run = conn
-        .find_connection_sync_in_workspace(workspace.id, path_params.sync_id)
-        .await?
-        .filter(|run| run.connection_id == connection.id)
-        .ok_or_else(|| Error::not_found("connection_sync"))?;
-
-    let cancelled = conn
-        .cancel_workspace_connection_sync(run.id)
-        .await?
-        .ok_or_else(|| {
-            ErrorKind::Conflict.with_message("Sync is not in progress and cannot be cancelled")
-        })?;
-
-    // Signal the transfer to stop if it is running on this instance. A run on
-    // another instance is stopped by the status flip above plus the
-    // status-guarded finalizers.
-    let _ = connection_sync.cancel_local(run.id);
-
-    let trigger = resolve_account_ref(&mut conn, cancelled.account_id).await?;
-
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceConnectionSync::from_model(cancelled, trigger)),
-    ))
+    let cancelled = syncs
+        .cancel(
+            authz.workspace.id,
+            path_params.connection_id.as_uuid(),
+            path_params.sync_id,
+        )
+        .await?;
+    Ok(Json(sync_response(cancelled)))
 }
 
 fn cancel_connection_sync_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Cancel connection sync")
         .description("Cancels an in-progress sync run. A run that already finished returns 409.")
         .response::<200, Json<WorkspaceConnectionSync>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
         .response::<409, Json<ErrorResponse>>()
 }
 
-/// Finds a connection within a workspace by id, or returns a `NotFound` error.
-async fn find_connection(
-    conn: &mut PgConn,
-    workspace_id: Uuid,
-    connection_id: ConnectionId,
-) -> Result<WorkspaceConnectionModel> {
-    conn.find_connection_in_workspace(workspace_id, connection_id.as_uuid())
-        .await?
-        .ok_or_else(|| Error::not_found("connection"))
+/// Maps a sync run with its trigger to the response.
+fn sync_response(run: WithAccountRef<WorkspaceConnectionSyncModel>) -> WorkspaceConnectionSync {
+    WorkspaceConnectionSync::from_model(run.item, run.account.into())
 }
 
 /// Returns routes for connection sync operations.

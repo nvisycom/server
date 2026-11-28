@@ -11,13 +11,10 @@ mod http_error;
 mod nats_error;
 mod object_error;
 mod oidc_error;
-mod pg_account;
-mod pg_detection;
-mod pg_document;
+mod pg_constraint;
 mod pg_error;
-mod pg_workspace;
 mod s3_error;
 mod webhook_error;
 
 pub use error_response::ErrorResponse;
-pub use http_error::{Error, ErrorKind, Result};
+pub use http_error::{Error, ErrorKind, Resource, Result, error_responses};

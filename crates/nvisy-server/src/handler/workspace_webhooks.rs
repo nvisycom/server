@@ -9,67 +9,46 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
 
 use crate::domain;
-use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
+use crate::extract::{Authorized, Json, Path, Query, ValidateJson, markers};
 use crate::handler::request::{
     CreateWorkspaceWebhook, CursorPagination, TestWorkspaceWebhook, UpdateWorkspaceWebhook,
     WorkspaceWebhookPathParams,
 };
 use crate::handler::response::{
-    WorkspaceWebhook, WorkspaceWebhookCreated, WorkspaceWebhookResult, WorkspaceWebhooksPage,
+    WorkspaceRef, WorkspaceWebhook, WorkspaceWebhookCreated, WorkspaceWebhookResult,
+    WorkspaceWebhooksPage,
 };
-use crate::handler::utility::resolve_account_ref;
-use crate::response::{ErrorResponse, Result};
-use crate::service::{ServiceState, event};
+use crate::response::Result;
+use crate::service::ServiceState;
 
 /// Tracing target for workspace webhook operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::webhooks";
+const TRACING_TARGET: &str = "nvisy_server::handler::workspace_webhooks";
 
 /// Creates a new workspace webhook.
 ///
 /// Returns the webhook configuration. Requires `CreateWebhooks` permission.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn create_webhook(
     State(webhooks): State<domain::WorkspaceWebhookService>,
-    State(pg_client): State<PgClient>,
     authz: Authorized<markers::CreateWebhooks>,
-    security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateWorkspaceWebhook>,
 ) -> Result<(StatusCode, Json<WorkspaceWebhookCreated>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace webhook");
 
-    let workspace = authz.workspace;
-    let account_id = authz.account_id;
-    let created = webhooks
-        .create(
-            event::EventOrigin {
-                workspace_id: workspace.id,
-                account_id,
-                security: &security,
-            },
-            request.into(),
-        )
-        .await?;
+    let workspace = &authz.workspace;
+    let created = webhooks.create(authz.origin(), request.into()).await?;
 
-    // The creator is the authenticated caller; resolve their handle directly.
-    let mut conn = pg_client.get_connection().await?;
-    let creator = resolve_account_ref(&mut conn, account_id).await?;
+    // The creator is the authenticated caller.
+    let creator = authz.account.clone().into();
 
     // WebhookCreated includes the secret, which is visible only once.
     Ok((
         StatusCode::CREATED,
         Json(WorkspaceWebhookCreated::from_model(
             created.webhook,
-            workspace.id,
-            workspace.handle,
+            WorkspaceRef::from(workspace),
             creator,
             created.secret,
         )),
@@ -84,52 +63,33 @@ fn create_webhook_docs(op: TransformOperation) -> TransformOperation {
              secret is only shown once upon creation and cannot be retrieved again.",
         )
         .response::<201, Json<WorkspaceWebhookCreated>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Lists all webhooks for a workspace.
 ///
 /// Returns all configured webhooks. Requires `ViewWebhooks` permission.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn list_webhooks(
     State(webhooks): State<domain::WorkspaceWebhookService>,
     authz: Authorized<markers::ViewWebhooks>,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<WorkspaceWebhooksPage>)> {
+) -> Result<Json<WorkspaceWebhooksPage>> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace webhooks");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
     let page = webhooks
         .list(workspace.id, pagination.into_cursor())
         .await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceWebhooksPage::from_cursor_page(page, |wc| {
-            WorkspaceWebhook::from_model(
-                wc.item,
-                workspace.id,
-                workspace.handle.clone(),
-                wc.account.into(),
-            )
-        })),
-    ))
+    Ok(Json(WorkspaceWebhooksPage::from_cursor_page(page, |wc| {
+        WorkspaceWebhook::from_model(wc.item, WorkspaceRef::from(workspace), wc.account.into())
+    })))
 }
 
 fn list_webhooks_docs(op: TransformOperation) -> TransformOperation {
     op.summary("List webhooks")
         .description("Returns all configured webhooks for the workspace without secrets.")
         .response::<200, Json<WorkspaceWebhooksPage>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Retrieves a specific workspace webhook.
@@ -138,8 +98,6 @@ fn list_webhooks_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         webhook_id = %path_params.webhook_id,
     )
 )]
@@ -147,32 +105,25 @@ async fn read_webhook(
     State(webhooks): State<domain::WorkspaceWebhookService>,
     authz: Authorized<markers::ViewWebhooks>,
     Path(path_params): Path<WorkspaceWebhookPathParams>,
-) -> Result<(StatusCode, Json<WorkspaceWebhook>)> {
+) -> Result<Json<WorkspaceWebhook>> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace webhook");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
     let found = webhooks
         .find(workspace.id, path_params.webhook_id.as_uuid())
         .await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceWebhook::from_model(
-            found.item,
-            workspace.id,
-            workspace.handle,
-            found.account.into(),
-        )),
-    ))
+    Ok(Json(WorkspaceWebhook::from_model(
+        found.item,
+        WorkspaceRef::from(workspace),
+        found.account.into(),
+    )))
 }
 
 fn read_webhook_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get webhook")
         .description("Returns webhook details without the secret.")
         .response::<200, Json<WorkspaceWebhook>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Updates a workspace webhook.
@@ -181,8 +132,6 @@ fn read_webhook_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         webhook_id = %path_params.webhook_id,
     )
 )]
@@ -190,44 +139,30 @@ async fn update_webhook(
     State(webhooks): State<domain::WorkspaceWebhookService>,
     authz: Authorized<markers::UpdateWebhooks>,
     Path(path_params): Path<WorkspaceWebhookPathParams>,
-    security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWorkspaceWebhook>,
-) -> Result<(StatusCode, Json<WorkspaceWebhook>)> {
+) -> Result<Json<WorkspaceWebhook>> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace webhook");
 
-    let workspace = authz.workspace;
-    let account_id = authz.account_id;
+    let workspace = &authz.workspace;
     let found = webhooks
         .update(
-            event::EventOrigin {
-                workspace_id: workspace.id,
-                account_id,
-                security: &security,
-            },
+            authz.origin(),
             path_params.webhook_id.as_uuid(),
             request.into(),
         )
         .await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceWebhook::from_model(
-            found.item,
-            workspace.id,
-            workspace.handle,
-            found.account.into(),
-        )),
-    ))
+    Ok(Json(WorkspaceWebhook::from_model(
+        found.item,
+        WorkspaceRef::from(workspace),
+        found.account.into(),
+    )))
 }
 
 fn update_webhook_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update webhook")
         .description("Updates webhook configuration such as URL or event subscriptions.")
         .response::<200, Json<WorkspaceWebhook>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Deletes a workspace webhook.
@@ -236,8 +171,6 @@ fn update_webhook_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         webhook_id = %path_params.webhook_id,
     )
 )]
@@ -245,21 +178,10 @@ async fn delete_webhook(
     State(webhooks): State<domain::WorkspaceWebhookService>,
     authz: Authorized<markers::DeleteWebhooks>,
     Path(path_params): Path<WorkspaceWebhookPathParams>,
-    security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace webhook");
-
-    let workspace = authz.workspace;
-    let account_id = authz.account_id;
     webhooks
-        .delete(
-            event::EventOrigin {
-                workspace_id: workspace.id,
-                account_id,
-                security: &security,
-            },
-            path_params.webhook_id.as_uuid(),
-        )
+        .delete(authz.origin(), path_params.webhook_id.as_uuid())
         .await?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -269,9 +191,6 @@ fn delete_webhook_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete webhook")
         .description("Permanently removes the webhook from the workspace.")
         .response::<204, ()>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Tests a webhook by sending a test payload.
@@ -281,8 +200,6 @@ fn delete_webhook_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         webhook_id = %path_params.webhook_id,
     )
 )]
@@ -291,10 +208,10 @@ async fn test_webhook(
     authz: Authorized<markers::TestWebhooks>,
     Path(path_params): Path<WorkspaceWebhookPathParams>,
     ValidateJson(request): ValidateJson<TestWorkspaceWebhook>,
-) -> Result<(StatusCode, Json<WorkspaceWebhookResult>)> {
+) -> Result<Json<WorkspaceWebhookResult>> {
     tracing::debug!(target: TRACING_TARGET, "Testing workspace webhook");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
     let response = webhooks
         .test(
             workspace.id,
@@ -304,19 +221,13 @@ async fn test_webhook(
         )
         .await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceWebhookResult::from_response(&response)),
-    ))
+    Ok(Json(WorkspaceWebhookResult::from_response(&response)))
 }
 
 fn test_webhook_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Test webhook")
         .description("Sends a test payload to the webhook endpoint and returns the result.")
         .response::<200, Json<WorkspaceWebhookResult>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Returns routes for workspace webhook management.

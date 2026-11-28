@@ -11,25 +11,24 @@ use aide::axum::routing::get_with;
 use aide::transform::TransformOperation;
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use nvisy_postgres::PgClient;
+use axum::http::{HeaderMap, HeaderValue};
 use nvisy_postgres::model::WorkspaceActivity as WorkspaceActivityModel;
-use nvisy_postgres::query::WorkspaceActivityRepository;
 use nvisy_postgres::types::WithAccountRef;
 use serde::Serialize;
 
+use crate::domain::{self, ActivityExport};
 use crate::extract::{Authorized, Json, Query, markers};
 use crate::handler::ServiceState;
 use crate::handler::request::{
     CursorPagination, DateWindow, ExportFormat, MAX_EXPORT_ROWS, WorkspaceActivityExportOptions,
     WorkspaceActivityFilterQuery,
 };
-use crate::handler::response::{WorkspaceActivitiesPage, WorkspaceActivity};
+use crate::handler::response::{WorkspaceActivitiesPage, WorkspaceActivity, WorkspaceRef};
 use crate::handler::utility::DownloadDocs;
-use crate::response::{Error, ErrorKind, ErrorResponse, Result, attachment_headers};
+use crate::response::{Error, ErrorKind, Result, attachment_headers};
 
 /// Tracing target for activity export operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::activities";
+const TRACING_TARGET: &str = "nvisy_server::handler::workspace_activities";
 
 /// One activity as a flat export row. The activity type is split into its
 /// object/action halves, and the acted-on object into an id and a human label,
@@ -103,40 +102,27 @@ impl ActivityExportRow {
 }
 
 /// Lists a workspace's activity log, most recent first, cursor-paginated.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn list_activities(
-    State(pg_client): State<PgClient>,
+    State(activities): State<domain::WorkspaceActivityService>,
     authz: Authorized<markers::ViewActivity>,
     Query(filter_query): Query<WorkspaceActivityFilterQuery>,
     Query(window): Query<DateWindow>,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<WorkspaceActivitiesPage>)> {
+) -> Result<Json<WorkspaceActivitiesPage>> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace activities");
 
-    let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
-
+    let workspace = &authz.workspace;
     // The window is validated even when the id matches nobody, so an invalid date
     // range is still a 400; a nonexistent actor id simply matches no rows.
-    let filter = filter_query.to_filter(filter_query.actor, &window)?;
+    let filter = filter_query.into_filter(&window)?;
 
-    let page = conn
-        .cursor_list_workspace_activity(workspace.id, filter, pagination.into_cursor())
+    let page = activities
+        .list(workspace.id, filter, pagination.into_cursor())
         .await?;
 
     let response = WorkspaceActivitiesPage::from_cursor_page(page, |wc| {
-        WorkspaceActivity::from_model(
-            &wc.item,
-            workspace.id,
-            workspace.handle.clone(),
-            wc.account.into(),
-        )
+        WorkspaceActivity::from_model(&wc.item, WorkspaceRef::from(workspace), wc.account.into())
     });
 
     tracing::debug!(
@@ -145,7 +131,7 @@ async fn list_activities(
         "Workspace activities listed"
     );
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok(Json(response))
 }
 
 fn list_activities_docs(op: TransformOperation) -> TransformOperation {
@@ -157,51 +143,26 @@ fn list_activities_docs(op: TransformOperation) -> TransformOperation {
              otherwise all-time).",
         )
         .response::<200, Json<WorkspaceActivitiesPage>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Exports a workspace's activity log over a date window as CSV or JSON.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn export_activities(
-    State(pg_client): State<PgClient>,
+    State(activities): State<domain::WorkspaceActivityService>,
     authz: Authorized<markers::ViewActivity>,
     Query(filter_query): Query<WorkspaceActivityFilterQuery>,
     Query(window_query): Query<DateWindow>,
     Query(export_query): Query<WorkspaceActivityExportOptions>,
-) -> Result<(StatusCode, HeaderMap, Body)> {
+) -> Result<(HeaderMap, Body)> {
     tracing::debug!(target: TRACING_TARGET, "Exporting workspace activities");
-
-    let workspace = authz.workspace;
-    let mut conn = pg_client.get_connection().await?;
 
     let window = window_query.resolve()?;
 
     // A nonexistent actor id simply narrows the export to no rows.
-    let filter = filter_query.to_export_filter(filter_query.actor, &window)?;
-    // Fetch one past the cap so a full result signals truncation.
-    let fetch_limit = i64::try_from(MAX_EXPORT_ROWS + 1).unwrap_or(i64::MAX);
-    let mut rows = conn
-        .list_workspace_activity_for_export(workspace.id, filter, fetch_limit)
+    let filter = filter_query.into_export_filter(&window)?;
+    let ActivityExport { rows, truncated } = activities
+        .export(authz.workspace.id, filter, MAX_EXPORT_ROWS)
         .await?;
-
-    let truncated = rows.len() > MAX_EXPORT_ROWS;
-    rows.truncate(MAX_EXPORT_ROWS);
-    if truncated {
-        // Rows come oldest-first and we keep the leading page, so it is the
-        // newest rows in the window that are dropped past the cap.
-        tracing::warn!(
-            target: TRACING_TARGET,
-            cap = MAX_EXPORT_ROWS,
-            "WorkspaceActivity export hit the row cap; the newest rows in the window were dropped"
-        );
-    }
 
     let records: Vec<ActivityExportRow> = rows
         .into_iter()
@@ -239,7 +200,7 @@ async fn export_activities(
         truncated,
         "Workspace activities exported"
     );
-    Ok((StatusCode::OK, headers, Body::from(body)))
+    Ok((headers, Body::from(body)))
 }
 
 fn export_activities_docs(op: TransformOperation) -> TransformOperation {
@@ -257,10 +218,6 @@ fn export_activities_docs(op: TransformOperation) -> TransformOperation {
             "The exported activity log.",
             &["text/csv", "application/json"],
         )
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Column headers for the CSV export, in field order.
@@ -313,7 +270,7 @@ fn csv_cell(value: &str) -> Cow<'_, str> {
 }
 
 /// Maps an export serialization failure to an internal error.
-fn serialize_error(error: impl std::fmt::Display) -> Error<'static> {
+fn serialize_error(error: impl std::fmt::Display) -> Error {
     ErrorKind::InternalServerError
         .with_message("Failed to render activity export")
         .with_context(error.to_string())

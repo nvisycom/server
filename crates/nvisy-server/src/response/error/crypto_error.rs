@@ -7,17 +7,8 @@
 use super::http_error::{Error as HttpError, ErrorKind};
 use crate::service::CryptoError;
 
-/// Tracing target for crypto error conversions.
-const TRACING_TARGET: &str = "nvisy_server::handler::crypto";
-
-impl From<CryptoError> for HttpError<'static> {
+impl From<CryptoError> for HttpError {
     fn from(error: CryptoError) -> Self {
-        tracing::error!(
-            target: TRACING_TARGET,
-            error = %error,
-            "Cryptographic operation failed"
-        );
-
         ErrorKind::InternalServerError
             .with_message("Cryptographic operation failed")
             .with_context(error.to_string())

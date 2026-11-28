@@ -13,7 +13,7 @@ use nvisy_postgres::{AsyncConnection, PgClient};
 use uuid::Uuid;
 
 use crate::domain::output::CreatedApiToken;
-use crate::response::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Resource, Result};
 use crate::service::AuthIssuer;
 
 /// Tracing target for account API-token domain operations.
@@ -60,7 +60,7 @@ impl AccountApiTokenService {
         let account = conn
             .find_account_by_id(account_id)
             .await?
-            .ok_or_else(|| Error::not_found("account"))?;
+            .ok_or_else(|| Error::not_found(Resource::Account))?;
 
         // Insert the row and sign its JWT in one transaction: signing consumes the
         // persisted token's id/claims, so if it fails the insert is rolled back and
@@ -174,6 +174,6 @@ async fn find_account_token(
         .find_account_api_token_by_id(token_id)
         .await?
         .filter(|token| token.account_id == account_id)
-        .ok_or_else(|| ErrorKind::NotFound.with_message("API token not found"))?;
+        .ok_or_else(|| Error::not_found(Resource::ApiToken))?;
     Ok(token)
 }

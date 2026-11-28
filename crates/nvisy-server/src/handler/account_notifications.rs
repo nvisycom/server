@@ -11,7 +11,6 @@ use async_stream::stream;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::sse::Event;
-use futures::StreamExt;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::query::AccountNotificationRepository;
 use tokio_util::sync::CancellationToken;
@@ -23,26 +22,23 @@ use crate::handler::request::{AccountNotificationPathParams, CursorPagination};
 use crate::handler::response::{
     AccountMarkedReadStatus, AccountNotification, AccountNotificationsPage, AccountUnreadStatus,
 };
-use crate::response::{ErrorResponse, Result, SseResponse};
+use crate::response::{ErrorResponse, Result, SseResponse, Watch, sse_event, watch};
 use crate::service::{NotificationEmitter, ServiceState, UnreadCountEvent};
 
 /// Tracing target for notification operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::notifications";
+const TRACING_TARGET: &str = "nvisy_server::handler::account_notifications";
 
 /// Lists notifications for the authenticated account.
 ///
 /// A pure read: it does not change read status. The client marks notifications
 /// read explicitly via `POST /notifications/read/` (all) or
 /// `POST /notifications/{notificationId}/read/` (one).
-#[tracing::instrument(
-    skip_all,
-    fields(account_id = %auth_state.account_id)
-)]
+#[tracing::instrument(skip_all)]
 async fn list_notifications(
     State(notifications): State<AccountNotificationService>,
     auth_state: AuthState,
     Query(pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<AccountNotificationsPage>)> {
+) -> Result<Json<AccountNotificationsPage>> {
     tracing::debug!(target: TRACING_TARGET, "Listing notifications");
 
     let page = notifications
@@ -58,7 +54,7 @@ async fn list_notifications(
         "Notifications listed"
     );
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok(Json(response))
 }
 
 fn list_notifications_docs(op: TransformOperation) -> TransformOperation {
@@ -69,18 +65,14 @@ fn list_notifications_docs(op: TransformOperation) -> TransformOperation {
              POST /notifications/{notificationId}/read/ to mark them read.",
         )
         .response::<200, Json<AccountNotificationsPage>>()
-        .response::<401, Json<ErrorResponse>>()
 }
 
 /// Returns the count of unread notifications for the authenticated account.
-#[tracing::instrument(
-    skip_all,
-    fields(account_id = %auth_state.account_id)
-)]
+#[tracing::instrument(skip_all)]
 async fn get_unread_status(
     State(notifications): State<AccountNotificationService>,
     auth_state: AuthState,
-) -> Result<(StatusCode, Json<AccountUnreadStatus>)> {
+) -> Result<Json<AccountUnreadStatus>> {
     tracing::debug!(target: TRACING_TARGET, "Checking unread notifications count");
 
     let unread_count = notifications.unread_count(auth_state.account_id).await?;
@@ -91,14 +83,13 @@ async fn get_unread_status(
         "Unread notifications count retrieved"
     );
 
-    Ok((StatusCode::OK, Json(AccountUnreadStatus { unread_count })))
+    Ok(Json(AccountUnreadStatus { unread_count }))
 }
 
 fn get_unread_status_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get unread notifications count")
         .description("Returns the number of unread notifications for the authenticated account.")
         .response::<200, Json<AccountUnreadStatus>>()
-        .response::<401, Json<ErrorResponse>>()
 }
 
 /// How long the unread stream waits for a live broadcast before re-reading the
@@ -120,10 +111,7 @@ const UNREAD_POLL_INTERVAL: Duration = Duration::from_secs(30);
 /// Authenticated like every other route (Bearer); browsers should consume it via
 /// a `fetch` stream rather than the native `EventSource`, which cannot send an
 /// `Authorization` header.
-#[tracing::instrument(
-    skip_all,
-    fields(account_id = %auth_state.account_id)
-)]
+#[tracing::instrument(skip_all)]
 async fn stream_unread_status(
     State(pg_client): State<PgClient>,
     State(notification_emitter): State<NotificationEmitter>,
@@ -148,33 +136,16 @@ async fn stream_unread_status(
         // still learns the present state.
         yield unread_event(UnreadCountEvent { unread_count: current });
 
-        loop {
-            tokio::select! {
-                // Server shutting down: this stream is open-ended and would
-                // otherwise block graceful shutdown, so end it promptly.
-                () = shutdown.cancelled() => break,
-                result = tokio::time::timeout(UNREAD_POLL_INTERVAL, updates.next()) => {
-                    match result {
-                        // A live broadcast arrived; forward it.
-                        Ok(Some(event)) => {
-                            yield unread_event(event);
-                        }
-                        // The subscription ended; re-read once so the client is
-                        // not left with a stale count, then stop.
-                        Ok(None) => {
-                            if let Some(unread_count) = reread_unread_count(&pg_client, account_id).await {
-                                yield unread_event(UnreadCountEvent { unread_count });
-                            }
-                            break;
-                        }
-                        // No broadcast within the interval: re-read the
-                        // authoritative count, recovering a dropped best-effort
-                        // broadcast (core NATS is at-most-once).
-                        Err(_) => {
-                            if let Some(unread_count) = reread_unread_count(&pg_client, account_id).await {
-                                yield unread_event(UnreadCountEvent { unread_count });
-                            }
-                        }
+        while let Some(watched) = watch(&mut updates, UNREAD_POLL_INTERVAL, &shutdown).await {
+            let closed = matches!(watched, Watch::Closed);
+            match watched {
+                Watch::Live(event) => yield unread_event(event),
+                Watch::Reread | Watch::Closed => {
+                    if let Some(unread_count) = reread_unread_count(&pg_client, account_id).await {
+                        yield unread_event(UnreadCountEvent { unread_count });
+                    }
+                    if closed {
+                        break;
                     }
                 }
             }
@@ -199,44 +170,33 @@ async fn reread_unread_count(pg_client: &PgClient, account_id: Uuid) -> Option<i
 
 /// Builds an `unread` SSE event carrying the account's current unread count.
 fn unread_event(event: UnreadCountEvent) -> Event {
-    Event::default()
-        .event("unread")
-        .json_data(event)
-        .unwrap_or_else(|_| Event::default().event("unread"))
+    sse_event("unread", &event)
 }
 
 /// `OpenAPI` documentation for the unread-count SSE stream.
 fn stream_unread_status_docs(op: TransformOperation) -> TransformOperation {
-    op.summary("Stream unread notifications count")
-        .description(
-            "Opens a Server-Sent Events stream of the account's unread \
+    op.summary("Stream unread notifications count").description(
+        "Opens a Server-Sent Events stream of the account's unread \
              notification count. Emits the current count immediately, then each \
              change as notifications arrive or are marked read, until the client \
              disconnects. Each event's `data` is an `UnreadCountEvent` (see the \
              response schema). Authenticate with a Bearer token via a \
              `fetch`-based client; the native `EventSource` cannot send an \
              `Authorization` header.",
-        )
-        .response::<401, Json<ErrorResponse>>()
+    )
 }
 
 /// Marks all of the authenticated account's unread notifications as read.
-#[tracing::instrument(
-    skip_all,
-    fields(account_id = %auth_state.account_id)
-)]
+#[tracing::instrument(skip_all)]
 async fn mark_all_notifications_read(
     State(notifications): State<AccountNotificationService>,
     auth_state: AuthState,
-) -> Result<(StatusCode, Json<AccountMarkedReadStatus>)> {
+) -> Result<Json<AccountMarkedReadStatus>> {
     tracing::debug!(target: TRACING_TARGET, "Marking all notifications as read");
 
     let marked_read = notifications.mark_all_read(auth_state.account_id).await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(AccountMarkedReadStatus { marked_read }),
-    ))
+    Ok(Json(AccountMarkedReadStatus { marked_read }))
 }
 
 fn mark_all_notifications_read_docs(op: TransformOperation) -> TransformOperation {
@@ -256,7 +216,6 @@ fn mark_all_notifications_read_docs(op: TransformOperation) -> TransformOperatio
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth_state.account_id,
         notification_id = %path_params.notification_id,
     )
 )]
@@ -278,7 +237,6 @@ fn mark_notification_read_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Mark notification as read")
         .description("Marks a single notification of the authenticated account as read.")
         .response::<204, ()>()
-        .response::<401, Json<ErrorResponse>>()
         .response::<404, Json<ErrorResponse>>()
 }
 

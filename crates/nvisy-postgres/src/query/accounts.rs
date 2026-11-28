@@ -7,7 +7,7 @@ use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use crate::model::{Account, NewAccount, UpdateAccount};
-use crate::types::Handle;
+use crate::types::{AccountRefRow, Handle};
 use crate::{Error, PgConnection, Result, schema};
 
 /// Repository for account database operations.
@@ -24,6 +24,14 @@ pub trait AccountRepository {
         new_account: NewAccount,
     ) -> impl Future<Output = Result<Account>> + Send;
 
+    /// Finds an account's public reference (id and username) by id. Unlike
+    /// [`Self::find_account_by_id`], a soft-deleted account still resolves, as it
+    /// does in the joined finders: a resource keeps naming its creator.
+    fn find_account_ref(
+        &mut self,
+        account_id: Uuid,
+    ) -> impl Future<Output = Result<Option<AccountRefRow>>> + Send;
+
     /// Finds an account by its unique identifier.
     ///
     /// Retrieves a specific account using its UUID, automatically excluding
@@ -32,16 +40,6 @@ pub trait AccountRepository {
         &mut self,
         account_id: Uuid,
     ) -> impl Future<Output = Result<Option<Account>>> + Send;
-
-    /// Finds the live accounts for a set of ids in one query.
-    ///
-    /// Soft-deleted accounts and unknown ids are simply absent from the result,
-    /// which is unordered. Used to resolve a page's distinct accounts without a
-    /// per-id round-trip.
-    fn find_accounts_by_ids(
-        &mut self,
-        account_ids: &[Uuid],
-    ) -> impl Future<Output = Result<Vec<Account>>> + Send;
 
     /// Finds an account by email address.
     ///
@@ -148,6 +146,17 @@ impl AccountRepository for PgConnection {
             .await?)
     }
 
+    async fn find_account_ref(&mut self, account_id: Uuid) -> Result<Option<AccountRefRow>> {
+        use schema::accounts::{self, dsl};
+
+        Ok(accounts::table
+            .filter(dsl::id.eq(account_id))
+            .select(AccountRefRow::as_select())
+            .first(self)
+            .await
+            .optional()?)
+    }
+
     async fn find_account_by_id(&mut self, account_id: Uuid) -> Result<Option<Account>> {
         use schema::accounts::{self, dsl};
 
@@ -158,21 +167,6 @@ impl AccountRepository for PgConnection {
             .first(self)
             .await
             .optional()?)
-    }
-
-    async fn find_accounts_by_ids(&mut self, account_ids: &[Uuid]) -> Result<Vec<Account>> {
-        use schema::accounts::{self, dsl};
-
-        if account_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        Ok(accounts::table
-            .filter(dsl::id.eq_any(account_ids))
-            .filter(dsl::deleted_at.is_null())
-            .select(Account::as_select())
-            .load(self)
-            .await?)
     }
 
     async fn find_account_by_email(&mut self, email: &str) -> Result<Option<Account>> {

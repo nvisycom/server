@@ -23,7 +23,6 @@ use nvisy_postgres::{AsyncConnection, PgConn};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::extract::SecurityContext;
 use crate::response::Result;
 use crate::service::event::EventEmitter;
 use crate::service::{ConnectionConfig, CryptoService, ExternalObjectStore, Infra, event};
@@ -118,7 +117,9 @@ impl ConnectionSyncService {
     /// Creates a sync run row and records its `ConnectionSyncStarted` event in one
     /// transaction on the caller's connection, so the run and its start event
     /// commit together — the start event can never be lost for a run that was
-    /// created. Returns the persisted run.
+    /// created. `origin` attributes the event: the requester for an on-demand
+    /// run, the connection's creator for a scheduled one. Returns the persisted
+    /// run.
     ///
     /// # Errors
     ///
@@ -127,14 +128,10 @@ impl ConnectionSyncService {
     pub async fn create_run(
         &self,
         conn: &mut PgConn,
+        origin: event::EventOrigin<'_>,
         new_run: NewWorkspaceConnectionSync,
         connection: &WorkspaceConnection,
     ) -> Result<WorkspaceConnectionSync> {
-        let origin = event::EventOrigin {
-            workspace_id: connection.workspace_id,
-            account_id: new_run.account_id,
-            security: &SecurityContext::default(),
-        };
         let started = event::WorkspaceEvent::ConnectionSyncStarted(event::ConnectionSyncStarted {
             connection_id: connection.id,
             connection_name: connection.display_name.clone(),

@@ -11,10 +11,7 @@ use nvisy_postgres::{Error as PgError, TimeoutType};
 
 use super::{Error, ErrorKind};
 
-/// Tracing target for account operations.
-const TRACING_TARGET: &str = "nvisy_server::response::error";
-
-impl From<ConstraintViolation> for Error<'static> {
+impl From<ConstraintViolation> for Error {
     fn from(constraint: ConstraintViolation) -> Self {
         match constraint {
             ConstraintViolation::Account(c) => c.into(),
@@ -39,116 +36,40 @@ impl From<ConstraintViolation> for Error<'static> {
     }
 }
 
-/// The retryable error for a database that is not answering.
-fn database_unavailable() -> Error<'static> {
-    ErrorKind::ServiceUnavailable.with_message("The database is unavailable; retry shortly")
-}
-
-impl From<PgError> for Error<'static> {
+impl From<PgError> for Error {
     fn from(error: PgError) -> Self {
+        let internal = |detail: String| ErrorKind::InternalServerError.with_context(detail);
         match error {
-            PgError::Config(config_error) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    error = %config_error,
-                    "database configuration error"
-                );
-                ErrorKind::InternalServerError.into_error()
+            // A wait timeout means the pool was saturated: the service is
+            // momentarily overloaded, not broken, so surface a retryable 503.
+            PgError::Timeout(TimeoutType::Wait) => {
+                ErrorKind::ServiceUnavailable.with_message("The server is busy; retry shortly")
             }
-            PgError::Timeout(timeout) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    timeout = ?timeout,
-                    "database timeout",
-                );
-                // A timeout is transient, so surface a retryable 503: a wait
-                // timeout means the pool was saturated, a create/recycle timeout
-                // that the database is not answering.
-                match timeout {
-                    TimeoutType::Wait => ErrorKind::ServiceUnavailable
-                        .with_message("The server is busy; retry shortly"),
-                    TimeoutType::Create | TimeoutType::Recycle => database_unavailable(),
-                }
-            }
-            // A lost connection is transient: a retry on a fresh one may succeed,
-            // so surface a retryable 503 that callers (and workers) can classify.
-            ref transient @ (PgError::Connection(_) | PgError::Query(_))
-                if transient.is_transient() =>
-            {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    error = %transient,
-                    "database connection lost"
-                );
-                database_unavailable()
-            }
-            PgError::Connection(connection_error) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    error = %connection_error,
-                    "database connection error"
-                );
-                ErrorKind::InternalServerError.into_error()
-            }
-            PgError::Migration(migration_error) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    error = %migration_error,
-                    "database migration error"
-                );
-                ErrorKind::InternalServerError.into_error()
-            }
-            PgError::Query(ref query_error) => {
-                // A query that expected a row but matched none (e.g. a `get_result`
-                // scoped to a live row that was concurrently tombstoned) is a
-                // not-found, not a server error.
+            // Any other transient failure (a create/recycle timeout, a lost
+            // connection) means the database is not answering: also a retryable
+            // 503, which callers and workers can classify.
+            ref transient if transient.is_transient() => ErrorKind::ServiceUnavailable
+                .with_message("The database is unavailable; retry shortly")
+                .with_context(transient.to_string()),
+            PgError::Query(_) => {
+                // A query that expected a row but matched none (e.g. a
+                // `get_result` scoped to a live row that was concurrently
+                // tombstoned) is a not-found, not a server error.
                 if error.is_not_found() {
                     return ErrorKind::NotFound.into_error();
                 }
-
-                // Try to extract constraint violation
-                if let Some(constraint_name) = error.constraint()
-                    && let Some(constraint) = ConstraintViolation::new(constraint_name)
-                {
-                    tracing::error!(
-                        target: TRACING_TARGET,
-                        constraint = constraint_name,
-                        error = %query_error,
-                        "query error (constraint violation)"
-                    );
-                    return constraint.into();
+                match error.constraint().and_then(ConstraintViolation::new) {
+                    Some(constraint) => constraint.into(),
+                    None => internal(error.to_string()),
                 }
-
-                // Generic query error without constraint
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    error = %query_error,
-                    "query error"
-                );
-                ErrorKind::InternalServerError.into_error()
             }
-            PgError::Unexpected(unexpected_error) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    error = %unexpected_error,
-                    "unexpected database error"
-                );
-                ErrorKind::InternalServerError.into_error()
-            }
-            PgError::Jiff(jiff_error) => {
-                tracing::error!(
-                    target: TRACING_TARGET,
-                    error = %jiff_error,
-                    "timestamp arithmetic error"
-                );
-                ErrorKind::InternalServerError.into_error()
-            }
+            error => internal(error.to_string()),
         }
     }
 }
 
 // Used only for transactions.
-impl From<nvisy_postgres::DieselError> for Error<'static> {
+impl From<nvisy_postgres::DieselError> for Error {
     fn from(error: nvisy_postgres::DieselError) -> Self {
         // Convert DieselError -> PgError -> Error
         let pg_error: PgError = error.into();

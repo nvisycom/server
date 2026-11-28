@@ -279,6 +279,6 @@ impl TransferEngine {
 
 /// The client-safe summary of a failed sync: the error's public message, never
 /// its context (which may carry backend URLs or details).
-fn safe_failure<'a>(err: &'a Error<'_>) -> &'a str {
+fn safe_failure(err: &Error) -> &str {
     err.message.as_deref().unwrap_or("Sync failed")
 }

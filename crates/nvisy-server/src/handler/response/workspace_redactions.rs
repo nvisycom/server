@@ -2,12 +2,12 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceRedaction as RedactionModel;
-use nvisy_postgres::types::{DetectionId, Handle, RedactionId};
+use nvisy_postgres::types::{DetectionId, RedactionId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{AccountRef, Page};
+use super::{AccountRef, Page, WorkspaceRef};
 
 /// Response type for a redaction.
 ///
@@ -26,10 +26,9 @@ pub struct WorkspaceRedactionResult {
     pub id: RedactionId,
     /// The detection this redaction was produced from.
     pub detection_id: DetectionId,
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
-    /// URL-safe workspace handle. Display-only.
-    pub workspace_handle: Handle,
+    /// The workspace it belongs to.
+    #[serde(flatten)]
+    pub workspace: WorkspaceRef,
     /// Redacted output document this redaction produced. `None` only if the file
     /// was removed (e.g. by retention).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -49,15 +48,13 @@ impl WorkspaceRedactionResult {
     #[must_use]
     pub fn from_model(
         redaction: &RedactionModel,
-        workspace_id: Uuid,
-        workspace_handle: Handle,
+        workspace: WorkspaceRef,
         requested_by: AccountRef,
     ) -> Self {
         Self {
             id: RedactionId::from_uuid(redaction.id),
             detection_id: DetectionId::from_uuid(redaction.detection_id),
-            workspace_id,
-            workspace_handle,
+            workspace,
             output_document_id: redaction.output_document_id,
             requested_by,
             created_at: redaction.created_at.into(),

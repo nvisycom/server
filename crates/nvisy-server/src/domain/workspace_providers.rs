@@ -13,10 +13,11 @@ use nvisy_postgres::types::{CursorPage, CursorPagination, ProviderId, TimeCursor
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn, model};
 use uuid::Uuid;
 
+use crate::domain::config::replace_config;
 use crate::domain::input::{CreateProviderInput, UpdateProviderInput};
-use crate::response::{Error, ErrorKind, Result};
+use crate::response::{Error, Resource, Result};
 use crate::service::event::EventEmitter;
-use crate::service::{CryptoService, ProviderConfig, event};
+use crate::service::{CryptoService, event};
 
 /// Tracing target for provider domain operations.
 const TRACING_TARGET: &str = "nvisy_server::domain::provider";
@@ -93,10 +94,10 @@ impl WorkspaceProviderService {
                 let created = conn.create_workspace_provider(new_provider).await?;
                 conn.emit_event(
                     origin,
-                    event::WorkspaceEvent::ProviderCreated(event::ProviderCreated {
+                    event::ProviderCreated {
                         provider_id: created.id,
                         provider_name: created.display_name.clone(),
-                    }),
+                    },
                 )
                 .await?;
                 Ok::<_, Error>(created)
@@ -181,24 +182,14 @@ impl WorkspaceProviderService {
             .clone()
             .unwrap_or_else(|| existing.display_name.clone());
         let workspace_id = origin.workspace_id;
-        let crypto = self.crypto.clone();
-        conn.transaction(async move |conn| {
-            let (provider, encrypted_data) = match input.config {
-                Some(config) => {
-                    let stored: ProviderConfig =
-                        crypto.decrypt_json(workspace_id, &existing.encrypted_data)?;
-                    if config.provider_id() != stored.provider_id() {
-                        return Err(ErrorKind::BadRequest.with_message(
-                            "A provider's provider cannot be changed; delete and recreate instead",
-                        ));
-                    }
-                    (
-                        Some(config.provider_id().to_owned()),
-                        Some(crypto.encrypt_json(workspace_id, &config)?),
-                    )
-                }
-                None => (None, None),
-            };
+        conn.transaction(async |conn| {
+            let (provider, encrypted_data) = input
+                .config
+                .map(|config| {
+                    replace_config(&self.crypto, workspace_id, &existing.encrypted_data, config)
+                })
+                .transpose()?
+                .unzip();
 
             let update_data = model::UpdateWorkspaceProvider {
                 display_name: input.display_name,
@@ -211,10 +202,10 @@ impl WorkspaceProviderService {
                 .await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::ProviderUpdated(event::ProviderUpdated {
+                event::ProviderUpdated {
                     provider_id: provider_row_id,
                     provider_name,
-                }),
+                },
             )
             .await?;
             Ok::<(), Error>(())
@@ -245,10 +236,10 @@ impl WorkspaceProviderService {
             conn.delete_workspace_provider(existing.id).await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::ProviderDeleted(event::ProviderDeleted {
+                event::ProviderDeleted {
                     provider_id: existing.id,
                     provider_name: existing.display_name.clone(),
-                }),
+                },
             )
             .await?;
             Ok::<(), Error>(())
@@ -268,5 +259,5 @@ async fn find_provider(
 ) -> Result<WithAccountRef<WorkspaceProvider>> {
     conn.find_provider_in_workspace_with_creator(workspace_id, provider_id)
         .await?
-        .ok_or_else(|| Error::not_found("provider"))
+        .ok_or_else(|| Error::not_found(Resource::Provider))
 }

@@ -166,7 +166,7 @@ fn day_start_utc(date: Date) -> Result<jiff::Timestamp> {
 }
 
 /// A 400 for an invalid window.
-fn invalid(message: impl Into<Cow<'static, str>>) -> Error<'static> {
+fn invalid(message: impl Into<Cow<'static, str>>) -> Error {
     ErrorKind::BadRequest.with_message(message)
 }
 

@@ -17,11 +17,14 @@ use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
 use nvisy_postgres::PgClient;
 use nvisy_postgres::model::{Workspace, WorkspaceMember};
+use nvisy_postgres::types::AccountRefRow;
 use uuid::Uuid;
 
 use super::{AuthState, Permission};
-use crate::extract::WorkspaceContext;
-use crate::response::{Error, ErrorKind};
+use crate::extract::workspace_context::{find_workspace, workspace_path_id};
+use crate::extract::{SecurityContext, WorkspaceContext};
+use crate::response::{Error, ErrorKind, error_responses};
+use crate::service::event::EventOrigin;
 
 /// A workspace permission required by a handler, expressed as a marker type so it
 /// can parameterize [`Authorized`]. Implemented for one zero-sized type per
@@ -42,11 +45,42 @@ pub trait RequiredPermission {
 pub struct Authorized<P: RequiredPermission> {
     /// The authenticated caller's account id.
     pub account_id: Uuid,
+    /// The caller's public account reference.
+    pub account: AccountRefRow,
     /// The workspace the `{workspaceId}` segment resolved to.
     pub workspace: Workspace,
     /// The caller's membership in the workspace, whose role satisfied `P`.
     pub member: WorkspaceMember,
+    /// The caller's client IP and user agent, for [`origin`](Self::origin).
+    security: SecurityContext,
     _permission: PhantomData<P>,
+}
+
+impl<P: RequiredPermission> Authorized<P> {
+    /// Requires a further permission of the caller, decided by the role already
+    /// loaded — for a handler whose required permission depends on what it
+    /// finds (e.g. the kind of document being downloaded).
+    ///
+    /// # Errors
+    ///
+    /// `Forbidden` if the caller's role does not grant `permission`.
+    pub fn require(&self, permission: Permission) -> Result<(), Error> {
+        if permission.is_permitted_by_role(self.member.member_role) {
+            Ok(())
+        } else {
+            Err(ErrorKind::Forbidden.with_message("Insufficient role for this action"))
+        }
+    }
+
+    /// Who is acting where, for the events the handler raises.
+    #[must_use]
+    pub fn origin(&self) -> EventOrigin<'_> {
+        EventOrigin {
+            workspace_id: self.workspace.id,
+            account_id: self.account_id,
+            security: &self.security,
+        }
+    }
 }
 
 impl<P, S> FromRequestParts<S> for Authorized<P>
@@ -54,40 +88,34 @@ where
     P: RequiredPermission,
     S: Sync + Send + 'static,
     PgClient: FromRef<S>,
-    AuthState: FromRequestParts<S, Rejection = Error<'static>>,
-    WorkspaceContext: FromRequestParts<S, Rejection = Error<'static>>,
+    AuthState: FromRequestParts<S, Rejection = Error>,
 {
-    type Rejection = Error<'static>;
+    type Rejection = Error;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        // AuthState verifies the token (cached in extensions) and WorkspaceContext
-        // resolves the workspace by id. The membership/role check needs a connection only for
-        // its own duration, so acquire one here and drop it before returning —
-        // never hand a pooled connection to the handler body, which would pin it
-        // for the request's whole lifetime and exhaust the pool under load.
+        // AuthState verifies the token (cached in extensions). The workspace and
+        // membership lookups share one connection, held only for their duration —
+        // never handed to the handler body, which would pin it for the request's
+        // whole lifetime and exhaust the pool under load.
         let auth = AuthState::from_request_parts(parts, state).await?;
-        let WorkspaceContext(workspace) =
-            WorkspaceContext::from_request_parts(parts, state).await?;
+        let Ok(security) = SecurityContext::from_request_parts(parts, state).await;
+        let workspace_id = workspace_path_id(parts).await?;
 
-        let account_id = auth.account_id;
-        let member = {
-            let mut conn = PgClient::from_ref(state)
-                .get_connection()
-                .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, "Failed to acquire database connection");
-                    ErrorKind::InternalServerError
-                        .with_message("Database connection unavailable")
-                        .with_context(e.to_string())
-                })?;
-            auth.authorize_workspace(&mut conn, workspace.id, P::PERMISSION)
-                .await?
+        let (workspace, member) = {
+            let mut conn = PgClient::from_ref(state).get_connection().await?;
+            let workspace = find_workspace(&mut conn, workspace_id).await?;
+            let member = auth
+                .authorize_workspace(&mut conn, workspace.id, P::PERMISSION)
+                .await?;
+            (workspace, member)
         };
 
         Ok(Self {
-            account_id,
+            account_id: auth.account_id,
+            account: auth.account().clone(),
             workspace,
             member,
+            security,
             _permission: PhantomData,
         })
     }
@@ -105,7 +133,10 @@ impl<P: RequiredPermission> OperationInput for Authorized<P> {
         ctx: &mut GenContext,
         operation: &mut Operation,
     ) -> Vec<(Option<aide::openapi::StatusCode>, Response)> {
-        WorkspaceContext::inferred_early_responses(ctx, operation)
+        let mut responses = AuthState::inferred_early_responses(ctx, operation);
+        responses.extend(WorkspaceContext::inferred_early_responses(ctx, operation));
+        responses.extend(error_responses(ctx, operation, &[403]));
+        responses
     }
 }
 

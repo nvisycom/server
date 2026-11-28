@@ -24,15 +24,16 @@ use nvisy_postgres::query::{
     WorkspacePolicyRepository, WorkspacePolicyVersionRepository,
 };
 use nvisy_postgres::types::{
-    CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Json, TimeCursor,
+    AccountRefRow, CursorPage, CursorPagination, DetectionFilter, DetectionStatus, Json, TimeCursor,
 };
 use nvisy_postgres::{AsyncConnection, PgClient, PgConn};
 use uuid::Uuid;
 
 use crate::domain::input::{CreateDetectionInput, DerivedPolicyInput, DetectionSourceInput};
-use crate::domain::output::CreatedDetection;
+use crate::domain::json::{encode, parse_policy_definition};
+use crate::domain::output::{CreatedDetection, FoundDetection};
 use crate::domain::workspace_policies::resolve_derived_policy;
-use crate::response::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Resource, Result};
 use crate::service::event::EventEmitter;
 use crate::service::{ArtifactReader, DetectionQueue, EngineService, event};
 use crate::worker::detection::DetectionJob;
@@ -119,6 +120,7 @@ impl WorkspaceDetectionService {
     pub async fn create(
         &self,
         origin: event::EventOrigin<'_>,
+        caller: &AccountRefRow,
         idempotency_key: Option<String>,
         input: CreateDetectionInput,
     ) -> Result<CreatedDetection> {
@@ -132,13 +134,13 @@ impl WorkspaceDetectionService {
                 .find_detection_by_idempotency_key(workspace_id, key)
                 .await?
         {
-            return self.replay(&mut conn, workspace_id, existing).await;
+            return self.replay(&mut conn, workspace_id, existing.id).await;
         }
 
         let document = conn
             .find_document_in_workspace(workspace_id, input.document_id)
             .await?
-            .ok_or_else(|| Error::not_found("document"))?;
+            .ok_or_else(|| Error::not_found(Resource::Document))?;
         if document.blob_id.is_none() {
             return Err(Error::document_content_gone());
         }
@@ -153,7 +155,7 @@ impl WorkspaceDetectionService {
                         .await?
                         .is_none()
                     {
-                        return Err(Error::not_found("policy"));
+                        return Err(Error::not_found(Resource::Policy));
                     }
                 }
                 CommitPolicies::Named(policy_ids)
@@ -191,10 +193,12 @@ impl WorkspaceDetectionService {
 
         tracing::info!(target: TRACING_TARGET, detection_id = %detection_row.id, "Detection queued");
         Ok(CreatedDetection {
-            trigger_account_id: origin.account_id,
-            detection: detection_row,
-            documents: DetectionDocuments {
-                input: Some(document.display_name),
+            found: FoundDetection {
+                detection: detection_row,
+                trigger: caller.clone(),
+                documents: DetectionDocuments {
+                    input: Some(document.display_name),
+                },
             },
             created: true,
         })
@@ -206,15 +210,10 @@ impl WorkspaceDetectionService {
         &self,
         conn: &mut PgConn,
         workspace_id: Uuid,
-        existing: WorkspaceDetectionModel,
+        detection_id: Uuid,
     ) -> Result<CreatedDetection> {
-        let documents = conn
-            .detection_document_names(workspace_id, &existing)
-            .await?;
         Ok(CreatedDetection {
-            trigger_account_id: existing.account_id,
-            detection: existing,
-            documents,
+            found: found_detection(conn, workspace_id, detection_id).await?,
             created: false,
         })
     }
@@ -261,21 +260,13 @@ impl WorkspaceDetectionService {
     ///
     /// - `NotFound` if the detection does not exist in the workspace.
     /// - A database error if a connection or a query fails.
-    pub async fn get(
+    pub async fn find_with_documents(
         &self,
         workspace_id: Uuid,
         detection_id: Uuid,
-    ) -> Result<(WorkspaceDetectionModel, Uuid, DetectionDocuments)> {
+    ) -> Result<FoundDetection> {
         let mut conn = self.postgres.get_connection().await?;
-        let detection = conn
-            .find_workspace_detection_by_id(workspace_id, detection_id)
-            .await?
-            .ok_or_else(|| Error::not_found("detection"))?;
-        let trigger_account_id = detection.account_id;
-        let documents = conn
-            .detection_document_names(workspace_id, &detection)
-            .await?;
-        Ok((detection, trigger_account_id, documents))
+        found_detection(&mut conn, workspace_id, detection_id).await
     }
 
     /// Finds a detection within a workspace, for a handler action (stream, redact)
@@ -293,7 +284,7 @@ impl WorkspaceDetectionService {
         let mut conn = self.postgres.get_connection().await?;
         conn.find_workspace_detection_by_id(workspace_id, detection_id)
             .await?
-            .ok_or_else(|| Error::not_found("detection"))
+            .ok_or_else(|| Error::not_found(Resource::Detection))
     }
 
     /// Persists a detection's accumulated reviewer edits (`edit_set`) under an
@@ -343,15 +334,7 @@ impl WorkspaceDetectionService {
         // dependency on the engine's `EditSet` type), so encode to a value here.
         let edit_set = edits
             .as_ref()
-            .map(|edits| {
-                serde_json::to_value(edits)
-                    .map(Json::from_raw)
-                    .map_err(|err| {
-                        ErrorKind::InternalServerError
-                            .with_message("Failed to encode detection edits")
-                            .with_context(err.to_string())
-                    })
-            })
+            .map(|edits| encode(edits, "detection edits").map(Json::from_raw))
             .transpose()?;
         match conn
             .set_detection_edits(workspace_id, detection_id, expected_rev, edit_set)
@@ -361,7 +344,7 @@ impl WorkspaceDetectionService {
             EditWriteOutcome::Stale => Err(ErrorKind::Conflict.with_message(
                 "The detection's edits changed since you loaded them; reload and retry",
             )),
-            EditWriteOutcome::Absent => Err(Error::not_found("detection")),
+            EditWriteOutcome::Absent => Err(Error::not_found(Resource::Detection)),
         }
     }
 
@@ -424,7 +407,7 @@ impl WorkspaceDetectionService {
                         .with_message("A pinned policy version is no longer available")
                         .with_context(format!("policy_version_id: {version_id}"))
                 })?;
-            policies.push(parse_definition(version.id, version.definition)?);
+            policies.push(parse_policy_definition(version.id, version.definition)?);
         }
         Ok(policies)
     }
@@ -463,6 +446,7 @@ impl WorkspaceDetectionService {
                         resolve_derived_policy(conn, origin, derived)
                             .await?
                             .policy
+                            .policy
                             .id,
                     ]
                 }
@@ -472,9 +456,9 @@ impl WorkspaceDetectionService {
                 .await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::DetectionStarted(event::DetectionStarted {
+                event::DetectionStarted {
                     detection_id: detection_row.id,
-                }),
+                },
             )
             .await?;
 
@@ -489,11 +473,7 @@ impl WorkspaceDetectionService {
             };
             conn.insert_outbox(NewWorkspaceDetectionJob {
                 detection_id: detection_row.id,
-                job: serde_json::to_value(&job).map_err(|err| {
-                    ErrorKind::InternalServerError
-                        .with_message("Failed to encode detection job")
-                        .with_context(err.to_string())
-                })?,
+                job: encode(&job, "detection job")?,
             })
             .await?;
             Ok::<_, Error>(detection_row)
@@ -515,12 +495,23 @@ impl WorkspaceDetectionService {
     }
 }
 
-/// Deserializes a stored policy definition (plaintext JSONB) into an engine
-/// [`Policy`], failing if the stored body is malformed.
-fn parse_definition(version_id: Uuid, definition: serde_json::Value) -> Result<Policy> {
-    serde_json::from_value(definition).map_err(|err| {
-        ErrorKind::InternalServerError
-            .with_message("Stored policy definition is malformed")
-            .with_context(format!("policy_version_id: {version_id}: {err}"))
+/// Loads a detection with the account that triggered it and its input document
+/// name(s), or a `NotFound`.
+async fn found_detection(
+    conn: &mut PgConn,
+    workspace_id: Uuid,
+    detection_id: Uuid,
+) -> Result<FoundDetection> {
+    let found = conn
+        .find_detection_with_trigger(workspace_id, detection_id)
+        .await?
+        .ok_or_else(|| Error::not_found(Resource::Detection))?;
+    let documents = conn
+        .detection_document_names(workspace_id, &found.item)
+        .await?;
+    Ok(FoundDetection {
+        detection: found.item,
+        trigger: found.account,
+        documents,
     })
 }

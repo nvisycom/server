@@ -7,7 +7,6 @@ mod workspace_connections;
 mod workspace_detections;
 mod workspace_documents;
 mod workspace_invites;
-mod workspace_policies;
 mod workspace_webhooks;
 mod workspaces;
 
@@ -16,6 +15,5 @@ pub use workspace_connections::*;
 pub use workspace_detections::*;
 pub use workspace_documents::*;
 pub use workspace_invites::*;
-pub use workspace_policies::*;
 pub use workspace_webhooks::*;
 pub use workspaces::*;

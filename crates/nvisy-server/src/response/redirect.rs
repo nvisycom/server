@@ -124,13 +124,17 @@ pub(crate) fn connection_result_redirect(
     status: &str,
     workspace_handle: Option<&str>,
 ) -> Response {
-    if let Some(base) = base {
+    let target = base.and_then(|base| {
         let base = match workspace_handle {
             Some(handle) => base.replace("{workspaceHandle}", handle),
             None => base.to_owned(),
         };
-        let separator = if base.contains('?') { '&' } else { '?' };
-        Redirect::to(&format!("{base}{separator}connection={status}")).into_response()
+        let mut url = url::Url::parse(&base).ok()?;
+        url.query_pairs_mut().append_pair("connection", status);
+        Some(url)
+    });
+    if let Some(url) = target {
+        Redirect::to(url.as_str()).into_response()
     } else {
         let body = format!("Cloud file connection {status}. You can close this window.");
         (StatusCode::OK, body).into_response()

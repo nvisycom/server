@@ -4,12 +4,11 @@ use jiff::Timestamp;
 use nvisy_postgres::model::{
     WorkspaceConnection as WorkspaceConnectionModel, WorkspaceConnectionSchedule,
 };
-use nvisy_postgres::types::{ConnectionId, ConnectionType, Handle, SyncDeletionPolicy, SyncMode};
+use nvisy_postgres::types::{ConnectionId, ConnectionType, SyncDeletionPolicy, SyncMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use super::{AccountRef, Page};
+use super::{AccountRef, Page, WorkspaceRef};
 
 /// A connection's scheduled-sync configuration (its cron config), present only
 /// for connections that sync on a timer. A connection can transfer on demand
@@ -37,10 +36,9 @@ pub struct WorkspaceSyncSchedule {
 pub struct WorkspaceConnection {
     /// Opaque identifier of the connection.
     pub id: ConnectionId,
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
-    /// URL-safe workspace handle. Display-only.
-    pub workspace_handle: Handle,
+    /// The workspace it belongs to.
+    #[serde(flatten)]
+    pub workspace: WorkspaceRef,
     /// Account that created this connection.
     pub created_by: AccountRef,
     /// Human-readable connection display name.
@@ -121,8 +119,7 @@ impl WorkspaceConnection {
     #[must_use]
     pub fn from_model(
         connection: WorkspaceConnectionModel,
-        workspace_id: Uuid,
-        workspace_handle: Handle,
+        workspace: WorkspaceRef,
         created_by: AccountRef,
         schedule: Option<WorkspaceConnectionSchedule>,
         last_synced_at: Option<Timestamp>,
@@ -134,8 +131,7 @@ impl WorkspaceConnection {
         });
         Self {
             id: ConnectionId::from_uuid(connection.id),
-            workspace_id,
-            workspace_handle,
+            workspace,
             created_by,
             display_name: connection.display_name,
             provider: connection.provider,

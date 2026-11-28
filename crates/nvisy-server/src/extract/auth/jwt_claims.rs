@@ -27,7 +27,7 @@ const NEVER_EXPIRES_SECONDS: i64 = 100 * 365 * 24 * 60 * 60;
 /// All timestamps use RFC 3339 format for consistency and interoperability.
 #[derive(Debug, Clone, Deserialize, Serialize, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct AuthClaims<T = ()> {
+pub struct AuthClaims {
     // Standard (or registered) claims.
     /// Issuer (who created the token).
     #[serde(rename = "iss")]
@@ -49,57 +49,18 @@ pub struct AuthClaims<T = ()> {
     /// Expiration time (as Unix timestamp).
     #[serde(rename = "exp")]
     pub expires_at: i64,
-
-    // Private (or custom) claims
-    #[serde(flatten)]
-    pub custom_claims: T,
 }
 
-impl AuthClaims<()> {
-    /// Creates a new JWT claims structure from account and session data.
-    ///
-    /// This method generates claims that are consistent with the database state
-    /// at the time of token creation.
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - The authenticated account
-    /// * `account_session` - The active session for this account
-    ///
-    /// # Returns
-    ///
-    /// Returns a new [`AuthClaims`] instance ready for JWT encoding.
-    #[must_use]
-    pub fn new(account_model: &Account, account_api_token: &AccountApiToken) -> Self {
-        Self::with_custom_claims(account_model, account_api_token, ())
-    }
-}
-
-impl<T> AuthClaims<T> {
+impl AuthClaims {
     /// Default JWT audience identifier for authentication tokens.
     const JWT_AUDIENCE: &str = "nvisy:server";
     /// Default JWT issuer identifier for authentication tokens.
     const JWT_ISSUER: &str = "nvisy";
 
-    /// Creates a new JWT claims structure from account, session data and custom claims.
-    ///
-    /// This method generates claims that are consistent with the database state
-    /// at the time of token creation.
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - The authenticated account
-    /// * `account_session` - The active session for this account
-    /// * `custom_claims` - Custom claims to include in the JWT
-    ///
-    /// # Returns
-    ///
-    /// Returns a new [`AuthClaims`] instance ready for JWT encoding.
-    pub fn with_custom_claims(
-        account_model: &Account,
-        account_api_token: &AccountApiToken,
-        custom_claims: T,
-    ) -> Self {
+    /// Creates the claims for an account's token, consistent with the database
+    /// state at the time of token creation.
+    #[must_use]
+    pub fn new(account_model: &Account, account_api_token: &AccountApiToken) -> Self {
         let issued_at = Timestamp::from(account_api_token.issued_at);
 
         // The JWT's `exp` depends on the token kind:
@@ -132,15 +93,11 @@ impl<T> AuthClaims<T> {
             account_id: account_model.id,
             issued_at: issued_at.as_second(),
             expires_at: expires_at.as_second(),
-            custom_claims,
         }
     }
 }
 
-impl<T> AuthClaims<T>
-where
-    T: Clone + Serialize,
-{
+impl AuthClaims {
     /// Encodes the claims into a signed JWT token string.
     ///
     /// # Arguments
@@ -171,10 +128,7 @@ where
     }
 }
 
-impl<T> AuthClaims<T>
-where
-    T: Clone + for<'de> Deserialize<'de>,
-{
+impl AuthClaims {
     /// Parses and validates a raw JWT token string, regardless of the transport
     /// it arrived on (session cookie or Authorization header).
     ///

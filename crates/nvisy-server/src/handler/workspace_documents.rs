@@ -11,65 +11,48 @@
 // is fixed by the framework and cannot be bundled into a struct.
 #![allow(clippy::too_many_arguments)]
 
+use std::io;
 use std::str::FromStr;
 
 use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::body::Body;
-use axum::extract::multipart::Field;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use futures::StreamExt;
-use nvisy_postgres::model::{NewBlob, NewWorkspaceDocument};
-use nvisy_postgres::query::{
-    DocumentWithBlob, WorkspaceBlobRepository, WorkspaceDocumentRepository,
-};
 use nvisy_postgres::types::DocumentKind;
-use nvisy_postgres::{AsyncConnection, PgClient};
-use nvisy_s3::{BlobStore, Bucket, DocumentKey};
-use tokio_util::io::{ReaderStream, StreamReader};
-use uuid::Uuid;
+use nvisy_s3::{BlobStore, DocumentKey};
+use tokio_util::io::ReaderStream;
 
 use crate::domain;
-use crate::extract::{
-    AuthState, Authorized, Json, Multipart, Path, Permission, Query, SecurityContext, ValidateJson,
-    WorkspaceContext, markers,
-};
+use crate::extract::{Authorized, Json, Multipart, Path, Permission, Query, ValidateJson, markers};
 use crate::handler::request::{
     CursorPagination, DeleteWorkspaceDocuments as DeleteDocumentsRequest, ListWorkspaceDocuments,
     UpdateWorkspaceDocument, WorkspaceDocumentPathParams,
 };
 use crate::handler::response::{
     self, WorkspaceDocument, WorkspaceDocumentDetails, WorkspaceDocuments, WorkspaceDocumentsPage,
+    WorkspaceRef,
 };
-use crate::handler::utility::{DownloadDocs, resolve_account_ref};
+use crate::handler::utility::DownloadDocs;
 use crate::middleware::UploadConfig;
-use crate::response::{Error, ErrorKind, ErrorResponse, Result, attachment_headers};
-use crate::service::event::EventEmitter;
-use crate::service::{
-    CryptoService, EngineService, HashingReader, LimitedReader, ServiceState, event,
-};
+use crate::response::{ErrorKind, ErrorResponse, Result, attachment_headers};
+use crate::service::{CryptoService, DocumentStager, ServiceState, StagedDocument, UploadTarget};
 
 /// Tracing target for workspace document operations.
 const TRACING_TARGET: &str = "nvisy_server::handler::workspace_documents";
 
 /// Lists documents in a workspace with cursor-based pagination.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn list_documents(
     State(documents): State<domain::WorkspaceDocumentService>,
     authz: Authorized<markers::ViewDocuments>,
     Query(documents_query): Query<ListWorkspaceDocuments>,
     Query(cursor_pagination): Query<CursorPagination>,
-) -> Result<(StatusCode, Json<WorkspaceDocumentsPage>)> {
+) -> Result<Json<WorkspaceDocumentsPage>> {
     tracing::debug!(target: TRACING_TARGET, "Listing documents");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
     let page = documents
         .list(
             workspace.id,
@@ -82,8 +65,7 @@ async fn list_documents(
         WorkspaceDocument::from_model(
             wc.item.document,
             &wc.item.blob,
-            workspace.id,
-            workspace.handle.clone(),
+            WorkspaceRef::from(workspace),
             wc.account.into(),
         )
     });
@@ -92,10 +74,10 @@ async fn list_documents(
         target: TRACING_TARGET,
         document_count = response.items.len(),
         has_more = response.next_cursor.is_some(),
-        "WorkspaceDocuments listed"
+        "Documents listed"
     );
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok(Json(response))
 }
 
 fn list_documents_docs(op: TransformOperation) -> TransformOperation {
@@ -104,348 +86,78 @@ fn list_documents_docs(op: TransformOperation) -> TransformOperation {
             "Lists documents in a workspace with cursor-based pagination. Use the `after` parameter with the `nextCursor` value from the response to fetch subsequent pages. Use `kind=original` or `kind=redacted` to filter by role, and `search` to find a display name or original filename. Pass `hash` (a hex SHA-256) to find documents with identical content — a non-empty result means the document already exists, so an upload can be skipped.",
         )
         .response::<200, Json<WorkspaceDocumentsPage>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
 }
 
-/// Context for processing a single document upload.
-#[derive(Clone)]
-struct DocumentUploadContext {
-    workspace_id: Uuid,
-    account_id: Uuid,
-    blobs: BlobStore,
-    crypto: CryptoService,
-    /// Engine handle, used to reject upload of a format no codec can decode.
-    engine: EngineService,
-    /// Retention expiry for uploaded originals.
-    expires_at: jiff::Timestamp,
-    /// The effective per-document upload cap in bytes — the smaller of the workspace's
-    /// soft cap and the server-wide hard limit. A document streaming past it is
-    /// rejected before its excess reaches storage. This is a true per-document bound,
-    /// unlike the request-body layer, which limits the whole multipart request.
-    max_upload_bytes: u64,
-}
-
-/// A document streamed to object storage whose document/blob rows have not yet been
-/// inserted.
-///
-/// Pairs the object's storage key with its unsaved blob and document so the batch
-/// can persist every row together, and reclaim every staged object if that fails.
-struct StagedDocument {
-    key: DocumentKey,
-    blob: NewBlob,
-    document: NewWorkspaceDocument,
-}
-
-/// Streams one multipart document to storage and builds its unsaved rows.
-async fn stage_document(ctx: &DocumentUploadContext, field: Field<'_>) -> Result<StagedDocument> {
-    let filename = field.file_name().map_or_else(
-        || format!("file_{}.bin", Uuid::now_v7()),
-        ToString::to_string,
-    );
-
-    let file_extension = std::path::Path::new(&filename)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("bin")
-        .to_lowercase();
-
-    // Reject a format no codec can decode before streaming it to storage: an
-    // unprocessable document would only fail later at detection, after wasting an
-    // encrypted upload.
-    if !ctx.engine.supports_extension(&file_extension) {
-        return Err(ErrorKind::BadRequest
-            .with_message(format!("Unsupported document format: .{file_extension}"))
-            .with_context(
-                "The redaction engine has no codec for this document type; upload a supported format.",
-            ));
-    }
-
-    // Generate document key with a unique object ID for blob storage.
-    let document_key = DocumentKey::generate(ctx.workspace_id);
-
-    tracing::debug!(
-        target: TRACING_TARGET,
-        object_id = %document_key.object_id,
-        "Streaming document to storage"
-    );
-
-    // Step 1: Encrypt the plaintext as it streams to the blob store. The limited
-    // reader aborts an oversized upload before its excess is encrypted and stored,
-    // enforcing the effective per-document cap directly (the request-body layer only
-    // bounds the whole multipart request). The measured reader captures the
-    // plaintext size and hash (the store only sees ciphertext).
-    let cap = ctx.max_upload_bytes;
-    let source = StreamReader::new(field.map(|result| result.map_err(std::io::Error::other)));
-    let (limited, limit_state) = LimitedReader::new(source, cap);
-    let (measured, measurements) = HashingReader::new(limited);
-    let encrypted = ctx.crypto.encrypt_reader(ctx.workspace_id, measured);
-
-    if let Err(err) = ctx.blobs.put(&document_key, Box::pin(encrypted)).await {
-        // The limited reader aborts the stream, which fails the `put`. When that
-        // is why it failed, report the size limit (413) rather than a storage
-        // error; the reader's error is stringified in transit, so consult the
-        // shared state instead of inspecting the error.
-        if limit_state.is_exceeded() {
-            return Err(ErrorKind::PayloadTooLarge.with_message(format!(
-                "WorkspaceDocument exceeds the {cap}-byte upload limit"
-            )));
-        }
-        return Err(err.into());
-    }
-
-    tracing::debug!(
-        target: TRACING_TARGET,
-        object_id = %document_key.object_id,
-        size = measurements.bytes(),
-        "WorkspaceDocument encrypted and streamed to storage"
-    );
-
-    // Step 2: Build the unsaved blob (content-addressed bytes + retention) and the
-    // unsaved document that will point at it (Postgres generates each row's own id
-    // on insert; the blob is resolved — shared or created — at commit time). The
-    // content hash and size live on the blob; the human-facing name, extension, and
-    // creator live on the document.
-    let blob = NewBlob {
-        workspace_id: ctx.workspace_id,
-        content_hash: measurements.sha256().to_vec(),
-        file_size_bytes: i64::try_from(measurements.bytes()).unwrap_or(i64::MAX),
-        storage_path: document_key.to_string(),
-        storage_bucket: Bucket::Documents.name().to_owned(),
-        audit_digest: None,
-    };
-    let document = NewWorkspaceDocument {
-        workspace_id: ctx.workspace_id,
-        account_id: ctx.account_id,
-        // Resolved to the staged blob's id at commit time.
-        blob_id: Uuid::nil(),
-        kind: Some(DocumentKind::Original),
-        display_name: Some(filename.clone()),
-        original_filename: Some(filename),
-        file_extension: Some(file_extension),
-        metadata: None,
-        expires_at: Some(ctx.expires_at.into()),
-    };
-
-    Ok(StagedDocument {
-        key: document_key,
-        blob,
-        document,
-    })
-}
-
-impl DocumentUploadContext {
-    /// Streams every document field in the multipart body to storage, returning the
-    /// staged documents (object key + unsaved row). Non-document fields are skipped.
-    ///
-    /// On any error, the objects staged so far are removed before returning, so a
-    /// failed batch never leaves an object behind with no row to reclaim it.
-    async fn stage_all(&self, multipart: &mut Multipart) -> Result<Vec<StagedDocument>> {
-        let mut staged: Vec<StagedDocument> = Vec::new();
-        loop {
-            let field = match multipart.next_field().await {
-                Ok(Some(field)) => field,
-                Ok(None) => break,
-                Err(err) => {
-                    self.discard_staged(&staged).await;
-                    tracing::error!(target: TRACING_TARGET, error = %err, "Failed to read multipart field");
-                    return Err(ErrorKind::BadRequest
-                        .with_message("Invalid multipart data")
-                        .with_context(format!("Failed to parse multipart form: {err}")));
-                }
-            };
-
-            if field.file_name().is_none() {
-                tracing::debug!(
-                    target: TRACING_TARGET,
-                    name = ?field.name(),
-                    "Skipping non-document multipart field"
-                );
-                continue;
+/// Streams every document field of the multipart body to storage. Non-document
+/// fields are skipped. On any error the objects staged so far are reclaimed, so a
+/// failed batch never leaves an object with no row to reclaim it.
+async fn stage_multipart(
+    stager: &DocumentStager,
+    target: &UploadTarget,
+    multipart: &mut Multipart,
+) -> Result<Vec<StagedDocument>> {
+    let mut uploads = Vec::new();
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(field)) => field,
+            Ok(None) => break,
+            Err(err) => {
+                stager.discard(&uploads).await;
+                return Err(ErrorKind::BadRequest
+                    .with_message("Invalid multipart data")
+                    .with_context(format!("Failed to parse multipart form: {err}")));
             }
+        };
 
-            match stage_document(self, field).await {
-                Ok(document) => staged.push(document),
-                Err(err) => {
-                    self.discard_staged(&staged).await;
-                    return Err(err);
-                }
-            }
-        }
-        Ok(staged)
-    }
-
-    /// Removes staged objects best-effort, for when the batch does not commit.
-    /// Each object was written before any row exists, so nothing else can reclaim
-    /// it; a failed removal is logged and left for no one — an acceptable leak in
-    /// the rare storage-error case, not worth failing the response over.
-    async fn discard_staged(&self, staged: &[StagedDocument]) {
-        for document in staged {
-            self.discard_staged_object(&document.key).await;
-        }
-    }
-
-    /// Removes one staged object best-effort, logging a failure rather than
-    /// failing the response.
-    async fn discard_staged_object(&self, key: &DocumentKey) {
-        if let Err(err) = self.blobs.delete(key).await {
-            tracing::warn!(
+        let Some(filename) = field.file_name().map(ToOwned::to_owned) else {
+            tracing::debug!(
                 target: TRACING_TARGET,
-                error = %err,
-                object_id = %key.object_id,
-                "Failed to remove staged object",
+                name = ?field.name(),
+                "Skipping non-document multipart field"
             );
+            continue;
+        };
+
+        let body = field.map(|chunk| chunk.map_err(io::Error::other));
+        match stager.stage(target, &filename, body).await {
+            Ok(document) => uploads.push(document),
+            Err(err) => {
+                stager.discard(&uploads).await;
+                return Err(err);
+            }
         }
     }
+    Ok(uploads)
 }
 
 /// Uploads input documents to a workspace for processing.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn upload_document(
-    State(pg_client): State<PgClient>,
-    State(blobs): State<BlobStore>,
-    State(crypto): State<CryptoService>,
-    State(engine): State<EngineService>,
+    State(documents): State<domain::WorkspaceDocumentService>,
+    State(stager): State<DocumentStager>,
     State(upload): State<UploadConfig>,
     authz: Authorized<markers::UploadDocuments>,
-    security: SecurityContext,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<WorkspaceDocuments>)> {
     tracing::info!(target: TRACING_TARGET, "Uploading documents");
 
-    let workspace = authz.workspace;
+    // Stream every document to storage with no connection held, then record
+    // them all in one transaction: the batch records every document or none.
+    let target = UploadTarget::new(&authz.workspace, authz.account_id, upload.max_file_bytes());
+    let uploads = stage_multipart(&stager, &target, &mut multipart).await?;
+    let created = documents.commit_uploads(authz.origin(), uploads).await?;
 
-    // Do the quick pre-flight DB work under a connection, then release it:
-    // resolve the uploader's identity, and read the workspace's upload settings.
-    // Holding a pooled connection across the streaming below would pin it for the
-    // whole upload and starve the pool under load, so this scope drops it before
-    // streaming begins.
-    let (uploaded_by, expires_at, max_upload_bytes) = {
-        let mut conn = pg_client.get_connection().await?;
-
-        let uploaded_by = resolve_account_ref(&mut conn, authz.account_id).await?;
-
-        let settings = workspace.settings.or_default();
-        let expires_at = settings
-            .retention
-            .original_documents
-            .expires_at(jiff::Timestamp::now());
-        let max_upload_bytes = settings.effective_max_upload_bytes(upload.max_file_bytes());
-
-        (uploaded_by, expires_at, max_upload_bytes)
-    };
-
-    let ctx = DocumentUploadContext {
-        workspace_id: workspace.id,
-        account_id: authz.account_id,
-        blobs,
-        crypto,
-        engine,
-        expires_at,
-        max_upload_bytes,
-    };
-
-    // Stream every document to storage first (no DB connection held), then persist all
-    // their rows and events in one transaction. The upload is atomic: it either
-    // records every document or, on any failure, records none and reclaims every
-    // staged object — never a partial batch, and never an object left behind with
-    // no row.
-    let staged = ctx.stage_all(&mut multipart).await?;
-
-    if staged.is_empty() {
-        return Err(
-            ErrorKind::BadRequest.with_message("No documents provided in multipart request")
-        );
-    }
-
-    let origin = event::EventOrigin {
-        workspace_id: workspace.id,
-        account_id: authz.account_id,
-        security: &security,
-    };
-    // Acquisition and commit share the cleanup path: any failure after staging
-    // must reclaim the objects, including an exhausted connection pool.
-    let created = match async {
-        let mut conn = pg_client.get_connection().await?;
-        conn.transaction(async |conn| {
-            let mut created: Vec<DocumentWithBlob> = Vec::with_capacity(staged.len());
-            for staged_document in &staged {
-                let document = conn
-                    .create_workspace_document(
-                        staged_document.document.clone(),
-                        staged_document.blob.clone(),
-                    )
-                    .await?;
-                // Resolve the blob the document was pointed at (shared or freshly
-                // created), for the response's content-addressed fields.
-                let blob = conn
-                    .find_blob_by_id(document.blob_id.ok_or_else(|| {
-                        ErrorKind::InternalServerError.with_message("Staged blob not found")
-                    })?)
-                    .await?
-                    .ok_or_else(|| {
-                        ErrorKind::InternalServerError.with_message("Staged blob not found")
-                    })?;
-                conn.emit_event(
-                    origin,
-                    event::WorkspaceEvent::DocumentCreated(event::DocumentCreated {
-                        document_id: document.id,
-                        document_name: document.display_name.clone(),
-                        document_size_bytes: blob.file_size_bytes,
-                    }),
-                )
-                .await?;
-                created.push(DocumentWithBlob { document, blob });
-            }
-            Ok::<_, Error>(created)
+    let uploaded_documents = created
+        .into_iter()
+        .map(|entry| {
+            response::WorkspaceDocument::from_model(
+                entry.document,
+                &entry.blob,
+                WorkspaceRef::from(&authz.workspace),
+                authz.account.clone().into(),
+            )
         })
-        .await
-    }
-    .await
-    {
-        Ok(created) => created,
-        Err(err) => {
-            // The objects were streamed before this transaction, so a rollback
-            // leaves them with no rows and nothing to reclaim them later (the
-            // reaper works from blob rows). Remove them best-effort first.
-            ctx.discard_staged(&staged).await;
-            return Err(err);
-        }
-    };
-
-    // A document whose content deduplicated onto an existing blob is pointed at
-    // that blob's stored object, orphaning the object staged for it here. Remove
-    // the redundant staged object best-effort now that the batch has committed.
-    for (staged_document, entry) in staged.iter().zip(&created) {
-        if entry.blob.storage_path != staged_document.blob.storage_path {
-            ctx.discard_staged_object(&staged_document.key).await;
-        }
-    }
-
-    let mut uploaded_documents: WorkspaceDocuments = Vec::with_capacity(created.len());
-    for entry in created {
-        uploaded_documents.push(response::WorkspaceDocument::from_model(
-            entry.document,
-            &entry.blob,
-            workspace.id,
-            workspace.handle.clone(),
-            uploaded_by.clone(),
-        ));
-    }
-
-    tracing::info!(
-        target: TRACING_TARGET,
-        document_count = uploaded_documents.len(),
-        "WorkspaceDocuments uploaded",
-    );
-
+        .collect();
     Ok((StatusCode::CREATED, Json(uploaded_documents)))
 }
 
@@ -453,9 +165,6 @@ fn upload_document_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Upload documents")
         .description("Uploads one or more documents to a workspace. Each document is encrypted and streamed to storage. The batch is atomic: either every document is recorded, or on any failure none are and the request fails.")
         .response::<201, Json<WorkspaceDocuments>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
         .response::<413, Json<ErrorResponse>>()
 }
 
@@ -463,8 +172,6 @@ fn upload_document_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         document_id = %path_params.document_id,
     )
 )]
@@ -472,43 +179,34 @@ async fn read_document(
     State(documents): State<domain::WorkspaceDocumentService>,
     authz: Authorized<markers::ViewDocuments>,
     Path(path_params): Path<WorkspaceDocumentPathParams>,
-) -> Result<(StatusCode, Json<WorkspaceDocumentDetails>)> {
+) -> Result<Json<WorkspaceDocumentDetails>> {
     tracing::debug!(target: TRACING_TARGET, "Reading document metadata");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
     let found = documents
         .find(workspace.id, path_params.document_id)
         .await?;
 
-    tracing::debug!(target: TRACING_TARGET, "WorkspaceDocument metadata retrieved");
+    tracing::debug!(target: TRACING_TARGET, "Document metadata retrieved");
 
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceDocumentDetails::from_model(
-            found.item.document,
-            &found.item.blob,
-            workspace.id,
-            workspace.handle,
-            found.account.into(),
-        )),
-    ))
+    Ok(Json(WorkspaceDocumentDetails::from_model(
+        found.item.document,
+        &found.item.blob,
+        WorkspaceRef::from(workspace),
+        found.account.into(),
+    )))
 }
 
 fn read_document_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get document metadata")
         .description("Returns document metadata without downloading the document content.")
         .response::<200, Json<WorkspaceDocumentDetails>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Updates document metadata.
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         document_id = %path_params.document_id,
     )
 )]
@@ -516,33 +214,24 @@ async fn update_document(
     State(documents): State<domain::WorkspaceDocumentService>,
     authz: Authorized<markers::UpdateDocuments>,
     Path(path_params): Path<WorkspaceDocumentPathParams>,
-    security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWorkspaceDocument>,
-) -> Result<(StatusCode, Json<WorkspaceDocumentDetails>)> {
+) -> Result<Json<WorkspaceDocumentDetails>> {
     tracing::debug!(target: TRACING_TARGET, "Updating document");
 
-    let workspace = authz.workspace;
-    let origin = event::EventOrigin {
-        workspace_id: workspace.id,
-        account_id: authz.account_id,
-        security: &security,
-    };
+    let workspace = &authz.workspace;
+    let origin = authz.origin();
     let found = documents
         .update(origin, path_params.document_id, request.into())
         .await?;
 
-    tracing::info!(target: TRACING_TARGET, "WorkspaceDocument updated");
+    tracing::info!(target: TRACING_TARGET, "Document updated");
 
-    Ok((
-        StatusCode::OK,
-        Json(response::WorkspaceDocumentDetails::from_model(
-            found.item.document,
-            &found.item.blob,
-            workspace.id,
-            workspace.handle,
-            found.account.into(),
-        )),
-    ))
+    Ok(Json(response::WorkspaceDocumentDetails::from_model(
+        found.item.document,
+        &found.item.blob,
+        WorkspaceRef::from(workspace),
+        found.account.into(),
+    )))
 }
 
 fn update_document_docs(op: TransformOperation) -> TransformOperation {
@@ -551,41 +240,28 @@ fn update_document_docs(op: TransformOperation) -> TransformOperation {
             "Updates the display name or replaces custom metadata; returns the updated metadata.",
         )
         .response::<200, Json<WorkspaceDocumentDetails>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Downloads a document with streaming support for large documents.
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %auth.account_id,
-        workspace_id = %workspace.id,
         document_id = %path_params.document_id,
     )
 )]
 async fn download_document(
-    State(pg_client): State<PgClient>,
     State(documents): State<domain::WorkspaceDocumentService>,
     State(blobs): State<BlobStore>,
     State(crypto): State<CryptoService>,
-    WorkspaceContext(workspace): WorkspaceContext,
+    // Gate on document access before resolving the document, so a caller who
+    // cannot see documents cannot distinguish a missing document from a
+    // forbidden one. Every kind-specific download permission below requires at
+    // least this role, so it never rejects an otherwise-authorized caller.
+    authz: Authorized<markers::ViewDocuments>,
     Path(path_params): Path<WorkspaceDocumentPathParams>,
-    auth: AuthState,
-) -> Result<(StatusCode, HeaderMap, Body)> {
+) -> Result<(HeaderMap, Body)> {
     tracing::debug!(target: TRACING_TARGET, "Downloading document");
-
-    let mut conn = pg_client.get_connection().await?;
-
-    // Gate on workspace document access before resolving the document, so a caller who
-    // cannot see documents cannot distinguish a missing document from a forbidden one.
-    // Every kind-specific download permission below already requires at least the
-    // role this check does, so it never rejects an otherwise-authorized caller.
-    auth.authorize_workspace(&mut conn, workspace.id, Permission::ViewDocuments)
-        .await?;
-    drop(conn);
+    let workspace = &authz.workspace;
 
     // The permission a download requires depends on the document's kind, so the
     // raw original bytes and the redacted output are gated separately. Audit and
@@ -602,10 +278,7 @@ async fn download_document(
         DocumentKind::Redacted => Permission::DownloadRedactedDocuments,
     };
 
-    let mut conn = pg_client.get_connection().await?;
-    auth.authorize_workspace(&mut conn, workspace.id, permission)
-        .await?;
-    drop(conn);
+    authz.require(permission)?;
 
     let document_key = DocumentKey::from_str(&blob.storage_path).map_err(|err| {
         tracing::error!(
@@ -638,9 +311,9 @@ async fn download_document(
             tracing::warn!(
                 target: TRACING_TARGET,
                 document_id = %path_params.document_id,
-                "WorkspaceDocument content not found in storage"
+                "Document content not found in storage"
             );
-            ErrorKind::NotFound.with_message("WorkspaceDocument content not found")
+            ErrorKind::NotFound.with_message("Document content not found")
         })?;
 
     // `attachment_headers` handles the user-controlled name safely (escapes it,
@@ -666,7 +339,7 @@ async fn download_document(
     let stream = ReaderStream::new(Box::pin(decrypted));
     let body = Body::from_stream(stream);
 
-    Ok((StatusCode::OK, headers, body))
+    Ok((headers, body))
 }
 
 fn download_document_docs(op: TransformOperation) -> TransformOperation {
@@ -677,17 +350,13 @@ fn download_document_docs(op: TransformOperation) -> TransformOperation {
              DownloadOriginalDocuments, and a redacted output needs DownloadRedactedDocuments.",
         )
         .download_response("The document content.", &["application/octet-stream"])
-        .response::<401, Json<ErrorResponse>>()
         .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Deletes a document (soft delete).
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         document_id = %path_params.document_id,
     )
 )]
@@ -695,19 +364,13 @@ async fn delete_document(
     State(documents): State<domain::WorkspaceDocumentService>,
     authz: Authorized<markers::DeleteDocuments>,
     Path(path_params): Path<WorkspaceDocumentPathParams>,
-    security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting document");
 
-    let workspace = authz.workspace;
-    let origin = event::EventOrigin {
-        workspace_id: workspace.id,
-        account_id: authz.account_id,
-        security: &security,
-    };
+    let origin = authz.origin();
     documents.delete(origin, path_params.document_id).await?;
 
-    tracing::info!(target: TRACING_TARGET, "WorkspaceDocument deleted");
+    tracing::info!(target: TRACING_TARGET, "Document deleted");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -715,9 +378,6 @@ fn delete_document_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete document")
         .description("Deletes a document: the record is retired and its blob reference dropped. The stored content is reclaimed later, once no other document references it and its retention window has passed. This is permanent — the document cannot be restored.")
         .response::<204, ()>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Deletes several documents in one call (soft delete).
@@ -728,50 +388,36 @@ fn delete_document_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         requested = request.document_ids.len(),
     )
 )]
 async fn bulk_delete_documents(
     State(documents): State<domain::WorkspaceDocumentService>,
     authz: Authorized<markers::DeleteDocuments>,
-    security: SecurityContext,
     ValidateJson(request): ValidateJson<DeleteDocumentsRequest>,
-) -> Result<(StatusCode, Json<response::WorkspaceDeletedDocuments>)> {
+) -> Result<Json<response::WorkspaceDeletedDocuments>> {
     tracing::debug!(target: TRACING_TARGET, "Bulk-deleting documents");
 
-    let workspace = authz.workspace;
-    let origin = event::EventOrigin {
-        workspace_id: workspace.id,
-        account_id: authz.account_id,
-        security: &security,
-    };
+    let origin = authz.origin();
     let outcome = documents.bulk_delete(origin, request.document_ids).await?;
 
     tracing::info!(
         target: TRACING_TARGET,
         deleted = outcome.deleted.len(),
         skipped = outcome.skipped.len(),
-        "WorkspaceDocuments bulk-deleted",
+        "Documents bulk-deleted",
     );
 
-    Ok((
-        StatusCode::OK,
-        Json(response::WorkspaceDeletedDocuments {
-            deleted: outcome.deleted,
-            skipped: outcome.skipped,
-        }),
-    ))
+    Ok(Json(response::WorkspaceDeletedDocuments {
+        deleted: outcome.deleted,
+        skipped: outcome.skipped,
+    }))
 }
 
 fn bulk_delete_documents_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete documents")
         .description("Deletes several documents in one call. Idempotent: ids that resolve to live documents in the workspace are removed and returned in `deleted`; ids that are unknown, already deleted, or in another workspace are returned in `skipped`. Deletion is permanent — the documents' content cannot be recovered.")
         .response::<200, Json<response::WorkspaceDeletedDocuments>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Returns a [`Router`] with all related routes.

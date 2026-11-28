@@ -13,7 +13,7 @@ use elide_pipeline::entity::EditError;
 
 use super::http_error::{Error as HttpError, ErrorKind};
 
-impl From<elide_pipeline::Error> for HttpError<'_> {
+impl From<elide_pipeline::Error> for HttpError {
     fn from(error: elide_pipeline::Error) -> Self {
         match error.kind() {
             EngineErrorKind::MalformedInput => ErrorKind::BadRequest
@@ -29,7 +29,7 @@ impl From<elide_pipeline::Error> for HttpError<'_> {
     }
 }
 
-impl From<EditError> for HttpError<'_> {
+impl From<EditError> for HttpError {
     /// A reviewer edit set that does not apply to the analysis is always a client
     /// error: both an unknown target (a stale or wrong-modality entity id) and a
     /// self-contradiction (two edits deciding one entity differently) are the

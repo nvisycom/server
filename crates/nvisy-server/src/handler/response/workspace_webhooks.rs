@@ -4,12 +4,11 @@ use std::collections::BTreeMap;
 
 use jiff::Timestamp;
 use nvisy_postgres::model;
-use nvisy_postgres::types::{Handle, WebhookEvent, WebhookId, WebhookStatus};
+use nvisy_postgres::types::{WebhookEvent, WebhookId, WebhookStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use super::{AccountRef, Page};
+use super::{AccountRef, Page, WorkspaceRef};
 
 /// Workspace webhook response.
 #[must_use]
@@ -18,10 +17,9 @@ use super::{AccountRef, Page};
 pub struct WorkspaceWebhook {
     /// Opaque identifier of the webhook.
     pub id: WebhookId,
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
-    /// URL-safe workspace handle. Display-only.
-    pub workspace_handle: Handle,
+    /// The workspace it belongs to.
+    #[serde(flatten)]
+    pub workspace: WorkspaceRef,
     /// Human-readable name for the webhook.
     pub display_name: String,
     /// Detailed description of the webhook's purpose.
@@ -53,8 +51,7 @@ pub struct WorkspaceWebhook {
 impl WorkspaceWebhook {
     pub fn from_model(
         webhook: model::WorkspaceWebhook,
-        workspace_id: Uuid,
-        workspace_handle: Handle,
+        workspace: WorkspaceRef,
         created_by: AccountRef,
     ) -> Self {
         let events = webhook.subscribed_events();
@@ -62,8 +59,7 @@ impl WorkspaceWebhook {
 
         Self {
             id: WebhookId::from_uuid(webhook.id),
-            workspace_id,
-            workspace_handle,
+            workspace,
             display_name: webhook.display_name,
             description: webhook.description,
             url: webhook.url,
@@ -102,18 +98,12 @@ pub struct WorkspaceWebhookCreated {
 impl WorkspaceWebhookCreated {
     pub fn from_model(
         webhook: model::WorkspaceWebhook,
-        workspace_id: Uuid,
-        workspace_handle: Handle,
+        workspace: WorkspaceRef,
         created_by: AccountRef,
         secret: String,
     ) -> Self {
         Self {
-            webhook: WorkspaceWebhook::from_model(
-                webhook,
-                workspace_id,
-                workspace_handle,
-                created_by,
-            ),
+            webhook: WorkspaceWebhook::from_model(webhook, workspace, created_by),
             secret,
         }
     }

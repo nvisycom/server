@@ -25,7 +25,6 @@ use aide::axum::ApiRouter;
 use aide::axum::routing::post_with;
 use aide::transform::TransformOperation;
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::get;
 use nvisy_file_service::FileService;
@@ -40,7 +39,8 @@ use uuid::Uuid;
 
 use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
 use crate::handler::request::{OAuthCallbackQuery, OAuthStartPathParams, StartFileServiceOAuth};
-use crate::response::{Error, ErrorKind, ErrorResponse, Result, connection_result_redirect};
+use crate::handler::response::AuthorizeRedirect;
+use crate::response::{Error, ErrorKind, Result, connection_result_redirect};
 use crate::service::event::EventEmitter;
 use crate::service::{ConnectionConfig, CryptoService, FileServiceRedirect, ServiceState, event};
 
@@ -80,20 +80,10 @@ struct CallbackOutcome {
     workspace_handle: String,
 }
 
-/// The response to a successful authorization start: where to send the user.
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct OAuthStartResponse {
-    /// The provider authorize URL the client should redirect the user to.
-    pub authorize_url: String,
-}
-
 /// Starts a cloud file-service OAuth authorization.
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         provider = ?path_params.provider,
     )
 )]
@@ -103,7 +93,7 @@ async fn start_oauth(
     authz: Authorized<markers::ManageConnections>,
     Path(path_params): Path<OAuthStartPathParams>,
     ValidateJson(request): ValidateJson<StartFileServiceOAuth>,
-) -> Result<(StatusCode, Json<OAuthStartResponse>)> {
+) -> Result<Json<AuthorizeRedirect>> {
     tracing::debug!(target: TRACING_TARGET, "Starting cloud file OAuth");
 
     let provider = path_params.provider;
@@ -123,12 +113,9 @@ async fn start_oauth(
         .put(&authorization.csrf_state.parse::<OAuthStateKey>()?, &flow)
         .await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(OAuthStartResponse {
-            authorize_url: authorization.authorize_url,
-        }),
-    ))
+    Ok(Json(AuthorizeRedirect {
+        authorize_url: authorization.authorize_url,
+    }))
 }
 
 fn start_oauth_docs(op: TransformOperation) -> TransformOperation {
@@ -138,9 +125,7 @@ fn start_oauth_docs(op: TransformOperation) -> TransformOperation {
              provider authorize URL to redirect the user to. On the user's consent, the provider \
              redirects to the callback, which creates the connection.",
         )
-        .response::<200, Json<OAuthStartResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
+        .response::<200, Json<AuthorizeRedirect>>()
 }
 
 /// Completes a cloud file-service OAuth authorization: the provider redirects
@@ -253,10 +238,10 @@ async fn complete_callback(
                     account_id: flow.account_id,
                     security,
                 },
-                event::WorkspaceEvent::ConnectionCreated(event::ConnectionCreated {
+                event::ConnectionCreated {
                     connection_id: connection.id,
                     connection_name: connection.display_name.clone(),
-                }),
+                },
             )
             .await?;
             Ok::<_, Error>(connection.id)

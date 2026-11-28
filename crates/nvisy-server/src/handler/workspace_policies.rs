@@ -13,58 +13,44 @@ use aide::axum::ApiRouter;
 use aide::transform::TransformOperation;
 use axum::extract::State;
 use axum::http::StatusCode;
-use nvisy_postgres::PgClient;
 use nvisy_postgres::query::PolicyWithVersion;
 
 use crate::domain;
-use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
+use crate::extract::{Authorized, Json, Path, Query, ValidateJson, markers};
 use crate::handler::request::{
     CreateWorkspacePolicy, CursorPagination, PromoteWorkspacePolicy, UpdateWorkspacePolicy,
     WorkspacePoliciesQuery, WorkspacePolicyPathParams,
 };
-use crate::handler::response::{PoliciesPage, WorkspacePolicy, WorkspacePolicySummary};
-use crate::handler::utility::resolve_account_ref;
-use crate::response::{ErrorResponse, Result};
-use crate::service::{ServiceState, event};
+use crate::handler::response::{
+    PoliciesPage, WorkspacePolicy, WorkspacePolicySummary, WorkspaceRef,
+};
+use crate::response::Result;
+use crate::service::ServiceState;
 
 /// Tracing target for workspace policy operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::policies";
+const TRACING_TARGET: &str = "nvisy_server::handler::workspace_policies";
 
 /// Creates a new authored workspace policy.
 ///
 /// The request body carries a template or an inline definition; its name and
 /// description drive the stored record unless overridden. Requires
 /// `ManagePolicies` permission.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn create_policy(
-    State(pg_client): State<PgClient>,
     State(policies): State<domain::WorkspacePolicyService>,
     authz: Authorized<markers::ManagePolicies>,
-    security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateWorkspacePolicy>,
 ) -> Result<(StatusCode, Json<WorkspacePolicy>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace policy");
 
-    let workspace = authz.workspace;
-    let account_id = authz.account_id;
+    let workspace = &authz.workspace;
 
-    let origin = event::EventOrigin {
-        workspace_id: workspace.id,
-        account_id,
-        security: &security,
-    };
+    let origin = authz.origin();
     let PolicyWithVersion { policy, version } = policies.create(origin, request.into()).await?;
 
-    let mut conn = pg_client.get_connection().await?;
-    let creator = resolve_account_ref(&mut conn, account_id).await?;
+    let creator = authz.account.clone().into();
     let response =
-        WorkspacePolicy::from_model(policy, version, workspace.id, workspace.handle, creator)?;
+        WorkspacePolicy::from_model(policy, version, WorkspaceRef::from(workspace), creator)?;
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -77,28 +63,19 @@ fn create_policy_docs(op: TransformOperation) -> TransformOperation {
              authoring a policy, start a detection with a `labels` source instead.",
         )
         .response::<201, Json<WorkspacePolicy>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Lists all policies for a workspace.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn list_policies(
     State(policies): State<domain::WorkspacePolicyService>,
     authz: Authorized<markers::ViewPolicies>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<WorkspacePoliciesQuery>,
-) -> Result<(StatusCode, Json<PoliciesPage>)> {
+) -> Result<Json<PoliciesPage>> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace policies");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
 
     let page = policies
         .list(workspace.id, pagination.into_cursor(), query.kind)
@@ -115,13 +92,12 @@ async fn list_policies(
     let page = PoliciesPage::from_cursor_page(page, |wc| {
         WorkspacePolicySummary::from_model(
             wc.item,
-            workspace.id,
-            workspace.handle.clone(),
+            WorkspaceRef::from(workspace),
             wc.account.into(),
         )
     });
 
-    Ok((StatusCode::OK, Json(page)))
+    Ok(Json(page))
 }
 
 fn list_policies_docs(op: TransformOperation) -> TransformOperation {
@@ -131,16 +107,12 @@ fn list_policies_docs(op: TransformOperation) -> TransformOperation {
              narrows to a single kind (`authored` or `derived`).",
         )
         .response::<200, Json<PoliciesPage>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Retrieves a specific workspace policy.
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         policy_id = %path_params.policy_id,
     )
 )]
@@ -148,32 +120,28 @@ async fn read_policy(
     State(policies): State<domain::WorkspacePolicyService>,
     authz: Authorized<markers::ViewPolicies>,
     Path(path_params): Path<WorkspacePolicyPathParams>,
-) -> Result<(StatusCode, Json<WorkspacePolicy>)> {
+) -> Result<Json<WorkspacePolicy>> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace policy");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
 
     let (found, version) = policies.find(workspace.id, path_params.policy_id).await?;
 
     let response = WorkspacePolicy::from_model(
         found.item,
         version,
-        workspace.id,
-        workspace.handle,
+        WorkspaceRef::from(workspace),
         found.account.into(),
     )?;
 
     tracing::debug!(target: TRACING_TARGET, "Workspace policy read");
-    Ok((StatusCode::OK, Json(response)))
+    Ok(Json(response))
 }
 
 fn read_policy_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get policy")
         .description("Returns a single policy.")
         .response::<200, Json<WorkspacePolicy>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Updates a workspace policy.
@@ -184,8 +152,6 @@ fn read_policy_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         policy_id = %path_params.policy_id,
     )
 )]
@@ -193,17 +159,12 @@ async fn update_policy(
     State(policies): State<domain::WorkspacePolicyService>,
     authz: Authorized<markers::ManagePolicies>,
     Path(path_params): Path<WorkspacePolicyPathParams>,
-    security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWorkspacePolicy>,
-) -> Result<(StatusCode, Json<WorkspacePolicy>)> {
+) -> Result<Json<WorkspacePolicy>> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace policy");
 
-    let workspace = authz.workspace;
-    let origin = event::EventOrigin {
-        workspace_id: workspace.id,
-        account_id: authz.account_id,
-        security: &security,
-    };
+    let workspace = &authz.workspace;
+    let origin = authz.origin();
 
     let (found, version) = policies
         .update(origin, path_params.policy_id, request.into())
@@ -212,22 +173,17 @@ async fn update_policy(
     let response = WorkspacePolicy::from_model(
         found.item,
         version,
-        workspace.id,
-        workspace.handle,
+        WorkspaceRef::from(workspace),
         found.account.into(),
     )?;
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok(Json(response))
 }
 
 fn update_policy_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update policy")
         .description("Updates policy fields. Replacing the definition replaces the whole body.")
         .response::<200, Json<WorkspacePolicy>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Promotes a derived policy to an authored one.
@@ -239,8 +195,6 @@ fn update_policy_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         policy_id = %path_params.policy_id,
     )
 )]
@@ -248,17 +202,12 @@ async fn promote_policy(
     State(policies): State<domain::WorkspacePolicyService>,
     authz: Authorized<markers::ManagePolicies>,
     Path(path_params): Path<WorkspacePolicyPathParams>,
-    security: SecurityContext,
     ValidateJson(request): ValidateJson<PromoteWorkspacePolicy>,
-) -> Result<(StatusCode, Json<WorkspacePolicy>)> {
+) -> Result<Json<WorkspacePolicy>> {
     tracing::debug!(target: TRACING_TARGET, "Promoting workspace policy");
 
-    let workspace = authz.workspace;
-    let origin = event::EventOrigin {
-        workspace_id: workspace.id,
-        account_id: authz.account_id,
-        security: &security,
-    };
+    let workspace = &authz.workspace;
+    let origin = authz.origin();
 
     let (found, version) = policies
         .promote(origin, path_params.policy_id, request.display_name)
@@ -267,12 +216,11 @@ async fn promote_policy(
     let response = WorkspacePolicy::from_model(
         found.item,
         version,
-        workspace.id,
-        workspace.handle,
+        WorkspaceRef::from(workspace),
         found.account.into(),
     )?;
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok(Json(response))
 }
 
 fn promote_policy_docs(op: TransformOperation) -> TransformOperation {
@@ -285,18 +233,12 @@ fn promote_policy_docs(op: TransformOperation) -> TransformOperation {
              already authored.",
         )
         .response::<200, Json<WorkspacePolicy>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Deletes a workspace policy.
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         policy_id = %path_params.policy_id,
     )
 )]
@@ -304,16 +246,10 @@ async fn delete_policy(
     State(policies): State<domain::WorkspacePolicyService>,
     authz: Authorized<markers::ManagePolicies>,
     Path(path_params): Path<WorkspacePolicyPathParams>,
-    security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace policy");
 
-    let workspace = authz.workspace;
-    let origin = event::EventOrigin {
-        workspace_id: workspace.id,
-        account_id: authz.account_id,
-        security: &security,
-    };
+    let origin = authz.origin();
 
     policies.delete(origin, path_params.policy_id).await?;
 
@@ -324,9 +260,6 @@ fn delete_policy_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete policy")
         .description("Soft-deletes the policy from the workspace.")
         .response::<204, ()>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Returns routes for workspace policy management.

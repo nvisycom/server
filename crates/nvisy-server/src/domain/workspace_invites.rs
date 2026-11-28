@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::domain::input::{CreateInviteInput, GenerateInviteCodeInput};
 use crate::domain::output::{AcceptedInvite, CreatedInvite, InviteOutcome, InvitePreview};
 use crate::extract::SecurityContext;
-use crate::response::{Error, ErrorKind, Result};
+use crate::response::{Error, ErrorKind, Resource, Result};
 use crate::service::event;
 use crate::service::event::EventEmitter;
 
@@ -105,10 +105,10 @@ impl WorkspaceInviteService {
                 let invite = conn.create_workspace_invite(new_invite).await?;
                 conn.emit_event(
                     origin,
-                    event::WorkspaceEvent::InviteCreated(event::InviteCreated {
+                    event::InviteCreated {
                         invite_id: invite.id,
                         email: Some(invitee_email.clone()),
-                    }),
+                    },
                 )
                 .await?;
                 Ok::<_, Error>(invite)
@@ -157,10 +157,10 @@ impl WorkspaceInviteService {
             conn.cancel_workspace_invite(invite_id, actor_id).await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::InviteCanceled(event::InviteCanceled {
+                event::InviteCanceled {
                     invite_id: invite.id,
                     email: invite.invitee_email,
-                }),
+                },
             )
             .await?;
             Ok::<_, Error>(())
@@ -226,7 +226,7 @@ impl WorkspaceInviteService {
     ) -> Result<WorkspaceInvite> {
         let mut conn = self.postgres.get_connection().await?;
         let invite = conn
-            .create_workspace_invite(input.into_model(workspace_id, actor_id))
+            .create_workspace_invite(input.to_model(workspace_id, actor_id))
             .await?;
         tracing::info!(target: TRACING_TARGET, invite_id = %invite.id, "Workspace invite code generated");
         Ok(invite)
@@ -249,7 +249,7 @@ impl WorkspaceInviteService {
                 .with_message("This invite code has expired or is no longer valid"));
         }
         let Some(workspace) = conn.find_workspace_by_id(invite.workspace_id).await? else {
-            return Err(ErrorKind::NotFound.with_message("Workspace not found"));
+            return Err(Error::not_found(Resource::Workspace));
         };
         Ok(InvitePreview { workspace, invite })
     }
@@ -340,11 +340,8 @@ async fn decline_invite(
     conn.transaction(async |conn| {
         conn.reject_workspace_invite(invite_id, origin.account_id)
             .await?;
-        conn.emit_event(
-            origin,
-            event::WorkspaceEvent::InviteDeclined(event::InviteDeclined { invite_id, email }),
-        )
-        .await?;
+        conn.emit_event(origin, event::InviteDeclined { invite_id, email })
+            .await?;
         Ok::<_, Error>(())
     })
     .await?;
@@ -397,20 +394,17 @@ async fn accept_invite_as_member(
                 .find_workspace_member_with_account(workspace_id, account_id)
                 .await?
                 .ok_or_else(|| {
-                    PgError::Unexpected("WorkspaceMember not found after insert".into())
+                    PgError::Unexpected("Workspace member not found after insert".into())
                 })?;
 
+            conn.emit_event(origin, event::InviteAccepted { invite_id, email })
+                .await?;
             conn.emit_event(
                 origin,
-                event::WorkspaceEvent::InviteAccepted(event::InviteAccepted { invite_id, email }),
-            )
-            .await?;
-            conn.emit_event(
-                origin,
-                event::WorkspaceEvent::MemberAdded(event::MemberAdded {
+                event::MemberAdded {
                     member_id: account_id,
                     workspace_id,
-                }),
+                },
             )
             .await?;
 
@@ -439,7 +433,7 @@ async fn verify_invitee_matches(
     let account = conn
         .find_account_by_id(account_id)
         .await?
-        .ok_or_else(|| Error::not_found("account"))?;
+        .ok_or_else(|| Error::not_found(Resource::Account))?;
     if account.email_address.eq_ignore_ascii_case(invitee_email) {
         Ok(())
     } else {
@@ -456,7 +450,7 @@ async fn find_invite(
 ) -> Result<WorkspaceInvite> {
     conn.find_invite_in_workspace(workspace_id, invite_id)
         .await?
-        .ok_or_else(|| ErrorKind::NotFound.with_message("Invitation not found"))
+        .ok_or_else(|| Error::not_found(Resource::Invite))
 }
 
 /// Finds an invite by its shareable code token, or a `NotFound`.

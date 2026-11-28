@@ -26,61 +26,43 @@ use nvisy_file_service::FileService;
 use nvisy_postgres::PgClient;
 
 use crate::domain;
-use crate::extract::{Authorized, Json, Path, Query, SecurityContext, ValidateJson, markers};
+use crate::extract::{Authorized, Json, Path, Query, ValidateJson, markers};
 use crate::handler::request::{
     CreateWorkspaceConnection, CursorPagination, UpdateWorkspaceConnection,
     WorkspaceConnectionPathParams, WorkspaceConnectionsQuery, WorkspacePickerTokenRequest,
 };
 use crate::handler::response::{
     WorkspaceConnection, WorkspaceConnectionVerification, WorkspaceConnectionsPage,
-    WorkspacePickerToken,
+    WorkspacePickerToken, WorkspaceRef,
 };
-use crate::response::{ErrorKind, ErrorResponse, Result};
+use crate::response::{ErrorKind, Result};
 use crate::service::{
-    ConnectionConfig, CryptoService, ExternalObjectStore, ServiceState, event,
-    persist_refreshed_tokens,
+    ConnectionConfig, CryptoService, ExternalObjectStore, ServiceState, persist_refreshed_tokens,
 };
 
 /// Tracing target for workspace connection operations.
-const TRACING_TARGET: &str = "nvisy_server::handler::connections";
+const TRACING_TARGET: &str = "nvisy_server::handler::workspace_connections";
 
 /// Creates a new workspace connection.
 ///
 /// Returns the connection metadata (without encrypted data). Requires
 /// `ManageConnections` permission.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn create_connection(
     State(connections): State<domain::WorkspaceConnectionService>,
     authz: Authorized<markers::ManageConnections>,
-    security: SecurityContext,
     ValidateJson(request): ValidateJson<CreateWorkspaceConnection>,
 ) -> Result<(StatusCode, Json<WorkspaceConnection>)> {
     tracing::debug!(target: TRACING_TARGET, "Creating workspace connection");
 
-    let workspace = authz.workspace;
-    let found = connections
-        .create(
-            event::EventOrigin {
-                workspace_id: workspace.id,
-                account_id: authz.account_id,
-                security: &security,
-            },
-            request.into(),
-        )
-        .await?;
+    let workspace = &authz.workspace;
+    let found = connections.create(authz.origin(), request.into()).await?;
 
     Ok((
         StatusCode::CREATED,
         Json(WorkspaceConnection::from_model(
             found.connection.item,
-            workspace.id,
-            workspace.handle,
+            WorkspaceRef::from(workspace),
             found.connection.account.into(),
             found.schedule,
             found.last_synced_at,
@@ -96,48 +78,38 @@ fn create_connection_docs(op: TransformOperation) -> TransformOperation {
              the encrypted credentials.",
         )
         .response::<201, Json<WorkspaceConnection>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Lists all connections for a workspace.
 ///
 /// Returns connection metadata (without encrypted data). Requires
 /// `ViewConnections` permission.
-#[tracing::instrument(
-    skip_all,
-    fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
-    )
-)]
+#[tracing::instrument(skip_all)]
 async fn list_connections(
     State(connections): State<domain::WorkspaceConnectionService>,
     authz: Authorized<markers::ViewConnections>,
     Query(pagination): Query<CursorPagination>,
     Query(query): Query<WorkspaceConnectionsQuery>,
-) -> Result<(StatusCode, Json<WorkspaceConnectionsPage>)> {
+) -> Result<Json<WorkspaceConnectionsPage>> {
     tracing::debug!(target: TRACING_TARGET, "Listing workspace connections");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
     let page = connections
         .list(workspace.id, pagination.into_cursor(), &query.provider)
         .await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceConnectionsPage::from_cursor_page(page, |entry| {
+    Ok(Json(WorkspaceConnectionsPage::from_cursor_page(
+        page,
+        |entry| {
             WorkspaceConnection::from_model(
                 entry.connection.item,
-                workspace.id,
-                workspace.handle.clone(),
+                WorkspaceRef::from(workspace),
                 entry.connection.account.into(),
                 entry.schedule,
                 entry.last_synced_at,
             )
-        })),
-    ))
+        },
+    )))
 }
 
 fn list_connections_docs(op: TransformOperation) -> TransformOperation {
@@ -147,8 +119,6 @@ fn list_connections_docs(op: TransformOperation) -> TransformOperation {
              encrypted credentials are never exposed.",
         )
         .response::<200, Json<WorkspaceConnectionsPage>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
 }
 
 /// Retrieves a specific workspace connection.
@@ -158,8 +128,6 @@ fn list_connections_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -167,34 +135,27 @@ async fn read_connection(
     State(connections): State<domain::WorkspaceConnectionService>,
     authz: Authorized<markers::ViewConnections>,
     Path(path_params): Path<WorkspaceConnectionPathParams>,
-) -> Result<(StatusCode, Json<WorkspaceConnection>)> {
+) -> Result<Json<WorkspaceConnection>> {
     tracing::debug!(target: TRACING_TARGET, "Reading workspace connection");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
     let found = connections
         .find(workspace.id, path_params.connection_id)
         .await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceConnection::from_model(
-            found.connection.item,
-            workspace.id,
-            workspace.handle,
-            found.connection.account.into(),
-            found.schedule,
-            found.last_synced_at,
-        )),
-    ))
+    Ok(Json(WorkspaceConnection::from_model(
+        found.connection.item,
+        WorkspaceRef::from(workspace),
+        found.connection.account.into(),
+        found.schedule,
+        found.last_synced_at,
+    )))
 }
 
 fn read_connection_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Get connection")
         .description("Returns connection metadata without encrypted credentials.")
         .response::<200, Json<WorkspaceConnection>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Updates a workspace connection.
@@ -203,8 +164,6 @@ fn read_connection_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -212,45 +171,28 @@ async fn update_connection(
     State(connections): State<domain::WorkspaceConnectionService>,
     authz: Authorized<markers::ManageConnections>,
     Path(path_params): Path<WorkspaceConnectionPathParams>,
-    security: SecurityContext,
     ValidateJson(request): ValidateJson<UpdateWorkspaceConnection>,
-) -> Result<(StatusCode, Json<WorkspaceConnection>)> {
+) -> Result<Json<WorkspaceConnection>> {
     tracing::debug!(target: TRACING_TARGET, "Updating workspace connection");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
     let found = connections
-        .update(
-            event::EventOrigin {
-                workspace_id: workspace.id,
-                account_id: authz.account_id,
-                security: &security,
-            },
-            path_params.connection_id,
-            request.into(),
-        )
+        .update(authz.origin(), path_params.connection_id, request.into())
         .await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(WorkspaceConnection::from_model(
-            found.connection.item,
-            workspace.id,
-            workspace.handle,
-            found.connection.account.into(),
-            found.schedule,
-            found.last_synced_at,
-        )),
-    ))
+    Ok(Json(WorkspaceConnection::from_model(
+        found.connection.item,
+        WorkspaceRef::from(workspace),
+        found.connection.account.into(),
+        found.schedule,
+        found.last_synced_at,
+    )))
 }
 
 fn update_connection_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Update connection")
         .description("Updates connection name or encrypted data.")
         .response::<200, Json<WorkspaceConnection>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Deletes a workspace connection.
@@ -259,8 +201,6 @@ fn update_connection_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -268,20 +208,11 @@ async fn delete_connection(
     State(connections): State<domain::WorkspaceConnectionService>,
     authz: Authorized<markers::ManageConnections>,
     Path(path_params): Path<WorkspaceConnectionPathParams>,
-    security: SecurityContext,
 ) -> Result<StatusCode> {
     tracing::debug!(target: TRACING_TARGET, "Deleting workspace connection");
 
-    let workspace = authz.workspace;
     connections
-        .delete(
-            event::EventOrigin {
-                workspace_id: workspace.id,
-                account_id: authz.account_id,
-                security: &security,
-            },
-            path_params.connection_id,
-        )
+        .delete(authz.origin(), path_params.connection_id)
         .await?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -291,9 +222,6 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Delete connection")
         .description("Soft-deletes the connection from the workspace.")
         .response::<204, ()>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Verifies that a connection's backing object store is reachable.
@@ -306,8 +234,6 @@ fn delete_connection_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -319,10 +245,10 @@ async fn verify_connection(
     State(cloud): State<FileService>,
     authz: Authorized<markers::ViewConnections>,
     Path(path_params): Path<WorkspaceConnectionPathParams>,
-) -> Result<(StatusCode, Json<WorkspaceConnectionVerification>)> {
+) -> Result<Json<WorkspaceConnectionVerification>> {
     tracing::debug!(target: TRACING_TARGET, "Verifying workspace connection");
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
 
     // Load the connection through the service, then run the provider I/O below
     // with no pooled connection held: `connect`/`verify` reach external services
@@ -341,18 +267,18 @@ async fn verify_connection(
         ConnectionConfig::ObjectStore(config) => match object.connect(&config).await {
             Ok(client) => match client.verify_reachable().await {
                 Ok(()) => {
-                    tracing::info!(target: TRACING_TARGET, "WorkspaceConnection verified");
+                    tracing::info!(target: TRACING_TARGET, "Connection verified");
                     WorkspaceConnectionVerification::reachable()
                 }
                 Err(err) => {
                     // Log the full error, but return only a safe kind-based reason
                     // so backend URLs/bucket names are not exposed to the client.
-                    tracing::warn!(target: TRACING_TARGET, error = %err, "WorkspaceConnection unreachable");
+                    tracing::warn!(target: TRACING_TARGET, error = %err, "Connection unreachable");
                     WorkspaceConnectionVerification::unreachable(err.kind().reason())
                 }
             },
             Err(err) => {
-                tracing::warn!(target: TRACING_TARGET, error = %err, "WorkspaceConnection setup failed");
+                tracing::warn!(target: TRACING_TARGET, error = %err, "Connection setup failed");
                 WorkspaceConnectionVerification::unreachable(err.kind().reason())
             }
         },
@@ -375,17 +301,17 @@ async fn verify_connection(
                 }
                 match connected.client.verify().await {
                     Ok(()) => {
-                        tracing::info!(target: TRACING_TARGET, "WorkspaceConnection verified");
+                        tracing::info!(target: TRACING_TARGET, "Connection verified");
                         WorkspaceConnectionVerification::reachable()
                     }
                     Err(err) => {
-                        tracing::warn!(target: TRACING_TARGET, error = %err, "WorkspaceConnection unreachable");
+                        tracing::warn!(target: TRACING_TARGET, error = %err, "Connection unreachable");
                         WorkspaceConnectionVerification::unreachable(err.kind().reason())
                     }
                 }
             }
             Err(err) => {
-                tracing::warn!(target: TRACING_TARGET, error = %err, "WorkspaceConnection setup failed");
+                tracing::warn!(target: TRACING_TARGET, error = %err, "Connection setup failed");
                 WorkspaceConnectionVerification::unreachable(
                     "credentials rejected or provider unreachable",
                 )
@@ -393,16 +319,13 @@ async fn verify_connection(
         },
     };
 
-    Ok((StatusCode::OK, Json(verification)))
+    Ok(Json(verification))
 }
 
 fn verify_connection_docs(op: TransformOperation) -> TransformOperation {
     op.summary("Verify connection")
         .description("Checks whether the connection's backing store is reachable with its stored credentials.")
         .response::<200, Json<WorkspaceConnectionVerification>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Mints a short-lived provider OAuth access token for a browser file picker.
@@ -418,8 +341,6 @@ fn verify_connection_docs(op: TransformOperation) -> TransformOperation {
 #[tracing::instrument(
     skip_all,
     fields(
-        account_id = %authz.account_id,
-        workspace_id = %authz.workspace.id,
         connection_id = %path_params.connection_id,
     )
 )]
@@ -433,11 +354,11 @@ async fn mint_picker_token(
     // Optional body: a picker that names a resource per `authenticate` command
     // (OneDrive) sends `{ resource }`; single-token pickers send no body.
     request: Option<ValidateJson<WorkspacePickerTokenRequest>>,
-) -> Result<(StatusCode, HeaderMap, Json<WorkspacePickerToken>)> {
+) -> Result<(HeaderMap, Json<WorkspacePickerToken>)> {
     tracing::debug!(target: TRACING_TARGET, "Minting picker token");
     let resource = request.and_then(|ValidateJson(body)| body.resource);
 
-    let workspace = authz.workspace;
+    let workspace = &authz.workspace;
 
     // Load the connection through the service, then run the provider token refresh
     // below with no pooled connection held (it reaches the provider with no total
@@ -449,7 +370,7 @@ async fn mint_picker_token(
         .item;
 
     if !connection.is_active {
-        return Err(ErrorKind::BadRequest.with_message("WorkspaceConnection is not active"));
+        return Err(ErrorKind::BadRequest.with_message("Connection is not active"));
     }
 
     let config: ConnectionConfig = crypto.decrypt_json(workspace.id, &connection.encrypted_data)?;
@@ -490,7 +411,7 @@ async fn mint_picker_token(
         access_token: picker.access_token,
         expires_at: picker.expires_at,
     };
-    Ok((StatusCode::OK, headers, Json(token)))
+    Ok((headers, Json(token)))
 }
 
 fn mint_picker_token_docs(op: TransformOperation) -> TransformOperation {
@@ -504,10 +425,6 @@ fn mint_picker_token_docs(op: TransformOperation) -> TransformOperation {
              work or school (OneDrive for Business) accounts.",
         )
         .response::<200, Json<WorkspacePickerToken>>()
-        .response::<400, Json<ErrorResponse>>()
-        .response::<401, Json<ErrorResponse>>()
-        .response::<403, Json<ErrorResponse>>()
-        .response::<404, Json<ErrorResponse>>()
 }
 
 /// Returns routes for workspace connection management.

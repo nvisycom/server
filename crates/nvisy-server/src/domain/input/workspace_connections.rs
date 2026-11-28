@@ -1,8 +1,11 @@
 //! Connection service inputs.
 
+use nvisy_postgres::model::NewWorkspaceConnectionSchedule;
 use nvisy_postgres::types::{SyncDeletionPolicy, SyncMode};
+use uuid::Uuid;
 
-use crate::service::ConnectionConfig;
+use crate::response::{ErrorKind, Result};
+use crate::service::{ConnectionConfig, StandardCronSchedule};
 
 /// Scheduled-sync configuration for a schedulable connection.
 #[derive(Clone)]
@@ -13,6 +16,38 @@ pub struct SyncScheduleInput {
     pub schedule_cron: Option<String>,
     /// How an import reconciles files whose source object was deleted.
     pub deletion_policy: SyncDeletionPolicy,
+}
+
+impl SyncScheduleInput {
+    /// Checks the schedule is usable: the connection's provider supports
+    /// scheduled sync, and the cron expression (if any) is valid.
+    ///
+    /// # Errors
+    ///
+    /// `BadRequest` if scheduling is unsupported or the cron is invalid.
+    pub fn validate(&self, supports_schedule: bool) -> Result<()> {
+        if !supports_schedule {
+            return Err(
+                ErrorKind::BadRequest.with_message("This provider does not support scheduled sync")
+            );
+        }
+        if let Some(cron) = &self.schedule_cron
+            && !StandardCronSchedule.is_valid(cron)
+        {
+            return Err(ErrorKind::BadRequest.with_message("Invalid cron expression"));
+        }
+        Ok(())
+    }
+
+    /// The schedule row for `connection_id`.
+    pub fn into_model(self, connection_id: Uuid) -> NewWorkspaceConnectionSchedule {
+        NewWorkspaceConnectionSchedule {
+            connection_id,
+            sync_mode: Some(self.sync_mode),
+            schedule_cron: self.schedule_cron,
+            deletion_policy: Some(self.deletion_policy),
+        }
+    }
 }
 
 /// Input for creating a connection.

@@ -2,12 +2,11 @@
 
 use jiff::Timestamp;
 use nvisy_postgres::model::WorkspaceProvider as WorkspaceProviderModel;
-use nvisy_postgres::types::{Handle, ProviderId, ProviderType};
+use nvisy_postgres::types::{ProviderId, ProviderType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use super::{AccountRef, Page};
+use super::{AccountRef, Page, WorkspaceRef};
 
 /// Response type for a workspace inference provider.
 ///
@@ -18,10 +17,9 @@ use super::{AccountRef, Page};
 pub struct WorkspaceProvider {
     /// Opaque identifier of the provider.
     pub id: ProviderId,
-    /// Unique identifier of the workspace.
-    pub workspace_id: Uuid,
-    /// URL-safe workspace handle. Display-only.
-    pub workspace_handle: Handle,
+    /// The workspace it belongs to.
+    #[serde(flatten)]
+    pub workspace: WorkspaceRef,
     /// Account that created this provider.
     pub created_by: AccountRef,
     /// Human-readable provider display name.
@@ -46,14 +44,12 @@ impl WorkspaceProvider {
     #[must_use]
     pub fn from_model(
         provider: WorkspaceProviderModel,
-        workspace_id: Uuid,
-        workspace_handle: Handle,
+        workspace: WorkspaceRef,
         created_by: AccountRef,
     ) -> Self {
         Self {
             id: ProviderId::from_uuid(provider.id),
-            workspace_id,
-            workspace_handle,
+            workspace,
             created_by,
             display_name: provider.display_name,
             provider: provider.provider,

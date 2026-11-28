@@ -2,7 +2,6 @@
 
 use std::collections::HashSet;
 
-use nvisy_postgres::model::UpdateWorkspaceDocument as UpdateDocumentModel;
 use nvisy_postgres::types::{DocumentFilter, DocumentKind};
 
 use crate::service::{EngineService, UnknownFormatToken};
@@ -73,24 +72,5 @@ fn intersect_facets(
         }
         (only @ Some(_), None) | (None, only @ Some(_)) => only,
         (None, None) => None,
-    }
-}
-
-/// Input for updating a document's metadata.
-pub struct UpdateDocumentInput {
-    /// New display name for the document.
-    pub display_name: Option<String>,
-    /// Updated metadata blob.
-    pub metadata: Option<serde_json::Value>,
-}
-
-impl UpdateDocumentInput {
-    /// Builds the update model, leaving unset columns unchanged.
-    pub fn into_model(self) -> UpdateDocumentModel {
-        UpdateDocumentModel {
-            display_name: self.display_name,
-            metadata: self.metadata,
-            ..Default::default()
-        }
     }
 }

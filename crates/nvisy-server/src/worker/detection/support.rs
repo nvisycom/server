@@ -108,12 +108,12 @@ pub(crate) async fn fail_detection(
                 account_id: triggered_by,
                 security: &SecurityContext::default(),
             },
-            event::WorkspaceEvent::DetectionFailed(event::DetectionFailed {
+            event::DetectionFailed {
                 detection_id,
                 input_document_name: None,
                 error: Some(reason.to_owned()),
                 notify: triggered_by,
-            }),
+            },
         )
         .await
     {
